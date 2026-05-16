@@ -97,16 +97,26 @@ export default function AuthScreen({ mode }: AuthScreenProps) {
             required
             autoComplete="email"
           />
-          <Input
-            label="סיסמה"
-            type="password"
-            placeholder={mode === 'signup' ? 'לפחות 6 תווים' : '••••••••'}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            minLength={6}
-            autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-          />
+          <div className="flex flex-col gap-1.5">
+            <Input
+              label="סיסמה"
+              type="password"
+              placeholder={mode === 'signup' ? 'לפחות 6 תווים' : '••••••••'}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              minLength={6}
+              autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+            />
+            {mode === 'login' && (
+              <div className="flex justify-end">
+                <Link href="/forgot-password"
+                  className="text-xs text-tg-muted hover:text-tg-primary transition-colors">
+                  שכחתי סיסמא
+                </Link>
+              </div>
+            )}
+          </div>
 
           {error && (
             <div className="text-sm text-tg-danger rounded-xl px-3 py-2"
