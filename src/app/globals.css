@@ -1,0 +1,112 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), monospace;
+
+  /* Reflekt design tokens */
+  --color-tg-bg: #0c0e16;
+  --color-tg-surface: #13151f;
+  --color-tg-surface-2: #1a1d2e;
+  --color-tg-border: #252836;
+  --color-tg-border-light: #2f3347;
+
+  --color-tg-primary: #5b6ef0;
+  --color-tg-primary-hover: #4a5de0;
+  --color-tg-primary-muted: #5b6ef020;
+
+  --color-tg-success: #10b981;
+  --color-tg-success-muted: #10b98120;
+  --color-tg-warning: #f59e0b;
+  --color-tg-warning-muted: #f59e0b20;
+  --color-tg-danger: #f43f5e;
+  --color-tg-danger-muted: #f43f5e20;
+
+  --color-tg-text: #e2e8f0;
+  --color-tg-text-2: #94a3b8;
+  --color-tg-muted: #475569;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background-color: var(--color-tg-bg);
+  color: var(--color-tg-text);
+  min-height: 100%;
+}
+
+* {
+  box-sizing: border-box;
+  /* Remove tap highlight flash on mobile */
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Buttons and interactive elements — faster tap response (removes 300ms delay) */
+button,
+a,
+[role="button"],
+input[type="submit"],
+input[type="button"] {
+  touch-action: manipulation;
+}
+
+/* Disable hover states on touch devices — "הכל tap/swipe" */
+@media (hover: none) and (pointer: coarse) {
+  button:hover,
+  a:hover,
+  [role="button"]:hover {
+    opacity: 1;
+  }
+}
+
+/* Hide scrollbar utility */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-tg-surface);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-tg-border-light);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-tg-muted);
+}
+
+/* Bottom sheet animation */
+@keyframes slide-up {
+  from { transform: translateY(100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.3s ease-out;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.25s ease-out;
+}

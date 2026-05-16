@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell -Command 'Get-ChildItem -Path '\\\\''C:\\\\Users\\\\aradb\\\\tradeguard'\\\\'' -Recurse -Force -Depth 3 | Where-Object { $_.FullName -notmatch '\\\\''\\(\\\\node_modules|\\\\\\\\.git|\\\\\\\\.next\\)'\\\\'' } | ForEach-Object { $indent = \\($_.FullName -split '\\\\''\\\\'\\\\'' | Measure-Object\\).Count - \\($pwd.Path -split '\\\\''\\\\'\\\\'' | Measure-Object\\).Count; $name = $_.Name; if \\($_.PSIsContainer\\) { Write-Host \\('\\\\'' '\\\\'' * $indent\\) + '\\\\''├── '\\\\'' + $name + '\\\\''/'\\\\'' } else { Write-Host \\('\\\\'' '\\\\'' * $indent\\) + '\\\\''├── '\\\\'' + $name } }')",
+      "Bash(npx tsc *)",
+      "PowerShell(cd C:\\\\Users\\\\aradb\\\\tradeguard; npx tsc --noEmit --skipLibCheck 2>&1 | Where-Object { $_ -notmatch \"\\\\.next\" } | Select-Object -First 40)"
+    ]
+  }
+}
