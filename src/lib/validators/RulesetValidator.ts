@@ -1,4 +1,4 @@
-import type { TradePlanInput, PresetRules, RulesetValidationResult } from '@/lib/types';
+﻿import type { TradePlanInput, PresetRules, RulesetValidationResult } from '@/lib/types';
 import { calcRR } from '@/lib/utils';
 
 export function validateTradePlan(
@@ -19,11 +19,11 @@ export function validateTradePlan(
   if (input.emotional_state < presetRules.min_emotional_state) {
     if (input.emotional_state <= presetRules.min_emotional_state - 2) {
       blocked.push(
-        `מצב רגשי ${input.emotional_state}/5 — מתחת למינימום הנדרש (${presetRules.min_emotional_state}/5). לא מומלץ לסחור כרגע.`
+        `׳׳¦׳‘ ׳¨׳’׳©׳™ ${input.emotional_state}/5 ג€” ׳׳×׳—׳× ׳׳׳™׳ ׳™׳׳•׳ ׳”׳ ׳“׳¨׳© (${presetRules.min_emotional_state}/5). ׳׳ ׳׳•׳׳׳¥ ׳׳¡׳—׳•׳¨ ׳›׳¨׳’׳¢.`
       );
     } else {
       warnings.push(
-        `מצב רגשי ${input.emotional_state}/5 נמוך מהמינימום (${presetRules.min_emotional_state}/5) — שקול לחכות`
+        `׳׳¦׳‘ ׳¨׳’׳©׳™ ${input.emotional_state}/5 ׳ ׳׳•׳ ׳׳”׳׳™׳ ׳™׳׳•׳ (${presetRules.min_emotional_state}/5) ג€” ׳©׳§׳•׳ ׳׳—׳›׳•׳×`
       );
     }
   }
@@ -33,11 +33,11 @@ export function validateTradePlan(
     const rr = calcRR(entry, sl, tp);
     if (rr < presetRules.min_rr_ratio * 0.5) {
       blocked.push(
-        `יחס R:R ${rr.toFixed(2)}:1 נמוך מדי — המינימום שלך הוא ${presetRules.min_rr_ratio}:1`
+        `׳™׳—׳¡ R:R ${rr.toFixed(2)}:1 ׳ ׳׳•׳ ׳׳“׳™ ג€” ׳”׳׳™׳ ׳™׳׳•׳ ׳©׳׳ ׳”׳•׳ ${presetRules.min_rr_ratio}:1`
       );
     } else if (rr < presetRules.min_rr_ratio) {
       warnings.push(
-        `יחס R:R ${rr.toFixed(2)}:1 מתחת למינימום המומלץ שלך (${presetRules.min_rr_ratio}:1)`
+        `׳™׳—׳¡ R:R ${rr.toFixed(2)}:1 ׳׳×׳—׳× ׳׳׳™׳ ׳™׳׳•׳ ׳”׳׳•׳׳׳¥ ׳©׳׳ (${presetRules.min_rr_ratio}:1)`
       );
     }
   }
@@ -45,22 +45,22 @@ export function validateTradePlan(
   // Daily trade limit
   if (todayTradeCount >= presetRules.max_daily_trades) {
     blocked.push(
-      `הגעת למקסימום ${presetRules.max_daily_trades} עסקאות ליום — Cooldown נדרש`
+      `׳”׳’׳¢׳× ׳׳׳§׳¡׳™׳׳•׳ ${presetRules.max_daily_trades} ׳¢׳¡׳§׳׳•׳× ׳׳™׳•׳ ג€” Cooldown ׳ ׳“׳¨׳©`
     );
   } else if (todayTradeCount >= presetRules.max_daily_trades - 1) {
     warnings.push(
-      `זוהי העסקה האחרונה שמותרת לך היום (${todayTradeCount + 1}/${presetRules.max_daily_trades})`
+      `׳–׳•׳”׳™ ׳”׳¢׳¡׳§׳” ׳”׳׳—׳¨׳•׳ ׳” ׳©׳׳•׳×׳¨׳× ׳׳ ׳”׳™׳•׳ (${todayTradeCount + 1}/${presetRules.max_daily_trades})`
     );
   }
 
   // Cooldown after consecutive losses
   if (recentLossCount >= presetRules.cooldown_after_losses) {
     blocked.push(
-      `${recentLossCount} הפסדים רצופים — נדרש Cooldown לפני עסקה נוספת`
+      `${recentLossCount} ׳”׳₪׳¡׳“׳™׳ ׳¨׳¦׳•׳₪׳™׳ ג€” ׳ ׳“׳¨׳© Cooldown ׳׳₪׳ ׳™ ׳¢׳¡׳§׳” ׳ ׳•׳¡׳₪׳×`
     );
   } else if (recentLossCount >= presetRules.cooldown_after_losses - 1 && recentLossCount > 0) {
     warnings.push(
-      `${recentLossCount} הפסדים רצופים — עוד הפסד אחד ויופעל Cooldown`
+      `${recentLossCount} ׳”׳₪׳¡׳“׳™׳ ׳¨׳¦׳•׳₪׳™׳ ג€” ׳¢׳•׳“ ׳”׳₪׳¡׳“ ׳׳—׳“ ׳•׳™׳•׳₪׳¢׳ Cooldown`
     );
   }
 
@@ -68,11 +68,11 @@ export function validateTradePlan(
   if (presetRules.max_daily_loss !== null && presetRules.max_daily_loss > 0) {
     if (todayLossAmount >= presetRules.max_daily_loss) {
       blocked.push(
-        `הפסד יומי של $${todayLossAmount.toFixed(0)} עבר את המגבלה שלך ($${presetRules.max_daily_loss})`
+        `׳”׳₪׳¡׳“ ׳™׳•׳׳™ ׳©׳ $${todayLossAmount.toFixed(0)} ׳¢׳‘׳¨ ׳׳× ׳”׳׳’׳‘׳׳” ׳©׳׳ ($${presetRules.max_daily_loss})`
       );
     } else if (todayLossAmount >= presetRules.max_daily_loss * 0.8) {
       warnings.push(
-        `הפסד יומי של $${todayLossAmount.toFixed(0)} — קרוב למגבלה ($${presetRules.max_daily_loss})`
+        `׳”׳₪׳¡׳“ ׳™׳•׳׳™ ׳©׳ $${todayLossAmount.toFixed(0)} ג€” ׳§׳¨׳•׳‘ ׳׳׳’׳‘׳׳” ($${presetRules.max_daily_loss})`
       );
     }
   }
@@ -84,7 +84,7 @@ export function validateTradePlan(
     !presetRules.allowed_strategies.includes(input.strategy as import('@/lib/types').TradeStrategy)
   ) {
     warnings.push(
-      `אסטרטגיה "${input.strategy}" אינה ברשימת האסטרטגיות המאושרות שלך`
+      `׳׳¡׳˜׳¨׳˜׳’׳™׳” "${input.strategy}" ׳׳™׳ ׳” ׳‘׳¨׳©׳™׳׳× ׳”׳׳¡׳˜׳¨׳˜׳’׳™׳•׳× ׳”׳׳׳•׳©׳¨׳•׳× ׳©׳׳`
     );
   }
 

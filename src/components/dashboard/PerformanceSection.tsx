@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useMemo } from 'react';
 
@@ -20,16 +20,16 @@ type BasicFilter = 'day' | '3days' | 'week' | '2weeks';
 type ProFilter = BasicFilter | '30days' | '90days' | 'year';
 
 const BASIC_FILTERS: { key: BasicFilter; label: string }[] = [
-  { key: 'day', label: 'יום' },
-  { key: '3days', label: '3 ימים' },
-  { key: 'week', label: 'שבוע' },
-  { key: '2weeks', label: 'שבועיים' },
+  { key: 'day', label: '׳™׳•׳' },
+  { key: '3days', label: '3 ׳™׳׳™׳' },
+  { key: 'week', label: '׳©׳‘׳•׳¢' },
+  { key: '2weeks', label: '׳©׳‘׳•׳¢׳™׳™׳' },
 ];
 
 const PRO_EXTRA_FILTERS: { key: ProFilter; label: string }[] = [
-  { key: '30days', label: '30 יום' },
-  { key: '90days', label: '90 יום' },
-  { key: 'year', label: 'שנה' },
+  { key: '30days', label: '30 ׳™׳•׳' },
+  { key: '90days', label: '90 ׳™׳•׳' },
+  { key: 'year', label: '׳©׳ ׳”' },
 ];
 
 function daysAgo(n: number) {
@@ -52,7 +52,7 @@ function filterByRange(trades: SimpleTrade[], filter: ProFilter): SimpleTrade[] 
   return trades.filter((t) => new Date(t.submitted_at) >= cutoff);
 }
 
-const EMOTIONAL_EMOJIS: Record<number, string> = { 1: '😰', 2: '😟', 3: '😐', 4: '🙂', 5: '😎' };
+const EMOTIONAL_EMOJIS: Record<number, string> = { 1: 'נ˜°', 2: 'נ˜', 3: 'נ˜', 4: 'נ™‚', 5: 'נ˜' };
 const EMOTIONAL_COLORS: Record<number, string> = {
   1: 'var(--color-tg-danger)',
   2: 'var(--color-tg-warning)',
@@ -83,7 +83,7 @@ export default function PerformanceSection({ trades, plan }: PerformanceSectionP
   const strategyBreakdown = useMemo(() => {
     const map: Record<string, { count: number; totalRR: number }> = {};
     for (const t of filtered) {
-      const s = t.strategy || 'אחר';
+      const s = t.strategy || '׳׳—׳¨';
       if (!map[s]) map[s] = { count: 0, totalRR: 0 };
       map[s].count++;
       map[s].totalRR += t.rr_ratio || 0;
@@ -137,7 +137,7 @@ export default function PerformanceSection({ trades, plan }: PerformanceSectionP
         {plan !== 'pro' && (
           <div className="shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs border"
             style={{ borderColor: 'var(--color-tg-border)', color: 'var(--color-tg-muted)' }}>
-            30/90/שנה
+            30/90/׳©׳ ׳”
             <span className="font-bold" style={{ color: '#f59e0b' }}>Pro</span>
           </div>
         )}
@@ -146,7 +146,7 @@ export default function PerformanceSection({ trades, plan }: PerformanceSectionP
       {filtered.length === 0 ? (
         <div className="text-center py-6 rounded-2xl border border-tg-border"
           style={{ background: 'var(--color-tg-surface)' }}>
-          <p className="text-sm text-tg-text-2">אין עסקאות בטווח הזמן הנבחר</p>
+          <p className="text-sm text-tg-text-2">׳׳™׳ ׳¢׳¡׳§׳׳•׳× ׳‘׳˜׳•׳•׳— ׳”׳–׳׳ ׳”׳ ׳‘׳—׳¨</p>
         </div>
       ) : (
         <>
@@ -154,16 +154,16 @@ export default function PerformanceSection({ trades, plan }: PerformanceSectionP
           {plan !== 'free' && (
             <div className="rounded-2xl border border-tg-border p-4"
               style={{ background: 'var(--color-tg-surface)' }}>
-              <h3 className="text-sm font-semibold text-tg-text mb-3">השוואה שבוע מול שבוע</h3>
+              <h3 className="text-sm font-semibold text-tg-text mb-3">׳”׳©׳•׳•׳׳” ׳©׳‘׳•׳¢ ׳׳•׳ ׳©׳‘׳•׳¢</h3>
               <div className="grid grid-cols-2 gap-3">
                 <CompareCell
-                  label="עסקאות"
+                  label="׳¢׳¡׳§׳׳•׳×"
                   current={thisWeek.length}
                   delta={weekDelta}
                   suffix=""
                 />
                 <CompareCell
-                  label="R:R ממוצע"
+                  label="R:R ׳׳׳•׳¦׳¢"
                   current={parseFloat(thisWeekAvgRR.toFixed(2))}
                   delta={parseFloat(rrDelta.toFixed(2))}
                   suffix=""
@@ -176,8 +176,8 @@ export default function PerformanceSection({ trades, plan }: PerformanceSectionP
           <div className="rounded-2xl border border-tg-border p-4"
             style={{ background: 'var(--color-tg-surface)' }}>
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-semibold text-tg-text">דפוסים רגשיים</h3>
-              <span className="text-xs text-tg-muted">{filtered.length} עסקאות</span>
+              <h3 className="text-sm font-semibold text-tg-text">׳“׳₪׳•׳¡׳™׳ ׳¨׳’׳©׳™׳™׳</h3>
+              <span className="text-xs text-tg-muted">{filtered.length} ׳¢׳¡׳§׳׳•׳×</span>
             </div>
             <div className="flex items-end gap-2 h-20">
               {([1, 2, 3, 4, 5] as const).map((n) => {
@@ -205,14 +205,14 @@ export default function PerformanceSection({ trades, plan }: PerformanceSectionP
           {strategyBreakdown.length > 0 && (
             <div className="rounded-2xl border border-tg-border p-4"
               style={{ background: 'var(--color-tg-surface)' }}>
-              <h3 className="text-sm font-semibold text-tg-text mb-3">ביצועים לפי אסטרטגיה</h3>
+              <h3 className="text-sm font-semibold text-tg-text mb-3">׳‘׳™׳¦׳•׳¢׳™׳ ׳׳₪׳™ ׳׳¡׳˜׳¨׳˜׳’׳™׳”</h3>
               <div className="flex flex-col gap-0">
                 {strategyBreakdown.map(({ name, count, avgRR }, i) => (
                   <div key={name}
                     className={`flex items-center justify-between py-2.5 ${i < strategyBreakdown.length - 1 ? 'border-b border-tg-border' : ''}`}>
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium text-tg-text">{name}</span>
-                      <span className="text-xs text-tg-muted">{count} עסקאות</span>
+                      <span className="text-xs text-tg-muted">{count} ׳¢׳¡׳§׳׳•׳×</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <div className="w-16 h-1.5 rounded-full overflow-hidden"
@@ -237,25 +237,25 @@ export default function PerformanceSection({ trades, plan }: PerformanceSectionP
             </div>
           )}
 
-          {/* Heat map — Pro only */}
+          {/* Heat map ג€” Pro only */}
           <div className="rounded-2xl border border-tg-border p-4"
             style={{ background: 'var(--color-tg-surface)' }}>
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-tg-text">מפת חום — שעות וימים</h3>
+              <h3 className="text-sm font-semibold text-tg-text">׳׳₪׳× ׳—׳•׳ ג€” ׳©׳¢׳•׳× ׳•׳™׳׳™׳</h3>
               <span className="px-2 py-0.5 rounded-full text-xs font-bold"
                 style={{ background: 'rgba(245,158,11,0.15)', color: '#f59e0b' }}>Pro</span>
             </div>
             {plan === 'pro' ? (
               <div className="flex items-center justify-center py-6 rounded-xl"
                 style={{ background: 'var(--color-tg-surface-2)' }}>
-                <p className="text-sm text-tg-text-2">מפת חום — בקרוב</p>
+                <p className="text-sm text-tg-text-2">׳׳₪׳× ׳—׳•׳ ג€” ׳‘׳§׳¨׳•׳‘</p>
               </div>
             ) : (
               <div className="flex items-center justify-center py-6 rounded-xl"
                 style={{ background: 'var(--color-tg-surface-2)' }}>
                 <div className="text-center">
-                  <div className="text-2xl mb-1">🗺️</div>
-                  <p className="text-xs text-tg-muted">מציג שעות חולשה ושיא · זמין ב-Pro</p>
+                  <div className="text-2xl mb-1">נ—÷ן¸</div>
+                  <p className="text-xs text-tg-muted">׳׳¦׳™׳’ ׳©׳¢׳•׳× ׳—׳•׳׳©׳” ׳•׳©׳™׳ ֲ· ׳–׳׳™׳ ׳‘-Pro</p>
                 </div>
               </div>
             )}
@@ -265,7 +265,7 @@ export default function PerformanceSection({ trades, plan }: PerformanceSectionP
           <div className="rounded-2xl border border-tg-border p-4"
             style={{ background: 'var(--color-tg-surface)' }}>
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-tg-text">סיכום שבועי AI</h3>
+              <h3 className="text-sm font-semibold text-tg-text">׳¡׳™׳›׳•׳ ׳©׳‘׳•׳¢׳™ AI</h3>
               <span className="px-2 py-0.5 rounded-full text-xs font-semibold"
                 style={{ background: 'var(--color-tg-surface-2)', color: 'var(--color-tg-muted)' }}>Basic+</span>
             </div>
@@ -273,18 +273,18 @@ export default function PerformanceSection({ trades, plan }: PerformanceSectionP
               <div className="flex items-center justify-center py-6 rounded-xl"
                 style={{ background: 'var(--color-tg-surface-2)' }}>
                 <div className="text-center">
-                  <div className="text-2xl mb-1">📋</div>
-                  <p className="text-xs text-tg-muted mb-0.5">סיכום מספרי · דפוס מרכזי · גרף התקדמות</p>
-                  <p className="text-xs font-medium" style={{ color: 'var(--color-tg-primary)' }}>זמין ב-Basic ומעלה</p>
+                  <div className="text-2xl mb-1">נ“‹</div>
+                  <p className="text-xs text-tg-muted mb-0.5">׳¡׳™׳›׳•׳ ׳׳¡׳₪׳¨׳™ ֲ· ׳“׳₪׳•׳¡ ׳׳¨׳›׳–׳™ ֲ· ׳’׳¨׳£ ׳”׳×׳§׳“׳׳•׳×</p>
+                  <p className="text-xs font-medium" style={{ color: 'var(--color-tg-primary)' }}>׳–׳׳™׳ ׳‘-Basic ׳•׳׳¢׳׳”</p>
                 </div>
               </div>
             ) : (
               <div className="flex flex-col gap-2">
                 {[
-                  'סיכום מספרי + דפוס מרכזי',
-                  plan === 'pro' ? 'השוואה לשבועות קודמים + ציטוט מהסוחר' : 'המלצה כללית',
-                  'גרף התקדמות שבועית',
-                  plan === 'pro' ? 'שעות החולשה השבועיות' : null,
+                  '׳¡׳™׳›׳•׳ ׳׳¡׳₪׳¨׳™ + ׳“׳₪׳•׳¡ ׳׳¨׳›׳–׳™',
+                  plan === 'pro' ? '׳”׳©׳•׳•׳׳” ׳׳©׳‘׳•׳¢׳•׳× ׳§׳•׳“׳׳™׳ + ׳¦׳™׳˜׳•׳˜ ׳׳”׳¡׳•׳—׳¨' : '׳”׳׳׳¦׳” ׳›׳׳׳™׳×',
+                  '׳’׳¨׳£ ׳”׳×׳§׳“׳׳•׳× ׳©׳‘׳•׳¢׳™׳×',
+                  plan === 'pro' ? '׳©׳¢׳•׳× ׳”׳—׳•׳׳©׳” ׳”׳©׳‘׳•׳¢׳™׳•׳×' : null,
                 ].filter(Boolean).map((item) => (
                   <div key={item} className="flex items-center gap-2 text-xs text-tg-text-2">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--color-tg-success)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -295,7 +295,7 @@ export default function PerformanceSection({ trades, plan }: PerformanceSectionP
                 ))}
                 <div className="mt-2 px-3 py-2 rounded-xl text-xs text-tg-muted text-center"
                   style={{ background: 'var(--color-tg-surface-2)' }}>
-                  נשלח כל יום ראשון בבוקר
+                  ׳ ׳©׳׳— ׳›׳ ׳™׳•׳ ׳¨׳׳©׳•׳ ׳‘׳‘׳•׳§׳¨
                 </div>
               </div>
             )}
@@ -321,10 +321,10 @@ function CompareCell({ label, current, delta, suffix }: {
       {!isZero && (
         <p className="text-xs mt-0.5 flex items-center gap-0.5"
           style={{ color: isPositive ? 'var(--color-tg-success)' : 'var(--color-tg-danger)' }}>
-          {isPositive ? '▲' : '▼'} {Math.abs(delta)}{suffix} לעומת שבוע שעבר
+          {isPositive ? 'ג–²' : 'ג–¼'} {Math.abs(delta)}{suffix} ׳׳¢׳•׳׳× ׳©׳‘׳•׳¢ ׳©׳¢׳‘׳¨
         </p>
       )}
-      {isZero && <p className="text-xs text-tg-muted mt-0.5">זהה לשבוע שעבר</p>}
+      {isZero && <p className="text-xs text-tg-muted mt-0.5">׳–׳”׳” ׳׳©׳‘׳•׳¢ ׳©׳¢׳‘׳¨</p>}
     </div>
   );
 }

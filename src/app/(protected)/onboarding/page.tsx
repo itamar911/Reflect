@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import OnboardingWizard from '@/components/onboarding/OnboardingWizard';
 
-export const metadata = { title: 'הגדרת פרופיל — Reflekt' };
+export const metadata = { title: 'הגדרת פרופיל — Reflect' };
 
 export default async function OnboardingPage() {
   const supabase = await createClient();

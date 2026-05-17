@@ -1,19 +1,23 @@
-export type TradingType = 'day' | 'swing' | 'crypto';
+﻿export type TradingType = 'day' | 'swing' | 'crypto' | 'futures';
 export type ExperienceLevel = 'beginner' | 'intermediate' | 'advanced';
-export type Market = 'stocks' | 'crypto' | 'forex';
-export type TradeStrategy = 'Breakout' | 'Trend Follow' | 'Reversal' | 'Range' | 'Custom';
+export type Market = 'stocks' | 'crypto' | 'forex' | 'futures';
+export type TradeStrategy = 'Breakout' | 'Trend Follow' | 'Reversal' | 'Range' | 'Futures' | 'Custom';
 export type Enforcement = 'reminder' | 'warning' | 'block';
 export type ValidationStatus = 'valid' | 'warning' | 'blocked';
 export type EmotionalPattern = 'FOMO' | 'REVENGE' | 'FEAR' | 'OVERCONFIDENCE' | 'NONE';
 export type TradeStatus = 'open' | 'closed';
+export type TraderIdentity = 'Disciplined Trader' | 'Emotional Trader' | 'Sniper Trader' | 'Aggressive Trader' | 'Developing Trader';
+export type StreakType = 'discipline' | 'no_revenge' | 'stop_loss' | 'full_discipline';
 
 export interface Profile {
   id: string;
   email: string;
   display_name: string | null;
-  trading_type: TradingType;
+  trading_type: TradingType | TradingType[];
   experience_level: ExperienceLevel;
-  default_market: Market;
+  default_market: Market | Market[];
+  custom_strategies: string[] | null;
+  trader_identity: TraderIdentity | null;
   onboarding_completed: boolean;
   created_at: string;
   updated_at: string;
@@ -47,7 +51,7 @@ export interface CustomRule {
 export interface TradePlan {
   id: string;
   user_id: string;
-  strategy: TradeStrategy;
+  strategy: TradeStrategy | string;
   entry_price: number;
   stop_loss: number;
   take_profit: number;
@@ -66,16 +70,34 @@ export interface TradePlan {
 }
 
 export interface TradePlanInput {
-  strategy: TradeStrategy | '';
+  strategy: TradeStrategy | string;
   entry_price: string;
   stop_loss: string;
   take_profit: string;
   trade_reason: string;
   emotional_state: number;
+  direction: 'long' | 'short' | null;
 }
 
 export interface RulesetValidationResult {
   status: ValidationStatus;
   blockedReasons: string[];
   warningReasons: string[];
+}
+
+export interface Streak {
+  id: string;
+  user_id: string;
+  streak_type: StreakType;
+  current_count: number;
+  best_count: number;
+  last_updated: string;
+}
+
+export interface AIInsight {
+  id: string;
+  user_id: string;
+  type: 'time' | 'emotional' | 'revenge' | 'performance' | 'pattern' | 'discipline';
+  content: string;
+  generated_at: string;
 }

@@ -53,7 +53,7 @@ export default function ResetPasswordPage() {
             <polyline points="16 7 22 7 22 13" />
           </svg>
         </div>
-        <h1 className="text-2xl font-bold text-tg-text">Reflekt</h1>
+        <h1 className="text-2xl font-bold text-tg-text">Reflect</h1>
         <p className="text-sm text-tg-text-2 mt-1">בחר סיסמא חדשה</p>
       </div>
 

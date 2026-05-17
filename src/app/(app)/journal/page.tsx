@@ -4,7 +4,7 @@ import Badge from '@/components/ui/Badge';
 import TradeDebrief from '@/components/journal/TradeDebrief';
 import JournalExport from '@/components/journal/JournalExport';
 
-export const metadata = { title: 'יומן עסקאות — Reflekt' };
+export const metadata = { title: 'יומן עסקאות — Reflect' };
 
 const EMOTIONAL_EMOJIS: Record<number, string> = { 1: '😰', 2: '😟', 3: '😐', 4: '🙂', 5: '😎' };
 
@@ -117,7 +117,18 @@ function TradeCard({ trade }: { trade: Record<string, unknown> }) {
         {isClosed && (
           <div className="pt-3 border-t border-tg-border">
             <TradeDebrief
-              tradeId={trade.id as string}
+              trade={{
+                id: trade.id as string,
+                strategy: trade.strategy as string,
+                entry_price: Number(trade.entry_price),
+                stop_loss: Number(trade.stop_loss),
+                take_profit: Number(trade.take_profit),
+                rr_ratio: Number(trade.rr_ratio),
+                emotional_state: Number(trade.emotional_state),
+                trade_reason: trade.trade_reason as string,
+                status: trade.status as string,
+                exit_price: trade.exit_price !== null ? Number(trade.exit_price) : null,
+              }}
               existingAnswer={debriefAnswer}
             />
           </div>

@@ -5,7 +5,7 @@ import RulesEditor from '@/components/rules/RulesEditor';
 import AlertsPanel from '@/components/settings/AlertsPanel';
 import type { PresetRules, CustomRule } from '@/lib/types';
 
-export const metadata = { title: 'הגדרות — Reflekt' };
+export const metadata = { title: 'הגדרות — Reflect' };
 
 export default async function SettingsPage() {
   const supabase = await createClient();

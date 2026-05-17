@@ -1,11 +1,11 @@
-'use client';
+﻿'use client';
 
 const STATES = [
-  { value: 1, emoji: '😰', label: 'מתוח מאוד', color: 'var(--color-tg-danger)' },
-  { value: 2, emoji: '😟', label: 'לא בטוב', color: 'var(--color-tg-warning)' },
-  { value: 3, emoji: '😐', label: 'ניטרלי', color: '#64748b' },
-  { value: 4, emoji: '🙂', label: 'טוב', color: 'var(--color-tg-success)' },
-  { value: 5, emoji: '😎', label: 'מצוין', color: 'var(--color-tg-primary)' },
+  { value: 1, emoji: 'נ˜°', label: '׳׳×׳•׳— ׳׳׳•׳“', color: 'var(--color-tg-danger)' },
+  { value: 2, emoji: 'נ˜', label: '׳׳ ׳‘׳˜׳•׳‘', color: 'var(--color-tg-warning)' },
+  { value: 3, emoji: 'נ˜', label: '׳ ׳™׳˜׳¨׳׳™', color: '#64748b' },
+  { value: 4, emoji: 'נ™‚', label: '׳˜׳•׳‘', color: 'var(--color-tg-success)' },
+  { value: 5, emoji: 'נ˜', label: '׳׳¦׳•׳™׳', color: 'var(--color-tg-primary)' },
 ];
 
 interface EmotionalStateSliderProps {
@@ -19,7 +19,7 @@ export default function EmotionalStateSlider({ value, onChange }: EmotionalState
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
-        <span className="text-sm font-medium text-tg-text-2">מצב רגשי</span>
+        <span className="text-sm font-medium text-tg-text-2">׳׳¦׳‘ ׳¨׳’׳©׳™</span>
         <div className="flex items-center gap-1.5">
           <span className="text-lg">{current.emoji}</span>
           <span className="text-xs font-medium" style={{ color: current.color }}>

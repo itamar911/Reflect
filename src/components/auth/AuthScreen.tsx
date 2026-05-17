@@ -67,8 +67,8 @@ export default function AuthScreen({ mode }: AuthScreenProps) {
             <polyline points="16 7 22 7 22 13" />
           </svg>
         </div>
-        <h1 className="text-2xl font-bold text-tg-text">Reflekt</h1>
-        <p className="text-xs text-tg-muted mt-0.5 mb-1">השוק בוחן את האסטרטגיה שלך. רפלקט בוחן אותך.</p>
+        <h1 className="text-2xl font-bold text-tg-text" style={{ color: 'var(--color-tg-primary)' }}>Reflect</h1>
+        <p className="text-xs text-tg-muted mt-0.5 mb-1">השוק בוחן את האסטרטגיה שלך. Reflect בוחן אותך.</p>
         <p className="text-sm text-tg-text-2 mt-1">
           {mode === 'login' ? 'ברוך הבא! התחבר לחשבונך' : 'צור חשבון חדש'}
         </p>

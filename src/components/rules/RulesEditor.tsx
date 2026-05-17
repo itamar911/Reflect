@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
@@ -18,9 +18,9 @@ interface RulesEditorProps {
 }
 
 const ENFORCEMENT_LABELS: Record<Enforcement, string> = {
-  reminder: 'התראה',
-  warning: 'אזהרה',
-  block: 'נעילה עם טיימר',
+  reminder: '׳”׳×׳¨׳׳”',
+  warning: '׳׳–׳”׳¨׳”',
+  block: '׳ ׳¢׳™׳׳” ׳¢׳ ׳˜׳™׳™׳׳¨',
 };
 const ENFORCEMENT_VARIANTS: Record<Enforcement, 'default' | 'warning' | 'danger'> = {
   reminder: 'default',
@@ -50,9 +50,9 @@ export default function RulesEditor({ presetRules: initialPreset, customRules: i
               boxShadow: tab === t ? '0 1px 3px rgba(0,0,0,0.3)' : 'none',
             }}
           >
-            {t === 'preset' ? 'חוקים מובנים' : (
+            {t === 'preset' ? '׳—׳•׳§׳™׳ ׳׳•׳‘׳ ׳™׳' : (
               <>
-                חוקים אישיים{customRules.length > 0 ? ` (${customRules.length})` : ''}
+                ׳—׳•׳§׳™׳ ׳׳™׳©׳™׳™׳{customRules.length > 0 ? ` (${customRules.length})` : ''}
                 {plan === 'free' && (
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0110 0v4" />
@@ -98,14 +98,14 @@ function CustomRulesTab({
   if (plan === 'free') {
     return (
       <div className="text-center py-10">
-        <div className="text-3xl mb-3">🔒</div>
-        <p className="text-sm font-medium text-tg-text mb-1">חוקים אישיים זמינים ב-Basic ומעלה</p>
-        <p className="text-xs text-tg-muted mb-5">עד 3 חוקים ב-Basic · ללא הגבלה ב-Pro</p>
+        <div className="text-3xl mb-3">נ”’</div>
+        <p className="text-sm font-medium text-tg-text mb-1">׳—׳•׳§׳™׳ ׳׳™׳©׳™׳™׳ ׳–׳׳™׳ ׳™׳ ׳‘-Basic ׳•׳׳¢׳׳”</p>
+        <p className="text-xs text-tg-muted mb-5">׳¢׳“ 3 ׳—׳•׳§׳™׳ ׳‘-Basic ֲ· ׳׳׳ ׳”׳’׳‘׳׳” ׳‘-Pro</p>
         <div className="flex flex-col gap-2 text-right px-2 mb-5">
           {[
-            'אם הפסדתי יותר מ-3% היום ← לא להיכנס לעסקה נוספת',
-            'אם מסחר אחרי 21:00 ← לא לפתוח עסקות חדשות',
-            'אם הרגשתי FOMO בעסקה הקודמת ← לקחת הפסקה של שעה',
+            '׳׳ ׳”׳₪׳¡׳“׳×׳™ ׳™׳•׳×׳¨ ׳-3% ׳”׳™׳•׳ ג† ׳׳ ׳׳”׳™׳›׳ ׳¡ ׳׳¢׳¡׳§׳” ׳ ׳•׳¡׳₪׳×',
+            '׳׳ ׳׳¡׳—׳¨ ׳׳—׳¨׳™ 21:00 ג† ׳׳ ׳׳₪׳×׳•׳— ׳¢׳¡׳§׳•׳× ׳—׳“׳©׳•׳×',
+            '׳׳ ׳”׳¨׳’׳©׳×׳™ FOMO ׳‘׳¢׳¡׳§׳” ׳”׳§׳•׳“׳׳× ג† ׳׳§׳—׳× ׳”׳₪׳¡׳§׳” ׳©׳ ׳©׳¢׳”',
           ].map((ex) => (
             <div key={ex} className="flex items-start gap-2 px-3 py-2 rounded-xl text-xs text-tg-muted"
               style={{ background: 'var(--color-tg-surface-2)' }}>
@@ -113,7 +113,7 @@ function CustomRulesTab({
             </div>
           ))}
         </div>
-        <Button variant="secondary" onClick={() => {}}>שדרג ל-Basic</Button>
+        <Button variant="secondary" onClick={() => {}}>׳©׳“׳¨׳’ ׳-Basic</Button>
       </div>
     );
   }
@@ -123,16 +123,16 @@ function CustomRulesTab({
       {plan === 'basic' && (
         <div className="flex items-center justify-between px-3 py-2 rounded-xl text-xs"
           style={{ background: 'var(--color-tg-surface-2)', color: 'var(--color-tg-text-2)' }}>
-          <span>חוקים אישיים: {rules.length} / 3</span>
-          {rules.length >= 3 && <span style={{ color: 'var(--color-tg-warning)' }}>הגעת למגבלה · שדרג ל-Pro לחוקים נוספים</span>}
+          <span>׳—׳•׳§׳™׳ ׳׳™׳©׳™׳™׳: {rules.length} / 3</span>
+          {rules.length >= 3 && <span style={{ color: 'var(--color-tg-warning)' }}>׳”׳’׳¢׳× ׳׳׳’׳‘׳׳” ֲ· ׳©׳“׳¨׳’ ׳-Pro ׳׳—׳•׳§׳™׳ ׳ ׳•׳¡׳₪׳™׳</span>}
         </div>
       )}
 
       {rules.length === 0 && !showBuilder && (
         <div className="text-center py-10">
-          <div className="text-3xl mb-2">📋</div>
-          <p className="text-sm text-tg-text-2 mb-4">אין עדיין חוקים אישיים</p>
-          <Button onClick={() => setShowBuilder(true)}>+ הוסף חוק ראשון</Button>
+          <div className="text-3xl mb-2">נ“‹</div>
+          <p className="text-sm text-tg-text-2 mb-4">׳׳™׳ ׳¢׳“׳™׳™׳ ׳—׳•׳§׳™׳ ׳׳™׳©׳™׳™׳</p>
+          <Button onClick={() => setShowBuilder(true)}>+ ׳”׳•׳¡׳£ ׳—׳•׳§ ׳¨׳׳©׳•׳</Button>
         </div>
       )}
 
@@ -156,7 +156,7 @@ function CustomRulesTab({
           ))}
           {canAdd && (
             <Button variant="secondary" onClick={() => setShowBuilder(true)} className="mt-2">
-              + הוסף חוק
+              + ׳”׳•׳¡׳£ ׳—׳•׳§
             </Button>
           )}
         </div>
@@ -203,7 +203,7 @@ function CustomRuleCard({
         <button
           onClick={() => onDelete(rule.id)}
           className="text-tg-muted hover:text-tg-danger transition-colors shrink-0"
-          title="מחק חוק"
+          title="׳׳—׳§ ׳—׳•׳§"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14H6L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4h6v2" />
@@ -215,14 +215,14 @@ function CustomRuleCard({
         <div className="flex gap-2 text-xs">
           <span className="px-2 py-0.5 rounded-md font-medium shrink-0"
             style={{ background: 'var(--color-tg-primary-muted)', color: 'var(--color-tg-primary)' }}>
-            אם
+            ׳׳
           </span>
           <span className="text-tg-text-2">{rule.trigger_condition}</span>
         </div>
         <div className="flex gap-2 text-xs">
           <span className="px-2 py-0.5 rounded-md font-medium shrink-0"
             style={{ background: 'var(--color-tg-success-muted)', color: 'var(--color-tg-success)' }}>
-            אז
+            ׳׳–
           </span>
           <span className="text-tg-text-2">{rule.action_required}</span>
         </div>
@@ -230,7 +230,7 @@ function CustomRuleCard({
 
       {/* Toggle */}
       <div className="flex items-center justify-between">
-        <span className="text-xs text-tg-muted">{rule.is_active ? 'פעיל' : 'כבוי'}</span>
+        <span className="text-xs text-tg-muted">{rule.is_active ? '׳₪׳¢׳™׳' : '׳›׳‘׳•׳™'}</span>
         <button
           onClick={() => onToggle(rule.id, !rule.is_active)}
           className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
@@ -247,23 +247,23 @@ function CustomRuleCard({
 }
 
 const TRIGGER_EXAMPLES_BASIC = [
-  'כמות העסקאות היום עברה 3',
-  'ההפסד היומי עבר $200',
-  'השוק עלה ביותר מ-2% בשעה האחרונה',
+  '׳›׳׳•׳× ׳”׳¢׳¡׳§׳׳•׳× ׳”׳™׳•׳ ׳¢׳‘׳¨׳” 3',
+  '׳”׳”׳₪׳¡׳“ ׳”׳™׳•׳׳™ ׳¢׳‘׳¨ $200',
+  '׳”׳©׳•׳§ ׳¢׳׳” ׳‘׳™׳•׳×׳¨ ׳-2% ׳‘׳©׳¢׳” ׳”׳׳—׳¨׳•׳ ׳”',
 ];
 
 const TRIGGER_EXAMPLES_PRO = [
-  'השעה היא אחרי 21:00',
-  'יום שני (תחילת שבוע)',
-  'הרגשתי FOMO בעסקה האחרונה',
-  'ירידה רצופה של 3 עסקאות',
+  '׳”׳©׳¢׳” ׳”׳™׳ ׳׳—׳¨׳™ 21:00',
+  '׳™׳•׳ ׳©׳ ׳™ (׳×׳—׳™׳׳× ׳©׳‘׳•׳¢)',
+  '׳”׳¨׳’׳©׳×׳™ FOMO ׳‘׳¢׳¡׳§׳” ׳”׳׳—׳¨׳•׳ ׳”',
+  '׳™׳¨׳™׳“׳” ׳¨׳¦׳•׳₪׳” ׳©׳ 3 ׳¢׳¡׳§׳׳•׳×',
 ];
 
 const ACTION_EXAMPLES = [
-  'לא להיכנס לעסקה נוספת היום',
-  'להמתין 30 דקות לפני כניסה',
-  'לקחת הפסקה של שעה',
-  'לסגור את כל הפוזיציות הפתוחות',
+  '׳׳ ׳׳”׳™׳›׳ ׳¡ ׳׳¢׳¡׳§׳” ׳ ׳•׳¡׳₪׳× ׳”׳™׳•׳',
+  '׳׳”׳׳×׳™׳ 30 ׳“׳§׳•׳× ׳׳₪׳ ׳™ ׳›׳ ׳™׳¡׳”',
+  '׳׳§׳—׳× ׳”׳₪׳¡׳§׳” ׳©׳ ׳©׳¢׳”',
+  '׳׳¡׳’׳•׳¨ ׳׳× ׳›׳ ׳”׳₪׳•׳–׳™׳¦׳™׳•׳× ׳”׳₪׳×׳•׳—׳•׳×',
 ];
 
 function CustomRuleBuilder({
@@ -285,9 +285,9 @@ function CustomRuleBuilder({
 
   function validate() {
     const e: Record<string, string> = {};
-    if (!form.rule_name.trim()) e.rule_name = 'שם החוק חובה';
-    if (!form.trigger_condition.trim()) e.trigger_condition = 'תנאי הטריגר חובה';
-    if (!form.action_required.trim()) e.action_required = 'הפעולה חובה';
+    if (!form.rule_name.trim()) e.rule_name = '׳©׳ ׳”׳—׳•׳§ ׳—׳•׳‘׳”';
+    if (!form.trigger_condition.trim()) e.trigger_condition = '׳×׳ ׳׳™ ׳”׳˜׳¨׳™׳’׳¨ ׳—׳•׳‘׳”';
+    if (!form.action_required.trim()) e.action_required = '׳”׳₪׳¢׳•׳׳” ׳—׳•׳‘׳”';
     setErrors(e);
     return Object.keys(e).length === 0;
   }
@@ -316,14 +316,14 @@ function CustomRuleBuilder({
   return (
     <div className="p-4 rounded-2xl border border-tg-primary/30 flex flex-col gap-4 animate-fade-in"
       style={{ background: 'var(--color-tg-surface)' }}>
-      <h3 className="text-sm font-semibold text-tg-text">חוק חדש — אם/אז</h3>
+      <h3 className="text-sm font-semibold text-tg-text">׳—׳•׳§ ׳—׳“׳© ג€” ׳׳/׳׳–</h3>
 
       <div className="flex flex-col gap-1.5">
-        <label className="text-sm font-medium text-tg-text-2">שם החוק</label>
+        <label className="text-sm font-medium text-tg-text-2">׳©׳ ׳”׳—׳•׳§</label>
         <input
           type="text"
           maxLength={50}
-          placeholder='לדוגמה: "הפסד גדול ביום"'
+          placeholder='׳׳“׳•׳’׳׳”: "׳”׳₪׳¡׳“ ׳’׳“׳•׳ ׳‘׳™׳•׳"'
           value={form.rule_name}
           onChange={(e) => setForm({ ...form, rule_name: e.target.value })}
           className="w-full h-10 px-3 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors"
@@ -336,12 +336,12 @@ function CustomRuleBuilder({
         <div className="flex items-center gap-2">
           <span className="px-2 py-0.5 rounded-md text-xs font-medium"
             style={{ background: 'var(--color-tg-primary-muted)', color: 'var(--color-tg-primary)' }}>
-            אם (טריגר)
+            ׳׳ (׳˜׳¨׳™׳’׳¨)
           </span>
         </div>
         <textarea
           rows={2}
-          placeholder='לדוגמה: "הפסדתי יותר מ-3% מההון היום"'
+          placeholder='׳׳“׳•׳’׳׳”: "׳”׳₪׳¡׳“׳×׳™ ׳™׳•׳×׳¨ ׳-3% ׳׳”׳”׳•׳ ׳”׳™׳•׳"'
           value={form.trigger_condition}
           onChange={(e) => setForm({ ...form, trigger_condition: e.target.value })}
           className="w-full px-3 py-2.5 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors resize-none"
@@ -349,7 +349,7 @@ function CustomRuleBuilder({
         />
         {errors.trigger_condition && <p className="text-xs text-tg-danger">{errors.trigger_condition}</p>}
         <div className="flex flex-col gap-1">
-          <p className="text-xs text-tg-muted">דוגמאות מהירות:</p>
+          <p className="text-xs text-tg-muted">׳“׳•׳’׳׳׳•׳× ׳׳”׳™׳¨׳•׳×:</p>
           <div className="flex flex-wrap gap-1.5">
             {TRIGGER_EXAMPLES_BASIC.map((ex) => (
               <button key={ex} type="button"
@@ -382,12 +382,12 @@ function CustomRuleBuilder({
         <div className="flex items-center gap-2">
           <span className="px-2 py-0.5 rounded-md text-xs font-medium"
             style={{ background: 'var(--color-tg-success-muted)', color: 'var(--color-tg-success)' }}>
-            אז (פעולה)
+            ׳׳– (׳₪׳¢׳•׳׳”)
           </span>
         </div>
         <textarea
           rows={2}
-          placeholder='לדוגמה: "לא להיכנס לעסקה נוספת היום"'
+          placeholder='׳׳“׳•׳’׳׳”: "׳׳ ׳׳”׳™׳›׳ ׳¡ ׳׳¢׳¡׳§׳” ׳ ׳•׳¡׳₪׳× ׳”׳™׳•׳"'
           value={form.action_required}
           onChange={(e) => setForm({ ...form, action_required: e.target.value })}
           className="w-full px-3 py-2.5 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors resize-none"
@@ -395,7 +395,7 @@ function CustomRuleBuilder({
         />
         {errors.action_required && <p className="text-xs text-tg-danger">{errors.action_required}</p>}
         <div className="flex flex-col gap-1">
-          <p className="text-xs text-tg-muted">דוגמאות מהירות:</p>
+          <p className="text-xs text-tg-muted">׳“׳•׳’׳׳׳•׳× ׳׳”׳™׳¨׳•׳×:</p>
           <div className="flex flex-wrap gap-1.5">
             {ACTION_EXAMPLES.map((ex) => (
               <button key={ex} type="button"
@@ -411,7 +411,7 @@ function CustomRuleBuilder({
 
       {/* Enforcement */}
       <div className="flex flex-col gap-2">
-        <label className="text-sm font-medium text-tg-text-2">עוצמת האכיפה</label>
+        <label className="text-sm font-medium text-tg-text-2">׳¢׳•׳¦׳׳× ׳”׳׳›׳™׳₪׳”</label>
         <div className="grid grid-cols-2 gap-2">
           {(Object.entries(ENFORCEMENT_LABELS) as [Enforcement, string][]).map(([key, label]) => {
             const isBasicLocked = plan === 'basic' && key === 'block';
@@ -435,7 +435,7 @@ function CustomRuleBuilder({
               </button>
             );
           })}
-          {/* Self-block — Pro only */}
+          {/* Self-block ג€” Pro only */}
           <button
             type="button"
             onClick={() => {}}
@@ -448,14 +448,14 @@ function CustomRuleBuilder({
               cursor: 'default',
             }}
           >
-            חסימה עצמית מלאה
+            ׳—׳¡׳™׳׳” ׳¢׳¦׳׳™׳× ׳׳׳׳”
             <span className="text-[10px] font-bold" style={{ color: '#f59e0b' }}>Pro</span>
           </button>
         </div>
         {plan !== 'pro' && (
-          <p className="text-xs text-tg-muted">נעילה וחסימה עצמית מלאה זמינות ב-Pro</p>
+          <p className="text-xs text-tg-muted">׳ ׳¢׳™׳׳” ׳•׳—׳¡׳™׳׳” ׳¢׳¦׳׳™׳× ׳׳׳׳” ׳–׳׳™׳ ׳•׳× ׳‘-Pro</p>
         )}
-        {/* Self-block explanation — always visible */}
+        {/* Self-block explanation ג€” always visible */}
         <div className="flex items-start gap-2 p-3 rounded-xl"
           style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)' }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 shrink-0">
@@ -463,17 +463,17 @@ function CustomRuleBuilder({
             <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
           </svg>
           <div>
-            <p className="text-xs font-semibold" style={{ color: '#f59e0b' }}>חסימה עצמית מלאה — Pro</p>
+            <p className="text-xs font-semibold" style={{ color: '#f59e0b' }}>׳—׳¡׳™׳׳” ׳¢׳¦׳׳™׳× ׳׳׳׳” ג€” Pro</p>
             <p className="text-xs mt-0.5" style={{ color: 'var(--color-tg-text-2)' }}>
-              כשהחוק מופעל — לא ניתן להגיש תוכנית עסקה. לא ניתן לעקוף. אתה בוחר מראש לחסום את עצמך. הסבר מלא יוצג לפני ההפעלה.
+              ׳›׳©׳”׳—׳•׳§ ׳׳•׳₪׳¢׳ ג€” ׳׳ ׳ ׳™׳×׳ ׳׳”׳’׳™׳© ׳×׳•׳›׳ ׳™׳× ׳¢׳¡׳§׳”. ׳׳ ׳ ׳™׳×׳ ׳׳¢׳§׳•׳£. ׳׳×׳” ׳‘׳•׳—׳¨ ׳׳¨׳׳© ׳׳—׳¡׳•׳ ׳׳× ׳¢׳¦׳׳. ׳”׳¡׳‘׳¨ ׳׳׳ ׳™׳•׳¦׳’ ׳׳₪׳ ׳™ ׳”׳”׳₪׳¢׳׳”.
             </p>
           </div>
         </div>
       </div>
 
       <div className="flex gap-2 mt-1">
-        <Button variant="secondary" onClick={onCancel} className="flex-1">ביטול</Button>
-        <Button onClick={handleSave} loading={loading} className="flex-1">שמור חוק</Button>
+        <Button variant="secondary" onClick={onCancel} className="flex-1">׳‘׳™׳˜׳•׳</Button>
+        <Button onClick={handleSave} loading={loading} className="flex-1">׳©׳׳•׳¨ ׳—׳•׳§</Button>
       </div>
     </div>
   );

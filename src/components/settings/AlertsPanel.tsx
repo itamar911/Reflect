@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState } from 'react';
 
@@ -17,39 +17,39 @@ interface AlertConfig {
 const ALERTS: AlertConfig[] = [
   {
     id: 'pre_market',
-    label: 'תזכורת לפני פתיחת השוק',
-    description: 'תשלח אם לא הזנת אסטרטגיה להיום',
+    label: '׳×׳–׳›׳•׳¨׳× ׳׳₪׳ ׳™ ׳₪׳×׳™׳—׳× ׳”׳©׳•׳§',
+    description: '׳×׳©׳׳— ׳׳ ׳׳ ׳”׳–׳ ׳× ׳׳¡׳˜׳¨׳˜׳’׳™׳” ׳׳”׳™׳•׳',
     defaultEnabled: true,
     hasTime: true,
     defaultTime: '08:30',
   },
   {
     id: 'end_of_day',
-    label: 'תזכורת סוף יום',
-    description: 'תשלח אם יש עסקה שלא תוחקרה',
+    label: '׳×׳–׳›׳•׳¨׳× ׳¡׳•׳£ ׳™׳•׳',
+    description: '׳×׳©׳׳— ׳׳ ׳™׳© ׳¢׳¡׳§׳” ׳©׳׳ ׳×׳•׳—׳§׳¨׳”',
     defaultEnabled: true,
     hasTime: true,
     defaultTime: '21:00',
   },
   {
     id: 'discipline',
-    label: 'התראת משמעת',
-    description: 'תופעל כשחורגים ממגבלה שהוגדרה בחוקים',
+    label: '׳”׳×׳¨׳׳× ׳׳©׳׳¢׳×',
+    description: '׳×׳•׳₪׳¢׳ ׳›׳©׳—׳•׳¨׳’׳™׳ ׳׳׳’׳‘׳׳” ׳©׳”׳•׳’׳“׳¨׳” ׳‘׳—׳•׳§׳™׳',
     defaultEnabled: true,
     hasTime: false,
   },
   {
     id: 'weekly_summary',
-    label: 'סיכום שבועי AI',
-    description: 'נשלח כל יום ראשון בבוקר עם ניתוח השבוע',
+    label: '׳¡׳™׳›׳•׳ ׳©׳‘׳•׳¢׳™ AI',
+    description: '׳ ׳©׳׳— ׳›׳ ׳™׳•׳ ׳¨׳׳©׳•׳ ׳‘׳‘׳•׳§׳¨ ׳¢׳ ׳ ׳™׳×׳•׳— ׳”׳©׳‘׳•׳¢',
     defaultEnabled: true,
     hasTime: true,
     defaultTime: '09:00',
   },
   {
     id: 'realtime_pattern',
-    label: 'התראת דפוס בזמן אמת',
-    description: 'מזהה דפוס כושל לפני כניסה לעסקה',
+    label: '׳”׳×׳¨׳׳× ׳“׳₪׳•׳¡ ׳‘׳–׳׳ ׳׳׳×',
+    description: '׳׳–׳”׳” ׳“׳₪׳•׳¡ ׳›׳•׳©׳ ׳׳₪׳ ׳™ ׳›׳ ׳™׳¡׳” ׳׳¢׳¡׳§׳”',
     defaultEnabled: false,
     hasTime: false,
     proOnly: true,
@@ -97,7 +97,7 @@ export default function AlertsPanel({ plan }: { plan: Plan }) {
               <p className="text-xs text-tg-text-2 mt-0.5">{alert.description}</p>
               {alert.hasTime && canCustomize && !isLocked && enabled[alert.id] && (
                 <div className="flex items-center gap-2 mt-2">
-                  <span className="text-xs text-tg-muted">שעת שליחה:</span>
+                  <span className="text-xs text-tg-muted">׳©׳¢׳× ׳©׳׳™׳—׳”:</span>
                   <input
                     type="time"
                     value={times[alert.id] ?? '09:00'}
@@ -129,7 +129,7 @@ export default function AlertsPanel({ plan }: { plan: Plan }) {
 
       {!canCustomize && (
         <p className="text-xs text-tg-muted mt-3 text-center">
-          התאמת שעות שליחה זמינה ב-Basic ומעלה
+          ׳”׳×׳׳׳× ׳©׳¢׳•׳× ׳©׳׳™׳—׳” ׳–׳׳™׳ ׳” ׳‘-Basic ׳•׳׳¢׳׳”
         </p>
       )}
     </div>

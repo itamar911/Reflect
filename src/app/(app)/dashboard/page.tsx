@@ -1,9 +1,15 @@
-import { createClient } from '@/lib/supabase/server';
+﻿import { createClient } from '@/lib/supabase/server';
 import Card from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
+import ProgressRing from '@/components/ui/ProgressRing';
 import PerformanceSection from '@/components/dashboard/PerformanceSection';
+import AICoachCard from '@/components/ai/AICoachCard';
+import PatternDetection from '@/components/ai/PatternDetection';
+import StreakTracker from '@/components/streaks/StreakTracker';
+import TraderIdentityCard from '@/components/identity/TraderIdentity';
+import DangerMode from '@/components/danger/DangerMode';
 
-export const metadata = { title: 'דשבורד — Reflekt' };
+export const metadata = { title: '׳“׳©׳‘׳•׳¨׳“ ג€” Reflect' };
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -13,157 +19,261 @@ export default async function DashboardPage() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  const [profileRes, todayTradesRes, allTradesRes] = await Promise.all([
+  const [profileRes, todayTradesRes, allTradesRes, rulesRes] = await Promise.all([
     supabase.from('profiles').select('display_name, trading_type').eq('id', user.id).single(),
     supabase.from('trade_plans').select('*').eq('user_id', user.id).gte('submitted_at', today.toISOString()),
-    supabase.from('trade_plans').select('id, status, emotional_state, rr_ratio, strategy, submitted_at').eq('user_id', user.id).order('submitted_at', { ascending: false }).limit(50),
+    supabase.from('trade_plans').select('*').eq('user_id', user.id).order('submitted_at', { ascending: false }).limit(100),
+    supabase.from('preset_rules').select('cooldown_after_losses, max_daily_loss').eq('user_id', user.id).single(),
   ]);
 
   const profile = profileRes.data;
   const todayTrades = todayTradesRes.data ?? [];
   const allTrades = allTradesRes.data ?? [];
+  const rules = rulesRes.data;
 
   const totalTrades = allTrades.length;
+  const closedTrades = allTrades.filter((t) => t.status === 'closed');
   const avgRR = totalTrades > 0
-    ? (allTrades.reduce((sum, t) => sum + (t.rr_ratio || 0), 0) / totalTrades).toFixed(2)
-    : '—';
+    ? (allTrades.reduce((s, t) => s + (t.rr_ratio || 0), 0) / totalTrades).toFixed(1)
+    : 'ג€”';
   const avgEmotional = totalTrades > 0
-    ? (allTrades.reduce((sum, t) => sum + (t.emotional_state || 0), 0) / totalTrades).toFixed(1)
-    : '—';
+    ? allTrades.reduce((s, t) => s + (t.emotional_state || 3), 0) / totalTrades
+    : 3;
+
+  // Discipline score (0-100) based on: plans submitted, SL not moved, R:R met
+  const disciplineScore = totalTrades === 0 ? 0 : Math.min(
+    100,
+    Math.round(
+      (closedTrades.filter((t) => t.plan_score !== null).length / Math.max(closedTrades.length, 1)) * 30 +
+      (allTrades.filter((t) => t.emotional_state >= 3).length / totalTrades) * 30 +
+      (allTrades.filter((t) => (t.rr_ratio || 0) >= 2).length / totalTrades) * 40
+    )
+  );
+
+  // Emotional score
+  const emotionalScore = Math.round((avgEmotional / 5) * 100);
+
+  // Execution score
+  const executionScore = closedTrades.length === 0 ? 0 : Math.min(100,
+    Math.round((closedTrades.filter((t) => t.exit_price !== null).length / closedTrades.length) * 100)
+  );
+
+  // Consecutive losses
+  let consecutiveLosses = 0;
+  const sorted = [...allTrades].sort((a, b) => new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime());
+  for (const t of sorted) {
+    if (t.status === 'closed' && t.exit_price && t.entry_price && Number(t.exit_price) <= Number(t.stop_loss)) {
+      consecutiveLosses++;
+    } else if (t.status === 'closed') {
+      break;
+    }
+  }
+
+  // Today's loss
+  let todayLoss = 0;
+  for (const t of todayTrades) {
+    if (t.status === 'closed' && t.exit_price && t.entry_price && Number(t.exit_price) < Number(t.entry_price)) {
+      todayLoss += Math.abs(Number(t.entry_price) - Number(t.exit_price));
+    }
+  }
+  const dailyLossExceeded = rules?.max_daily_loss ? todayLoss >= rules.max_daily_loss : false;
+
+  // Streaks (simplified server-side compute)
+  const disciplineStreak = computeStreak(allTrades, 'discipline');
+  const noRevengeStreak = computeStreak(allTrades, 'no_revenge');
+  const stopLossStreak = computeStreak(allTrades, 'stop_loss');
+  const fullDisciplineStreak = Math.min(disciplineStreak, noRevengeStreak, stopLossStreak);
 
   const simpleTrades = allTrades.map((t) => ({
-    strategy: (t.strategy as string) || '',
-    emotional_state: (t.emotional_state as number) || 3,
-    rr_ratio: (t.rr_ratio as number) || 0,
-    submitted_at: t.submitted_at as string,
+    strategy: String(t.strategy || ''),
+    emotional_state: Number(t.emotional_state || 3),
+    rr_ratio: Number(t.rr_ratio || 0),
+    submitted_at: String(t.submitted_at),
+    status: String(t.status),
+    entry_price: Number(t.entry_price || 0),
+    exit_price: t.exit_price !== null ? Number(t.exit_price) : null,
+    stop_loss: Number(t.stop_loss || 0),
   }));
 
   const hour = new Date().getHours();
-  const greeting = hour < 12 ? 'בוקר טוב' : hour < 17 ? 'אחה"צ טוב' : 'ערב טוב';
-  const name = profile?.display_name?.split(' ')[0] ?? 'סוחר';
+  const greeting = hour < 5 ? '׳׳™׳׳” ׳˜׳•׳‘' : hour < 12 ? '׳‘׳•׳§׳¨ ׳˜׳•׳‘' : hour < 17 ? '׳¦׳”׳¨׳™׳™׳ ׳˜׳•׳‘׳™׳' : '׳¢׳¨׳‘ ׳˜׳•׳‘';
+  const name = profile?.display_name?.split(' ')[0] ?? '׳¡׳•׳—׳¨';
+
+  // Dynamic motivational message
+  let dynamicMsg = '';
+  if (consecutiveLosses >= 2) dynamicMsg = `ג ן¸ ${consecutiveLosses} ׳”׳₪׳¡׳“׳™׳ ׳¨׳¦׳•׳₪׳™׳ ג€” ׳©׳§׳•׳ ׳”׳₪׳¡׳§׳”`;
+  else if (disciplineStreak >= 3) dynamicMsg = `נ”¥ ${disciplineStreak} ׳™׳׳™׳ ׳׳₪׳™ ׳”׳—׳•׳§׳™׳ ׳‘׳¨׳¦׳£`;
+  else if (avgEmotional >= 4) dynamicMsg = 'נ’ ׳׳¦׳‘ ׳¨׳’׳©׳™ ׳׳¦׳•׳™׳ ג€” ׳™׳•׳ ׳׳¡׳—׳¨ ׳׳™׳“׳™׳׳׳™';
+  else if (disciplineScore >= 80) dynamicMsg = 'נ¯ ׳‘׳™׳¦׳•׳¢׳™׳ ׳׳¢׳•׳׳™׳ ג€” ׳”׳׳©׳ ׳›׳';
+  else if (todayTrades.length === 0) dynamicMsg = '׳›׳׳™ ׳”׳׳¡׳—׳¨ ׳©׳׳ ׳׳•׳›׳ ג€” ׳×׳›׳ ׳ ׳׳₪׳ ׳™ ׳©׳×׳™׳›׳ ׳¡';
 
   return (
-    <div className="px-4 py-5 flex flex-col gap-5 max-w-2xl mx-auto">
-      {/* Greeting */}
-      <div>
-        <h1 className="text-xl font-bold text-tg-text">{greeting}, {name} 👋</h1>
-        <p className="text-sm text-tg-text-2 mt-0.5">
-          {todayTrades.length === 0
-            ? 'לא הגשת תוכניות עסקה היום עדיין'
-            : `הגשת ${todayTrades.length} תוכנית${todayTrades.length > 1 ? 'ות' : ''} היום`}
-        </p>
+    <div className="px-4 py-5 flex flex-col gap-4 max-w-2xl mx-auto">
+
+      {/* Hero greeting */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-tg-text">{greeting}, {name}</h1>
+          {dynamicMsg && (
+            <p className="text-sm text-tg-text-2 mt-0.5">{dynamicMsg}</p>
+          )}
+        </div>
+        <div className="text-right">
+          <p className="text-xs text-tg-muted">
+            {new Date().toLocaleDateString('he-IL', { weekday: 'short', day: 'numeric', month: 'short' })}
+          </p>
+          {todayTrades.length > 0 && (
+            <p className="text-xs font-medium" style={{ color: 'var(--color-tg-primary)' }}>
+              {todayTrades.length} ׳¢׳¡׳§׳”{todayTrades.length > 1 ? '׳•׳×' : ''} ׳”׳™׳•׳
+            </p>
+          )}
+        </div>
       </div>
 
-      {/* Discipline Score placeholder */}
-      <Card>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold text-tg-text">ציון משמעת</h2>
-          <Badge variant="primary">בקרוב</Badge>
-        </div>
-        {totalTrades === 0 ? (
-          <div className="text-center py-4">
-            <div className="text-4xl mb-2">🎯</div>
-            <p className="text-sm text-tg-text-2 mb-3">הציון שלך יחושב לאחר העסקה הראשונה</p>
-          </div>
-        ) : (
-          <div className="flex items-center gap-4 mb-3">
-            <div className="relative w-20 h-20">
-              <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
-                <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--color-tg-surface-2)" strokeWidth="3" />
-                <circle
-                  cx="18" cy="18" r="15.9" fill="none"
-                  stroke="var(--color-tg-primary)" strokeWidth="3"
-                  strokeDasharray="75 100"
-                  strokeLinecap="round"
-                />
-              </svg>
-              <span className="absolute inset-0 flex items-center justify-center text-lg font-bold text-tg-text">75</span>
-            </div>
-            <div className="flex flex-col gap-1">
-              <p className="text-sm font-medium text-tg-text">בדרך הנכונה!</p>
-              <p className="text-xs text-tg-text-2">יש עוד מקום לשיפור</p>
-            </div>
-          </div>
-        )}
-        <div className="flex flex-col gap-1.5 pt-3 border-t border-tg-border">
-          <p className="text-xs font-medium text-tg-text-2 mb-1">איך מחושב הציון:</p>
-          {[
-            ['הגשת תוכנית לפני כניסה', '25'],
-            ['Stop Loss לא הוזז', '25'],
-            ['R:R בוצע לפי התוכנית', '20'],
-            ['לא חרגת ממקסימום עסקאות', '15'],
-            ['יציאה לפי התוכנית המקורית', '15'],
-          ].map(([label, pts]) => (
-            <div key={label} className="flex items-center justify-between">
-              <span className="text-xs text-tg-muted">{label}</span>
-              <span className="text-xs font-semibold" style={{ color: 'var(--color-tg-primary)' }}>{pts} נק׳</span>
-            </div>
-          ))}
-        </div>
-      </Card>
+      {/* Danger Mode */}
+      <DangerMode
+        consecutiveLosses={consecutiveLosses}
+        emotionalState={Math.round(avgEmotional)}
+        dailyLossExceeded={dailyLossExceeded}
+        maxDailyLoss={rules?.max_daily_loss ?? null}
+        currentLoss={todayLoss}
+      />
 
-      {/* Stats row */}
-      <div className="grid grid-cols-3 gap-3">
-        <StatCard label="עסקאות היום" value={String(todayTrades.length)} />
-        <StatCard label="R:R ממוצע" value={avgRR} />
-        <StatCard label="מצב רגשי" value={avgEmotional === '—' ? '—' : `${avgEmotional}/5`} />
-      </div>
+      {/* Scores row */}
+      {totalTrades > 0 ? (
+        <div className="grid grid-cols-3 gap-3">
+          <ScoreCard label="׳׳©׳׳¢׳×" value={disciplineScore} color="var(--color-tg-primary)" />
+          <ScoreCard label="׳¨׳’׳©׳•׳×" value={emotionalScore} color="#60A5FA" />
+          <ScoreCard label="׳‘׳™׳¦׳•׳¢" value={executionScore} color="var(--color-tg-success)" />
+        </div>
+      ) : (
+        <Card className="text-center py-8">
+          <div className="text-4xl mb-3">נ“</div>
+          <h3 className="text-base font-semibold text-tg-text mb-1">׳”׳’׳© ׳׳× ׳”׳¢׳¡׳§׳” ׳”׳¨׳׳©׳•׳ ׳” ׳©׳׳</h3>
+          <p className="text-sm text-tg-text-2">׳׳—׳¥ ׳¢׳ + ׳׳׳˜׳” ׳›׳“׳™ ׳׳”׳×׳—׳™׳</p>
+        </Card>
+      )}
+
+      {/* Quick stats */}
+      {totalTrades > 0 && (
+        <div className="grid grid-cols-3 gap-2">
+          <StatChip label="R:R ׳׳׳•׳¦׳¢" value={avgRR} />
+          <StatChip label="׳׳¦׳‘ ׳¨׳’׳©׳™" value={avgEmotional >= 1 ? `${avgEmotional.toFixed(1)}/5` : 'ג€”'} />
+          <StatChip label="׳¢׳¡׳§׳׳•׳× ׳”׳™׳•׳" value={String(todayTrades.length)} />
+        </div>
+      )}
+
+      {/* Trader Identity */}
+      {totalTrades >= 3 && (
+        <TraderIdentityCard
+          disciplineScore={disciplineScore}
+          avgEmotional={avgEmotional}
+          totalTrades={totalTrades}
+        />
+      )}
+
+      {/* Streaks */}
+      {totalTrades > 0 && (
+        <div>
+          <h2 className="text-sm font-semibold text-tg-text mb-2">׳¨׳¦׳₪׳™׳</h2>
+          <StreakTracker
+            disciplineStreak={disciplineStreak}
+            noRevengeStreak={noRevengeStreak}
+            stopLossStreak={stopLossStreak}
+            fullDisciplineStreak={fullDisciplineStreak}
+          />
+        </div>
+      )}
 
       {/* Today's trades */}
       {todayTrades.length > 0 && (
         <Card>
-          <h2 className="text-sm font-semibold text-tg-text mb-3">עסקאות היום</h2>
+          <h2 className="text-sm font-semibold text-tg-text mb-3">׳¢׳¡׳§׳׳•׳× ׳”׳™׳•׳</h2>
           <div className="flex flex-col gap-2">
-            {todayTrades.map((trade) => (
-              <div key={trade.id}
-                className="flex items-center justify-between py-2 border-b border-tg-border last:border-0">
-                <div>
-                  <p className="text-sm font-medium text-tg-text">{trade.strategy}</p>
-                  <p className="text-xs text-tg-muted">
-                    כניסה: {Number(trade.entry_price).toFixed(2)} | SL: {Number(trade.stop_loss).toFixed(2)} | TP: {Number(trade.take_profit).toFixed(2)}
-                  </p>
+            {todayTrades.map((trade) => {
+              const rrVal = Number(trade.rr_ratio);
+              const rrColor = rrVal >= 2 ? 'var(--color-tg-success)' : rrVal >= 1 ? 'var(--color-tg-warning)' : 'var(--color-tg-danger)';
+              return (
+                <div key={trade.id}
+                  className="flex items-center justify-between py-2 border-b border-tg-border last:border-0">
+                  <div>
+                    <p className="text-sm font-medium text-tg-text">{trade.strategy}</p>
+                    <p className="text-xs text-tg-muted">
+                      {Number(trade.entry_price).toFixed(2)} ג†’ SL {Number(trade.stop_loss).toFixed(2)} ג†’ TP {Number(trade.take_profit).toFixed(2)}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant={trade.status === 'open' ? 'primary' : 'default'}>
+                      {trade.status === 'open' ? '׳₪׳×׳•׳—' : '׳¡׳’׳•׳¨'}
+                    </Badge>
+                    <span className="text-xs font-bold" style={{ color: rrColor }}>
+                      1:{rrVal.toFixed(1)}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Badge variant={trade.status === 'open' ? 'primary' : 'default'}>
-                    {trade.status === 'open' ? 'פתוח' : 'סגור'}
-                  </Badge>
-                  <span className="text-xs font-medium"
-                    style={{ color: trade.rr_ratio >= 2 ? 'var(--color-tg-success)' : 'var(--color-tg-warning)' }}>
-                    R:R {Number(trade.rr_ratio).toFixed(1)}
-                  </span>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </Card>
       )}
 
-      {/* Call to action */}
-      {totalTrades === 0 && (
-        <Card className="text-center py-8">
-          <div className="text-4xl mb-3">📊</div>
-          <h3 className="text-base font-semibold text-tg-text mb-1">הגש את העסקה הראשונה שלך</h3>
-          <p className="text-sm text-tg-text-2 mb-4">לחץ על כפתור + למטה כדי להתחיל</p>
-        </Card>
+      {/* AI Coach */}
+      {totalTrades >= 3 && (
+        <AICoachCard trades={simpleTrades} />
       )}
 
-      {/* Performance Dashboard */}
+      {/* Pattern Detection */}
+      {totalTrades >= 5 && (
+        <PatternDetection trades={simpleTrades} />
+      )}
+
+      {/* Performance */}
       {totalTrades > 0 && (
-        <div className="flex flex-col gap-2">
-          <h2 className="text-base font-bold text-tg-text">לוח ביצועים</h2>
-          <PerformanceSection trades={simpleTrades} plan="free" />
+        <div>
+          <h2 className="text-sm font-semibold text-tg-text mb-2">׳‘׳™׳¦׳•׳¢׳™׳</h2>
+          <PerformanceSection trades={simpleTrades.map(t => ({
+            strategy: t.strategy,
+            emotional_state: t.emotional_state,
+            rr_ratio: t.rr_ratio,
+            submitted_at: t.submitted_at,
+          }))} plan="free" />
         </div>
       )}
     </div>
   );
 }
 
-function StatCard({ label, value }: { label: string; value: string }) {
+function ScoreCard({ label, value, color }: { label: string; value: number; color: string }) {
   return (
-    <div className="rounded-2xl border border-tg-border p-3 text-center"
-      style={{ background: 'var(--color-tg-surface)' }}>
-      <p className="text-lg font-bold text-tg-text">{value}</p>
-      <p className="text-xs text-tg-muted mt-0.5">{label}</p>
+    <div className="rounded-2xl p-3 flex flex-col items-center gap-2"
+      style={{ background: 'var(--color-tg-surface)', border: '1px solid var(--color-tg-border)' }}>
+      <ProgressRing value={value} size={64} strokeWidth={5} color={color} label={String(value)} />
+      <p className="text-xs text-tg-text-2 text-center">{label}</p>
     </div>
   );
+}
+
+function StatChip({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl p-2.5 text-center"
+      style={{ background: 'var(--color-tg-surface)', border: '1px solid var(--color-tg-border)' }}>
+      <p className="text-sm font-bold text-tg-text">{value}</p>
+      <p className="text-[10px] text-tg-muted mt-0.5">{label}</p>
+    </div>
+  );
+}
+
+function computeStreak(trades: Record<string, unknown>[], type: 'discipline' | 'no_revenge' | 'stop_loss'): number {
+  if (trades.length === 0) return 0;
+  const sorted = [...trades].sort((a, b) => new Date(b.submitted_at as string).getTime() - new Date(a.submitted_at as string).getTime());
+  let streak = 0;
+  for (const t of sorted) {
+    let ok = false;
+    if (type === 'discipline') ok = Number(t.emotional_state) >= 3 && Number(t.rr_ratio) >= 1.5;
+    if (type === 'no_revenge') ok = Number(t.emotional_state) >= 3;
+    if (type === 'stop_loss') ok = t.stop_loss !== null && t.stop_loss !== undefined;
+    if (ok) streak++;
+    else break;
+  }
+  return streak;
 }
