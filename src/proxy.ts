@@ -34,7 +34,9 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith('/reset-password') ||
     pathname.startsWith('/auth/');
 
-  const isPublicRoute = pathname === '/' || isAuthRoute;
+  const isApiRoute = pathname.startsWith('/api/');
+
+  const isPublicRoute = pathname === '/' || isAuthRoute || isApiRoute;
 
   if (!user && !isPublicRoute) {
     return NextResponse.redirect(new URL('/login', request.url));
