@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
@@ -62,7 +62,7 @@ export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: Prese
       .single();
 
     if (dbError) {
-      setError('׳©׳’׳™׳׳” ׳‘׳©׳׳™׳¨׳”. ׳ ׳¡׳” ׳©׳•׳‘.');
+      setError('שגיאה בשמירה. נסה שוב.');
     } else {
       onSave(data as PresetRules);
       setSaved(true);
@@ -79,19 +79,19 @@ export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: Prese
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--color-tg-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0110 0v4" />
           </svg>
-          <span>׳‘׳׳¡׳׳•׳ ׳—׳™׳ ׳׳™ ׳”׳—׳•׳§׳™׳ ׳§׳‘׳•׳¢׳™׳ ׳•׳׳ ׳ ׳™׳×׳ ׳™׳ ׳׳¢׳¨׳™׳›׳” ֲ· <span style={{ color: 'var(--color-tg-primary)' }}>׳©׳“׳¨׳’ ׳-Basic ׳׳¢׳¨׳™׳›׳” ׳׳׳׳”</span></span>
+          <span>במסלול חינמי החוקים קבועים ולא ניתנים לעריכה · <span style={{ color: 'var(--color-tg-primary)' }}>שדרג ל-Basic לעריכה מלאה</span></span>
         </div>
       ) : (
         <p className="text-sm text-tg-text-2">
-          ׳—׳•׳§׳™׳ ׳׳׳” ׳™׳׳•׳׳×׳• ׳׳•׳˜׳•׳׳˜׳™׳× ׳׳₪׳ ׳™ ׳›׳ ׳¢׳¡׳§׳”. ׳©׳ ׳” ׳¢׳¨׳›׳™׳ ׳׳₪׳™ ׳”׳¦׳•׳¨׳.
+          חוקים אלה יאומתו אוטומטית לפני כל עסקה. שנה ערכים לפי הצורך.
         </p>
       )}
 
       {/* R:R Minimum */}
       <RuleRow
-        label="R:R ׳׳™׳ ׳™׳׳׳™ ׳׳¢׳¡׳§׳”"
-        description="׳¢׳¡׳§׳” ׳×׳—׳¡׳ ׳׳ ׳™׳—׳¡ ׳”׳¡׳™׳›׳•׳/׳×׳’׳׳•׳ ׳ ׳׳•׳ ׳׳¢׳¨׳ ׳–׳”"
-        score="20 ׳ ׳§׳³ ׳׳©׳׳¢׳×"
+        label="R:R מינימלי לעסקה"
+        description="עסקה תחסם אם יחס הסיכון/תגמול נמוך מערך זה"
+        score="20 נק׳ משמעת"
       >
         <div className="flex items-center gap-2">
           <span className="text-sm text-tg-text-2">1:</span>
@@ -111,9 +111,9 @@ export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: Prese
 
       {/* Max daily trades */}
       <RuleRow
-        label="׳׳§׳¡׳™׳׳•׳ ׳¢׳¡׳§׳׳•׳× ׳‘׳™׳•׳"
-        description="׳—׳¨׳™׳’׳” ׳׳”׳׳’׳‘׳׳” ׳×׳₪׳¢׳™׳ ׳׳× ׳׳ ׳’׳ ׳•׳ ׳”-Cooldown"
-        score="15 ׳ ׳§׳³ ׳׳©׳׳¢׳×"
+        label="מקסימום עסקאות ביום"
+        description="חריגה מהמגבלה תפעיל את מנגנון ה-Cooldown"
+        score="15 נק׳ משמעת"
       >
         <input
           type="number"
@@ -130,8 +130,8 @@ export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: Prese
 
       {/* Cooldown after losses */}
       <RuleRow
-        label="Cooldown ׳׳—׳¨׳™ N ׳”׳₪׳¡׳“׳™׳ ׳¨׳¦׳•׳₪׳™׳"
-        description="׳ ׳¢׳™׳׳” ׳–׳׳ ׳™׳× ׳׳—׳¨׳™ ׳¡׳“׳¨׳× ׳”׳₪׳¡׳“׳•׳×"
+        label="Cooldown אחרי N הפסדים רצופים"
+        description="נעילה זמנית אחרי סדרת הפסדות"
       >
         <input
           type="number"
@@ -148,14 +148,14 @@ export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: Prese
 
       {/* Max daily loss */}
       <RuleRow
-        label="׳”׳₪׳¡׳“ ׳™׳•׳׳™ ׳׳§׳¡׳™׳׳׳™ ($)"
-        description="׳¢׳¦׳™׳¨׳” ׳›׳©׳—׳•׳¨׳’׳™׳ ׳׳’׳‘׳•׳ ׳”׳”׳₪׳¡׳“ ג€” ׳¨׳™׳§ = ׳׳׳ ׳”׳’׳‘׳׳”"
+        label="הפסד יומי מקסימלי ($)"
+        description="עצירה כשחורגים מגבול ההפסד — ריק = ללא הגבלה"
       >
         <input
           type="number"
           min={0}
           step={10}
-          placeholder="׳׳׳ ׳”׳’׳‘׳׳”"
+          placeholder="ללא הגבלה"
           value={form.max_daily_loss}
           onChange={(e) => !readOnly && setForm({ ...form, max_daily_loss: e.target.value })}
           readOnly={readOnly}
@@ -166,8 +166,8 @@ export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: Prese
 
       {/* Min emotional state */}
       <RuleRow
-        label="׳׳¦׳‘ ׳¨׳’׳©׳™ ׳׳™׳ ׳™׳׳׳™ ׳׳›׳ ׳™׳¡׳”"
-        description="׳׳–׳”׳¨׳”/׳—׳¡׳™׳׳” ׳׳ ׳׳×׳—׳× ׳׳¡׳£"
+        label="מצב רגשי מינימלי לכניסה"
+        description="אזהרה/חסימה אם מתחת לסף"
       >
         <div className="flex gap-1.5">
           {[1, 2, 3, 4, 5].map((n) => (
@@ -191,8 +191,8 @@ export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: Prese
 
       {/* Allowed strategies */}
       <RuleRow
-        label="׳׳¡׳˜׳¨׳˜׳’׳™׳•׳× ׳׳•׳×׳¨׳•׳×"
-        description="׳¨׳©׳™׳׳” ׳׳‘׳ ׳” ג€” ׳¢׳¡׳§׳׳•׳× ׳¢׳ ׳׳¡׳˜׳¨׳˜׳’׳™׳” ׳©׳׳™׳ ׳” ׳‘׳¨׳©׳™׳׳” ׳™׳§׳‘׳׳• ׳׳–׳”׳¨׳”"
+        label="אסטרטגיות מותרות"
+        description="רשימה לבנה — עסקאות עם אסטרטגיה שאינה ברשימה יקבלו אזהרה"
       >
         <div className="flex flex-wrap gap-2 mt-1">
           {STRATEGIES.map((s) => (
@@ -226,11 +226,11 @@ export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: Prese
           {saved && (
             <p className="text-sm text-tg-success px-3 py-2 rounded-xl"
               style={{ background: 'var(--color-tg-success-muted)' }}>
-              ג“ ׳”׳—׳•׳§׳™׳ ׳ ׳©׳׳¨׳• ׳•׳™׳•׳₪׳¢׳׳• ׳‘׳¢׳¡׳§׳” ׳”׳‘׳׳”
+              ✓ החוקים נשמרו ויופעלו בעסקה הבאה
             </p>
           )}
           <Button onClick={handleSave} loading={loading}>
-            ׳©׳׳•׳¨ ׳—׳•׳§׳™׳
+            שמור חוקים
           </Button>
         </>
       )}

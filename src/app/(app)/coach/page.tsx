@@ -1,9 +1,9 @@
-﻿import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/supabase/server';
 import AICoachCard from '@/components/ai/AICoachCard';
 import PatternDetection from '@/components/ai/PatternDetection';
 import ChartAnalysis from '@/components/ai/ChartAnalysis';
 
-export const metadata = { title: 'AI Coach ג€” Reflect' };
+export const metadata = { title: 'AI Coach — Reflect' };
 
 export default async function CoachPage() {
   const supabase = await createClient();
@@ -32,9 +32,10 @@ export default async function CoachPage() {
     <div className="px-4 py-5 flex flex-col gap-4 max-w-2xl mx-auto">
       <div>
         <h1 className="text-xl font-bold text-tg-text">AI Coach</h1>
-        <p className="text-sm text-tg-text-2 mt-0.5">׳×׳•׳‘׳ ׳•׳× ׳׳™׳©׳™׳•׳× ׳׳‘׳•׳¡׳¡׳•׳× ׳”׳ ׳×׳•׳ ׳™׳ ׳©׳׳</p>
+        <p className="text-sm text-tg-text-2 mt-0.5">
+          {'תובנות אישיות מבוססות הנתונים שלך'}
+        </p>
       </div>
-
       <AICoachCard trades={allTrades} />
       <PatternDetection trades={allTrades} />
       <ChartAnalysis />

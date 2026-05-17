@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { useState, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
@@ -77,7 +77,7 @@ export default function TradeDebrief({ trade, existingAnswer }: TradeDebriefProp
       const data = await res.json();
       setAiResult(data);
     } catch {
-      setAiResult({ overall: '׳©׳’׳™׳׳” ׳‘׳ ׳™׳×׳•׳— ג€” ׳ ׳¡׳” ׳©׳•׳‘' });
+      setAiResult({ overall: 'שגיאה בניתוח — נסה שוב' });
     } finally {
       setAiLoading(false);
     }
@@ -87,22 +87,21 @@ export default function TradeDebrief({ trade, existingAnswer }: TradeDebriefProp
     return (
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
-          <p className="text-xs font-medium" style={{ color: 'var(--color-tg-primary)' }}>׳×׳—׳§׳™׳¨ ׳¢׳¦׳׳™</p>
+          <p className="text-xs font-medium" style={{ color: 'var(--color-tg-primary)' }}>תחקיר עצמי</p>
           <div className="flex gap-2">
             <button onClick={() => setShowAI(true)}
               className="text-xs px-2 py-0.5 rounded-lg"
               style={{ color: 'var(--color-tg-primary)', background: 'var(--color-tg-primary-muted)' }}>
-              נ₪– AI ׳ ׳™׳×׳•׳—
+              🤖 AI ניתוח
             </button>
-            <button onClick={() => setEditing(true)}
-              className="text-xs text-tg-text-2">׳¢׳¨׳•׳</button>
+            <button onClick={() => setEditing(true)} className="text-xs text-tg-text-2">ערוך</button>
           </div>
         </div>
         <div className="px-3 py-2 rounded-xl text-xs"
           style={{ background: 'var(--color-tg-surface-2)', color: 'var(--color-tg-text-2)' }}>
           {answer}
         </div>
-        {saved && <p className="text-xs" style={{ color: 'var(--color-tg-success)' }}>ג“ ׳ ׳©׳׳¨</p>}
+        {saved && <p className="text-xs" style={{ color: 'var(--color-tg-success)' }}>✓ נשמר</p>}
       </div>
     );
   }
@@ -111,54 +110,50 @@ export default function TradeDebrief({ trade, existingAnswer }: TradeDebriefProp
     return (
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
-          <p className="text-xs font-semibold text-tg-text">נ₪– ׳×׳—׳§׳™׳¨ AI</p>
-          <button onClick={() => setShowAI(false)} className="text-xs text-tg-text-2">׳—׳–׳¨׳”</button>
+          <p className="text-xs font-semibold text-tg-text">🤖 תחקיר AI</p>
+          <button onClick={() => setShowAI(false)} className="text-xs text-tg-text-2">חזרה</button>
         </div>
-
         {!aiResult && (
           <>
             {!imagePreview ? (
               <button onClick={() => fileRef.current?.click()}
                 className="w-full py-6 rounded-xl border-2 border-dashed flex flex-col items-center gap-1"
                 style={{ borderColor: 'var(--color-tg-border)', background: 'var(--color-tg-surface-2)' }}>
-                <span className="text-2xl">נ“¸</span>
-                <span className="text-xs text-tg-text-2">׳”׳¢׳׳” Screenshot (׳׳•׳₪׳¦׳™׳•׳ ׳׳™)</span>
+                <span className="text-2xl">📸</span>
+                <span className="text-xs text-tg-text-2">העלה Screenshot (אופציונלי)</span>
               </button>
             ) : (
               <div className="relative">
-                <img src={imagePreview} alt="trade screenshot" className="w-full rounded-xl object-contain max-h-32" />
+                <img src={imagePreview} alt="trade" className="w-full rounded-xl object-contain max-h-32" />
                 <button onClick={() => { setImage(null); setImagePreview(null); }}
                   className="absolute top-1 left-1 w-5 h-5 rounded-full text-white flex items-center justify-center text-xs"
-                  style={{ background: 'var(--color-tg-danger)' }}>ֳ—</button>
+                  style={{ background: 'var(--color-tg-danger)' }}>×</button>
               </div>
             )}
             <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
-            <button
-              onClick={handleAIDebrief}
-              disabled={aiLoading}
+            <button onClick={handleAIDebrief} disabled={aiLoading}
               className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-50"
               style={{ background: 'var(--color-tg-primary)', color: 'black' }}>
-              {aiLoading ? '׳׳ ׳×׳—...' : '׳ ׳×׳— ׳¢׳¡׳§׳” ׳¢׳ AI'}
+              {aiLoading ? 'מנתח...' : 'נתח עסקה עם AI'}
             </button>
           </>
         )}
-
         {aiResult && (
           <div className="flex flex-col gap-2 animate-fade-in">
             {aiResult.score !== undefined && (
               <div className="flex items-center justify-between p-3 rounded-xl"
                 style={{ background: 'var(--color-tg-primary-muted)', border: '1px solid var(--color-tg-primary)30' }}>
-                <span className="text-xs text-tg-text-2">׳¦׳™׳•׳ ׳¢׳¡׳§׳”</span>
+                <span className="text-xs text-tg-text-2">ציון עסקה</span>
                 <span className="text-xl font-bold" style={{ color: 'var(--color-tg-primary)' }}>{aiResult.score}/100</span>
               </div>
             )}
             {[
-              ['׳¡׳™׳›׳•׳ ׳›׳׳׳™', aiResult.overall],
-              ['׳׳™׳›׳•׳× ׳›׳ ׳™׳¡׳”', aiResult.entry_quality],
-              ['׳ ׳™׳”׳•׳ ׳¡׳™׳›׳•׳ ׳™׳', aiResult.risk_management],
-              ['׳‘׳™׳¦׳•׳¢', aiResult.execution],
-              ['׳׳¦׳‘ ׳¨׳’׳©׳™', aiResult.emotional],
-              ['׳׳§׳—׳™׳', aiResult.lessons],
+              ['סיכום כללי', aiResult.overall],
+              ['איכות כניסה', aiResult.entry_quality],
+              ['ניהול סיכונים', aiResult.risk_management],
+              ['ביצוע', aiResult.execution],
+              ['מצב רגשי', aiResult.emotional],
+              ['לקחים', aiResult.lessons],
             ].filter(([, v]) => v).map(([label, value]) => (
               <div key={label as string} className="rounded-xl p-2.5"
                 style={{ background: 'var(--color-tg-surface-2)' }}>
@@ -166,8 +161,7 @@ export default function TradeDebrief({ trade, existingAnswer }: TradeDebriefProp
                 <p className="text-xs text-tg-text leading-relaxed">{value as string}</p>
               </div>
             ))}
-            <button onClick={() => setAiResult(null)}
-              className="text-xs text-tg-muted py-1">׳ ׳™׳×׳•׳— ׳—׳“׳©</button>
+            <button onClick={() => setAiResult(null)} className="text-xs text-tg-muted py-1">ניתוח חדש</button>
           </div>
         )}
       </div>
@@ -182,11 +176,11 @@ export default function TradeDebrief({ trade, existingAnswer }: TradeDebriefProp
           <path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3" />
           <line x1="12" y1="17" x2="12.01" y2="17" />
         </svg>
-        <p className="text-xs font-medium text-tg-text">׳׳” ׳’׳¨׳ ׳׳ ׳׳¦׳׳×?</p>
+        <p className="text-xs font-medium text-tg-text">מה גרם לך לצאת?</p>
       </div>
       <textarea rows={2} value={answer}
         onChange={(e) => setAnswer(e.target.value)}
-        placeholder="׳¡׳₪׳¨ ׳׳” ׳§׳¨׳”... ׳”׳’׳¢׳×׳™ ׳-SL? ׳™׳¦׳׳×׳™ ׳׳•׳§׳“׳? ׳₪׳—׳“׳×׳™?"
+        placeholder="ספר מה קרה... הגעתי ל-SL? יצאתי מוקדם? פחדתי?"
         className="w-full px-3 py-2.5 rounded-xl text-xs border focus:outline-none transition-colors resize-none"
         style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)', color: 'var(--color-tg-text)' }}
         onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--color-tg-primary)'; }}
@@ -197,18 +191,18 @@ export default function TradeDebrief({ trade, existingAnswer }: TradeDebriefProp
           <button onClick={() => { setAnswer(existingAnswer); setEditing(false); }}
             className="flex-1 py-1.5 rounded-xl text-xs font-medium border transition-all"
             style={{ borderColor: 'var(--color-tg-border)', color: 'var(--color-tg-text-2)', background: 'transparent' }}>
-            ׳‘׳™׳˜׳•׳
+            ביטול
           </button>
         )}
         <button onClick={handleSave} disabled={saving || !answer.trim()}
           className="flex-1 py-1.5 rounded-xl text-xs font-semibold transition-all disabled:opacity-50"
           style={{ background: 'var(--color-tg-primary)', color: 'black' }}>
-          {saving ? '׳©׳•׳׳¨...' : '׳”׳’׳© ׳×׳—׳§׳™׳¨'}
+          {saving ? 'שומר...' : 'הגש תחקיר'}
         </button>
         <button onClick={() => setShowAI(true)}
           className="py-1.5 px-3 rounded-xl text-xs border transition-all"
           style={{ borderColor: 'var(--color-tg-primary)40', color: 'var(--color-tg-primary)', background: 'var(--color-tg-primary-muted)' }}>
-          נ₪–
+          🤖
         </button>
       </div>
     </div>

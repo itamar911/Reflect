@@ -1,4 +1,4 @@
-﻿import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/supabase/server';
 import Card from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import ProgressRing from '@/components/ui/ProgressRing';
@@ -9,7 +9,7 @@ import StreakTracker from '@/components/streaks/StreakTracker';
 import TraderIdentityCard from '@/components/identity/TraderIdentity';
 import DangerMode from '@/components/danger/DangerMode';
 
-export const metadata = { title: '׳“׳©׳‘׳•׳¨׳“ ג€” Reflect' };
+export const metadata = { title: 'דשבורד — Reflect' };
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -35,50 +35,36 @@ export default async function DashboardPage() {
   const closedTrades = allTrades.filter((t) => t.status === 'closed');
   const avgRR = totalTrades > 0
     ? (allTrades.reduce((s, t) => s + (t.rr_ratio || 0), 0) / totalTrades).toFixed(1)
-    : 'ג€”';
+    : '—';
   const avgEmotional = totalTrades > 0
     ? allTrades.reduce((s, t) => s + (t.emotional_state || 3), 0) / totalTrades
     : 3;
 
-  // Discipline score (0-100) based on: plans submitted, SL not moved, R:R met
-  const disciplineScore = totalTrades === 0 ? 0 : Math.min(
-    100,
-    Math.round(
-      (closedTrades.filter((t) => t.plan_score !== null).length / Math.max(closedTrades.length, 1)) * 30 +
-      (allTrades.filter((t) => t.emotional_state >= 3).length / totalTrades) * 30 +
-      (allTrades.filter((t) => (t.rr_ratio || 0) >= 2).length / totalTrades) * 40
-    )
-  );
-
-  // Emotional score
+  const disciplineScore = totalTrades === 0 ? 0 : Math.min(100, Math.round(
+    (closedTrades.filter((t) => t.plan_score !== null).length / Math.max(closedTrades.length, 1)) * 30 +
+    (allTrades.filter((t) => t.emotional_state >= 3).length / totalTrades) * 30 +
+    (allTrades.filter((t) => (t.rr_ratio || 0) >= 2).length / totalTrades) * 40
+  ));
   const emotionalScore = Math.round((avgEmotional / 5) * 100);
-
-  // Execution score
   const executionScore = closedTrades.length === 0 ? 0 : Math.min(100,
     Math.round((closedTrades.filter((t) => t.exit_price !== null).length / closedTrades.length) * 100)
   );
 
-  // Consecutive losses
   let consecutiveLosses = 0;
   const sorted = [...allTrades].sort((a, b) => new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime());
   for (const t of sorted) {
     if (t.status === 'closed' && t.exit_price && t.entry_price && Number(t.exit_price) <= Number(t.stop_loss)) {
       consecutiveLosses++;
-    } else if (t.status === 'closed') {
-      break;
-    }
+    } else if (t.status === 'closed') break;
   }
 
-  // Today's loss
   let todayLoss = 0;
   for (const t of todayTrades) {
-    if (t.status === 'closed' && t.exit_price && t.entry_price && Number(t.exit_price) < Number(t.entry_price)) {
+    if (t.status === 'closed' && t.exit_price && t.entry_price && Number(t.exit_price) < Number(t.entry_price))
       todayLoss += Math.abs(Number(t.entry_price) - Number(t.exit_price));
-    }
   }
   const dailyLossExceeded = rules?.max_daily_loss ? todayLoss >= rules.max_daily_loss : false;
 
-  // Streaks (simplified server-side compute)
   const disciplineStreak = computeStreak(allTrades, 'discipline');
   const noRevengeStreak = computeStreak(allTrades, 'no_revenge');
   const stopLossStreak = computeStreak(allTrades, 'stop_loss');
@@ -96,27 +82,34 @@ export default async function DashboardPage() {
   }));
 
   const hour = new Date().getHours();
-  const greeting = hour < 5 ? '׳׳™׳׳” ׳˜׳•׳‘' : hour < 12 ? '׳‘׳•׳§׳¨ ׳˜׳•׳‘' : hour < 17 ? '׳¦׳”׳¨׳™׳™׳ ׳˜׳•׳‘׳™׳' : '׳¢׳¨׳‘ ׳˜׳•׳‘';
-  const name = profile?.display_name?.split(' ')[0] ?? '׳¡׳•׳—׳¨';
+  const greeting = hour < 5
+    ? 'לילה טוב'
+    : hour < 12
+    ? 'בוקר טוב'
+    : hour < 17
+    ? 'צהריים טובים'
+    : 'ערב טוב';
+  const name = profile?.display_name?.split(' ')[0] ?? 'סוחר';
 
-  // Dynamic motivational message
   let dynamicMsg = '';
-  if (consecutiveLosses >= 2) dynamicMsg = `ג ן¸ ${consecutiveLosses} ׳”׳₪׳¡׳“׳™׳ ׳¨׳¦׳•׳₪׳™׳ ג€” ׳©׳§׳•׳ ׳”׳₪׳¡׳§׳”`;
-  else if (disciplineStreak >= 3) dynamicMsg = `נ”¥ ${disciplineStreak} ׳™׳׳™׳ ׳׳₪׳™ ׳”׳—׳•׳§׳™׳ ׳‘׳¨׳¦׳£`;
-  else if (avgEmotional >= 4) dynamicMsg = 'נ’ ׳׳¦׳‘ ׳¨׳’׳©׳™ ׳׳¦׳•׳™׳ ג€” ׳™׳•׳ ׳׳¡׳—׳¨ ׳׳™׳“׳™׳׳׳™';
-  else if (disciplineScore >= 80) dynamicMsg = 'נ¯ ׳‘׳™׳¦׳•׳¢׳™׳ ׳׳¢׳•׳׳™׳ ג€” ׳”׳׳©׳ ׳›׳';
-  else if (todayTrades.length === 0) dynamicMsg = '׳›׳׳™ ׳”׳׳¡׳—׳¨ ׳©׳׳ ׳׳•׳›׳ ג€” ׳×׳›׳ ׳ ׳׳₪׳ ׳™ ׳©׳×׳™׳›׳ ׳¡';
+  if (consecutiveLosses >= 2)
+    dynamicMsg = `⚠️ ${consecutiveLosses} הפסדים רצופים — שקול הפסקה`;
+  else if (disciplineStreak >= 3)
+    dynamicMsg = `🔥 ${disciplineStreak} ימים לפי החוקים ברצף`;
+  else if (avgEmotional >= 4)
+    dynamicMsg = '💚 מצב רגשי מצוין — יום מסחר אידיאלי';
+  else if (disciplineScore >= 80)
+    dynamicMsg = '🎯 ביצועים מעולים — המשך כך';
+  else if (todayTrades.length === 0)
+    dynamicMsg = 'כלי המסחר שלך מוכן — תכנן לפני שתיכנס';
 
   return (
     <div className="px-4 py-5 flex flex-col gap-4 max-w-2xl mx-auto">
 
-      {/* Hero greeting */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-tg-text">{greeting}, {name}</h1>
-          {dynamicMsg && (
-            <p className="text-sm text-tg-text-2 mt-0.5">{dynamicMsg}</p>
-          )}
+          {dynamicMsg && <p className="text-sm text-tg-text-2 mt-0.5">{dynamicMsg}</p>}
         </div>
         <div className="text-right">
           <p className="text-xs text-tg-muted">
@@ -124,13 +117,12 @@ export default async function DashboardPage() {
           </p>
           {todayTrades.length > 0 && (
             <p className="text-xs font-medium" style={{ color: 'var(--color-tg-primary)' }}>
-              {todayTrades.length} ׳¢׳¡׳§׳”{todayTrades.length > 1 ? '׳•׳×' : ''} ׳”׳™׳•׳
+              {todayTrades.length} {todayTrades.length > 1 ? 'עסקאות' : 'עסקה'} {'היום'}
             </p>
           )}
         </div>
       </div>
 
-      {/* Danger Mode */}
       <DangerMode
         consecutiveLosses={consecutiveLosses}
         emotionalState={Math.round(avgEmotional)}
@@ -139,31 +131,32 @@ export default async function DashboardPage() {
         currentLoss={todayLoss}
       />
 
-      {/* Scores row */}
       {totalTrades > 0 ? (
         <div className="grid grid-cols-3 gap-3">
-          <ScoreCard label="׳׳©׳׳¢׳×" value={disciplineScore} color="var(--color-tg-primary)" />
-          <ScoreCard label="׳¨׳’׳©׳•׳×" value={emotionalScore} color="#60A5FA" />
-          <ScoreCard label="׳‘׳™׳¦׳•׳¢" value={executionScore} color="var(--color-tg-success)" />
+          <ScoreCard label={'משמעת'} value={disciplineScore} color="var(--color-tg-primary)" />
+          <ScoreCard label={'רגשות'} value={emotionalScore} color="#60A5FA" />
+          <ScoreCard label={'ביצוע'} value={executionScore} color="var(--color-tg-success)" />
         </div>
       ) : (
         <Card className="text-center py-8">
-          <div className="text-4xl mb-3">נ“</div>
-          <h3 className="text-base font-semibold text-tg-text mb-1">׳”׳’׳© ׳׳× ׳”׳¢׳¡׳§׳” ׳”׳¨׳׳©׳•׳ ׳” ׳©׳׳</h3>
-          <p className="text-sm text-tg-text-2">׳׳—׳¥ ׳¢׳ + ׳׳׳˜׳” ׳›׳“׳™ ׳׳”׳×׳—׳™׳</p>
+          <div className="text-4xl mb-3">📊</div>
+          <h3 className="text-base font-semibold text-tg-text mb-1">
+            {'הגש את העסקה הראשונה שלך'}
+          </h3>
+          <p className="text-sm text-tg-text-2">
+            {'לחץ על + למטה כדי להתחיל'}
+          </p>
         </Card>
       )}
 
-      {/* Quick stats */}
       {totalTrades > 0 && (
         <div className="grid grid-cols-3 gap-2">
-          <StatChip label="R:R ׳׳׳•׳¦׳¢" value={avgRR} />
-          <StatChip label="׳׳¦׳‘ ׳¨׳’׳©׳™" value={avgEmotional >= 1 ? `${avgEmotional.toFixed(1)}/5` : 'ג€”'} />
-          <StatChip label="׳¢׳¡׳§׳׳•׳× ׳”׳™׳•׳" value={String(todayTrades.length)} />
+          <StatChip label={'R:R ממוצע'} value={avgRR} />
+          <StatChip label={'מצב רגשי'} value={avgEmotional >= 1 ? `${avgEmotional.toFixed(1)}/5` : '—'} />
+          <StatChip label={'עסקאות היום'} value={String(todayTrades.length)} />
         </div>
       )}
 
-      {/* Trader Identity */}
       {totalTrades >= 3 && (
         <TraderIdentityCard
           disciplineScore={disciplineScore}
@@ -172,10 +165,9 @@ export default async function DashboardPage() {
         />
       )}
 
-      {/* Streaks */}
       {totalTrades > 0 && (
         <div>
-          <h2 className="text-sm font-semibold text-tg-text mb-2">׳¨׳¦׳₪׳™׳</h2>
+          <h2 className="text-sm font-semibold text-tg-text mb-2">{'רצפים'}</h2>
           <StreakTracker
             disciplineStreak={disciplineStreak}
             noRevengeStreak={noRevengeStreak}
@@ -185,10 +177,11 @@ export default async function DashboardPage() {
         </div>
       )}
 
-      {/* Today's trades */}
       {todayTrades.length > 0 && (
         <Card>
-          <h2 className="text-sm font-semibold text-tg-text mb-3">׳¢׳¡׳§׳׳•׳× ׳”׳™׳•׳</h2>
+          <h2 className="text-sm font-semibold text-tg-text mb-3">
+            {'עסקאות היום'}
+          </h2>
           <div className="flex flex-col gap-2">
             {todayTrades.map((trade) => {
               const rrVal = Number(trade.rr_ratio);
@@ -199,12 +192,12 @@ export default async function DashboardPage() {
                   <div>
                     <p className="text-sm font-medium text-tg-text">{trade.strategy}</p>
                     <p className="text-xs text-tg-muted">
-                      {Number(trade.entry_price).toFixed(2)} ג†’ SL {Number(trade.stop_loss).toFixed(2)} ג†’ TP {Number(trade.take_profit).toFixed(2)}
+                      {Number(trade.entry_price).toFixed(2)} → SL {Number(trade.stop_loss).toFixed(2)} → TP {Number(trade.take_profit).toFixed(2)}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge variant={trade.status === 'open' ? 'primary' : 'default'}>
-                      {trade.status === 'open' ? '׳₪׳×׳•׳—' : '׳¡׳’׳•׳¨'}
+                      {trade.status === 'open' ? 'פתוח' : 'סגור'}
                     </Badge>
                     <span className="text-xs font-bold" style={{ color: rrColor }}>
                       1:{rrVal.toFixed(1)}
@@ -217,20 +210,12 @@ export default async function DashboardPage() {
         </Card>
       )}
 
-      {/* AI Coach */}
-      {totalTrades >= 3 && (
-        <AICoachCard trades={simpleTrades} />
-      )}
+      {totalTrades >= 3 && <AICoachCard trades={simpleTrades} />}
+      {totalTrades >= 5 && <PatternDetection trades={simpleTrades} />}
 
-      {/* Pattern Detection */}
-      {totalTrades >= 5 && (
-        <PatternDetection trades={simpleTrades} />
-      )}
-
-      {/* Performance */}
       {totalTrades > 0 && (
         <div>
-          <h2 className="text-sm font-semibold text-tg-text mb-2">׳‘׳™׳¦׳•׳¢׳™׳</h2>
+          <h2 className="text-sm font-semibold text-tg-text mb-2">{'ביצועים'}</h2>
           <PerformanceSection trades={simpleTrades.map(t => ({
             strategy: t.strategy,
             emotional_state: t.emotional_state,
@@ -265,9 +250,9 @@ function StatChip({ label, value }: { label: string; value: string }) {
 
 function computeStreak(trades: Record<string, unknown>[], type: 'discipline' | 'no_revenge' | 'stop_loss'): number {
   if (trades.length === 0) return 0;
-  const sorted = [...trades].sort((a, b) => new Date(b.submitted_at as string).getTime() - new Date(a.submitted_at as string).getTime());
+  const s = [...trades].sort((a, b) => new Date(b.submitted_at as string).getTime() - new Date(a.submitted_at as string).getTime());
   let streak = 0;
-  for (const t of sorted) {
+  for (const t of s) {
     let ok = false;
     if (type === 'discipline') ok = Number(t.emotional_state) >= 3 && Number(t.rr_ratio) >= 1.5;
     if (type === 'no_revenge') ok = Number(t.emotional_state) >= 3;
