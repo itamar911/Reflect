@@ -4,6 +4,16 @@ import { createClient } from '@/lib/supabase/server';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+const VALID_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+
+function resolveMediaType(type: string): 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' {
+  if (VALID_TYPES.includes(type)) return type as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+  if (type.includes('jpg') || type.includes('jpeg')) return 'image/jpeg';
+  if (type.includes('png')) return 'image/png';
+  if (type.includes('webp')) return 'image/webp';
+  return 'image/jpeg';
+}
+
 export async function POST(request: Request) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -17,53 +27,55 @@ export async function POST(request: Request) {
 
   const buffer = await imageFile.arrayBuffer();
   const base64 = Buffer.from(buffer).toString('base64');
-  const mediaType = imageFile.type as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+  const mediaType = resolveMediaType(imageFile.type);
 
   try {
     const message = await client.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 2000,
+      max_tokens: 2500,
       messages: [{
         role: 'user',
         content: [
           { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
           {
             type: 'text',
-            text: `You are a senior technical analyst. Analyze this trading chart thoroughly and respond entirely in Hebrew.
+            text: `אתה מנתח טכני מקצועי. נתח את הגרף הזה בפירוט מלא בעברית.
 ${context ? `הקשר: ${context}` : ''}
 
-Return ONLY a JSON object with no extra text:
-{
-  "timeframe": "טווח זמן משוער (לדוגמה: 1H, 4H, Daily)",
-  "trend": "מגמה נוכחית (עלייה / ירידה / צד)",
-  "pattern": "דפוס גרפי שזוהה אם קיים (או null)",
-  "support_levels": ["רמת תמיכה 1", "רמת תמיכה 2"],
-  "resistance_levels": ["רמת התנגדות 1", "רמת התנגדות 2"],
-  "key_observations": [
-    "תצפית טכנית 1",
-    "תצפית טכנית 2",
-    "תצפית טכנית 3",
-    "תצפית טכנית 4"
-  ],
-  "entry_suggestion": "הצעת כניסה — מחיר ותנאים",
-  "stop_loss_suggestion": "הצעת Stop Loss — מחיר ונימוק",
-  "take_profit_suggestion": "הצעת Take Profit — מחיר ונימוק",
-  "bias": "Bullish / Bearish / Neutral",
-  "recommendation": "המלצה מפורטת — האם לסחור, מה לחפש, מה להימנע ממנו",
-  "risk_notes": "הערות סיכון חשובות"
-}`,
+ספק ניתוח מסודר עם הסקשנים הבאים (השתמש בפורמט המדויק הזה):
+
+**מגמה כללית**
+[תאר עולה/יורדת/צדדית + חוזק המגמה]
+
+**רמות תמיכה והתנגדות**
+תמיכות: [רשום רמות]
+התנגדויות: [רשום רמות]
+
+**תבניות גרפיות**
+[זהה תבניות: ראש וכתפיים, דגל, משולש, ערוץ, וכו' — אם אין, ציין "לא זוהתה תבנית ברורה"]
+
+**אינדיקטורים**
+[RSI, MACD, MA, Volume — תאר מה נראה בגרף]
+
+**נקודות כניסה מומלצות**
+[מחיר ותנאים לכניסה]
+
+**Stop Loss ו-Take Profit**
+Stop Loss: [מחיר + נימוק]
+Take Profit: [מחיר + נימוק]
+
+**סיכום והמלצה**
+[המלצה מפורטת — האם לסחור, מה לחכות, מה להימנע ממנו]`,
           },
         ],
       }],
     });
 
-    const text = message.content[0].type === 'text' ? message.content[0].text : '{}';
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return NextResponse.json({ error: 'parse_error', recommendation: 'לא ניתן לנתח את הגרף' }, { status: 500 });
-    const parsed = JSON.parse(jsonMatch[0]);
-    return NextResponse.json(parsed);
+    const analysis = message.content[0].type === 'text' ? message.content[0].text : 'לא ניתן לנתח';
+    return NextResponse.json({ analysis });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'שגיאה לא ידועה';
-    return NextResponse.json({ error: msg, recommendation: 'שגיאה בניתוח הגרף — נסה שוב' }, { status: 500 });
+    console.error('ai-chart error:', msg);
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

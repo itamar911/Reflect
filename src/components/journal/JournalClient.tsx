@@ -181,7 +181,12 @@ function TradeCard({ trade, onClose }: { trade: Trade; onClose: () => void }) {
           <CloseTrade
             tradeId={trade.id}
             entryPrice={trade.entry_price}
+            stopLoss={trade.stop_loss}
+            takeProfit={trade.take_profit}
+            rrRatio={trade.rr_ratio}
+            emotionalState={trade.emotional_state}
             strategy={trade.strategy}
+            tradeReason={trade.trade_reason}
             onClosed={onClose}
           />
         )}

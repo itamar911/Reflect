@@ -1,7 +1,8 @@
 import { createClient } from '@/lib/supabase/server';
+import ChartAnalysis from '@/components/ai/ChartAnalysis';
 import AICoachCard from '@/components/ai/AICoachCard';
 import PatternDetection from '@/components/ai/PatternDetection';
-import ChartAnalysis from '@/components/ai/ChartAnalysis';
+import TradingBot from '@/components/ai/TradingBot';
 
 export const metadata = { title: 'AI Coach — Reflect' };
 
@@ -29,15 +30,36 @@ export default async function CoachPage() {
   }));
 
   return (
-    <div className="px-4 py-5 flex flex-col gap-4 max-w-2xl mx-auto">
+    <div className="px-4 py-5 flex flex-col gap-5 max-w-2xl mx-auto">
       <div>
         <h1 className="text-xl font-bold text-tg-text">AI Coach</h1>
-        <p className="text-sm text-tg-text-2 mt-0.5">
-          {'תובנות אישיות מבוססות הנתונים שלך'}
-        </p>
+        <p className="text-sm text-tg-text-2 mt-0.5">יועץ מסחר אישי + ניתוח תבניות</p>
       </div>
-      <AICoachCard trades={allTrades} />
-      <PatternDetection trades={allTrades} />
+
+      {/* Trading Bot - main feature */}
+      <div className="rounded-2xl border border-tg-border overflow-hidden"
+        style={{ background: 'var(--color-tg-surface)', height: '520px', display: 'flex', flexDirection: 'column' }}>
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-tg-border shrink-0"
+          style={{ background: 'var(--color-tg-surface-2)' }}>
+          <div className="w-8 h-8 rounded-full flex items-center justify-center"
+            style={{ background: 'var(--color-tg-primary-muted)' }}>
+            🤖
+          </div>
+          <div>
+            <p className="text-sm font-bold text-tg-text">יועץ המסחר שלי</p>
+            <p className="text-[10px] text-tg-muted">מכיר את כל ההיסטוריה שלך + ידע מסחרי מקצועי</p>
+          </div>
+        </div>
+        <div className="flex-1 overflow-hidden p-4" style={{ minHeight: 0 }}>
+          <TradingBot />
+        </div>
+      </div>
+
+      {/* AI Insights */}
+      {allTrades.length >= 3 && <AICoachCard trades={allTrades} />}
+      {allTrades.length >= 5 && <PatternDetection trades={allTrades} />}
+
+      {/* Chart Analysis */}
       <ChartAnalysis />
     </div>
   );

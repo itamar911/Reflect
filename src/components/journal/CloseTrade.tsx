@@ -4,10 +4,39 @@ import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
 
+interface AIDebriefResult {
+  overall?: string;
+  entry_quality?: string;
+  risk_management?: string;
+  execution?: string;
+  emotional?: string;
+  lessons?: string;
+  score?: number;
+}
+
+interface TradeForDebrief {
+  id: string;
+  strategy: string;
+  entry_price: number;
+  stop_loss: number;
+  take_profit: number;
+  rr_ratio: number;
+  emotional_state: number;
+  trade_reason: string;
+  exit_price: number;
+  exit_reason: string;
+  post_trade_notes: string;
+}
+
 interface CloseTradeProps {
   tradeId: string;
   entryPrice: number;
+  stopLoss: number;
+  takeProfit: number;
+  rrRatio: number;
+  emotionalState: number;
   strategy: string;
+  tradeReason: string;
   onClosed: () => void;
 }
 
@@ -22,19 +51,23 @@ const EXIT_REASONS = [
   'סגירה מוקדמת',
 ];
 
-export default function CloseTrade({ tradeId, entryPrice, strategy, onClosed }: CloseTradeProps) {
+export default function CloseTrade({
+  tradeId, entryPrice, stopLoss, takeProfit, rrRatio,
+  emotionalState, strategy, tradeReason, onClosed
+}: CloseTradeProps) {
   const [open, setOpen] = useState(false);
   const [exitPrice, setExitPrice] = useState('');
   const [exitReason, setExitReason] = useState('');
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [debriefResult, setDebriefResult] = useState<AIDebriefResult | null>(null);
+  const [debriefLoading, setDebriefLoading] = useState(false);
 
   const supabase = createClient();
 
-  const pnlPoints = exitPrice && entryPrice
-    ? (parseFloat(exitPrice) - entryPrice).toFixed(2)
-    : null;
+  const exit = parseFloat(exitPrice);
+  const pnlPoints = exitPrice ? (exit - entryPrice).toFixed(2) : null;
   const isWin = pnlPoints !== null ? parseFloat(pnlPoints) > 0 : null;
 
   async function handleClose() {
@@ -44,7 +77,7 @@ export default function CloseTrade({ tradeId, entryPrice, strategy, onClosed }: 
 
     const { error: err } = await supabase.from('trade_plans').update({
       status: 'closed',
-      exit_price: parseFloat(exitPrice),
+      exit_price: exit,
       exit_reason: exitReason,
       post_trade_notes: notes.trim() || null,
       closed_at: new Date().toISOString(),
@@ -53,21 +86,86 @@ export default function CloseTrade({ tradeId, entryPrice, strategy, onClosed }: 
     if (err) {
       setError('שגיאה — נסה שוב');
       setLoading(false);
-    } else {
-      setOpen(false);
+      return;
+    }
+
+    setLoading(false);
+
+    // Auto-trigger AI debrief
+    setDebriefLoading(true);
+    try {
+      const tradeData: TradeForDebrief = {
+        id: tradeId, strategy, entry_price: entryPrice,
+        stop_loss: stopLoss, take_profit: takeProfit,
+        rr_ratio: rrRatio, emotional_state: emotionalState,
+        trade_reason: tradeReason,
+        exit_price: exit, exit_reason: exitReason,
+        post_trade_notes: notes.trim(),
+      };
+      const fd = new FormData();
+      fd.append('trade', JSON.stringify({ ...tradeData, status: 'closed', exit_price: exit }));
+      if (notes.trim()) fd.append('description', notes.trim());
+      const res = await fetch('/api/ai-debrief', { method: 'POST', body: fd });
+      if (res.ok) {
+        const data = await res.json();
+        setDebriefResult(data);
+      }
+    } catch {
+      // debrief failed silently — trade was still closed
+    } finally {
+      setDebriefLoading(false);
       onClosed();
     }
   }
 
   if (!open) {
     return (
-      <button
-        onClick={() => setOpen(true)}
-        className="w-full py-2 rounded-xl text-sm font-semibold transition-all active:scale-95"
-        style={{ background: 'var(--color-tg-danger-muted)', color: 'var(--color-tg-danger)', border: '1px solid var(--color-tg-danger)30' }}
-      >
+      <button onClick={() => setOpen(true)}
+        className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
+        style={{ background: 'var(--color-tg-danger-muted)', color: 'var(--color-tg-danger)', border: '1px solid rgba(255,59,48,0.3)' }}>
         סגור עסקה
       </button>
+    );
+  }
+
+  if (debriefLoading) {
+    return (
+      <div className="pt-4 flex flex-col items-center gap-3 animate-fade-in">
+        <div className="w-8 h-8 rounded-full border-2 border-t-transparent animate-spin"
+          style={{ borderColor: 'var(--color-tg-primary)', borderTopColor: 'transparent' }} />
+        <p className="text-sm text-tg-text-2">מנתח את העסקה עם AI...</p>
+      </div>
+    );
+  }
+
+  if (debriefResult) {
+    return (
+      <div className="flex flex-col gap-3 pt-3 border-t border-tg-border animate-fade-in">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-bold text-tg-text">🤖 משוב AI על העסקה</p>
+          {debriefResult.score !== undefined && (
+            <span className="text-lg font-bold"
+              style={{ color: debriefResult.score >= 70 ? 'var(--color-tg-success)' : debriefResult.score >= 40 ? 'var(--color-tg-warning)' : 'var(--color-tg-danger)' }}>
+              {debriefResult.score}/100
+            </span>
+          )}
+        </div>
+
+        {([
+          ['סיכום', debriefResult.overall],
+          ['איכות כניסה', debriefResult.entry_quality],
+          ['ניהול סיכונים', debriefResult.risk_management],
+          ['ביצוע', debriefResult.execution],
+          ['מצב רגשי', debriefResult.emotional],
+          ['לקחים לפעם הבאה', debriefResult.lessons],
+        ] as [string, string | undefined][]).filter(([, v]) => v).map(([label, value]) => (
+          <div key={label} className="rounded-xl p-3"
+            style={{ background: 'var(--color-tg-surface-2)' }}>
+            <p className="text-[10px] font-bold text-tg-muted mb-1 uppercase tracking-wide">{label}</p>
+            <p className="text-xs leading-relaxed text-tg-text">{value}</p>
+          </div>
+        ))}
+      </div>
     );
   }
 
@@ -75,18 +173,13 @@ export default function CloseTrade({ tradeId, entryPrice, strategy, onClosed }: 
     <div className="flex flex-col gap-3 pt-3 border-t border-tg-border animate-fade-in">
       <div className="flex items-center justify-between">
         <p className="text-sm font-semibold text-tg-text">סגירת עסקה — {strategy}</p>
-        <button onClick={() => setOpen(false)} className="text-tg-muted text-xs">ביטול</button>
+        <button onClick={() => setOpen(false)} className="text-xs text-tg-muted">ביטול</button>
       </div>
 
-      {/* Exit price */}
       <div className="flex flex-col gap-1">
         <label className="text-xs text-tg-muted">מחיר יציאה *</label>
         <div className="flex items-center gap-2">
-          <input
-            type="number"
-            step="any"
-            placeholder="0.00"
-            value={exitPrice}
+          <input type="number" step="any" placeholder="0.00" value={exitPrice}
             onChange={(e) => setExitPrice(e.target.value)}
             className="flex-1 h-10 px-3 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary"
             style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)' }}
@@ -103,7 +196,6 @@ export default function CloseTrade({ tradeId, entryPrice, strategy, onClosed }: 
         </div>
       </div>
 
-      {/* Exit reason */}
       <div className="flex flex-col gap-1">
         <label className="text-xs text-tg-muted">סיבת יציאה *</label>
         <div className="flex flex-wrap gap-1.5">
@@ -121,26 +213,21 @@ export default function CloseTrade({ tradeId, entryPrice, strategy, onClosed }: 
         </div>
       </div>
 
-      {/* Notes */}
       <div className="flex flex-col gap-1">
-        <label className="text-xs text-tg-muted">מה קרה בעסקה? (אופציונלי)</label>
-        <textarea
-          rows={2}
-          placeholder="תאר את ביצוע העסקה, האם הוזזו Stop/TP, מה חשבת..."
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
+        <label className="text-xs text-tg-muted">מה קרה? (יופיע בניתוח AI)</label>
+        <textarea rows={2}
+          placeholder="תאר את ביצוע העסקה — הוזזת Stop? פחד? ביצעת לפי התוכנית?"
+          value={notes} onChange={(e) => setNotes(e.target.value)}
           className="w-full px-3 py-2 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none focus:border-tg-primary resize-none"
           style={{ background: 'var(--color-tg-surface-2)' }}
         />
       </div>
 
-      {error && (
-        <p className="text-xs text-tg-danger px-2">{error}</p>
-      )}
+      {error && <p className="text-xs" style={{ color: 'var(--color-tg-danger)' }}>{error}</p>}
 
       <Button fullWidth onClick={handleClose} loading={loading}
         variant={isWin === false ? 'danger' : 'primary'}>
-        {isWin === true ? '✓ סגור ברווח' : isWin === false ? 'סגור בהפסד' : 'סגור עסקה'}
+        סגור עסקה + קבל ניתוח AI
       </Button>
     </div>
   );

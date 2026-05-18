@@ -117,7 +117,7 @@ export default function AppShell({
         {NAV_ITEMS.map((item) => {
           const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
           return (
-            <Link key={item.href} href={item.href}
+            <Link key={item.href} href={item.href} prefetch={true}
               className={cn('flex flex-col items-center gap-0.5 flex-1 py-2 transition-colors',
                 isActive ? '' : 'text-tg-muted hover:text-tg-text-2')}
               style={isActive ? { color: 'var(--color-tg-primary)' } : {}}>
