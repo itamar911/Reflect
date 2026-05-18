@@ -42,7 +42,7 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL('/login', request.url));
   }
 
-  if (user && isAuthRoute && !pathname.startsWith('/auth/')) {
+  if (user && isAuthRoute && !pathname.startsWith('/auth/') && !pathname.startsWith('/reset-password')) {
     return NextResponse.redirect(new URL('/dashboard', request.url));
   }
 
