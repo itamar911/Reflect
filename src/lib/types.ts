@@ -1,6 +1,7 @@
 ﻿export type TradingType = 'day' | 'swing' | 'crypto' | 'futures';
 export type ExperienceLevel = 'beginner' | 'intermediate' | 'advanced';
 export type Market = 'stocks' | 'crypto' | 'forex' | 'futures';
+export type SubscriptionTier = 'free' | 'basic' | 'pro';
 export type TradeStrategy = 'Breakout' | 'Trend Follow' | 'Reversal' | 'Range' | 'Futures' | 'Custom';
 export type Enforcement = 'reminder' | 'warning' | 'block';
 export type ValidationStatus = 'valid' | 'warning' | 'blocked';
@@ -19,6 +20,7 @@ export interface Profile {
   custom_strategies: string[] | null;
   trader_identity: TraderIdentity | null;
   onboarding_completed: boolean;
+  subscription_tier: SubscriptionTier;
   created_at: string;
   updated_at: string;
 }

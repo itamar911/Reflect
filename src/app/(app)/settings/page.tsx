@@ -19,6 +19,7 @@ export default async function SettingsPage() {
   ]);
 
   const profile = profileRes.data;
+  const plan = (profile?.subscription_tier ?? 'free') as 'free' | 'basic' | 'pro';
   const presetRules = presetRes.data as PresetRules | null;
   const customRules = (customRes.data ?? []) as CustomRule[];
 
@@ -60,7 +61,7 @@ export default async function SettingsPage() {
           presetRules={presetRules}
           customRules={customRules}
           userId={user.id}
-          plan="free"
+          plan={plan}
         />
       </Card>
 
@@ -68,24 +69,36 @@ export default async function SettingsPage() {
       <Card>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold text-tg-text">היסטוריית הפעלות חוקים</h2>
-          <span className="px-2 py-0.5 rounded-full text-xs font-bold"
-            style={{ background: 'rgba(245,158,11,0.15)', color: '#f59e0b' }}>Pro</span>
+          {plan !== 'pro' && (
+            <span className="px-2 py-0.5 rounded-full text-xs font-bold"
+              style={{ background: 'rgba(245,158,11,0.15)', color: '#f59e0b' }}>Pro</span>
+          )}
         </div>
-        <div className="flex items-center justify-center py-8 rounded-xl"
-          style={{ background: 'var(--color-tg-surface-2)' }}>
-          <div className="text-center">
-            <div className="text-2xl mb-2">📜</div>
-            <p className="text-sm text-tg-text-2 mb-1">היסטוריית כל החוקים שהופעלו</p>
-            <p className="text-xs text-tg-muted">תאריך · שם החוק · פעולה שבוצעה</p>
-            <p className="text-xs font-medium mt-2" style={{ color: '#f59e0b' }}>זמין במסלול Pro</p>
+        {plan === 'pro' ? (
+          <div className="flex items-center justify-center py-8 rounded-xl"
+            style={{ background: 'var(--color-tg-surface-2)' }}>
+            <div className="text-center">
+              <div className="text-2xl mb-2">📜</div>
+              <p className="text-sm text-tg-text-2">אין עדיין הפעלות חוקים מתועדות</p>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="flex items-center justify-center py-8 rounded-xl"
+            style={{ background: 'var(--color-tg-surface-2)' }}>
+            <div className="text-center">
+              <div className="text-2xl mb-2">📜</div>
+              <p className="text-sm text-tg-text-2 mb-1">היסטוריית כל החוקים שהופעלו</p>
+              <p className="text-xs text-tg-muted">תאריך · שם החוק · פעולה שבוצעה</p>
+              <p className="text-xs font-medium mt-2" style={{ color: '#f59e0b' }}>זמין במסלול Pro</p>
+            </div>
+          </div>
+        )}
       </Card>
 
       {/* Alerts */}
       <Card>
         <h2 className="text-sm font-semibold text-tg-text mb-4">התראות</h2>
-        <AlertsPanel plan="free" />
+        <AlertsPanel plan={plan} />
       </Card>
 
       {/* Pricing */}
@@ -93,12 +106,17 @@ export default async function SettingsPage() {
         <h2 className="text-base font-bold text-tg-text">מסלולים</h2>
 
         {/* Free */}
-        <div className="rounded-2xl border-2 p-4" style={{ borderColor: 'var(--color-tg-primary)', background: 'var(--color-tg-surface)' }}>
+        <div className="rounded-2xl border-2 p-4" style={{
+          borderColor: plan === 'free' ? 'var(--color-tg-primary)' : 'var(--color-tg-border)',
+          background: 'var(--color-tg-surface)',
+        }}>
           <div className="flex items-center justify-between mb-3">
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-bold text-tg-text">חינמי</h3>
-                <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: 'var(--color-tg-primary-muted)', color: 'var(--color-tg-primary)' }}>המסלול שלך</span>
+                {plan === 'free' && (
+                  <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: 'var(--color-tg-primary-muted)', color: 'var(--color-tg-primary)' }}>המסלול שלך</span>
+                )}
               </div>
               <p className="text-xl font-bold text-tg-text mt-1">$0</p>
             </div>
@@ -120,17 +138,25 @@ export default async function SettingsPage() {
         </div>
 
         {/* Basic */}
-        <div className="rounded-2xl border p-4" style={{ borderColor: 'var(--color-tg-border)', background: 'var(--color-tg-surface)' }}>
+        <div className="rounded-2xl border-2 p-4" style={{
+          borderColor: plan === 'basic' ? 'var(--color-tg-primary)' : 'var(--color-tg-border)',
+          background: 'var(--color-tg-surface)',
+        }}>
           <div className="flex items-start justify-between mb-3">
             <div>
-              <h3 className="text-sm font-bold text-tg-text">Basic</h3>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-tg-text">Basic</h3>
+                {plan === 'basic' && (
+                  <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: 'var(--color-tg-primary-muted)', color: 'var(--color-tg-primary)' }}>המסלול שלך</span>
+                )}
+              </div>
               <div className="flex items-baseline gap-1 mt-1">
                 <p className="text-xl font-bold text-tg-text">$29</p>
                 <span className="text-xs text-tg-muted">/ חודש</span>
               </div>
               <p className="text-xs text-tg-muted mt-0.5">או $299 / שנה · חסכון של $50</p>
             </div>
-            <span className="text-xs text-tg-muted mt-1">3 ימי ניסיון</span>
+            {plan === 'free' && <span className="text-xs text-tg-muted mt-1">3 ימי ניסיון</span>}
           </div>
           <ul className="flex flex-col gap-1.5 mb-4">
             {[
@@ -146,20 +172,29 @@ export default async function SettingsPage() {
               'ייצוא CSV — שבועיים אחורה',
             ].map((f) => <PlanFeature key={f} text={f} />)}
           </ul>
-          <button
-            className="w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-all duration-150 active:scale-95"
-            style={{ background: 'linear-gradient(135deg, var(--color-tg-primary), #8b5cf6)' }}
-          >
-            שדרג ל-Basic
-          </button>
+          {plan === 'free' && (
+            <button
+              className="w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-all duration-150 active:scale-95"
+              style={{ background: 'linear-gradient(135deg, var(--color-tg-primary), #8b5cf6)' }}
+            >
+              שדרג ל-Basic
+            </button>
+          )}
         </div>
 
         {/* Pro */}
-        <div className="rounded-2xl border p-4 relative overflow-hidden" style={{ borderColor: 'var(--color-tg-border)', background: 'var(--color-tg-surface)' }}>
+        <div className="rounded-2xl border-2 p-4 relative overflow-hidden" style={{
+          borderColor: plan === 'pro' ? '#f59e0b' : 'var(--color-tg-border)',
+          background: 'var(--color-tg-surface)',
+        }}>
           <div className="absolute top-3 left-3">
-            <span className="px-2 py-0.5 rounded-full text-xs font-bold" style={{ background: 'linear-gradient(135deg, #f59e0b, #ef4444)', color: 'white' }}>
-              פופולרי
-            </span>
+            {plan === 'pro' ? (
+              <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: 'rgba(245,158,11,0.15)', color: '#f59e0b' }}>המסלול שלך</span>
+            ) : (
+              <span className="px-2 py-0.5 rounded-full text-xs font-bold" style={{ background: 'linear-gradient(135deg, #f59e0b, #ef4444)', color: 'white' }}>
+                פופולרי
+              </span>
+            )}
           </div>
           <div className="flex items-start justify-between mb-3">
             <div>
@@ -170,7 +205,7 @@ export default async function SettingsPage() {
               </div>
               <p className="text-xs text-tg-muted mt-0.5">או $499 / שנה · חסכון של $90</p>
             </div>
-            <span className="text-xs text-tg-muted mt-1">3 ימי ניסיון</span>
+            {plan !== 'pro' && <span className="text-xs text-tg-muted mt-1">3 ימי ניסיון</span>}
           </div>
           <ul className="flex flex-col gap-1.5 mb-4">
             {[
@@ -189,12 +224,14 @@ export default async function SettingsPage() {
               'ייצוא CSV ו-Excel ללא הגבלה',
             ].map((f) => <PlanFeature key={f} text={f} pro />)}
           </ul>
-          <button
-            className="w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-all duration-150 active:scale-95"
-            style={{ background: 'linear-gradient(135deg, #f59e0b, #ef4444)' }}
-          >
-            שדרג ל-Pro
-          </button>
+          {plan !== 'pro' && (
+            <button
+              className="w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-all duration-150 active:scale-95"
+              style={{ background: 'linear-gradient(135deg, #f59e0b, #ef4444)' }}
+            >
+              שדרג ל-Pro
+            </button>
+          )}
         </div>
 
         <p className="text-xs text-tg-muted text-center px-2">

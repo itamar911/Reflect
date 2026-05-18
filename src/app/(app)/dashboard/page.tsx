@@ -20,7 +20,7 @@ export default async function DashboardPage() {
   today.setHours(0, 0, 0, 0);
 
   const [profileRes, todayTradesRes, allTradesRes, rulesRes] = await Promise.all([
-    supabase.from('profiles').select('display_name, trading_type').eq('id', user.id).single(),
+    supabase.from('profiles').select('display_name, trading_type, subscription_tier').eq('id', user.id).single(),
     supabase.from('trade_plans').select('*').eq('user_id', user.id).gte('submitted_at', today.toISOString()),
     supabase.from('trade_plans').select('*').eq('user_id', user.id).order('submitted_at', { ascending: false }).limit(100),
     supabase.from('preset_rules').select('cooldown_after_losses, max_daily_loss').eq('user_id', user.id).single(),
@@ -221,7 +221,7 @@ export default async function DashboardPage() {
             emotional_state: t.emotional_state,
             rr_ratio: t.rr_ratio,
             submitted_at: t.submitted_at,
-          }))} plan="free" />
+          }))} plan={(profile?.subscription_tier ?? 'free') as 'free' | 'basic' | 'pro'} />
         </div>
       )}
     </div>
