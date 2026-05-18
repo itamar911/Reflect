@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
@@ -21,6 +22,7 @@ export default function AuthScreen({ mode }: AuthScreenProps) {
   const [success, setSuccess] = useState('');
 
   const supabase = createClient();
+  const router = useRouter();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -49,7 +51,9 @@ export default function AuthScreen({ mode }: AuthScreenProps) {
           ? 'אימייל או סיסמה שגויים'
           : error.message);
       } else {
-        window.location.href = '/dashboard';
+        router.refresh();
+        router.push('/dashboard');
+        return;
       }
     }
 

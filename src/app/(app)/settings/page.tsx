@@ -3,7 +3,10 @@ import { createClient } from '@/lib/supabase/server';
 import Card from '@/components/ui/Card';
 import RulesEditor from '@/components/rules/RulesEditor';
 import AlertsPanel from '@/components/settings/AlertsPanel';
+import StrategyBuilder from '@/components/strategies/StrategyBuilder';
 import type { PresetRules, CustomRule } from '@/lib/types';
+import type { PersonalStrategy } from '@/components/strategies/StrategyBuilder';
+import type { AlertSettingsData } from '@/components/settings/AlertsPanel';
 
 export const metadata = { title: 'הגדרות — Reflect' };
 
@@ -12,16 +15,20 @@ export default async function SettingsPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  const [profileRes, presetRes, customRes] = await Promise.all([
+  const [profileRes, presetRes, customRes, strategiesRes, alertRes] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', user.id).single(),
     supabase.from('preset_rules').select('*').eq('user_id', user.id).single(),
     supabase.from('custom_rules').select('*').eq('user_id', user.id).order('sort_order').order('created_at'),
+    supabase.from('personal_strategies').select('*').eq('user_id', user.id).order('created_at'),
+    supabase.from('alert_settings').select('*').eq('user_id', user.id).single(),
   ]);
 
   const profile = profileRes.data;
   const plan = (profile?.subscription_tier ?? 'free') as 'free' | 'basic' | 'pro';
   const presetRules = presetRes.data as PresetRules | null;
   const customRules = (customRes.data ?? []) as CustomRule[];
+  const strategies = (strategiesRes.data ?? []) as PersonalStrategy[];
+  const alertSettings = alertRes.data as AlertSettingsData | null;
 
   if (!presetRules) {
     return (
@@ -95,10 +102,16 @@ export default async function SettingsPage() {
         )}
       </Card>
 
+      {/* Personal Strategies */}
+      <Card>
+        <h2 className="text-sm font-semibold text-tg-text mb-4">האסטרטגיות שלי</h2>
+        <StrategyBuilder userId={user.id} initialStrategies={strategies} />
+      </Card>
+
       {/* Alerts */}
       <Card>
         <h2 className="text-sm font-semibold text-tg-text mb-4">התראות</h2>
-        <AlertsPanel plan={plan} />
+        <AlertsPanel plan={plan} userId={user.id} initialSettings={alertSettings} />
       </Card>
 
       {/* Pricing */}

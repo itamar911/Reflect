@@ -19,40 +19,51 @@ export async function POST(request: Request) {
   const base64 = Buffer.from(buffer).toString('base64');
   const mediaType = imageFile.type as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
 
-  const message = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 1500,
-    messages: [{
-      role: 'user',
-      content: [
-        { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
-        {
-          type: 'text',
-          text: `You are a professional technical analyst. Analyze the chart in the image and respond entirely in Hebrew.
-${context ? `Context: ${context}` : ''}
+  try {
+    const message = await client.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 2000,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+          {
+            type: 'text',
+            text: `You are a senior technical analyst. Analyze this trading chart thoroughly and respond entirely in Hebrew.
+${context ? `הקשר: ${context}` : ''}
 
-Return JSON exactly in this format (no additional text):
+Return ONLY a JSON object with no extra text:
 {
-  "timeframe": "estimated timeframe",
-  "trend": "current trend (uptrend/downtrend/sideways)",
-  "pattern": "chart pattern identified if any",
-  "support_levels": ["support level 1", "support level 2"],
-  "resistance_levels": ["resistance level 1", "resistance level 2"],
-  "key_observations": ["observation 1", "observation 2", "observation 3"],
+  "timeframe": "טווח זמן משוער (לדוגמה: 1H, 4H, Daily)",
+  "trend": "מגמה נוכחית (עלייה / ירידה / צד)",
+  "pattern": "דפוס גרפי שזוהה אם קיים (או null)",
+  "support_levels": ["רמת תמיכה 1", "רמת תמיכה 2"],
+  "resistance_levels": ["רמת התנגדות 1", "רמת התנגדות 2"],
+  "key_observations": [
+    "תצפית טכנית 1",
+    "תצפית טכנית 2",
+    "תצפית טכנית 3",
+    "תצפית טכנית 4"
+  ],
+  "entry_suggestion": "הצעת כניסה — מחיר ותנאים",
+  "stop_loss_suggestion": "הצעת Stop Loss — מחיר ונימוק",
+  "take_profit_suggestion": "הצעת Take Profit — מחיר ונימוק",
   "bias": "Bullish / Bearish / Neutral",
-  "recommendation": "brief recommendation - whether to trade and why",
-  "risk_notes": "important risk notes"
-}
+  "recommendation": "המלצה מפורטת — האם לסחור, מה לחפש, מה להימנע ממנו",
+  "risk_notes": "הערות סיכון חשובות"
+}`,
+          },
+        ],
+      }],
+    });
 
-Write all text values in Hebrew.`,
-        },
-      ],
-    }],
-  });
-
-  const text = message.content[0].type === 'text' ? message.content[0].text : '{}';
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : { recommendation: 'Unable to analyze' };
-
-  return NextResponse.json(parsed);
+    const text = message.content[0].type === 'text' ? message.content[0].text : '{}';
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return NextResponse.json({ error: 'parse_error', recommendation: 'לא ניתן לנתח את הגרף' }, { status: 500 });
+    const parsed = JSON.parse(jsonMatch[0]);
+    return NextResponse.json(parsed);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'שגיאה לא ידועה';
+    return NextResponse.json({ error: msg, recommendation: 'שגיאה בניתוח הגרף — נסה שוב' }, { status: 500 });
+  }
 }

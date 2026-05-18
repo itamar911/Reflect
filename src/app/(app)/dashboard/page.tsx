@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { Suspense } from 'react';
 import Card from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import ProgressRing from '@/components/ui/ProgressRing';
@@ -8,6 +9,10 @@ import PatternDetection from '@/components/ai/PatternDetection';
 import StreakTracker from '@/components/streaks/StreakTracker';
 import TraderIdentityCard from '@/components/identity/TraderIdentity';
 import DangerMode from '@/components/danger/DangerMode';
+
+function SectionSkeleton({ h = 80 }: { h?: number }) {
+  return <div className="rounded-2xl animate-pulse" style={{ background: 'var(--color-tg-surface)', height: h }} />;
+}
 
 export const metadata = { title: 'דשבורד — Reflect' };
 
@@ -158,22 +163,26 @@ export default async function DashboardPage() {
       )}
 
       {totalTrades >= 3 && (
-        <TraderIdentityCard
-          disciplineScore={disciplineScore}
-          avgEmotional={avgEmotional}
-          totalTrades={totalTrades}
-        />
+        <Suspense fallback={<SectionSkeleton h={60} />}>
+          <TraderIdentityCard
+            disciplineScore={disciplineScore}
+            avgEmotional={avgEmotional}
+            totalTrades={totalTrades}
+          />
+        </Suspense>
       )}
 
       {totalTrades > 0 && (
         <div>
           <h2 className="text-sm font-semibold text-tg-text mb-2">{'רצפים'}</h2>
-          <StreakTracker
-            disciplineStreak={disciplineStreak}
-            noRevengeStreak={noRevengeStreak}
-            stopLossStreak={stopLossStreak}
-            fullDisciplineStreak={fullDisciplineStreak}
-          />
+          <Suspense fallback={<SectionSkeleton h={80} />}>
+            <StreakTracker
+              disciplineStreak={disciplineStreak}
+              noRevengeStreak={noRevengeStreak}
+              stopLossStreak={stopLossStreak}
+              fullDisciplineStreak={fullDisciplineStreak}
+            />
+          </Suspense>
         </div>
       )}
 
@@ -210,18 +219,23 @@ export default async function DashboardPage() {
         </Card>
       )}
 
-      {totalTrades >= 3 && <AICoachCard trades={simpleTrades} />}
-      {totalTrades >= 5 && <PatternDetection trades={simpleTrades} />}
+      {totalTrades >= 3 && (
+        <Suspense fallback={<SectionSkeleton h={120} />}>
+          <AICoachCard trades={simpleTrades} />
+        </Suspense>
+      )}
+      {totalTrades >= 5 && (
+        <Suspense fallback={<SectionSkeleton h={100} />}>
+          <PatternDetection trades={simpleTrades} />
+        </Suspense>
+      )}
 
       {totalTrades > 0 && (
         <div>
           <h2 className="text-sm font-semibold text-tg-text mb-2">{'ביצועים'}</h2>
-          <PerformanceSection trades={simpleTrades.map(t => ({
-            strategy: t.strategy,
-            emotional_state: t.emotional_state,
-            rr_ratio: t.rr_ratio,
-            submitted_at: t.submitted_at,
-          }))} plan={(profile?.subscription_tier ?? 'free') as 'free' | 'basic' | 'pro'} />
+          <Suspense fallback={<SectionSkeleton h={200} />}>
+            <PerformanceSection trades={simpleTrades} plan={(profile?.subscription_tier ?? 'free') as 'free' | 'basic' | 'pro'} />
+          </Suspense>
         </div>
       )}
     </div>

@@ -11,9 +11,13 @@ interface ChartResult {
   support_levels?: string[];
   resistance_levels?: string[];
   key_observations?: string[];
+  entry_suggestion?: string;
+  stop_loss_suggestion?: string;
+  take_profit_suggestion?: string;
   bias?: string;
   recommendation?: string;
   risk_notes?: string;
+  error?: string;
 }
 
 export default function ChartAnalysis() {
@@ -131,6 +135,16 @@ export default function ChartAnalysis() {
                     style={{ background: 'var(--color-tg-danger-muted)', color: 'var(--color-tg-danger)' }}>{l}</span>
                 ))}
               </div>
+            </div>
+          )}
+
+          {(result.entry_suggestion || result.stop_loss_suggestion || result.take_profit_suggestion) && (
+            <div className="flex flex-col gap-1.5 p-3 rounded-xl"
+              style={{ background: 'var(--color-tg-surface-2)', border: '1px solid var(--color-tg-border)' }}>
+              <p className="text-xs font-semibold text-tg-text mb-1">נקודות מחיר מרכזיות</p>
+              {result.entry_suggestion && <p className="text-xs text-tg-text-2"><span className="text-tg-primary font-medium">כניסה: </span>{result.entry_suggestion}</p>}
+              {result.stop_loss_suggestion && <p className="text-xs text-tg-text-2"><span className="text-tg-danger font-medium">Stop Loss: </span>{result.stop_loss_suggestion}</p>}
+              {result.take_profit_suggestion && <p className="text-xs text-tg-text-2"><span className="text-tg-success font-medium">Take Profit: </span>{result.take_profit_suggestion}</p>}
             </div>
           )}
 

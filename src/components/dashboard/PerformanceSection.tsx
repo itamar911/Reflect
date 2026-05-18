@@ -9,6 +9,10 @@ interface SimpleTrade {
   emotional_state: number;
   rr_ratio: number;
   submitted_at: string;
+  status?: string;
+  entry_price?: number;
+  exit_price?: number | null;
+  stop_loss?: number;
 }
 
 interface PerformanceSectionProps {
@@ -32,6 +36,9 @@ const PRO_EXTRA_FILTERS: { key: ProFilter; label: string }[] = [
   { key: 'year', label: 'שנה' },
 ];
 
+const DAYS_HE = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+const HOURS = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21];
+
 function daysAgo(n: number) {
   const d = new Date();
   d.setDate(d.getDate() - n);
@@ -50,6 +57,12 @@ function filterByRange(trades: SimpleTrade[], filter: ProFilter): SimpleTrade[] 
     year: daysAgo(365),
   }[filter];
   return trades.filter((t) => new Date(t.submitted_at) >= cutoff);
+}
+
+function isWin(t: SimpleTrade) {
+  if (t.status !== 'closed' || t.exit_price == null) return null;
+  if (t.stop_loss != null) return t.exit_price > t.stop_loss;
+  return t.exit_price > (t.entry_price ?? 0);
 }
 
 const EMOTIONAL_EMOJIS: Record<number, string> = { 1: '😰', 2: '😟', 3: '😐', 4: '🙂', 5: '😎' };
@@ -81,19 +94,29 @@ export default function PerformanceSection({ trades, plan }: PerformanceSectionP
   const maxEmotional = Math.max(...Object.values(emotionalDist), 1);
 
   const strategyBreakdown = useMemo(() => {
-    const map: Record<string, { count: number; totalRR: number }> = {};
+    const map: Record<string, { count: number; totalRR: number; wins: number; closed: number }> = {};
     for (const t of filtered) {
       const s = t.strategy || 'אחר';
-      if (!map[s]) map[s] = { count: 0, totalRR: 0 };
+      if (!map[s]) map[s] = { count: 0, totalRR: 0, wins: 0, closed: 0 };
       map[s].count++;
       map[s].totalRR += t.rr_ratio || 0;
+      const w = isWin(t);
+      if (w !== null) {
+        map[s].closed++;
+        if (w) map[s].wins++;
+      }
     }
     return Object.entries(map)
-      .map(([name, v]) => ({ name, count: v.count, avgRR: v.count > 0 ? v.totalRR / v.count : 0 }))
+      .map(([name, v]) => ({
+        name,
+        count: v.count,
+        avgRR: v.count > 0 ? v.totalRR / v.count : 0,
+        winRate: v.closed > 0 ? Math.round((v.wins / v.closed) * 100) : null,
+      }))
       .sort((a, b) => b.count - a.count);
   }, [filtered]);
 
-  // Week-over-week comparison
+  // Week-over-week
   const thisWeek = useMemo(() => filterByRange(trades, 'week'), [trades]);
   const prevWeekTrades = useMemo(() => {
     const from = daysAgo(14);
@@ -106,31 +129,42 @@ export default function PerformanceSection({ trades, plan }: PerformanceSectionP
 
   const weekDelta = thisWeek.length - prevWeekTrades.length;
   const thisWeekAvgRR = thisWeek.length > 0
-    ? (thisWeek.reduce((s, t) => s + (t.rr_ratio || 0), 0) / thisWeek.length)
-    : 0;
+    ? thisWeek.reduce((s, t) => s + (t.rr_ratio || 0), 0) / thisWeek.length : 0;
   const prevWeekAvgRR = prevWeekTrades.length > 0
-    ? (prevWeekTrades.reduce((s, t) => s + (t.rr_ratio || 0), 0) / prevWeekTrades.length)
-    : 0;
+    ? prevWeekTrades.reduce((s, t) => s + (t.rr_ratio || 0), 0) / prevWeekTrades.length : 0;
   const rrDelta = thisWeekAvgRR - prevWeekAvgRR;
+
+  // Heat map data
+  const heatData = useMemo(() => {
+    const grid: Record<string, { wins: number; losses: number }> = {};
+    for (const t of filtered) {
+      const w = isWin(t);
+      if (w === null) continue;
+      const d = new Date(t.submitted_at);
+      const day = d.getDay();
+      const hour = d.getHours();
+      const key = `${day}-${hour}`;
+      if (!grid[key]) grid[key] = { wins: 0, losses: 0 };
+      if (w) grid[key].wins++;
+      else grid[key].losses++;
+    }
+    return grid;
+  }, [filtered]);
 
   if (trades.length === 0) return null;
 
   return (
     <div className="flex flex-col gap-5">
       {/* Filter tabs */}
-      <div className="flex gap-1 overflow-x-auto pb-1 scrollbar-none"
-        style={{ scrollbarWidth: 'none' }}>
+      <div className="flex gap-1 overflow-x-auto pb-1 scrollbar-none">
         {allFilters.map(({ key, label }) => (
-          <button
-            key={key}
-            onClick={() => setFilter(key)}
+          <button key={key} onClick={() => setFilter(key)}
             className="shrink-0 px-3 py-1.5 rounded-xl text-xs font-medium border transition-all duration-150"
             style={{
               background: filter === key ? 'var(--color-tg-primary)' : 'var(--color-tg-surface)',
               borderColor: filter === key ? 'var(--color-tg-primary)' : 'var(--color-tg-border)',
-              color: filter === key ? 'white' : 'var(--color-tg-text-2)',
-            }}
-          >
+              color: filter === key ? '#000' : 'var(--color-tg-text-2)',
+            }}>
             {label}
           </button>
         ))}
@@ -150,24 +184,14 @@ export default function PerformanceSection({ trades, plan }: PerformanceSectionP
         </div>
       ) : (
         <>
-          {/* Week-over-week comparison */}
+          {/* Week-over-week */}
           {plan !== 'free' && (
             <div className="rounded-2xl border border-tg-border p-4"
               style={{ background: 'var(--color-tg-surface)' }}>
               <h3 className="text-sm font-semibold text-tg-text mb-3">השוואה שבוע מול שבוע</h3>
               <div className="grid grid-cols-2 gap-3">
-                <CompareCell
-                  label="עסקאות"
-                  current={thisWeek.length}
-                  delta={weekDelta}
-                  suffix=""
-                />
-                <CompareCell
-                  label="R:R ממוצע"
-                  current={parseFloat(thisWeekAvgRR.toFixed(2))}
-                  delta={parseFloat(rrDelta.toFixed(2))}
-                  suffix=""
-                />
+                <CompareCell label="עסקאות" current={thisWeek.length} delta={weekDelta} suffix="" />
+                <CompareCell label="ממוצע R:R" current={parseFloat(thisWeekAvgRR.toFixed(2))} delta={parseFloat(rrDelta.toFixed(2))} suffix="" />
               </div>
             </div>
           )}
@@ -201,35 +225,42 @@ export default function PerformanceSection({ trades, plan }: PerformanceSectionP
             </div>
           </div>
 
-          {/* Strategy performance */}
+          {/* Strategy performance — Fix 8: added labels */}
           {strategyBreakdown.length > 0 && (
             <div className="rounded-2xl border border-tg-border p-4"
               style={{ background: 'var(--color-tg-surface)' }}>
               <h3 className="text-sm font-semibold text-tg-text mb-3">ביצועים לפי אסטרטגיה</h3>
               <div className="flex flex-col gap-0">
-                {strategyBreakdown.map(({ name, count, avgRR }, i) => (
+                {strategyBreakdown.map(({ name, count, avgRR, winRate }, i) => (
                   <div key={name}
                     className={`flex items-center justify-between py-2.5 ${i < strategyBreakdown.length - 1 ? 'border-b border-tg-border' : ''}`}>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-col">
                       <span className="text-sm font-medium text-tg-text">{name}</span>
-                      <span className="text-xs text-tg-muted">{count} עסקאות</span>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-xs text-tg-muted">{count} עסקאות</span>
+                        {winRate !== null && (
+                          <span className="text-xs font-medium"
+                            style={{ color: winRate >= 60 ? 'var(--color-tg-success)' : winRate >= 40 ? 'var(--color-tg-warning)' : 'var(--color-tg-danger)' }}>
+                            {winRate}% הצלחה
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <div className="flex items-center gap-2">
                       <div className="w-16 h-1.5 rounded-full overflow-hidden"
                         style={{ background: 'var(--color-tg-surface-2)' }}>
                         <div className="h-full rounded-full" style={{
                           width: `${Math.min((avgRR / 3) * 100, 100)}%`,
-                          background: avgRR >= 2
-                            ? 'var(--color-tg-success)'
-                            : avgRR >= 1
-                              ? 'var(--color-tg-warning)'
-                              : 'var(--color-tg-danger)',
+                          background: avgRR >= 2 ? 'var(--color-tg-success)' : avgRR >= 1 ? 'var(--color-tg-warning)' : 'var(--color-tg-danger)',
                         }} />
                       </div>
-                      <span className="text-sm font-bold w-10 text-left"
-                        style={{ color: avgRR >= 2 ? 'var(--color-tg-success)' : avgRR >= 1 ? 'var(--color-tg-warning)' : 'var(--color-tg-danger)' }}>
-                        {avgRR.toFixed(1)}
-                      </span>
+                      <div className="text-left w-20">
+                        <div className="text-xs text-tg-muted leading-none">ממוצע R:R</div>
+                        <div className="text-sm font-bold"
+                          style={{ color: avgRR >= 2 ? 'var(--color-tg-success)' : avgRR >= 1 ? 'var(--color-tg-warning)' : 'var(--color-tg-danger)' }}>
+                          1:{avgRR.toFixed(1)}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -237,19 +268,18 @@ export default function PerformanceSection({ trades, plan }: PerformanceSectionP
             </div>
           )}
 
-          {/* Heat map — Pro only */}
+          {/* Heat map — Fix 10: real data */}
           <div className="rounded-2xl border border-tg-border p-4"
             style={{ background: 'var(--color-tg-surface)' }}>
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-tg-text">מפת חום — שעות וימים</h3>
-              <span className="px-2 py-0.5 rounded-full text-xs font-bold"
-                style={{ background: 'rgba(245,158,11,0.15)', color: '#f59e0b' }}>Pro</span>
+              {plan !== 'pro' && (
+                <span className="px-2 py-0.5 rounded-full text-xs font-bold"
+                  style={{ background: 'rgba(245,158,11,0.15)', color: '#f59e0b' }}>Pro</span>
+              )}
             </div>
             {plan === 'pro' ? (
-              <div className="flex items-center justify-center py-6 rounded-xl"
-                style={{ background: 'var(--color-tg-surface-2)' }}>
-                <p className="text-sm text-tg-text-2">מפת חום — בקרוב</p>
-              </div>
+              <HeatMap heatData={heatData} />
             ) : (
               <div className="flex items-center justify-center py-6 rounded-xl"
                 style={{ background: 'var(--color-tg-surface-2)' }}>
@@ -306,11 +336,64 @@ export default function PerformanceSection({ trades, plan }: PerformanceSectionP
   );
 }
 
+function HeatMap({ heatData }: { heatData: Record<string, { wins: number; losses: number }> }) {
+  const visibleHours = HOURS;
+  return (
+    <div className="overflow-x-auto">
+      <div className="min-w-[320px]">
+        {/* Hour labels */}
+        <div className="flex mb-1" style={{ paddingRight: '36px' }}>
+          {visibleHours.map((h) => (
+            <div key={h} className="flex-1 text-center text-[9px] text-tg-muted">{h}</div>
+          ))}
+        </div>
+        {/* Grid */}
+        {DAYS_HE.map((dayName, day) => (
+          <div key={day} className="flex items-center mb-1">
+            <div className="text-[9px] text-tg-muted w-9 shrink-0 text-right pl-1">{dayName}</div>
+            {visibleHours.map((hour) => {
+              const cell = heatData[`${day}-${hour}`];
+              const wins = cell?.wins ?? 0;
+              const losses = cell?.losses ?? 0;
+              const total = wins + losses;
+              let bg = 'var(--color-tg-surface-2)';
+              let opacity = 0.3;
+              if (total > 0) {
+                const ratio = wins / total;
+                if (ratio >= 0.6) { bg = 'var(--color-tg-success)'; opacity = 0.3 + (ratio - 0.5) * 1.4; }
+                else if (ratio <= 0.4) { bg = 'var(--color-tg-danger)'; opacity = 0.3 + (0.5 - ratio) * 1.4; }
+                else { bg = 'var(--color-tg-warning)'; opacity = 0.4; }
+                opacity = Math.min(opacity, 0.9);
+              }
+              return (
+                <div key={hour} className="flex-1 mx-0.5"
+                  title={total > 0 ? `${wins}W / ${losses}L` : ''}
+                  style={{
+                    height: '18px',
+                    borderRadius: '3px',
+                    background: bg,
+                    opacity: total === 0 ? 0.15 : opacity,
+                  }} />
+              );
+            })}
+          </div>
+        ))}
+        {/* Legend */}
+        <div className="flex items-center justify-end gap-3 mt-2">
+          {[['var(--color-tg-success)', 'רווח'], ['var(--color-tg-danger)', 'הפסד'], ['var(--color-tg-warning)', 'מעורב']].map(([color, label]) => (
+            <div key={label} className="flex items-center gap-1">
+              <div className="w-2.5 h-2.5 rounded-sm" style={{ background: color, opacity: 0.7 }} />
+              <span className="text-[10px] text-tg-muted">{label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CompareCell({ label, current, delta, suffix }: {
-  label: string;
-  current: number;
-  delta: number;
-  suffix: string;
+  label: string; current: number; delta: number; suffix: string;
 }) {
   const isPositive = delta > 0;
   const isZero = delta === 0;
