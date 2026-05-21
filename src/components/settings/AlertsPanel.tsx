@@ -55,15 +55,16 @@ export default function AlertsPanel({ plan, userId, initialSettings }: AlertsPan
   });
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState('');
 
   const canCustomize = plan !== 'free';
-  const supabase = createClient();
 
   const save = useCallback(async (newEnabled: Record<string, boolean>, newTimes: Record<string, string>) => {
     if (!canCustomize) return;
     setSaving(true);
-    await supabase.from('alert_settings').upsert({
-      user_id: userId,
+    setSaveError('');
+
+    const payload = {
       pre_market_enabled: newEnabled.pre_market,
       pre_market_time: newTimes.pre_market ?? '08:30',
       end_of_day_enabled: newEnabled.end_of_day,
@@ -72,11 +73,27 @@ export default function AlertsPanel({ plan, userId, initialSettings }: AlertsPan
       weekly_summary_enabled: newEnabled.weekly_summary,
       weekly_summary_time: newTimes.weekly_summary ?? '09:00',
       realtime_pattern_enabled: newEnabled.realtime_pattern,
-    }, { onConflict: 'user_id' });
+    };
+
+    const supabase = createClient();
+    const { data: existing } = await supabase
+      .from('alert_settings')
+      .select('id')
+      .eq('user_id', userId)
+      .single();
+
+    const { error } = existing
+      ? await supabase.from('alert_settings').update(payload).eq('user_id', userId)
+      : await supabase.from('alert_settings').insert({ user_id: userId, ...payload });
+
     setSaving(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  }, [canCustomize, userId, supabase]);
+    if (error) {
+      setSaveError(error.message);
+    } else {
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    }
+  }, [canCustomize, userId]);
 
   function toggleAlert(id: string) {
     const isLocked = ALERTS.find((a) => a.id === id)?.proOnly && plan !== 'pro';
@@ -151,6 +168,7 @@ export default function AlertsPanel({ plan, userId, initialSettings }: AlertsPan
 
       {saving && <p className="text-xs text-tg-muted text-center mt-2">שומר...</p>}
       {saved && <p className="text-xs text-tg-success text-center mt-2 animate-fade-in">✓ הגדרות נשמרו</p>}
+      {saveError && <p className="text-xs text-tg-danger text-center mt-2">{saveError}</p>}
     </div>
   );
 }
