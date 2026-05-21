@@ -51,7 +51,6 @@ export default function AuthScreen({ mode }: AuthScreenProps) {
           ? 'אימייל או סיסמה שגויים'
           : error.message);
       } else {
-        router.refresh();
         router.push('/dashboard');
         return;
       }
