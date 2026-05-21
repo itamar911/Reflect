@@ -20,6 +20,15 @@ export default function ResetPasswordPage() {
   useEffect(() => {
     const supabase = createClient();
 
+    // PKCE recovery flow: code passed from /auth/callback
+    const code = new URLSearchParams(window.location.search).get('code');
+    if (code) {
+      supabase.auth.exchangeCodeForSession(code).then(({ error }) => {
+        setStatus(error ? 'invalid' : 'ready');
+      });
+      return;
+    }
+
     // Implicit flow: #access_token=...&refresh_token=...&type=recovery
     const hash = window.location.hash;
     if (hash) {
@@ -38,7 +47,7 @@ export default function ResetPasswordPage() {
       }
     }
 
-    // PKCE flow: session already set via /auth/callback redirect
+    // Fallback: session already set (e.g. next=/reset-password path without type param)
     supabase.auth.getSession().then(({ data: { session } }) => {
       setStatus(session ? 'ready' : 'invalid');
     });
