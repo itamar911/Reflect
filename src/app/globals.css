@@ -4,27 +4,27 @@
   --font-sans: var(--font-geist-sans), system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), monospace;
 
-  /* Reflect design tokens — gold/black dark theme */
-  --color-tg-bg: #0A0A0A;
-  --color-tg-surface: #111111;
-  --color-tg-surface-2: #1A1A1A;
-  --color-tg-border: #222222;
-  --color-tg-border-light: #2A2A2A;
+  /* Deep Space design tokens */
+  --color-tg-bg: #0a0a0f;
+  --color-tg-surface: #0d1117;
+  --color-tg-surface-2: #111827;
+  --color-tg-border: #1a2535;
+  --color-tg-border-light: #1e3448;
 
   --color-tg-primary: #F5C518;
   --color-tg-primary-hover: #D4A017;
-  --color-tg-primary-muted: #F5C51815;
+  --color-tg-primary-muted: rgba(245, 197, 24, 0.1);
 
   --color-tg-success: #00C853;
-  --color-tg-success-muted: #00C85318;
+  --color-tg-success-muted: rgba(0, 200, 83, 0.12);
   --color-tg-warning: #F59E0B;
-  --color-tg-warning-muted: #F59E0B18;
+  --color-tg-warning-muted: rgba(245, 158, 11, 0.12);
   --color-tg-danger: #FF3B30;
-  --color-tg-danger-muted: #FF3B3018;
+  --color-tg-danger-muted: rgba(255, 59, 48, 0.12);
 
-  --color-tg-text: #FFFFFF;
-  --color-tg-text-2: #888888;
-  --color-tg-muted: #555555;
+  --color-tg-text: #e8edf5;
+  --color-tg-text-2: #7b8fa8;
+  --color-tg-muted: #3d5068;
 }
 
 :root {
@@ -33,28 +33,53 @@
 
 html,
 body {
-  background: radial-gradient(ellipse at center, #0a0a1a 0%, #050510 50%, #000000 100%);
+  background: #0a0a0f;
   color: var(--color-tg-text);
   min-height: 100dvh;
 }
 
+/* Deep space atmosphere — stars, nebula glow, navy clouds */
 body::before {
   content: '';
   position: fixed;
   inset: 0;
   background:
-    radial-gradient(ellipse 60% 40% at 50% 0%, rgba(245, 197, 24, 0.04) 0%, transparent 55%),
-    radial-gradient(ellipse 120% 80% at 0% 100%, rgba(10, 10, 26, 0.6) 0%, transparent 50%),
-    radial-gradient(ellipse 120% 80% at 100% 0%, rgba(5, 5, 16, 0.6) 0%, transparent 50%);
+    /* Gold aurora at top */
+    radial-gradient(ellipse 90% 28% at 50% -4%, rgba(245, 197, 24, 0.09) 0%, transparent 65%),
+    /* Navy depth corners */
+    radial-gradient(ellipse 55% 55% at -5% 105%, rgba(13, 27, 42, 0.92) 0%, transparent 55%),
+    radial-gradient(ellipse 55% 55% at 105% -5%, rgba(13, 27, 42, 0.92) 0%, transparent 55%),
+    /* Subtle blue-black depth in center */
+    radial-gradient(ellipse 70% 70% at 50% 50%, rgba(10, 14, 30, 0.25) 0%, transparent 70%),
+    /* Stars — bright */
+    radial-gradient(1.5px 1.5px at 20% 15%, rgba(255,255,255,0.4) 0%, transparent 100%),
+    radial-gradient(1.5px 1.5px at 73% 8%,  rgba(255,255,255,0.35) 0%, transparent 100%),
+    radial-gradient(2px   2px   at 45% 22%, rgba(200,220,255,0.3)  0%, transparent 100%),
+    radial-gradient(1.5px 1.5px at 88% 37%, rgba(255,255,255,0.35) 0%, transparent 100%),
+    radial-gradient(1.5px 1.5px at 12% 65%, rgba(255,255,255,0.3)  0%, transparent 100%),
+    radial-gradient(2px   2px   at 62% 75%, rgba(255,230,200,0.25) 0%, transparent 100%),
+    radial-gradient(1.5px 1.5px at 35% 88%, rgba(255,255,255,0.3)  0%, transparent 100%),
+    radial-gradient(1.5px 1.5px at 91% 72%, rgba(255,255,255,0.25) 0%, transparent 100%),
+    /* Stars — dim */
+    radial-gradient(1px 1px at 5%  30%, rgba(255,255,255,0.2)  0%, transparent 100%),
+    radial-gradient(1px 1px at 28% 45%, rgba(255,255,255,0.18) 0%, transparent 100%),
+    radial-gradient(1px 1px at 53% 58%, rgba(255,255,255,0.15) 0%, transparent 100%),
+    radial-gradient(1px 1px at 78% 52%, rgba(255,255,255,0.2)  0%, transparent 100%),
+    radial-gradient(1px 1px at 68% 90%, rgba(255,255,255,0.15) 0%, transparent 100%),
+    radial-gradient(1px 1px at 16% 95%, rgba(200,220,255,0.18) 0%, transparent 100%),
+    radial-gradient(1px 1px at 95% 85%, rgba(255,255,255,0.2)  0%, transparent 100%),
+    radial-gradient(1px 1px at 40% 5%,  rgba(255,255,255,0.15) 0%, transparent 100%),
+    radial-gradient(1px 1px at 82% 18%, rgba(200,220,255,0.15) 0%, transparent 100%);
   pointer-events: none;
   z-index: 0;
 }
 
+/* Strong vignette — dark edges like a terminal display */
 body::after {
   content: '';
   position: fixed;
   inset: 0;
-  background: radial-gradient(ellipse 140% 140% at 50% 50%, transparent 55%, rgba(0, 0, 0, 0.55) 100%);
+  background: radial-gradient(ellipse 125% 125% at 50% 50%, transparent 30%, rgba(0, 0, 8, 0.82) 100%);
   pointer-events: none;
   z-index: 0;
 }
@@ -112,48 +137,66 @@ input[type="button"] {
   background: var(--color-tg-muted);
 }
 
+/* ── Animations ─────────────────────────────────────────── */
+
 @keyframes slide-up {
   from { transform: translateY(100%); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
+  to   { transform: translateY(0);    opacity: 1; }
 }
 
 @keyframes fade-in {
   from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
+  to   { opacity: 1; transform: translateY(0);   }
 }
 
 @keyframes pulse-gold {
   0%, 100% { box-shadow: 0 0 0 0 rgba(245, 197, 24, 0.4); }
-  50% { box-shadow: 0 0 0 8px rgba(245, 197, 24, 0); }
+  50%       { box-shadow: 0 0 0 8px rgba(245, 197, 24, 0); }
 }
 
 @keyframes pulse-danger {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 59, 48, 0.5); }
-  50% { box-shadow: 0 0 0 12px rgba(255, 59, 48, 0); }
+  0%, 100% { box-shadow: 0 0 0 0  rgba(255, 59, 48, 0.5); }
+  50%       { box-shadow: 0 0 0 12px rgba(255, 59, 48, 0); }
 }
 
-.animate-slide-up {
-  animation: slide-up 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+@keyframes gold-breathe {
+  0%, 100% { box-shadow: 0 0 16px rgba(245,197,24,0.25), 0 0 32px rgba(245,197,24,0.08); }
+  50%       { box-shadow: 0 0 28px rgba(245,197,24,0.45), 0 0 56px rgba(245,197,24,0.16); }
 }
 
-.animate-fade-in {
-  animation: fade-in 0.22s ease-out;
+.animate-slide-up    { animation: slide-up    0.28s cubic-bezier(0.32, 0.72, 0, 1); }
+.animate-fade-in     { animation: fade-in     0.22s ease-out; }
+.animate-pulse-gold  { animation: pulse-gold  2s   infinite; }
+.animate-pulse-danger{ animation: pulse-danger 1.5s infinite; }
+.animate-gold-breathe{ animation: gold-breathe 3s  ease-in-out infinite; }
+
+/* ── Gold glow utilities ─────────────────────────────────── */
+
+.gold-glow {
+  box-shadow: 0 0 20px rgba(245,197,24,0.22), 0 0 40px rgba(245,197,24,0.07);
 }
 
-.animate-pulse-gold {
-  animation: pulse-gold 2s infinite;
+.gold-glow-strong {
+  box-shadow: 0 0 28px rgba(245,197,24,0.4), 0 0 56px rgba(245,197,24,0.14);
 }
 
-.animate-pulse-danger {
-  animation: pulse-danger 1.5s infinite;
+.text-glow-gold {
+  text-shadow: 0 0 14px rgba(245,197,24,0.55), 0 0 28px rgba(245,197,24,0.22);
 }
 
-/* Gold accent text */
+/* ── Glass morphism ──────────────────────────────────────── */
+
+.glass-dark {
+  backdrop-filter: blur(16px) saturate(1.4);
+  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+}
+
+/* ── Legacy alias ────────────────────────────────────────── */
+
 .text-gold {
   color: var(--color-tg-primary);
 }
 
-/* Danger mode overlay */
 .danger-overlay {
   background: linear-gradient(180deg, rgba(255,59,48,0.06) 0%, transparent 100%);
 }

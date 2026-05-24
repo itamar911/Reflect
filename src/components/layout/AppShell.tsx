@@ -74,19 +74,26 @@ export default function AppShell({
   }
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ background: 'var(--color-tg-bg)' }}>
-      {/* Top bar */}
-      <header className="sticky top-0 z-30 flex items-center justify-between px-4 h-14 border-b"
-        style={{ background: 'var(--color-tg-surface)', borderColor: 'var(--color-tg-border)' }}>
+    <div className="min-h-screen flex flex-col" style={{ background: 'transparent' }}>
+      {/* Top bar — glass dark */}
+      <header className="glass-dark sticky top-0 z-30 flex items-center justify-between px-4 h-14 border-b"
+        style={{
+          background: 'rgba(10, 10, 15, 0.88)',
+          borderColor: 'rgba(245, 197, 24, 0.13)',
+          boxShadow: '0 1px 0 rgba(245,197,24,0.06), 0 4px 32px rgba(0,0,0,0.5)',
+        }}>
         <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg flex items-center justify-center"
-            style={{ background: 'var(--color-tg-primary)' }}>
+          <div className="w-7 h-7 rounded-lg flex items-center justify-center animate-gold-breathe"
+            style={{
+              background: 'linear-gradient(135deg, #F5C518 0%, #D4A017 100%)',
+              boxShadow: '0 0 12px rgba(245,197,24,0.45), 0 0 24px rgba(245,197,24,0.15)',
+            }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="black" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="22 7 13.5 15.5 8.5 10.5 2 17" />
               <polyline points="16 7 22 7 22 13" />
             </svg>
           </div>
-          <span className="font-bold text-sm" style={{ color: 'var(--color-tg-primary)' }}>Reflect</span>
+          <span className="font-bold text-sm text-glow-gold" style={{ color: 'var(--color-tg-primary)' }}>Reflect</span>
         </div>
 
         <div className="flex items-center gap-3">
@@ -99,11 +106,14 @@ export default function AppShell({
 
       <main className="flex-1 overflow-auto pb-24">{children}</main>
 
-      {/* FAB */}
+      {/* FAB — gold gradient + strong glow */}
       <button
         onClick={() => setFormOpen(true)}
-        className="fixed bottom-20 right-4 z-30 w-14 h-14 rounded-full flex items-center justify-center shadow-2xl transition-transform active:scale-95"
-        style={{ background: 'var(--color-tg-primary)', boxShadow: '0 4px 20px rgba(245,197,24,0.4)' }}
+        className="fixed bottom-20 right-4 z-30 w-14 h-14 rounded-full flex items-center justify-center transition-transform active:scale-95"
+        style={{
+          background: 'linear-gradient(135deg, #F5C518 0%, #D4A017 100%)',
+          boxShadow: '0 4px 24px rgba(245,197,24,0.55), 0 0 48px rgba(245,197,24,0.2), inset 0 1px 0 rgba(255,255,255,0.25)',
+        }}
         aria-label="הגש תוכנית עסקה">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="black" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
           <line x1="12" y1="5" x2="12" y2="19" />
@@ -111,16 +121,23 @@ export default function AppShell({
         </svg>
       </button>
 
-      {/* Bottom navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 z-30 flex items-center h-16 border-t"
-        style={{ background: 'var(--color-tg-surface)', borderColor: 'var(--color-tg-border)' }}>
+      {/* Bottom navigation — glass dark */}
+      <nav className="glass-dark fixed bottom-0 left-0 right-0 z-30 flex items-center h-16 border-t"
+        style={{
+          background: 'rgba(10, 10, 15, 0.92)',
+          borderColor: 'rgba(245, 197, 24, 0.1)',
+          boxShadow: '0 -1px 0 rgba(245,197,24,0.05), 0 -4px 32px rgba(0,0,0,0.6)',
+        }}>
         {NAV_ITEMS.map((item) => {
           const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
           return (
             <Link key={item.href} href={item.href} prefetch={true}
-              className={cn('flex flex-col items-center gap-0.5 flex-1 py-2 transition-colors',
+              className={cn('flex flex-col items-center gap-0.5 flex-1 py-2 transition-all duration-200',
                 isActive ? '' : 'text-tg-muted hover:text-tg-text-2')}
-              style={isActive ? { color: 'var(--color-tg-primary)' } : {}}>
+              style={isActive ? {
+                color: 'var(--color-tg-primary)',
+                filter: 'drop-shadow(0 0 6px rgba(245,197,24,0.6))',
+              } : {}}>
               {item.icon}
               <span className="text-[10px] font-medium">{item.label}</span>
             </Link>
