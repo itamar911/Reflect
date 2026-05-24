@@ -19,7 +19,7 @@ export async function POST(request: Request) {
     max_tokens: 1024,
     messages: [{
       role: 'user',
-      content: `You are an AI trading coach. Analyze the following trading data and provide 4-6 personal insights in Hebrew.
+      content: `You are a financial performance analyst for a trading journal app. Analyze the following trading data and provide 4-6 concrete, dollar-impact insights in Hebrew.
 
 ${summary}
 
@@ -33,9 +33,14 @@ Return JSON exactly in this format (no additional text):
   ]
 }
 
-Insight types: time (trading hours), emotional (emotional state), performance (performance), pattern (patterns), revenge (revenge trading), discipline (discipline).
-Each insight: one direct, specific, data-based sentence. For example: "You trade worse after 2 consecutive losses" or "Hours 9:30-11:00 are your most profitable".
-Write all insight text in Hebrew.`,
+CRITICAL: Every insight must quantify financial impact using the actual numbers from the data. Use the P&L values, counts, and percentages provided. Examples of the style required:
+- "עצרנו אותך מ-3 עסקאות Revenge החודש — חסכת $X לפי הממוצע של עסקאות דומות"
+- "ה-Win Rate שלך עם מצב רגשי גבוה (4-5) הוא X% לעומת X% כשאתה במצב נמוך — הפרש של $X בממוצע לעסקה"
+- "שעות X-Y הכניסו לך X% מסך ה-P&L עם X% Win Rate"
+- "האסטרטגיה הטובה ביותר שלך הרוויחה $X, הגרועה ביותר הפסידה $X"
+
+Insight types: time (best/worst hours by P&L), emotional (emotional state vs P&L), performance (overall numbers), pattern (patterns), revenge (revenge trading cost in $), discipline (rules impact in $).
+Write all insight text in Hebrew. Be specific with numbers.`,
     }],
   });
 
@@ -49,35 +54,67 @@ Write all insight text in Hebrew.`,
 function buildTradeSummary(trades: Record<string, unknown>[]): string {
   const total = trades.length;
   const closed = trades.filter((t) => t.status === 'closed');
-  const wins = closed.filter((t) => Number(t.exit_price) > Number(t.entry_price));
-  const winRate = closed.length > 0 ? Math.round((wins.length / closed.length) * 100) : 0;
+  const closedWithExit = closed.filter((t) => t.exit_price !== null);
+  const wins = closedWithExit.filter((t) => Number(t.exit_price) > Number(t.entry_price));
+  const losses = closedWithExit.filter((t) => Number(t.exit_price) <= Number(t.entry_price));
+  const winRate = closedWithExit.length > 0 ? Math.round((wins.length / closedWithExit.length) * 100) : 0;
+
+  const totalPL = closedWithExit.reduce((s, t) => s + (Number(t.exit_price) - Number(t.entry_price)), 0);
+  const winPL = wins.reduce((s, t) => s + (Number(t.exit_price) - Number(t.entry_price)), 0);
+  const lossPL = losses.reduce((s, t) => s + (Number(t.exit_price) - Number(t.entry_price)), 0);
 
   const avgEmotional = total > 0
     ? (trades.reduce((s, t) => s + Number(t.emotional_state || 3), 0) / total).toFixed(1) : '3';
   const avgRR = total > 0
     ? (trades.reduce((s, t) => s + Number(t.rr_ratio || 0), 0) / total).toFixed(2) : '0';
 
-  const byHour: Record<number, { count: number; wins: number }> = {};
-  for (const t of trades) {
+  // Revenge trades: low emotional state + closed loss
+  const revengeTrades = closedWithExit.filter((t) =>
+    Number(t.emotional_state) <= 2 && Number(t.exit_price) < Number(t.entry_price)
+  );
+  const revengeLoss = revengeTrades.reduce((s, t) => s + (Number(t.entry_price) - Number(t.exit_price)), 0);
+
+  // Quality trades: emotional state >= 4
+  const qualityTrades = closedWithExit.filter((t) => Number(t.emotional_state) >= 4);
+  const qualityPL = qualityTrades.reduce((s, t) => s + (Number(t.exit_price) - Number(t.entry_price)), 0);
+  const qualityWinRate = qualityTrades.length > 0
+    ? Math.round(qualityTrades.filter((t) => Number(t.exit_price) > Number(t.entry_price)).length / qualityTrades.length * 100) : 0;
+
+  // By hour with P&L
+  const byHour: Record<number, { count: number; wins: number; pl: number }> = {};
+  for (const t of closedWithExit) {
     const h = new Date(t.submitted_at as string).getHours();
-    if (!byHour[h]) byHour[h] = { count: 0, wins: 0 };
+    if (!byHour[h]) byHour[h] = { count: 0, wins: 0, pl: 0 };
     byHour[h].count++;
-    if (t.status === 'closed' && Number(t.exit_price) > Number(t.entry_price)) byHour[h].wins++;
+    const pl = Number(t.exit_price) - Number(t.entry_price);
+    byHour[h].pl += pl;
+    if (pl > 0) byHour[h].wins++;
+  }
+
+  // By strategy with P&L
+  const strategyPL: Record<string, { count: number; pl: number; wins: number }> = {};
+  for (const t of closedWithExit) {
+    const s = String(t.strategy || 'Unknown');
+    if (!strategyPL[s]) strategyPL[s] = { count: 0, pl: 0, wins: 0 };
+    strategyPL[s].count++;
+    const pl = Number(t.exit_price) - Number(t.entry_price);
+    strategyPL[s].pl += pl;
+    if (pl > 0) strategyPL[s].wins++;
   }
 
   const lowEmotional = trades.filter((t) => Number(t.emotional_state) <= 2).length;
-  const strategies = trades.reduce<Record<string, number>>((acc, t) => {
-    const s = String(t.strategy || 'Unknown');
-    acc[s] = (acc[s] || 0) + 1;
-    return acc;
-  }, {});
 
   return `Total trades: ${total}
-Closed trades: ${closed.length}
+Closed trades with exit: ${closedWithExit.length}
 Win rate: ${winRate}%
 Average R:R: ${avgRR}
 Average emotional state: ${avgEmotional}/5
-Trades with low emotional state (1-2): ${lowEmotional}
-Strategies used: ${JSON.stringify(strategies)}
-Hourly distribution: ${JSON.stringify(byHour)}`;
+Total P&L ($): ${totalPL.toFixed(2)}
+P&L from winning trades ($): +${winPL.toFixed(2)}
+P&L from losing trades ($): ${lossPL.toFixed(2)}
+Revenge trades (emotional state 1-2 + loss): ${revengeTrades.length} trades, total cost: $${revengeLoss.toFixed(2)}
+Trades with any low emotional state (1-2): ${lowEmotional}
+High-quality trades (emotional state 4-5): ${qualityTrades.length} trades, P&L: $${qualityPL.toFixed(2)}, win rate: ${qualityWinRate}%
+Strategy P&L breakdown: ${JSON.stringify(strategyPL)}
+Hourly P&L breakdown: ${JSON.stringify(byHour)}`;
 }

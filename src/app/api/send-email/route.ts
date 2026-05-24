@@ -72,12 +72,14 @@ function buildDailySummaryEmail(name: string, stats: { trades: number; winRate: 
 </div></body></html>`;
 }
 
-function buildWeeklySummaryEmail(name: string, stats: { trades: number; winRate: number; avgRR: number; disciplineScore: number }) {
+function buildWeeklySummaryEmail(name: string, stats: { trades: number; winRate: number; avgRR: number; totalPL: number }) {
+  const plColor = stats.totalPL >= 0 ? '#00C853' : '#FF3B30';
+  const plFormatted = (stats.totalPL >= 0 ? '+$' : '-$') + Math.abs(stats.totalPL).toFixed(2);
   return `
 <!DOCTYPE html><html dir="rtl" lang="he"><body style="font-family:sans-serif;background:#0a0a1a;color:#fff;padding:24px;max-width:600px;margin:0 auto">
 <div style="background:#111;border:1px solid #222;border-radius:16px;padding:24px">
   <h2 style="color:#F5C518;margin:0 0 16px">📅 סיכום שבועי — Reflect</h2>
-  <p style="color:#888;margin:0 0 16px">שלום ${name}, הנה סיכום השבוע שלך:</p>
+  <p style="color:#888;margin:0 0 16px">שלום ${name}, הנה השפעת Reflect על הארנק שלך השבוע:</p>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
     <div style="background:#1a1a1a;border-radius:12px;padding:16px;text-align:center">
       <div style="font-size:28px;font-weight:bold;color:#F5C518">${stats.trades}</div>
@@ -85,15 +87,15 @@ function buildWeeklySummaryEmail(name: string, stats: { trades: number; winRate:
     </div>
     <div style="background:#1a1a1a;border-radius:12px;padding:16px;text-align:center">
       <div style="font-size:28px;font-weight:bold;color:${stats.winRate >= 50 ? '#00C853' : '#FF3B30'}">${stats.winRate}%</div>
-      <div style="font-size:12px;color:#888">אחוז הצלחה</div>
+      <div style="font-size:12px;color:#888">Win Rate</div>
     </div>
     <div style="background:#1a1a1a;border-radius:12px;padding:16px;text-align:center">
       <div style="font-size:28px;font-weight:bold;color:${stats.avgRR >= 2 ? '#00C853' : '#F59E0B'}">${stats.avgRR}</div>
       <div style="font-size:12px;color:#888">R:R ממוצע</div>
     </div>
     <div style="background:#1a1a1a;border-radius:12px;padding:16px;text-align:center">
-      <div style="font-size:28px;font-weight:bold;color:#60A5FA">${stats.disciplineScore}</div>
-      <div style="font-size:12px;color:#888">ציון משמעת</div>
+      <div style="font-size:28px;font-weight:bold;color:${plColor}">${plFormatted}</div>
+      <div style="font-size:12px;color:#888">P&L השבוע</div>
     </div>
   </div>
   <div style="background:#1a1a1a;border-radius:12px;padding:16px">
@@ -129,16 +131,13 @@ export async function POST(request: Request) {
 
   const allTrades = trades ?? [];
   const closed = allTrades.filter(t => t.status === 'closed');
-  const wins = closed.filter(t => Number(t.exit_price) > Number(t.stop_loss));
-  const winRate = closed.length > 0 ? Math.round((wins.length / closed.length) * 100) : 0;
+  const closedWithExit = closed.filter(t => t.exit_price !== null);
+  const wins = closedWithExit.filter(t => Number(t.exit_price) > Number(t.entry_price));
+  const winRate = closedWithExit.length > 0 ? Math.round((wins.length / closedWithExit.length) * 100) : 0;
   const avgRR = allTrades.length > 0
     ? parseFloat((allTrades.reduce((s, t) => s + Number(t.rr_ratio || 0), 0) / allTrades.length).toFixed(1))
     : 0;
-  const disciplineScore = allTrades.length === 0 ? 0 : Math.min(100, Math.round(
-    (closed.filter(t => t.plan_score != null).length / Math.max(closed.length, 1)) * 30 +
-    (allTrades.filter(t => Number(t.emotional_state) >= 3).length / allTrades.length) * 30 +
-    (allTrades.filter(t => Number(t.rr_ratio || 0) >= 2).length / allTrades.length) * 40
-  ));
+  const totalPL = closedWithExit.reduce((s, t) => s + (Number(t.exit_price) - Number(t.entry_price)), 0);
 
   const emailMap = {
     pre_market: {
@@ -151,7 +150,7 @@ export async function POST(request: Request) {
     },
     weekly_summary: {
       subject: '📅 סיכום שבועי — Reflect',
-      html: buildWeeklySummaryEmail(name, { trades: allTrades.length, winRate, avgRR, disciplineScore }),
+      html: buildWeeklySummaryEmail(name, { trades: allTrades.length, winRate, avgRR, totalPL }),
     },
   };
 

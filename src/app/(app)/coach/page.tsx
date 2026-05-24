@@ -4,7 +4,7 @@ import AICoachCard from '@/components/ai/AICoachCard';
 import PatternDetection from '@/components/ai/PatternDetection';
 import TradingBot from '@/components/ai/TradingBot';
 
-export const metadata = { title: 'AI Coach — Reflect' };
+export const metadata = { title: 'יועץ מסחר — Reflect' };
 
 export default async function CoachPage() {
   const supabase = await createClient();
@@ -32,8 +32,8 @@ export default async function CoachPage() {
   return (
     <div className="px-4 py-5 flex flex-col gap-5 max-w-2xl mx-auto">
       <div>
-        <h1 className="text-xl font-bold text-tg-text">AI Coach</h1>
-        <p className="text-sm text-tg-text-2 mt-0.5">יועץ מסחר אישי + ניתוח תבניות</p>
+        <h1 className="text-xl font-bold text-tg-text">יועץ המסחר שלי</h1>
+        <p className="text-sm text-tg-text-2 mt-0.5">השפעה ריאלית על הארנק שלך — מבוסס על הנתונים שלך</p>
       </div>
 
       {/* Trading Bot - main feature */}

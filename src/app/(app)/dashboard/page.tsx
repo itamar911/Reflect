@@ -2,7 +2,6 @@ import { createClient } from '@/lib/supabase/server';
 import { Suspense } from 'react';
 import Card from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
-import ProgressRing from '@/components/ui/ProgressRing';
 import PerformanceSection from '@/components/dashboard/PerformanceSection';
 import AICoachCard from '@/components/ai/AICoachCard';
 import PatternDetection from '@/components/ai/PatternDetection';
@@ -50,10 +49,16 @@ export default async function DashboardPage() {
     (allTrades.filter((t) => t.emotional_state >= 3).length / totalTrades) * 30 +
     (allTrades.filter((t) => (t.rr_ratio || 0) >= 2).length / totalTrades) * 40
   ));
-  const emotionalScore = Math.round((avgEmotional / 5) * 100);
-  const executionScore = closedTrades.length === 0 ? 0 : Math.min(100,
-    Math.round((closedTrades.filter((t) => t.exit_price !== null).length / closedTrades.length) * 100)
+
+  // Dollar impact calculations
+  const closedWithExit = closedTrades.filter((t) => t.exit_price !== null);
+  const totalPL = closedWithExit.reduce((sum, t) => sum + (Number(t.exit_price) - Number(t.entry_price)), 0);
+  const winCount = closedWithExit.filter((t) => Number(t.exit_price) > Number(t.entry_price)).length;
+  const winRatePct = closedWithExit.length > 0 ? Math.round((winCount / closedWithExit.length) * 100) : 0;
+  const revengeTrades = closedWithExit.filter((t) =>
+    Number(t.emotional_state) <= 2 && Number(t.exit_price) < Number(t.entry_price)
   );
+  const revengeLoss = revengeTrades.reduce((sum, t) => sum + (Number(t.entry_price) - Number(t.exit_price)), 0);
 
   let consecutiveLosses = 0;
   const sorted = [...allTrades].sort((a, b) => new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime());
@@ -99,12 +104,14 @@ export default async function DashboardPage() {
   let dynamicMsg = '';
   if (consecutiveLosses >= 2)
     dynamicMsg = `⚠️ ${consecutiveLosses} הפסדים רצופים — שקול הפסקה`;
+  else if (revengeTrades.length >= 2)
+    dynamicMsg = `⚠️ ${revengeTrades.length} עסקאות Revenge עלו לך $${revengeLoss.toFixed(1)} — שים לב למצב רגשי`;
+  else if (totalPL > 0 && closedWithExit.length >= 3)
+    dynamicMsg = `💰 P&L מצטבר: +$${totalPL.toFixed(1)} — המשך לפי התוכנית`;
   else if (disciplineStreak >= 3)
     dynamicMsg = `🔥 ${disciplineStreak} ימים לפי החוקים ברצף`;
   else if (avgEmotional >= 4)
     dynamicMsg = '💚 מצב רגשי מצוין — יום מסחר אידיאלי';
-  else if (disciplineScore >= 80)
-    dynamicMsg = '🎯 ביצועים מעולים — המשך כך';
   else if (todayTrades.length === 0)
     dynamicMsg = 'כלי המסחר שלך מוכן — תכנן לפני שתיכנס';
 
@@ -138,9 +145,21 @@ export default async function DashboardPage() {
 
       {totalTrades > 0 ? (
         <div className="grid grid-cols-3 gap-3">
-          <ScoreCard label={'משמעת'} value={disciplineScore} color="var(--color-tg-primary)" />
-          <ScoreCard label={'רגשות'} value={emotionalScore} color="#60A5FA" />
-          <ScoreCard label={'ביצוע'} value={executionScore} color="var(--color-tg-success)" />
+          <ImpactCard
+            label="P&L"
+            value={closedWithExit.length > 0 ? (totalPL >= 0 ? `+$${totalPL.toFixed(1)}` : `-$${Math.abs(totalPL).toFixed(1)}`) : '—'}
+            color={totalPL >= 0 ? 'var(--color-tg-success)' : 'var(--color-tg-danger)'}
+          />
+          <ImpactCard
+            label="Win Rate"
+            value={closedWithExit.length > 0 ? `${winRatePct}%` : '—'}
+            color="#60A5FA"
+          />
+          <ImpactCard
+            label="Revenge Cost"
+            value={revengeTrades.length === 0 ? '✅ $0' : `-$${revengeLoss.toFixed(1)}`}
+            color={revengeTrades.length === 0 ? 'var(--color-tg-success)' : 'var(--color-tg-danger)'}
+          />
         </div>
       ) : (
         <Card className="text-center py-8">
@@ -242,12 +261,12 @@ export default async function DashboardPage() {
   );
 }
 
-function ScoreCard({ label, value, color }: { label: string; value: number; color: string }) {
+function ImpactCard({ label, value, color }: { label: string; value: string; color: string }) {
   return (
-    <div className="rounded-2xl p-3 flex flex-col items-center gap-2"
+    <div className="rounded-2xl p-3 flex flex-col items-center justify-center gap-1 text-center"
       style={{ background: 'var(--color-tg-surface)', border: '1px solid var(--color-tg-border)' }}>
-      <ProgressRing value={value} size={64} strokeWidth={5} color={color} label={String(value)} />
-      <p className="text-xs text-tg-text-2 text-center">{label}</p>
+      <p className="text-base font-bold leading-tight" style={{ color }}>{value}</p>
+      <p className="text-[10px] text-tg-text-2">{label}</p>
     </div>
   );
 }

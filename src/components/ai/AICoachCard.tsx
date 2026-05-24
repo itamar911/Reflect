@@ -59,10 +59,10 @@ export default function AICoachCard({ trades }: { trades: Trade[] }) {
     return (
       <Card>
         <div className="flex items-center gap-2 mb-3">
-          <span className="text-lg">🤖</span>
-          <h3 className="text-sm font-semibold text-tg-text">AI Coach</h3>
+          <span className="text-lg">💰</span>
+          <h3 className="text-sm font-semibold text-tg-text">ניתוח השפעה פיננסית</h3>
         </div>
-        <p className="text-xs text-tg-text-2">נדרשות לפחות 3 עסקאות לקבלת תובנות אישיות</p>
+        <p className="text-xs text-tg-text-2">נדרשות לפחות 3 עסקאות כדי לחשב כמה אתה חוסך ומרוויח</p>
       </Card>
     );
   }
@@ -73,9 +73,9 @@ export default function AICoachCard({ trades }: { trades: Trade[] }) {
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-lg flex items-center justify-center"
             style={{ background: 'var(--color-tg-primary-muted)', border: '1px solid var(--color-tg-primary)' }}>
-            <span className="text-sm">🤖</span>
+            <span className="text-sm">💰</span>
           </div>
-          <h3 className="text-sm font-semibold text-tg-text">AI Coach</h3>
+          <h3 className="text-sm font-semibold text-tg-text">ניתוח השפעה פיננסית</h3>
         </div>
         {!loading && (
           <button onClick={fetchInsights}
