@@ -1,0 +1,21 @@
+name: Send Alerts
+
+on:
+  schedule:
+    - cron: '* * * * *'
+  workflow_dispatch:
+
+jobs:
+  send-alerts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+
+    steps:
+      - name: Trigger alert cron endpoint
+        run: |
+          response=$(curl --silent --show-error --fail \
+            --max-time 30 \
+            -X GET "${{ secrets.APP_URL }}/api/cron/send-alerts" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json")
+          echo "Response: $response"
