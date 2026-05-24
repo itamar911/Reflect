@@ -9,6 +9,7 @@ import StreakTracker from '@/components/streaks/StreakTracker';
 import TraderIdentityCard from '@/components/identity/TraderIdentity';
 import DangerMode from '@/components/danger/DangerMode';
 import { computeTraderProfile } from '@/lib/identity';
+import TradeHeatmap from '@/components/dashboard/TradeHeatmap';
 
 function SectionSkeleton({ h = 80 }: { h?: number }) {
   return <div className="rounded-2xl animate-pulse" style={{ background: 'var(--color-tg-surface)', height: h }} />;
@@ -244,6 +245,13 @@ export default async function DashboardPage() {
         <Suspense fallback={<SectionSkeleton h={100} />}>
           <PatternDetection trades={simpleTrades} />
         </Suspense>
+      )}
+
+      {closedWithExit.length >= 3 && (
+        <div>
+          <h2 className="text-sm font-semibold text-tg-text mb-2">{'אנליטיקס'}</h2>
+          <TradeHeatmap trades={simpleTrades} />
+        </div>
       )}
 
       {totalTrades > 0 && (
