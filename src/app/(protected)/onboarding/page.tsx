@@ -12,11 +12,11 @@ export default async function OnboardingPage() {
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('onboarding_completed')
+    .select('onboarding_completed, subscription_tier')
     .eq('id', user.id)
     .single();
 
-  if (profile?.onboarding_completed) redirect('/dashboard');
+  if (profile?.onboarding_completed || profile?.subscription_tier === 'pro') redirect('/dashboard');
 
   return <OnboardingWizard userId={user.id} />;
 }
