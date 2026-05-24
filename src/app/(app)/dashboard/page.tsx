@@ -8,6 +8,7 @@ import PatternDetection from '@/components/ai/PatternDetection';
 import StreakTracker from '@/components/streaks/StreakTracker';
 import TraderIdentityCard from '@/components/identity/TraderIdentity';
 import DangerMode from '@/components/danger/DangerMode';
+import { computeTraderProfile } from '@/lib/identity';
 
 function SectionSkeleton({ h = 80 }: { h?: number }) {
   return <div className="rounded-2xl animate-pulse" style={{ background: 'var(--color-tg-surface)', height: h }} />;
@@ -91,6 +92,8 @@ export default async function DashboardPage() {
     stop_loss: Number(t.stop_loss || 0),
   }));
 
+  const traderProfile = computeTraderProfile(simpleTrades);
+
   const hour = new Date().getHours();
   const greeting = hour < 5
     ? 'לילה טוב'
@@ -173,22 +176,16 @@ export default async function DashboardPage() {
         </Card>
       )}
 
+      {totalTrades >= 3 && (
+        <TraderIdentityCard profile={traderProfile} />
+      )}
+
       {totalTrades > 0 && (
         <div className="grid grid-cols-3 gap-2">
           <StatChip label={'R:R ממוצע'} value={avgRR} />
           <StatChip label={'מצב רגשי'} value={avgEmotional >= 1 ? `${avgEmotional.toFixed(1)}/5` : '—'} />
           <StatChip label={'עסקאות היום'} value={String(todayTrades.length)} />
         </div>
-      )}
-
-      {totalTrades >= 3 && (
-        <Suspense fallback={<SectionSkeleton h={60} />}>
-          <TraderIdentityCard
-            disciplineScore={disciplineScore}
-            avgEmotional={avgEmotional}
-            totalTrades={totalTrades}
-          />
-        </Suspense>
       )}
 
       {totalTrades > 0 && (

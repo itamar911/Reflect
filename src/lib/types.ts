@@ -7,7 +7,7 @@ export type Enforcement = 'reminder' | 'warning' | 'block';
 export type ValidationStatus = 'valid' | 'warning' | 'blocked';
 export type EmotionalPattern = 'FOMO' | 'REVENGE' | 'FEAR' | 'OVERCONFIDENCE' | 'NONE';
 export type TradeStatus = 'open' | 'closed';
-export type TraderIdentity = 'Disciplined Trader' | 'Emotional Trader' | 'Sniper Trader' | 'Aggressive Trader' | 'Developing Trader';
+export type TraderIdentity = 'Disciplined Sniper' | 'Emotional Trader' | 'Risk Taker' | 'Aggressive Scalper' | 'Developing Trader';
 export type StreakType = 'discipline' | 'no_revenge' | 'stop_loss' | 'full_discipline';
 
 export interface Profile {
