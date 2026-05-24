@@ -162,6 +162,9 @@ export default function AlertsPanel({ plan, userId, initialSettings }: AlertsPan
         );
       })}
 
+      {canCustomize && (
+        <p className="text-xs text-tg-muted mt-3 text-center">⏰ שעות לפי שעון ישראל (UTC+2)</p>
+      )}
       {!canCustomize && (
         <p className="text-xs text-tg-muted mt-3 text-center">התאמת שעות שליחה זמינה ב-Basic ומעלה</p>
       )}
