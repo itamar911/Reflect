@@ -1,16 +1,26 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import TradePlanForm from '@/components/trade/TradePlanForm';
 import { cn } from '@/lib/utils';
 
-const NAV_ITEMS = [
+const NAV_ITEMS_LEFT = [
+  {
+    href: '/dashboard',
+    label: 'בית',
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+        <polyline points="9 22 9 12 15 12 15 22" />
+      </svg>
+    ),
+  },
   {
     href: '/journal',
-    label: 'יומן',
+    label: 'עסקאות',
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
@@ -20,21 +30,12 @@ const NAV_ITEMS = [
       </svg>
     ),
   },
-  {
-    href: '/dashboard',
-    label: 'דשבורד',
-    icon: (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="3" y="3" width="7" height="7" rx="1" />
-        <rect x="14" y="3" width="7" height="7" rx="1" />
-        <rect x="14" y="14" width="7" height="7" rx="1" />
-        <rect x="3" y="14" width="7" height="7" rx="1" />
-      </svg>
-    ),
-  },
+];
+
+const NAV_ITEMS_RIGHT = [
   {
     href: '/coach',
-    label: 'Coach',
+    label: "קואץ'",
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="12" cy="12" r="10" />
@@ -67,6 +68,12 @@ export default function AppShell({
   const router = useRouter();
   const [formOpen, setFormOpen] = useState(false);
 
+  useEffect(() => {
+    const handler = () => setFormOpen(true);
+    window.addEventListener('open-trade-form', handler);
+    return () => window.removeEventListener('open-trade-form', handler);
+  }, []);
+
   async function handleSignOut() {
     const supabase = createClient();
     await supabase.auth.signOut();
@@ -75,7 +82,7 @@ export default function AppShell({
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: 'transparent' }}>
-      {/* Top bar — glass dark */}
+      {/* Top bar */}
       <header className="glass-dark sticky top-0 z-30 flex items-center justify-between px-4 h-14 border-b"
         style={{
           background: 'rgba(10, 10, 15, 0.88)',
@@ -106,29 +113,50 @@ export default function AppShell({
 
       <main className="flex-1 overflow-auto pb-24">{children}</main>
 
-      {/* FAB — gold gradient + strong glow */}
-      <button
-        onClick={() => setFormOpen(true)}
-        className="fixed bottom-20 right-4 z-30 w-14 h-14 rounded-full flex items-center justify-center transition-transform active:scale-95"
-        style={{
-          background: 'linear-gradient(135deg, #F5C518 0%, #D4A017 100%)',
-          boxShadow: '0 4px 24px rgba(245,197,24,0.55), 0 0 48px rgba(245,197,24,0.2), inset 0 1px 0 rgba(255,255,255,0.25)',
-        }}
-        aria-label="הגש תוכנית עסקה">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="black" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-          <line x1="12" y1="5" x2="12" y2="19" />
-          <line x1="5" y1="12" x2="19" y2="12" />
-        </svg>
-      </button>
-
-      {/* Bottom navigation — glass dark */}
+      {/* Bottom navigation */}
       <nav className="glass-dark fixed bottom-0 left-0 right-0 z-30 flex items-center h-16 border-t"
         style={{
           background: 'rgba(10, 10, 15, 0.92)',
           borderColor: 'rgba(245, 197, 24, 0.1)',
           boxShadow: '0 -1px 0 rgba(245,197,24,0.05), 0 -4px 32px rgba(0,0,0,0.6)',
+          overflow: 'visible',
         }}>
-        {NAV_ITEMS.map((item) => {
+
+        {NAV_ITEMS_LEFT.map((item) => {
+          const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
+          return (
+            <Link key={item.href} href={item.href} prefetch={true}
+              className={cn('flex flex-col items-center gap-0.5 flex-1 py-2 transition-all duration-200',
+                isActive ? '' : 'text-tg-muted hover:text-tg-text-2')}
+              style={isActive ? {
+                color: 'var(--color-tg-primary)',
+                filter: 'drop-shadow(0 0 6px rgba(245,197,24,0.6))',
+              } : {}}>
+              {item.icon}
+              <span className="text-[10px] font-medium">{item.label}</span>
+            </Link>
+          );
+        })}
+
+        {/* Centre — raised add button */}
+        <div className="flex-1 flex flex-col items-center justify-center -translate-y-3">
+          <button
+            onClick={() => setFormOpen(true)}
+            aria-label="הוסף עסקה"
+            className="w-14 h-14 rounded-full flex items-center justify-center transition-transform active:scale-95"
+            style={{
+              background: 'linear-gradient(135deg, #F5C518 0%, #D4A017 100%)',
+              boxShadow: '0 4px 20px rgba(245,197,24,0.65), 0 0 48px rgba(245,197,24,0.25), inset 0 1px 0 rgba(255,255,255,0.25)',
+            }}>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="black" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+          </button>
+          <span className="text-[10px] font-semibold mt-1" style={{ color: 'var(--color-tg-primary)' }}>הוסף עסקה</span>
+        </div>
+
+        {NAV_ITEMS_RIGHT.map((item) => {
           const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
           return (
             <Link key={item.href} href={item.href} prefetch={true}

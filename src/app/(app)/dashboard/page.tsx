@@ -10,12 +10,13 @@ import TraderIdentityCard from '@/components/identity/TraderIdentity';
 import DangerMode from '@/components/danger/DangerMode';
 import { computeTraderProfile } from '@/lib/identity';
 import TradeHeatmap from '@/components/dashboard/TradeHeatmap';
+import EmptyStateButton from '@/components/dashboard/EmptyStateButton';
 
 function SectionSkeleton({ h = 80 }: { h?: number }) {
   return <div className="rounded-2xl animate-pulse" style={{ background: 'var(--color-tg-surface)', height: h }} />;
 }
 
-export const metadata = { title: 'דשבורד — Reflect' };
+export const metadata = { title: 'בית — Reflect' };
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -109,9 +110,9 @@ export default async function DashboardPage() {
   if (consecutiveLosses >= 2)
     dynamicMsg = `⚠️ ${consecutiveLosses} הפסדים רצופים — שקול הפסקה`;
   else if (revengeTrades.length >= 2)
-    dynamicMsg = `⚠️ ${revengeTrades.length} עסקאות Revenge עלו לך $${revengeLoss.toFixed(1)} — שים לב למצב רגשי`;
+    dynamicMsg = `⚠️ ${revengeTrades.length} עסקאות ריגשיות עלו לך $${revengeLoss.toFixed(1)} — שים לב למצב רגשי`;
   else if (totalPL > 0 && closedWithExit.length >= 3)
-    dynamicMsg = `💰 P&L מצטבר: +$${totalPL.toFixed(1)} — המשך לפי התוכנית`;
+    dynamicMsg = `💰 רווח מצטבר: +$${totalPL.toFixed(1)} — המשך לפי התוכנית`;
   else if (disciplineStreak >= 3)
     dynamicMsg = `🔥 ${disciplineStreak} ימים לפי החוקים ברצף`;
   else if (avgEmotional >= 4)
@@ -150,29 +151,31 @@ export default async function DashboardPage() {
       {totalTrades > 0 ? (
         <div className="grid grid-cols-3 gap-3">
           <ImpactCard
-            label="P&L"
+            label="רווח/הפסד"
             value={closedWithExit.length > 0 ? (totalPL >= 0 ? `+$${totalPL.toFixed(1)}` : `-$${Math.abs(totalPL).toFixed(1)}`) : '—'}
             color={totalPL >= 0 ? 'var(--color-tg-success)' : 'var(--color-tg-danger)'}
           />
           <ImpactCard
-            label="Win Rate"
+            label="אחוז הצלחה"
             value={closedWithExit.length > 0 ? `${winRatePct}%` : '—'}
             color="#60A5FA"
           />
           <ImpactCard
-            label="Revenge Cost"
+            label="עלות ריגשי"
             value={revengeTrades.length === 0 ? '✅ $0' : `-$${revengeLoss.toFixed(1)}`}
             color={revengeTrades.length === 0 ? 'var(--color-tg-success)' : 'var(--color-tg-danger)'}
           />
         </div>
       ) : (
-        <Card className="text-center py-8">
-          <div className="text-4xl mb-3">📊</div>
-          <h3 className="text-base font-semibold text-tg-text mb-1">
-            {'הגש את העסקה הראשונה שלך'}
-          </h3>
-          <p className="text-sm text-tg-text-2">
-            {'לחץ על + למטה כדי להתחיל'}
+        <Card className="text-center py-10 px-6">
+          <div className="text-5xl mb-4">📈</div>
+          <h3 className="text-xl font-bold text-tg-text mb-2">ברוך הבא ל-Reflect</h3>
+          <p className="text-sm text-tg-text-2 mb-6 leading-relaxed">
+            יומן מסחר חכם שעוזר לך לתעד עסקאות, לנתח ביצועים ולשמור על משמעת מסחר עם תובנות AI.
+          </p>
+          <EmptyStateButton />
+          <p className="text-xs text-tg-muted mt-4">
+            או לחץ על כפתור ה-+ בתפריט התחתון
           </p>
         </Card>
       )}
@@ -218,7 +221,7 @@ export default async function DashboardPage() {
                   <div>
                     <p className="text-sm font-medium text-tg-text">{trade.strategy}</p>
                     <p className="text-xs text-tg-muted">
-                      {Number(trade.entry_price).toFixed(2)} → SL {Number(trade.stop_loss).toFixed(2)} → TP {Number(trade.take_profit).toFixed(2)}
+                      {Number(trade.entry_price).toFixed(2)} → עצירה {Number(trade.stop_loss).toFixed(2)} → יעד {Number(trade.take_profit).toFixed(2)}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
