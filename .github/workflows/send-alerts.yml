@@ -3,7 +3,7 @@ name: Send Alerts
 on:
   schedule:
     - cron: '* * * * *'
-  workflow_dispatch:
+  workflow_dispatch::
 
 jobs:
   send-alerts:
