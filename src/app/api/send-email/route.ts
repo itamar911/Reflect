@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
-const FROM_EMAIL = 'Reflect Trading <alerts@reflekt-fawn.vercel.app>';
+const FROM_EMAIL = 'Reflect Trading <onboarding@resend.dev>';
 
 interface EmailPayload {
   to: string;

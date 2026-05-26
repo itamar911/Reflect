@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const CRON_SECRET = process.env.CRON_SECRET;
-const FROM_EMAIL = 'Reflect Trading <alerts@reflekt-fawn.vercel.app>';
+const FROM_EMAIL = 'Reflect Trading <onboarding@resend.dev>';
 
 function createAdminClient() {
   return createClient(

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
-const FROM_EMAIL = 'Reflect Trading <alerts@reflekt-fawn.vercel.app>';
+const FROM_EMAIL = 'Reflect Trading <onboarding@resend.dev>';
 const WINDOW_MINUTES = 5;
 
 // ── Email sender ────────────────────────────────────────────────────────────
