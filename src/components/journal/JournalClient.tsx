@@ -2,10 +2,13 @@
 
 import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
 import Card from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import TradeDebrief from '@/components/journal/TradeDebrief';
 import CloseTrade from '@/components/journal/CloseTrade';
+
+const TradingViewChart = dynamic(() => import('@/components/journal/TradingViewChart'), { ssr: false });
 
 type FilterTab = 'all' | 'open' | 'closed';
 
@@ -14,6 +17,7 @@ const EMOTIONAL_EMOJIS: Record<number, string> = { 1: '😰', 2: '😟', 3: '�
 interface Trade {
   id: string;
   strategy: string;
+  symbol: string | null;
   entry_price: number;
   stop_loss: number;
   take_profit: number;
@@ -119,6 +123,7 @@ function TradeCard({ trade, onClose }: { trade: Trade; onClose: () => void }) {
     ? (trade.exit_price - trade.entry_price).toFixed(2)
     : null;
   const isWin = pnlPoints !== null ? parseFloat(pnlPoints) > 0 : null;
+  const [showChart, setShowChart] = useState(false);
 
   return (
     <Card padding="none">
@@ -128,6 +133,12 @@ function TradeCard({ trade, onClose }: { trade: Trade; onClose: () => void }) {
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-sm font-semibold text-tg-text">{trade.strategy}</span>
+              {trade.symbol && (
+                <span className="text-xs font-mono px-1.5 py-0.5 rounded-md font-semibold"
+                  style={{ background: 'var(--color-tg-surface-2)', color: 'var(--color-tg-primary)' }}>
+                  {trade.symbol}
+                </span>
+              )}
               <Badge variant={isClosed ? (isWin ? 'success' : isWin === false ? 'danger' : 'default') : 'primary'}>
                 {isClosed ? (isWin ? 'רווח' : isWin === false ? 'הפסד' : 'סגור') : 'פתוח'}
               </Badge>
@@ -175,6 +186,39 @@ function TradeCard({ trade, onClose }: { trade: Trade; onClose: () => void }) {
           <p className="text-xs text-tg-text-2 flex-1 line-clamp-2">{trade.trade_reason}</p>
           <span className="text-lg shrink-0">{EMOTIONAL_EMOJIS[trade.emotional_state] ?? '😐'}</span>
         </div>
+
+        {/* Chart toggle — only available when symbol is set */}
+        {trade.symbol && (
+          <button
+            onClick={() => setShowChart((v) => !v)}
+            className="flex items-center gap-1.5 text-xs font-medium mb-3 px-3 py-1.5 rounded-xl border transition-all w-full justify-center"
+            style={{
+              borderColor: showChart ? 'var(--color-tg-primary)' : 'var(--color-tg-border)',
+              background: showChart ? 'var(--color-tg-primary-muted)' : 'var(--color-tg-surface-2)',
+              color: showChart ? 'var(--color-tg-primary)' : 'var(--color-tg-text-2)',
+            }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+            </svg>
+            {showChart ? 'הסתר גרף' : `גרף ${trade.symbol}`}
+          </button>
+        )}
+
+        {/* TradingView chart */}
+        {showChart && trade.symbol && (
+          <div className="mb-3">
+            <TradingViewChart
+              symbol={trade.symbol}
+              entryPrice={trade.entry_price}
+              stopLoss={trade.stop_loss}
+              takeProfit={trade.take_profit}
+              exitPrice={trade.exit_price}
+              submittedAt={trade.submitted_at}
+              closedAt={trade.closed_at}
+            />
+          </div>
+        )}
 
         {/* Close button for open trades */}
         {!isClosed && (

@@ -54,6 +54,7 @@ export interface TradePlan {
   id: string;
   user_id: string;
   strategy: TradeStrategy | string;
+  symbol: string | null;
   entry_price: number;
   stop_loss: number;
   take_profit: number;
@@ -73,6 +74,7 @@ export interface TradePlan {
 
 export interface TradePlanInput {
   strategy: TradeStrategy | string;
+  symbol: string;
   entry_price: string;
   stop_loss: string;
   take_profit: string;

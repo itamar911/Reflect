@@ -19,6 +19,7 @@ export default async function JournalPage() {
   const allTrades = (trades ?? []).map((t) => ({
     id: t.id as string,
     strategy: t.strategy as string,
+    symbol: (t.symbol as string | null) ?? null,
     entry_price: Number(t.entry_price),
     stop_loss: Number(t.stop_loss),
     take_profit: Number(t.take_profit),

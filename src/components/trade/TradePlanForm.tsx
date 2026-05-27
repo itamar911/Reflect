@@ -27,6 +27,7 @@ const REASON_TAGS = [
 
 const EMPTY_FORM: TradePlanInput = {
   strategy: '',
+  symbol: '',
   entry_price: '',
   stop_loss: '',
   take_profit: '',
@@ -162,6 +163,7 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
     const { error } = await supabase.from('trade_plans').insert({
       user_id: userId,
       strategy: form.strategy,
+      symbol: form.symbol.trim() || null,
       entry_price: entry,
       stop_loss: sl,
       take_profit: tp,
@@ -285,7 +287,15 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
             </FormSection>
 
             {/* Step 2 — Prices */}
-            <FormSection step={2} label="מחירים ו-R:R" active={activeStep === 2} done={activeStep > 2}>
+            <FormSection step={2} label="סימול ומחירים" active={activeStep === 2} done={activeStep > 2}>
+              <input
+                type="text"
+                placeholder="סימול נייר (SPY, EURUSD, AAPL...)"
+                value={form.symbol}
+                onChange={(e) => { setForm({ ...form, symbol: e.target.value.toUpperCase() }); setValidationResult(null); }}
+                className="w-full h-10 px-3 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none focus:border-tg-primary transition-colors"
+                style={{ background: 'var(--color-tg-surface-2)' }}
+              />
               <div className="grid grid-cols-3 gap-2">
                 <PriceInput
                   label="כניסה"
