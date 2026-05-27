@@ -186,12 +186,15 @@ function RecommendationCard({ content }: { content: string }) {
       : 'var(--color-tg-warning-muted)';
   const actionLabel = isBuy ? 'Buy' : isSell ? 'Sell' : isWait ? 'Wait' : firstLine;
 
-  // Split remaining lines into KV pairs (have ':') and explanation text (after KV ends)
+  // Split remaining lines into known KV pairs and explanation text.
+  // Use explicit label matching so sentences containing colons (e.g. "R:R")
+  // are never misidentified as KV rows.
+  const KV_LABEL = /^(כניסה|stop\s*loss|take\s*profit|sl|tp|entry)\s*:/i;
   const kvLines: string[] = [];
   const explanationLines: string[] = [];
   let passedKV = false;
   for (const line of lines.slice(1)) {
-    if (!passedKV && line.includes(':')) {
+    if (!passedKV && KV_LABEL.test(line)) {
       kvLines.push(line);
     } else {
       passedKV = true;
