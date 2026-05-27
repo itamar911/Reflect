@@ -186,7 +186,19 @@ function RecommendationCard({ content }: { content: string }) {
       : 'var(--color-tg-warning-muted)';
   const actionLabel = isBuy ? 'Buy' : isSell ? 'Sell' : isWait ? 'Wait' : firstLine;
 
-  const details = lines.slice(1);
+  // Split remaining lines into KV pairs (have ':') and explanation text (after KV ends)
+  const kvLines: string[] = [];
+  const explanationLines: string[] = [];
+  let passedKV = false;
+  for (const line of lines.slice(1)) {
+    if (!passedKV && line.includes(':')) {
+      kvLines.push(line);
+    } else {
+      passedKV = true;
+      explanationLines.push(line);
+    }
+  }
+  const explanation = explanationLines.join(' ');
 
   return (
     <div className="rounded-xl p-3" style={{ background: 'var(--color-tg-surface-2)' }}>
@@ -196,26 +208,33 @@ function RecommendationCard({ content }: { content: string }) {
           {actionLabel}
         </span>
       </div>
-      {details.map((line, i) => {
+      {kvLines.map((line, i) => {
         const [label, ...rest] = line.split(':');
         const val = rest.join(':').trim();
-        return val ? (
+        return (
           <div key={i} className="flex items-center justify-between py-0.5">
             <span className="text-xs text-tg-muted">{label.trim()}</span>
             <span className="text-xs font-semibold font-mono text-tg-text">{val}</span>
           </div>
-        ) : (
-          <p key={i} className="text-xs text-tg-text">{line}</p>
         );
       })}
+      {explanation && (
+        <p className="text-xs leading-relaxed mt-2 pt-2 border-t border-tg-border"
+          style={{ color: 'var(--color-tg-text-2)' }}>
+          {explanation}
+        </p>
+      )}
     </div>
   );
 }
 
 function RiskCard({ content }: { content: string }) {
-  const isLow = /low/i.test(content);
-  const isHigh = /high/i.test(content);
-  const isMedium = /medium/i.test(content);
+  const lines = content.split('\n').map((l) => l.trim()).filter(Boolean);
+  const firstLine = lines[0] ?? '';
+
+  const isLow = /low/i.test(firstLine);
+  const isHigh = /high/i.test(firstLine);
+  const isMedium = /medium/i.test(firstLine);
 
   const level = isLow ? 'Low' : isHigh ? 'High' : isMedium ? 'Medium' : null;
   const color = isLow
@@ -229,22 +248,23 @@ function RiskCard({ content }: { content: string }) {
       ? 'var(--color-tg-danger-muted)'
       : 'var(--color-tg-warning-muted)';
 
-  // Strip the level word from the explanation sentence
-  const explanation = content.replace(/^(low|medium|high)\s*[—\-–]?\s*/i, '').trim();
+  // Level may be on its own line or inline ("Low — text"); collect all explanation text
+  const firstLineRest = firstLine.replace(/^(low|medium|high)\s*[—\-–]?\s*/i, '').trim();
+  const explanation = [firstLineRest, ...lines.slice(1)].filter(Boolean).join(' ');
 
   return (
     <div className="rounded-xl p-3" style={{ background: 'var(--color-tg-surface-2)' }}>
-      <p className="text-xs font-bold mb-2" style={{ color: 'var(--color-tg-text-2)' }}>רמת סיכון</p>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs font-bold" style={{ color: 'var(--color-tg-text-2)' }}>רמת סיכון</p>
         {level && (
-          <span className="text-xs font-bold px-2.5 py-1 rounded-lg shrink-0" style={{ background: bg, color }}>
+          <span className="text-xs font-bold px-2.5 py-1 rounded-lg" style={{ background: bg, color }}>
             {level}
           </span>
         )}
-        <p className="text-xs leading-relaxed" style={{ color: 'var(--color-tg-text)' }}>
-          {explanation || content}
-        </p>
       </div>
+      <p className="text-xs leading-relaxed" style={{ color: 'var(--color-tg-text)' }}>
+        {explanation || content}
+      </p>
     </div>
   );
 }
@@ -255,7 +275,7 @@ function KeyLevelsCard({ content }: { content: string }) {
   return (
     <div className="rounded-xl p-3" style={{ background: 'var(--color-tg-surface-2)' }}>
       <p className="text-xs font-bold mb-2" style={{ color: 'var(--color-tg-success)' }}>רמות מפתח</p>
-      <div className="flex flex-col gap-1">
+      <div className="flex flex-col">
         {lines.map((line, i) => {
           const isSupport = /תמיכה/i.test(line);
           const isResistance = /התנגד/i.test(line);
@@ -265,19 +285,33 @@ function KeyLevelsCard({ content }: { content: string }) {
               ? 'var(--color-tg-success)'
               : 'var(--color-tg-text-2)';
           const clean = line.replace(/^•\s*/, '');
-          const [label, ...rest] = clean.split(':');
-          const val = rest.join(':').trim();
+          const colonIdx = clean.indexOf(':');
+
+          if (colonIdx === -1) {
+            return (
+              <div key={i} className="flex items-center gap-2 py-1.5">
+                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: dotColor }} />
+                <span className="text-xs text-tg-text">{clean}</span>
+              </div>
+            );
+          }
+
+          const label = clean.slice(0, colonIdx).trim();
+          const rest = clean.slice(colonIdx + 1).trim();
+          // Split "price — explanation" on em-dash / en-dash / hyphen
+          const dashMatch = rest.match(/^(.+?)\s*[—–-]\s*(.+)$/);
+          const price = dashMatch ? dashMatch[1].trim() : rest;
+          const note = dashMatch ? dashMatch[2].trim() : '';
 
           return (
-            <div key={i} className="flex items-center gap-2">
-              <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: dotColor }} />
-              {val ? (
-                <>
-                  <span className="text-xs text-tg-muted">{label.trim()}</span>
-                  <span className="text-xs font-semibold font-mono ml-auto" style={{ color: dotColor }}>{val}</span>
-                </>
-              ) : (
-                <span className="text-xs text-tg-text">{clean}</span>
+            <div key={i} className="py-1.5 border-b border-tg-border last:border-b-0">
+              <div className="flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: dotColor }} />
+                <span className="text-xs text-tg-muted">{label}</span>
+                <span className="text-xs font-semibold font-mono ml-auto" style={{ color: dotColor }}>{price}</span>
+              </div>
+              {note && (
+                <p className="text-xs mt-0.5 pr-3.5" style={{ color: 'var(--color-tg-muted)' }}>{note}</p>
               )}
             </div>
           );
