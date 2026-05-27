@@ -138,31 +138,151 @@ function AnalysisDisplay({ text }: { text: string }) {
     );
   }
 
-  const sectionColors: Record<string, string> = {
-    'מגמה כללית': 'var(--color-tg-primary)',
-    'רמות תמיכה והתנגדות': 'var(--color-tg-success)',
-    'נקודות כניסה מומלצות': 'var(--color-tg-success)',
-    'Stop Loss ו-Take Profit': 'var(--color-tg-danger)',
-    'סיכום והמלצה': 'var(--color-tg-primary)',
-  };
-
   return (
     <div className="flex flex-col gap-2.5">
       {parts.map((part, i) => (
-        <div key={i} className="rounded-xl p-3"
-          style={{ background: 'var(--color-tg-surface-2)' }}>
-          {part.title && (
-            <p className="text-xs font-bold mb-1.5"
-              style={{ color: sectionColors[part.title] ?? 'var(--color-tg-text-2)' }}>
-              {part.title}
-            </p>
-          )}
-          <p className="text-xs leading-relaxed whitespace-pre-wrap"
-            style={{ color: 'var(--color-tg-text)' }}>
-            {part.content}
-          </p>
-        </div>
+        <SectionCard key={i} title={part.title} content={part.content} />
       ))}
+    </div>
+  );
+}
+
+function SectionCard({ title, content }: { title?: string; content: string }) {
+  if (title === 'המלצה') return <RecommendationCard content={content} />;
+  if (title === 'רמת סיכון') return <RiskCard content={content} />;
+  if (title === 'רמות מפתח') return <KeyLevelsCard content={content} />;
+
+  // מגמה כללית / fallback
+  return (
+    <div className="rounded-xl p-3" style={{ background: 'var(--color-tg-surface-2)' }}>
+      {title && (
+        <p className="text-xs font-bold mb-1" style={{ color: 'var(--color-tg-primary)' }}>
+          {title}
+        </p>
+      )}
+      <p className="text-xs leading-relaxed" style={{ color: 'var(--color-tg-text)' }}>
+        {content}
+      </p>
+    </div>
+  );
+}
+
+function RecommendationCard({ content }: { content: string }) {
+  const lines = content.split('\n').map((l) => l.trim()).filter(Boolean);
+  const firstLine = lines[0] ?? '';
+  const isBuy = /buy/i.test(firstLine);
+  const isSell = /sell/i.test(firstLine);
+  const isWait = /wait/i.test(firstLine);
+
+  const actionColor = isBuy
+    ? 'var(--color-tg-success)'
+    : isSell
+      ? 'var(--color-tg-danger)'
+      : 'var(--color-tg-warning)';
+  const actionBg = isBuy
+    ? 'var(--color-tg-success-muted)'
+    : isSell
+      ? 'var(--color-tg-danger-muted)'
+      : 'var(--color-tg-warning-muted)';
+  const actionLabel = isBuy ? 'Buy' : isSell ? 'Sell' : isWait ? 'Wait' : firstLine;
+
+  const details = lines.slice(1);
+
+  return (
+    <div className="rounded-xl p-3" style={{ background: 'var(--color-tg-surface-2)' }}>
+      <p className="text-xs font-bold mb-2" style={{ color: 'var(--color-tg-primary)' }}>המלצה</p>
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-sm font-bold px-3 py-1 rounded-lg" style={{ background: actionBg, color: actionColor }}>
+          {actionLabel}
+        </span>
+      </div>
+      {details.map((line, i) => {
+        const [label, ...rest] = line.split(':');
+        const val = rest.join(':').trim();
+        return val ? (
+          <div key={i} className="flex items-center justify-between py-0.5">
+            <span className="text-xs text-tg-muted">{label.trim()}</span>
+            <span className="text-xs font-semibold font-mono text-tg-text">{val}</span>
+          </div>
+        ) : (
+          <p key={i} className="text-xs text-tg-text">{line}</p>
+        );
+      })}
+    </div>
+  );
+}
+
+function RiskCard({ content }: { content: string }) {
+  const isLow = /low/i.test(content);
+  const isHigh = /high/i.test(content);
+  const isMedium = /medium/i.test(content);
+
+  const level = isLow ? 'Low' : isHigh ? 'High' : isMedium ? 'Medium' : null;
+  const color = isLow
+    ? 'var(--color-tg-success)'
+    : isHigh
+      ? 'var(--color-tg-danger)'
+      : 'var(--color-tg-warning)';
+  const bg = isLow
+    ? 'var(--color-tg-success-muted)'
+    : isHigh
+      ? 'var(--color-tg-danger-muted)'
+      : 'var(--color-tg-warning-muted)';
+
+  // Strip the level word from the explanation sentence
+  const explanation = content.replace(/^(low|medium|high)\s*[—\-–]?\s*/i, '').trim();
+
+  return (
+    <div className="rounded-xl p-3" style={{ background: 'var(--color-tg-surface-2)' }}>
+      <p className="text-xs font-bold mb-2" style={{ color: 'var(--color-tg-text-2)' }}>רמת סיכון</p>
+      <div className="flex items-center gap-2">
+        {level && (
+          <span className="text-xs font-bold px-2.5 py-1 rounded-lg shrink-0" style={{ background: bg, color }}>
+            {level}
+          </span>
+        )}
+        <p className="text-xs leading-relaxed" style={{ color: 'var(--color-tg-text)' }}>
+          {explanation || content}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function KeyLevelsCard({ content }: { content: string }) {
+  const lines = content.split('\n').map((l) => l.trim()).filter(Boolean);
+
+  return (
+    <div className="rounded-xl p-3" style={{ background: 'var(--color-tg-surface-2)' }}>
+      <p className="text-xs font-bold mb-2" style={{ color: 'var(--color-tg-success)' }}>רמות מפתח</p>
+      <div className="flex flex-col gap-1">
+        {lines.map((line, i) => {
+          const isSupport = /תמיכה/i.test(line);
+          const isResistance = /התנגד/i.test(line);
+          const dotColor = isResistance
+            ? 'var(--color-tg-danger)'
+            : isSupport
+              ? 'var(--color-tg-success)'
+              : 'var(--color-tg-text-2)';
+          const clean = line.replace(/^•\s*/, '');
+          const [label, ...rest] = clean.split(':');
+          const val = rest.join(':').trim();
+
+          return (
+            <div key={i} className="flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: dotColor }} />
+              {val ? (
+                <>
+                  <span className="text-xs text-tg-muted">{label.trim()}</span>
+                  <span className="text-xs font-semibold font-mono ml-auto" style={{ color: dotColor }}>{val}</span>
+                </>
+              ) : (
+                <span className="text-xs text-tg-text">{clean}</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
