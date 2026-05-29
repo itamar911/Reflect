@@ -1,6 +1,6 @@
 export default function Loading() {
   return (
-    <div className="px-4 py-5 flex flex-col gap-4 max-w-2xl mx-auto">
+    <div className="px-4 py-5 flex flex-col gap-4 md:max-w-none">
       <div className="h-7 w-40 rounded-xl animate-pulse" style={{ background: 'var(--color-tg-surface)' }} />
       <div className="h-11 rounded-xl animate-pulse" style={{ background: 'var(--color-tg-surface)' }} />
       {[1, 2, 3, 4].map(i => (

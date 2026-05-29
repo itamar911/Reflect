@@ -39,7 +39,7 @@ export default async function SettingsPage() {
   }
 
   return (
-    <div className="px-4 py-5 flex flex-col gap-5 max-w-2xl mx-auto">
+    <div className="px-4 py-5 flex flex-col gap-5 md:max-w-none">
       <h1 className="text-xl font-bold text-tg-text">הגדרות</h1>
 
       {/* Profile section */}

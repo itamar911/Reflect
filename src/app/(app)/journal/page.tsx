@@ -50,7 +50,7 @@ export default async function JournalPage() {
   }));
 
   return (
-    <div className="px-4 py-5 flex flex-col gap-4 max-w-2xl mx-auto">
+    <div className="px-4 py-5 flex flex-col gap-4 md:max-w-none">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-tg-text">יומן עסקאות</h1>

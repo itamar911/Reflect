@@ -30,7 +30,7 @@ export default async function CoachPage() {
   }));
 
   return (
-    <div className="px-4 py-5 flex flex-col gap-5 max-w-2xl mx-auto">
+    <div className="px-4 py-5 flex flex-col gap-5 md:max-w-none">
       <div>
         <h1 className="text-xl font-bold text-tg-text">יועץ המסחר שלי</h1>
         <p className="text-sm text-tg-text-2 mt-0.5">השפעה ריאלית על הארנק שלך — מבוסס על הנתונים שלך</p>

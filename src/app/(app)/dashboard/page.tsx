@@ -121,7 +121,7 @@ export default async function DashboardPage() {
     dynamicMsg = 'כלי המסחר שלך מוכן — תכנן לפני שתיכנס';
 
   return (
-    <div className="px-4 py-5 flex flex-col gap-4 max-w-2xl mx-auto">
+    <div className="px-4 py-5 flex flex-col gap-4 md:max-w-none">
 
       <div className="flex items-center justify-between">
         <div>
