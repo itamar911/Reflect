@@ -98,12 +98,23 @@ export default function TradingViewChart({
   const widgetRef = useRef<TVWidget | null>(null);
 
   useEffect(() => {
+    // Each effect invocation gets its own cancelled flag.
+    // This prevents a stale initWidget (queued in _tvScriptCallbacks before unmount)
+    // from running after the component has already been torn down or remounted.
+    let cancelled = false;
+
     const tvSymbol = toTvSymbol(symbol);
     const interval = getInterval(submittedAt, closedAt);
 
     function initWidget() {
+      if (cancelled) return;
+
       const container = document.getElementById(containerId);
       if (!container || !window.TradingView) return;
+
+      // Wipe any leftover iframe/content from a previous widget instance
+      // before handing the container to a new widget.
+      container.innerHTML = '';
 
       const widget = new window.TradingView.widget({
         container_id: containerId,
@@ -124,6 +135,8 @@ export default function TradingViewChart({
       widgetRef.current = widget;
 
       widget.onChartReady(() => {
+        // Guard: component may have unmounted while the widget was initialising
+        if (cancelled) return;
         try {
           const chart = widget.activeChart();
           const isWin = exitPrice != null ? exitPrice > entryPrice : null;
@@ -155,6 +168,7 @@ export default function TradingViewChart({
     loadTvScript(initWidget);
 
     return () => {
+      cancelled = true;
       widgetRef.current = null;
       const container = document.getElementById(containerId);
       if (container) container.innerHTML = '';
