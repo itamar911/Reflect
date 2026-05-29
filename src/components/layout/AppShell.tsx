@@ -138,7 +138,9 @@ export default function AppShell({
               prefetch={true}
               className={cn(
                 'flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-sm font-medium',
-                active(item.href) ? '' : 'text-tg-muted hover:text-tg-text-2 hover:bg-[var(--shell-hover)]',
+                active(item.href)
+                  ? 'sidebar-link-active'
+                  : 'text-tg-muted hover:text-tg-text-2 hover:bg-[var(--shell-hover)]',
               )}
               style={active(item.href) ? {
                 color: GOLD,

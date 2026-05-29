@@ -30,6 +30,11 @@
 :root {
   color-scheme: dark;
 
+  /* Text hierarchy — dark defaults */
+  --text-primary:   #e8edf5;  /* near-white, inherits from --color-tg-text */
+  --text-secondary: #7b8fa8;  /* mid-blue-grey */
+  --text-muted:     #3d5068;  /* dim blue-grey */
+
   /* Shell chrome — dark defaults */
   --shell-bg:             rgba(10, 10, 15, 0.97);
   --shell-header-bg:      rgba(10, 10, 15, 0.88);
@@ -63,9 +68,15 @@ html.light {
   --color-tg-border:       #d1d8e0;
   --color-tg-border-light: #dde3ea;
 
-  --color-tg-text:         #131722;
-  --color-tg-text-2:       #787b86;
-  --color-tg-muted:        #b2b5be;
+  /* Text hierarchy — light overrides (all pass WCAG AA on #fff) */
+  --text-primary:   #131722;  /* 18.1:1 — near-black */
+  --text-secondary: #3e4451;  /*  8.9:1 — dark slate  */
+  --text-muted:     #5c6370;  /*  5.9:1 — medium grey */
+
+  /* Sync existing tg-text tokens to the new hierarchy */
+  --color-tg-text:    #131722;
+  --color-tg-text-2:  #3e4451;  /* was #787b86 → now passes WCAG AA */
+  --color-tg-muted:   #5c6370;  /* was #b2b5be → now passes WCAG AA */
 
   --color-tg-success:      #26a69a;
   --color-tg-success-muted: rgba(38, 166, 154, 0.12);
@@ -76,7 +87,7 @@ html.light {
 html,
 body {
   background: var(--color-tg-bg, #0a0a0f);
-  color: var(--color-tg-text);
+  color: var(--text-primary);
   min-height: 100dvh;
   transition: background 0.2s ease, color 0.2s ease;
 }
@@ -85,6 +96,12 @@ body {
 html.light body::before,
 html.light body::after {
   display: none;
+}
+
+/* Sidebar active link: swap gold text → dark text in light mode for readability */
+html.light .sidebar-link-active {
+  color: var(--text-primary) !important;
+  background: rgba(245, 197, 24, 0.15) !important;
 }
 
 /* Deep space atmosphere — stars, nebula glow, navy clouds */
@@ -249,3 +266,9 @@ input[type="button"] {
 .danger-overlay {
   background: linear-gradient(180deg, rgba(255,59,48,0.06) 0%, transparent 100%);
 }
+
+/* ── Text hierarchy utilities ────────────────────────────────── */
+
+.text-primary   { color: var(--text-primary); }
+.text-secondary { color: var(--text-secondary); }
+.text-muted-var { color: var(--text-muted); }
