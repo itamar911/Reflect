@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import TradePlanForm from '@/components/trade/TradePlanForm';
 import { cn } from '@/lib/utils';
+import { ThemeToggle } from '@/components/theme/ThemeToggle';
 
 // ── Icons ────────────────────────────────────────────────────────────────────
 
@@ -178,6 +179,7 @@ export default function AppShell({
               {(displayName || '?').charAt(0).toUpperCase()}
             </div>
             <p className="flex-1 text-xs font-medium text-tg-text truncate min-w-0">{displayName}</p>
+            <ThemeToggle className="p-1 rounded-md hover:bg-white/5 transition-colors shrink-0" />
             <button
               onClick={handleSignOut}
               className="text-xs text-tg-muted hover:text-tg-danger transition-colors shrink-0"
@@ -216,7 +218,7 @@ export default function AppShell({
             <span className="font-bold text-sm text-glow-gold" style={{ color: GOLD }}>Reflect</span>
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-xs text-tg-muted hidden sm:block">{displayName}</span>
+            <ThemeToggle className="p-1.5 rounded-md hover:bg-white/5 transition-colors" />
             <button onClick={handleSignOut} className="text-xs text-tg-muted hover:text-tg-danger transition-colors">
               יציאה
             </button>

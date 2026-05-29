@@ -31,11 +31,38 @@
   color-scheme: dark;
 }
 
+/* ── Light mode token overrides ─────────────────────────────── */
+html.light {
+  color-scheme: light;
+
+  --color-tg-bg:           #ffffff;
+  --color-tg-surface:      #f4f6f8;
+  --color-tg-surface-2:    #e9ecf0;
+  --color-tg-border:       #d1d8e0;
+  --color-tg-border-light: #dde3ea;
+
+  --color-tg-text:         #131722;
+  --color-tg-text-2:       #787b86;
+  --color-tg-muted:        #b2b5be;
+
+  --color-tg-success:      #26a69a;
+  --color-tg-success-muted: rgba(38, 166, 154, 0.12);
+  --color-tg-danger:       #ef5350;
+  --color-tg-danger-muted: rgba(239, 83, 80, 0.12);
+}
+
 html,
 body {
-  background: #0a0a0f;
+  background: var(--color-tg-bg, #0a0a0f);
   color: var(--color-tg-text);
   min-height: 100dvh;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+/* Hide the starfield/vignette in light mode */
+html.light body::before,
+html.light body::after {
+  display: none;
 }
 
 /* Deep space atmosphere — stars, nebula glow, navy clouds */
