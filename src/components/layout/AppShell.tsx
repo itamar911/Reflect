@@ -97,7 +97,7 @@ export default function AppShell({
   const active = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
   return (
-    <div className="min-h-screen flex" style={{ background: 'transparent' }}>
+    <div className="min-h-screen" style={{ background: 'transparent' }}>
 
       {/* ── Desktop sidebar ──────────────────────────────────────────────── */}
       <aside
@@ -189,7 +189,7 @@ export default function AppShell({
       </aside>
 
       {/* ── Main content column ──────────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col min-h-screen md:ml-[220px]">
+      <div className="flex flex-col min-h-screen md:ml-[220px]">
 
         {/* Mobile-only top bar */}
         <header
