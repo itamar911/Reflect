@@ -1,12 +1,12 @@
 'use client';
 
-import { useEffect, useId, useRef } from 'react';
+import { Component, useEffect, useRef, useState } from 'react';
+
+// ── TradingView global types ──────────────────────────────────────────────────
 
 declare global {
   interface Window {
-    TradingView?: {
-      widget: new (config: Record<string, unknown>) => TVWidget;
-    };
+    TradingView?: { widget: new (config: Record<string, unknown>) => TVWidget };
     _tvScriptLoaded?: boolean;
     _tvScriptCallbacks?: Array<() => void>;
   }
@@ -19,7 +19,10 @@ interface TVChart {
 interface TVWidget {
   onChartReady(callback: () => void): void;
   activeChart(): TVChart;
+  remove?(): void;
 }
+
+// ── Props ─────────────────────────────────────────────────────────────────────
 
 interface Props {
   symbol: string;
@@ -31,7 +34,8 @@ interface Props {
   closedAt?: string | null;
 }
 
-// Resolve symbol to TradingView format
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
 function toTvSymbol(sym: string): string {
   const s = sym.toUpperCase().trim();
   if (!s) return 'SPY';
@@ -61,16 +65,9 @@ function getInterval(submittedAt: string, closedAt?: string | null): string {
 }
 
 function loadTvScript(onReady: () => void) {
-  if (window._tvScriptLoaded) {
-    onReady();
-    return;
-  }
-  if (!window._tvScriptCallbacks) {
-    window._tvScriptCallbacks = [];
-  }
+  if (window._tvScriptLoaded) { onReady(); return; }
+  if (!window._tvScriptCallbacks) window._tvScriptCallbacks = [];
   window._tvScriptCallbacks.push(onReady);
-
-  // Only add the script tag once
   if (document.querySelector('script[src*="tradingview.com/tv.js"]')) return;
 
   const script = document.createElement('script');
@@ -81,104 +78,192 @@ function loadTvScript(onReady: () => void) {
     (window._tvScriptCallbacks ?? []).forEach((cb) => cb());
     window._tvScriptCallbacks = [];
   };
+  script.onerror = () => {
+    console.error('[TradingView] Failed to load tv.js script');
+  };
   document.head.appendChild(script);
 }
 
-export default function TradingViewChart({
-  symbol,
-  entryPrice,
-  stopLoss,
-  takeProfit,
-  exitPrice,
-  submittedAt,
-  closedAt,
+// ── Error Boundary ────────────────────────────────────────────────────────────
+
+interface BoundaryState { error: Error | null }
+
+class ChartErrorBoundary extends Component<{ children: React.ReactNode; onReset: () => void }, BoundaryState> {
+  state: BoundaryState = { error: null };
+
+  static getDerivedStateFromError(error: Error): BoundaryState {
+    console.error('[TradingView] Error boundary caught:', error);
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error('[TradingView] componentDidCatch:', error, info.componentStack);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="rounded-xl border border-tg-border flex flex-col items-center justify-center gap-3 py-10"
+          style={{ background: 'var(--color-tg-surface)', minHeight: 200 }}>
+          <p className="text-sm text-tg-text-2">לא ניתן לטעון את הגרף</p>
+          <button
+            className="text-xs px-3 py-1.5 rounded-lg transition-colors"
+            style={{ background: 'var(--color-tg-surface-2)', color: 'var(--color-tg-text-2)', border: '1px solid var(--color-tg-border)' }}
+            onClick={() => { this.setState({ error: null }); this.props.onReset(); }}
+          >
+            נסה שוב
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// ── Inner chart component ─────────────────────────────────────────────────────
+
+function TradingViewChartInner({
+  symbol, entryPrice, stopLoss, takeProfit, exitPrice, submittedAt, closedAt,
 }: Props) {
-  const rawId = useId().replace(/:/g, '');
-  const containerId = `tv_${rawId}`;
+  // A fresh unique ID on every mount — avoids TradingView's internal ID collision
+  // when the component unmounts and remounts at the same tree position.
+  // useId() returns the same value for the same position; useRef avoids that.
+  const containerIdRef = useRef<string>(
+    `tv_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`
+  );
+  const containerId = containerIdRef.current;
   const widgetRef = useRef<TVWidget | null>(null);
+  const [initError, setInitError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Each effect invocation gets its own cancelled flag.
-    // This prevents a stale initWidget (queued in _tvScriptCallbacks before unmount)
-    // from running after the component has already been torn down or remounted.
     let cancelled = false;
 
     const tvSymbol = toTvSymbol(symbol);
     const interval = getInterval(submittedAt, closedAt);
 
     function initWidget() {
-      if (cancelled) return;
+      if (cancelled) {
+        console.warn('[TradingView] initWidget skipped — component already unmounted');
+        return;
+      }
 
       const container = document.getElementById(containerId);
-      if (!container || !window.TradingView) return;
+      if (!container) {
+        console.error('[TradingView] Container not found:', containerId);
+        return;
+      }
+      if (!window.TradingView) {
+        console.error('[TradingView] window.TradingView not available after script load');
+        return;
+      }
 
-      // Wipe any leftover iframe/content from a previous widget instance
-      // before handing the container to a new widget.
+      // Wipe any residual iframe from the previous widget instance
       container.innerHTML = '';
 
-      const widget = new window.TradingView.widget({
-        container_id: containerId,
-        symbol: tvSymbol,
-        interval,
-        theme: 'dark',
-        style: '1',
-        locale: 'en',
-        width: '100%',
-        height: 400,
-        save_image: false,
-        hide_side_toolbar: true,
-        allow_symbol_change: true,
-        backgroundColor: '#0f0f10',
-        gridColor: '#1a1a1f',
-      });
+      let widget: TVWidget;
+      try {
+        console.info('[TradingView] Creating widget in', containerId, 'symbol:', tvSymbol);
+        widget = new window.TradingView.widget({
+          container_id: containerId,
+          symbol: tvSymbol,
+          interval,
+          theme: 'dark',
+          style: '1',
+          locale: 'en',
+          width: '100%',
+          height: 400,
+          save_image: false,
+          hide_side_toolbar: true,
+          allow_symbol_change: true,
+          backgroundColor: '#0f0f10',
+          gridColor: '#1a1a1f',
+        });
+      } catch (err) {
+        console.error('[TradingView] widget constructor threw:', err);
+        setInitError(String(err));
+        return;
+      }
+
+      if (cancelled) {
+        // Unmounted between constructor and here — clean up immediately
+        console.warn('[TradingView] Widget created but component already unmounted, removing');
+        try { widget.remove?.(); } catch { /* ignore */ }
+        container.innerHTML = '';
+        return;
+      }
 
       widgetRef.current = widget;
 
-      widget.onChartReady(() => {
-        // Guard: component may have unmounted while the widget was initialising
-        if (cancelled) return;
-        try {
-          const chart = widget.activeChart();
-          const isWin = exitPrice != null ? exitPrice > entryPrice : null;
+      try {
+        widget.onChartReady(() => {
+          if (cancelled) return;
+          try {
+            const chart = widget.activeChart();
+            const isWin = exitPrice != null ? exitPrice > entryPrice : null;
 
-          chart.createShape(
-            { price: entryPrice },
-            { shape: 'horizontal_line', text: `Entry ${entryPrice}`, overrides: { linecolor: '#60a5fa', linewidth: 2, linestyle: 0, showLabel: true, textcolor: '#60a5fa', fontsize: 11 } },
-          );
-          chart.createShape(
-            { price: stopLoss },
-            { shape: 'horizontal_line', text: `SL ${stopLoss}`, overrides: { linecolor: '#f87171', linewidth: 1, linestyle: 2, showLabel: true, textcolor: '#f87171', fontsize: 11 } },
-          );
-          chart.createShape(
-            { price: takeProfit },
-            { shape: 'horizontal_line', text: `TP ${takeProfit}`, overrides: { linecolor: '#4ade80', linewidth: 1, linestyle: 2, showLabel: true, textcolor: '#4ade80', fontsize: 11 } },
-          );
-          if (exitPrice != null) {
-            chart.createShape(
-              { price: exitPrice },
-              { shape: 'horizontal_line', text: `Exit ${exitPrice}`, overrides: { linecolor: isWin ? '#4ade80' : '#f87171', linewidth: 2, linestyle: 0, showLabel: true, textcolor: isWin ? '#4ade80' : '#f87171', fontsize: 11 } },
-            );
+            chart.createShape({ price: entryPrice }, {
+              shape: 'horizontal_line', text: `Entry ${entryPrice}`,
+              overrides: { linecolor: '#60a5fa', linewidth: 2, linestyle: 0, showLabel: true, textcolor: '#60a5fa', fontsize: 11 },
+            });
+            chart.createShape({ price: stopLoss }, {
+              shape: 'horizontal_line', text: `SL ${stopLoss}`,
+              overrides: { linecolor: '#f87171', linewidth: 1, linestyle: 2, showLabel: true, textcolor: '#f87171', fontsize: 11 },
+            });
+            chart.createShape({ price: takeProfit }, {
+              shape: 'horizontal_line', text: `TP ${takeProfit}`,
+              overrides: { linecolor: '#4ade80', linewidth: 1, linestyle: 2, showLabel: true, textcolor: '#4ade80', fontsize: 11 },
+            });
+            if (exitPrice != null) {
+              chart.createShape({ price: exitPrice }, {
+                shape: 'horizontal_line', text: `Exit ${exitPrice}`,
+                overrides: { linecolor: isWin ? '#4ade80' : '#f87171', linewidth: 2, linestyle: 0, showLabel: true, textcolor: isWin ? '#4ade80' : '#f87171', fontsize: 11 },
+              });
+            }
+          } catch (err) {
+            // createShape failure is non-fatal; chart still renders
+            console.warn('[TradingView] createShape failed (non-fatal):', err);
           }
-        } catch {
-          // createShape may be unavailable; chart still renders normally
-        }
-      });
+        });
+      } catch (err) {
+        console.error('[TradingView] onChartReady registration threw:', err);
+      }
     }
 
-    loadTvScript(initWidget);
+    try {
+      loadTvScript(initWidget);
+    } catch (err) {
+      console.error('[TradingView] loadTvScript threw:', err);
+      setInitError(String(err));
+    }
 
     return () => {
       cancelled = true;
+      const widget = widgetRef.current;
       widgetRef.current = null;
+
+      if (widget) {
+        try { widget.remove?.(); } catch (err) {
+          console.warn('[TradingView] widget.remove() threw during cleanup:', err);
+        }
+      }
+
       const container = document.getElementById(containerId);
       if (container) container.innerHTML = '';
     };
   }, [containerId, symbol, entryPrice, stopLoss, takeProfit, exitPrice, submittedAt, closedAt]);
 
+  if (initError) {
+    return (
+      <div className="rounded-xl border border-tg-border flex items-center justify-center py-10"
+        style={{ background: 'var(--color-tg-surface)' }}>
+        <p className="text-sm text-tg-text-2">לא ניתן לאתחל את הגרף</p>
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-xl overflow-hidden border border-tg-border" style={{ background: '#0f0f10' }}>
       <div id={containerId} style={{ height: 400 }} />
-      {/* Price level legend */}
       <div className="flex items-center gap-4 px-3 py-2 flex-wrap" style={{ background: 'var(--color-tg-surface-2)' }}>
         <LegendItem color="#60a5fa" label="כניסה" value={entryPrice} />
         <LegendItem color="#f87171" label="SL" value={stopLoss} />
@@ -188,6 +273,20 @@ export default function TradingViewChart({
         )}
       </div>
     </div>
+  );
+}
+
+// ── Public export (wrapped in error boundary) ─────────────────────────────────
+
+export default function TradingViewChart(props: Props) {
+  // Changing the key forces a full remount of both the boundary and the inner
+  // chart, resetting all state after the user clicks "נסה שוב".
+  const [resetKey, setResetKey] = useState(0);
+
+  return (
+    <ChartErrorBoundary key={resetKey} onReset={() => setResetKey((k) => k + 1)}>
+      <TradingViewChartInner {...props} />
+    </ChartErrorBoundary>
   );
 }
 
