@@ -102,17 +102,17 @@ export default function AppShell({
 
       {/* ── Desktop sidebar ──────────────────────────────────────────────── */}
       <aside
-        className="hidden md:flex flex-col fixed inset-y-0 left-0 z-40 w-[220px]"
+        className="hidden md:flex flex-col fixed inset-y-0 left-0 z-40 w-[220px] transition-colors duration-200"
         style={{
-          background: 'rgba(10, 10, 15, 0.97)',
-          borderRight: '1px solid rgba(245, 197, 24, 0.13)',
-          boxShadow: '4px 0 32px rgba(0,0,0,0.5)',
+          background: 'var(--shell-bg)',
+          borderRight: '1px solid var(--shell-border)',
+          boxShadow: 'var(--shell-sidebar-shadow)',
         }}
       >
         {/* Logo */}
         <div
           className="flex items-center gap-2.5 px-5 h-16 shrink-0"
-          style={{ borderBottom: '1px solid rgba(245, 197, 24, 0.1)' }}
+          style={{ borderBottom: '1px solid var(--shell-divider)' }}
         >
           <div
             className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 animate-gold-breathe"
@@ -138,7 +138,7 @@ export default function AppShell({
               prefetch={true}
               className={cn(
                 'flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-sm font-medium',
-                active(item.href) ? '' : 'text-tg-muted hover:text-tg-text-2 hover:bg-white/5',
+                active(item.href) ? '' : 'text-tg-muted hover:text-tg-text-2 hover:bg-[var(--shell-hover)]',
               )}
               style={active(item.href) ? {
                 color: GOLD,
@@ -169,7 +169,7 @@ export default function AppShell({
         {/* User info */}
         <div
           className="px-3 pb-4 pt-3 shrink-0"
-          style={{ borderTop: '1px solid rgba(245, 197, 24, 0.1)' }}
+          style={{ borderTop: '1px solid var(--shell-divider)' }}
         >
           <div className="flex items-center gap-3 px-2 py-1.5 rounded-lg">
             <div
@@ -179,7 +179,7 @@ export default function AppShell({
               {(displayName || '?').charAt(0).toUpperCase()}
             </div>
             <p className="flex-1 text-xs font-medium text-tg-text truncate min-w-0">{displayName}</p>
-            <ThemeToggle className="p-1 rounded-md hover:bg-white/5 transition-colors shrink-0" />
+            <ThemeToggle className="p-1 rounded-md hover:bg-[var(--shell-hover)] transition-colors shrink-0" />
             <button
               onClick={handleSignOut}
               className="text-xs text-tg-muted hover:text-tg-danger transition-colors shrink-0"
@@ -197,9 +197,9 @@ export default function AppShell({
         <header
           className="glass-dark sticky top-0 z-30 flex items-center justify-between px-4 h-14 border-b md:hidden"
           style={{
-            background: 'rgba(10, 10, 15, 0.88)',
-            borderColor: 'rgba(245, 197, 24, 0.13)',
-            boxShadow: '0 1px 0 rgba(245,197,24,0.06), 0 4px 32px rgba(0,0,0,0.5)',
+            background: 'var(--shell-header-bg)',
+            borderColor: 'var(--shell-border)',
+            boxShadow: 'var(--shell-header-shadow)',
           }}
         >
           <div className="flex items-center gap-2">
@@ -218,7 +218,7 @@ export default function AppShell({
             <span className="font-bold text-sm text-glow-gold" style={{ color: GOLD }}>Reflect</span>
           </div>
           <div className="flex items-center gap-3">
-            <ThemeToggle className="p-1.5 rounded-md hover:bg-white/5 transition-colors" />
+            <ThemeToggle className="p-1.5 rounded-md hover:bg-[var(--shell-hover)] transition-colors" />
             <button onClick={handleSignOut} className="text-xs text-tg-muted hover:text-tg-danger transition-colors">
               יציאה
             </button>
@@ -232,9 +232,9 @@ export default function AppShell({
         <nav
           className="glass-dark fixed bottom-0 left-0 right-0 z-30 flex items-center h-16 border-t md:hidden"
           style={{
-            background: 'rgba(10, 10, 15, 0.92)',
-            borderColor: 'rgba(245, 197, 24, 0.1)',
-            boxShadow: '0 -1px 0 rgba(245,197,24,0.05), 0 -4px 32px rgba(0,0,0,0.6)',
+            background: 'var(--shell-nav-bg)',
+            borderColor: 'var(--shell-divider)',
+            boxShadow: 'var(--shell-nav-shadow)',
             overflow: 'visible',
           }}
         >
