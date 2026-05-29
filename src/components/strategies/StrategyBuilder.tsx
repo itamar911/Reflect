@@ -55,12 +55,15 @@ export default function StrategyBuilder({ userId, initialStrategies }: StrategyB
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const supabase = createClient();
+
 
   function openAdd() {
     setEditId(null);
     setForm(EMPTY_FORM);
+    setSaveError(null);
     setShowForm(true);
   }
 
@@ -76,12 +79,14 @@ export default function StrategyBuilder({ userId, initialStrategies }: StrategyB
       preferred_hours: s.preferred_hours,
       markets: s.markets,
     });
+    setSaveError(null);
     setShowForm(true);
   }
 
   function useTemplate(t: typeof BUILTIN_TEMPLATES[0]) {
     setForm({ ...EMPTY_FORM, name: t.name, description: t.description });
     setEditId(null);
+    setSaveError(null);
     setShowForm(true);
   }
 
@@ -95,9 +100,17 @@ export default function StrategyBuilder({ userId, initialStrategies }: StrategyB
   async function handleSave() {
     if (!form.name.trim() || !form.description.trim()) return;
     setSaving(true);
+    setSaveError(null);
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setSaveError('לא מחובר — יש להתחבר מחדש');
+      setSaving(false);
+      return;
+    }
 
     const payload = {
-      user_id: userId,
+      user_id: user.id,
       name: form.name.trim(),
       description: form.description.trim(),
       direction: form.direction,
@@ -109,12 +122,31 @@ export default function StrategyBuilder({ userId, initialStrategies }: StrategyB
     };
 
     if (editId) {
-      const { data } = await supabase.from('personal_strategies').update(payload).eq('id', editId).select().single();
-      if (data) setStrategies((prev) => prev.map((s) => s.id === editId ? data as PersonalStrategy : s));
+      const { error } = await supabase.from('personal_strategies').update(payload).eq('id', editId);
+      if (error) {
+        setSaveError(`${error.message} (${error.code})`);
+        setSaving(false);
+        return;
+      }
     } else {
-      const { data } = await supabase.from('personal_strategies').insert(payload).select().single();
-      if (data) setStrategies((prev) => [...prev, data as PersonalStrategy]);
+      const { error } = await supabase.from('personal_strategies').insert(payload);
+      if (error) {
+        setSaveError(`${error.message} (${error.code})`);
+        setSaving(false);
+        return;
+      }
     }
+
+    const { data: fresh, error: fetchError } = await supabase
+      .from('personal_strategies')
+      .select('*')
+      .order('created_at');
+    if (fetchError) {
+      setSaveError(`שגיאה בטעינת הרשימה: ${fetchError.message}`);
+      setSaving(false);
+      return;
+    }
+    setStrategies([...(fresh ?? [])] as PersonalStrategy[]);
 
     setSaving(false);
     setShowForm(false);
@@ -324,8 +356,14 @@ export default function StrategyBuilder({ userId, initialStrategies }: StrategyB
             </div>
           </div>
 
+          {saveError && (
+            <p className="text-xs rounded-lg px-3 py-2" style={{ background: 'var(--color-tg-danger-muted)', color: 'var(--color-tg-danger)' }}>
+              שגיאה בשמירה: {saveError}
+            </p>
+          )}
+
           <div className="flex gap-2 pt-2">
-            <Button variant="secondary" onClick={() => setShowForm(false)} className="flex-1">
+            <Button variant="secondary" onClick={() => { setShowForm(false); setSaveError(null); }} className="flex-1">
               ביטול
             </Button>
             <Button onClick={handleSave} loading={saving}
