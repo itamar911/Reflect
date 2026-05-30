@@ -55,6 +55,7 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
   const [loading, setLoading] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [todayLossAmount, setTodayLossAmount] = useState(0);
+  const [personalStrategies, setPersonalStrategies] = useState<string[]>([]);
 
   const supabase = createClient();
 
@@ -62,14 +63,17 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
     setLoading(true);
     const todayStart = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
 
-    const [rulesRes, todayRes] = await Promise.all([
+    const [rulesRes, todayRes, personalRes] = await Promise.all([
       supabase.from('preset_rules').select('*').eq('user_id', userId).single(),
       supabase
         .from('trade_plans')
         .select('id, status, entry_price, exit_price, stop_loss')
         .eq('user_id', userId)
         .gte('submitted_at', todayStart),
+      supabase.from('personal_strategies').select('name').eq('user_id', userId).order('created_at'),
     ]);
+
+    if (personalRes.data) setPersonalStrategies(personalRes.data.map((s) => s.name));
 
     if (rulesRes.data) setPresetRules(rulesRes.data as PresetRules);
     if (todayRes.data) {
@@ -270,20 +274,34 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
             <FormSection step={1} label="אסטרטגיה" active={activeStep === 1} done={activeStep > 1}>
               <div className="flex flex-wrap gap-2">
                 {STRATEGIES.map((s) => (
-                  <button
+                  <StrategyChip
                     key={s}
+                    label={s}
+                    selected={form.strategy === s}
                     onClick={() => { setForm({ ...form, strategy: s }); setValidationResult(null); }}
-                    className="px-3 py-1.5 rounded-full text-sm border transition-all duration-150"
-                    style={{
-                      background: form.strategy === s ? 'var(--color-tg-primary-muted)' : 'var(--color-tg-surface-2)',
-                      borderColor: form.strategy === s ? 'var(--color-tg-primary)' : 'var(--color-tg-border)',
-                      color: form.strategy === s ? 'var(--color-tg-primary)' : 'var(--color-tg-text-2)',
-                    }}
-                  >
-                    {s}
-                  </button>
+                  />
                 ))}
               </div>
+              {personalStrategies.length > 0 && (
+                <>
+                  <div className="flex items-center gap-2 mt-1">
+                    <div className="flex-1 h-px" style={{ background: 'var(--color-tg-border)' }} />
+                    <span className="text-[10px] text-tg-muted shrink-0">האסטרטגיות שלי</span>
+                    <div className="flex-1 h-px" style={{ background: 'var(--color-tg-border)' }} />
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {personalStrategies.map((s) => (
+                      <StrategyChip
+                        key={s}
+                        label={s}
+                        selected={form.strategy === s}
+                        personal
+                        onClick={() => { setForm({ ...form, strategy: s }); setValidationResult(null); }}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
             </FormSection>
 
             {/* Step 2 — Prices */}
@@ -403,6 +421,35 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
         )}
       </div>
     </>
+  );
+}
+
+function StrategyChip({
+  label, selected, personal, onClick,
+}: {
+  label: string;
+  selected: boolean;
+  personal?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="px-3 py-1.5 rounded-full text-sm border transition-all duration-150"
+      style={{
+        background: selected
+          ? personal ? 'var(--color-tg-success-muted)' : 'var(--color-tg-primary-muted)'
+          : 'var(--color-tg-surface-2)',
+        borderColor: selected
+          ? personal ? 'var(--color-tg-success)' : 'var(--color-tg-primary)'
+          : 'var(--color-tg-border)',
+        color: selected
+          ? personal ? 'var(--color-tg-success)' : 'var(--color-tg-primary)'
+          : 'var(--color-tg-text-2)',
+      }}
+    >
+      {label}
+    </button>
   );
 }
 
