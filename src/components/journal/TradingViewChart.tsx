@@ -300,7 +300,7 @@ export default function TradingViewChart(props: Props) {
   const [resetKey, setResetKey] = useState(0);
 
   return (
-    <ChartErrorBoundary key={resetKey} onReset={() => setResetKey((k) => k + 1)}>
+    <ChartErrorBoundary key={`${props.symbol}-${resetKey}`} onReset={() => setResetKey((k) => k + 1)}>
       <TradingViewChartInner {...props} />
     </ChartErrorBoundary>
   );
