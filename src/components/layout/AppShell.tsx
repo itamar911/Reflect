@@ -123,9 +123,9 @@ export default function AppShell({
           boxShadow: 'var(--shell-sidebar-shadow)',
         }}
       >
-        {/* Logo + toggle */}
+        {/* Logo */}
         <div
-          className="flex items-center h-16 shrink-0 px-3 gap-2"
+          className="flex items-center h-16 shrink-0 px-3 gap-2.5"
           style={{ borderBottom: '1px solid var(--shell-divider)' }}
         >
           <div
@@ -146,19 +146,6 @@ export default function AppShell({
           >
             Reflect
           </span>
-          <button
-            onClick={toggleCollapsed}
-            className="w-6 h-6 flex items-center justify-center rounded-md shrink-0 transition-colors hover:bg-[var(--shell-hover)] text-tg-muted hover:text-tg-text-2"
-            title={collapsed ? 'הרחב סרגל' : 'כווץ סרגל'}
-          >
-            <svg
-              width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-              strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-              style={{ transition: 'transform 250ms ease', transform: collapsed ? 'rotate(180deg)' : 'rotate(0deg)' }}
-            >
-              <polyline points="15 18 9 12 15 6" />
-            </svg>
-          </button>
         </div>
 
         {/* Nav links */}
@@ -241,6 +228,32 @@ export default function AppShell({
           )}
         </div>
       </aside>
+
+      {/* ── Sidebar toggle — fixed to right edge, always visible on desktop ── */}
+      <button
+        onClick={toggleCollapsed}
+        className="hidden md:flex fixed z-50 items-center justify-center w-5 h-9 rounded-r-lg transition-colors"
+        style={{
+          left: collapsed ? 60 : 220,
+          top: '50%',
+          transform: 'translateY(-50%)',
+          transition: 'left 250ms ease, background-color 150ms ease',
+          background: 'var(--shell-bg)',
+          border: '1px solid var(--shell-border)',
+          borderLeft: 'none',
+          color: 'var(--color-tg-muted)',
+          boxShadow: '2px 0 6px rgba(0,0,0,0.12)',
+        }}
+        title={collapsed ? 'הרחב סרגל' : 'כווץ סרגל'}
+      >
+        <svg
+          width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+          style={{ transition: 'transform 250ms ease', transform: collapsed ? 'rotate(180deg)' : 'rotate(0deg)' }}
+        >
+          <polyline points="15 18 9 12 15 6" />
+        </svg>
+      </button>
 
       {/* ── Main content column ──────────────────────────────────────────── */}
       <div className={cn(
