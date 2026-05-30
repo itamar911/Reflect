@@ -36,10 +36,25 @@ interface Props {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+const FUTURES_EXCHANGE: Record<string, string> = {
+  'NQ1!': 'CME_MINI:NQ1!',
+  'ES1!': 'CME_MINI:ES1!',
+  'CL1!': 'NYMEX:CL1!',
+  'GC1!': 'COMEX:GC1!',
+  'YM1!': 'CBOT:YM1!',
+  'RTY1!': 'CME_MINI:RTY1!',
+  'SI1!': 'COMEX:SI1!',
+  'NG1!': 'NYMEX:NG1!',
+  'ZB1!': 'CBOT:ZB1!',
+  'ZN1!': 'CBOT:ZN1!',
+};
+
 function toTvSymbol(sym: string): string {
   const s = sym.toUpperCase().trim();
   if (!s) return 'SPY';
   if (s.includes(':')) return s;
+
+  if (s.includes('!')) return FUTURES_EXCHANGE[s] ?? `CME:${s}`;
 
   const fxBases = ['EUR', 'GBP', 'USD', 'JPY', 'CHF', 'AUD', 'CAD', 'NZD', 'NOK', 'SEK', 'DKK'];
   if (s.length === 6) {
