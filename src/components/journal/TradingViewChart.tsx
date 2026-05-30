@@ -36,17 +36,18 @@ interface Props {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const FUTURES_EXCHANGE: Record<string, string> = {
-  'NQ1!': 'CME_MINI:NQ1!',
-  'ES1!': 'CME_MINI:ES1!',
-  'CL1!': 'NYMEX:CL1!',
-  'GC1!': 'COMEX:GC1!',
-  'YM1!': 'CBOT:YM1!',
-  'RTY1!': 'CME_MINI:RTY1!',
-  'SI1!': 'COMEX:SI1!',
-  'NG1!': 'NYMEX:NG1!',
-  'ZB1!': 'CBOT:ZB1!',
-  'ZN1!': 'CBOT:ZN1!',
+// Free TradingView widget doesn't support futures — map to nearest available equivalent
+const FUTURES_FALLBACK: Record<string, string> = {
+  'NQ1!': 'NAS100',
+  'ES1!': 'SPX',
+  'YM1!': 'DJ30',
+  'CL1!': 'USOIL',
+  'GC1!': 'GOLD',
+  'RTY1!': 'US2000',
+  'SI1!': 'SILVER',
+  'NG1!': 'NATURALGAS',
+  'ZB1!': 'USB30Y',
+  'ZN1!': 'USB10Y',
 };
 
 function toTvSymbol(sym: string): string {
@@ -54,7 +55,7 @@ function toTvSymbol(sym: string): string {
   if (!s) return 'SPY';
   if (s.includes(':')) return s;
 
-  if (s.includes('!')) return FUTURES_EXCHANGE[s] ?? `CME:${s}`;
+  if (s.includes('!')) return FUTURES_FALLBACK[s] ?? 'SPX';
 
   const fxBases = ['EUR', 'GBP', 'USD', 'JPY', 'CHF', 'AUD', 'CAD', 'NZD', 'NOK', 'SEK', 'DKK'];
   if (s.length === 6) {
