@@ -82,12 +82,24 @@ export default function AppShell({
   const pathname = usePathname();
   const router = useRouter();
   const [formOpen, setFormOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
     const handler = () => setFormOpen(true);
     window.addEventListener('open-trade-form', handler);
     return () => window.removeEventListener('open-trade-form', handler);
   }, []);
+
+  useEffect(() => {
+    const saved = localStorage.getItem('sidebar-collapsed');
+    if (saved === 'true') setCollapsed(true);
+  }, []);
+
+  function toggleCollapsed() {
+    const next = !collapsed;
+    setCollapsed(next);
+    localStorage.setItem('sidebar-collapsed', String(next));
+  }
 
   async function handleSignOut() {
     const supabase = createClient();
@@ -102,16 +114,18 @@ export default function AppShell({
 
       {/* ── Desktop sidebar ──────────────────────────────────────────────── */}
       <aside
-        className="hidden md:flex flex-col fixed inset-y-0 left-0 z-40 w-[220px] transition-colors duration-200"
+        className="hidden md:flex flex-col fixed inset-y-0 left-0 z-40 overflow-hidden"
         style={{
+          width: collapsed ? 60 : 220,
+          transition: 'width 250ms ease',
           background: 'var(--shell-bg)',
           borderRight: '1px solid var(--shell-border)',
           boxShadow: 'var(--shell-sidebar-shadow)',
         }}
       >
-        {/* Logo */}
+        {/* Logo + toggle */}
         <div
-          className="flex items-center gap-2.5 px-5 h-16 shrink-0"
+          className="flex items-center h-16 shrink-0 px-3 gap-2"
           style={{ borderBottom: '1px solid var(--shell-divider)' }}
         >
           <div
@@ -126,18 +140,37 @@ export default function AppShell({
               <polyline points="16 7 22 7 22 13" />
             </svg>
           </div>
-          <span className="font-bold text-base text-glow-gold" style={{ color: GOLD }}>Reflect</span>
+          <span
+            className="font-bold text-base text-glow-gold flex-1 whitespace-nowrap overflow-hidden transition-opacity duration-200"
+            style={{ color: GOLD, opacity: collapsed ? 0 : 1 }}
+          >
+            Reflect
+          </span>
+          <button
+            onClick={toggleCollapsed}
+            className="w-6 h-6 flex items-center justify-center rounded-md shrink-0 transition-colors hover:bg-[var(--shell-hover)] text-tg-muted hover:text-tg-text-2"
+            title={collapsed ? 'הרחב סרגל' : 'כווץ סרגל'}
+          >
+            <svg
+              width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+              style={{ transition: 'transform 250ms ease', transform: collapsed ? 'rotate(180deg)' : 'rotate(0deg)' }}
+            >
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+          </button>
         </div>
 
         {/* Nav links */}
-        <nav className="flex-1 flex flex-col gap-0.5 px-3 py-5 overflow-y-auto">
+        <nav className="flex-1 flex flex-col gap-0.5 px-2 py-5 overflow-y-auto">
           {SIDEBAR_NAV.map((item) => (
             <Link
               key={item.href}
               href={item.href}
               prefetch={true}
               className={cn(
-                'flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-sm font-medium',
+                'flex items-center py-2.5 rounded-lg transition-all duration-200 text-sm font-medium',
+                collapsed ? 'justify-center px-0' : 'gap-3 px-3',
                 active(item.href)
                   ? 'sidebar-link-active'
                   : 'text-tg-muted hover:text-tg-text-2 hover:bg-[var(--shell-hover)]',
@@ -147,53 +180,73 @@ export default function AppShell({
                 background: 'rgba(245, 197, 24, 0.1)',
                 boxShadow: 'inset 0 0 0 1px rgba(245,197,24,0.15)',
               } : {}}
+              title={collapsed ? item.label : undefined}
             >
               {item.icon}
-              <span>{item.label}</span>
+              {!collapsed && <span>{item.label}</span>}
             </Link>
           ))}
 
           {/* New trade */}
           <button
             onClick={() => setFormOpen(true)}
-            className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-sm font-semibold w-full mt-3"
+            className={cn(
+              'flex items-center py-2.5 rounded-lg transition-all duration-200 text-sm font-semibold w-full mt-3',
+              collapsed ? 'justify-center px-0' : 'gap-3 px-3',
+            )}
             style={{
               color: '#0a0a0f',
               background: 'linear-gradient(135deg, #F5C518 0%, #D4A017 100%)',
               boxShadow: '0 2px 14px rgba(245,197,24,0.4)',
             }}
+            title={collapsed ? 'עסקה חדשה' : undefined}
           >
             <IconPlus size={18} strokeColor="black" />
-            <span>עסקה חדשה</span>
+            {!collapsed && <span>עסקה חדשה</span>}
           </button>
         </nav>
 
         {/* User info */}
         <div
-          className="px-3 pb-4 pt-3 shrink-0"
+          className="px-2 pb-4 pt-3 shrink-0"
           style={{ borderTop: '1px solid var(--shell-divider)' }}
         >
-          <div className="flex items-center gap-3 px-2 py-1.5 rounded-lg">
-            <div
-              className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
-              style={{ background: 'rgba(245,197,24,0.15)', color: GOLD }}
-            >
-              {(displayName || '?').charAt(0).toUpperCase()}
+          {collapsed ? (
+            <div className="flex justify-center">
+              <div
+                className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold"
+                style={{ background: 'rgba(245,197,24,0.15)', color: GOLD }}
+                title={displayName}
+              >
+                {(displayName || '?').charAt(0).toUpperCase()}
+              </div>
             </div>
-            <p className="flex-1 text-xs font-medium text-tg-text truncate min-w-0">{displayName}</p>
-            <ThemeToggle className="p-1 rounded-md hover:bg-[var(--shell-hover)] transition-colors shrink-0" />
-            <button
-              onClick={handleSignOut}
-              className="text-xs text-tg-muted hover:text-tg-danger transition-colors shrink-0"
-            >
-              יציאה
-            </button>
-          </div>
+          ) : (
+            <div className="flex items-center gap-3 px-2 py-1.5 rounded-lg">
+              <div
+                className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
+                style={{ background: 'rgba(245,197,24,0.15)', color: GOLD }}
+              >
+                {(displayName || '?').charAt(0).toUpperCase()}
+              </div>
+              <p className="flex-1 text-xs font-medium text-tg-text truncate min-w-0">{displayName}</p>
+              <ThemeToggle className="p-1 rounded-md hover:bg-[var(--shell-hover)] transition-colors shrink-0" />
+              <button
+                onClick={handleSignOut}
+                className="text-xs text-tg-muted hover:text-tg-danger transition-colors shrink-0"
+              >
+                יציאה
+              </button>
+            </div>
+          )}
         </div>
       </aside>
 
       {/* ── Main content column ──────────────────────────────────────────── */}
-      <div className="flex flex-col min-h-screen md:ml-[220px]">
+      <div className={cn(
+        'flex flex-col min-h-screen transition-[margin-left] duration-[250ms] ease-in-out',
+        collapsed ? 'md:ml-[60px]' : 'md:ml-[220px]',
+      )}>
 
         {/* Mobile-only top bar */}
         <header
