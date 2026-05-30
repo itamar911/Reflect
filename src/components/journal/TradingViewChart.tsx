@@ -51,11 +51,20 @@ const FUTURES_FALLBACK: Record<string, string> = {
 };
 
 function toTvSymbol(sym: string): string {
-  const s = sym.toUpperCase().trim();
+  // Normalize: strip surrounding whitespace, uppercase, replace full-width ! (U+FF01) with ASCII !
+  const s = sym.toUpperCase().trim().replace(/！/g, '!');
   if (!s) return 'SPY';
   if (s.includes(':')) return s;
 
-  if (s.includes('!')) return FUTURES_FALLBACK[s] ?? 'SPX';
+  if (s.includes('!')) {
+    // Direct lookup
+    if (FUTURES_FALLBACK[s]) return FUTURES_FALLBACK[s];
+    // Prefix match — handles trailing garbage or variant ! characters
+    const base = s.replace(/!/g, '').trim();
+    const entry = Object.entries(FUTURES_FALLBACK).find(([k]) => k.replace('!', '') === base);
+    if (entry) return entry[1];
+    return 'SPX';
+  }
 
   const fxBases = ['EUR', 'GBP', 'USD', 'JPY', 'CHF', 'AUD', 'CAD', 'NZD', 'NOK', 'SEK', 'DKK'];
   if (s.length === 6) {
@@ -211,6 +220,10 @@ function TradingViewChartInner({
       widgetRef.current = widget;
 
       try {
+        if (typeof (widget as unknown as Record<string, unknown>).onChartReady !== 'function') {
+          console.warn('[TradingView] onChartReady not available on this widget instance');
+          return;
+        }
         widget.onChartReady(() => {
           if (cancelled) return;
           try {
