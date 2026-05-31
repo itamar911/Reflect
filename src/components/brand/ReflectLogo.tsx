@@ -25,6 +25,7 @@ export function ReflectLogo({ width = 100, wordmark = true }: ReflectLogoProps) 
       xmlns="http://www.w3.org/2000/svg"
       aria-label="Reflect"
       role="img"
+      style={{ direction: 'ltr' }}
     >
       {/* Reversed R — transform maps the glyph from x=9 to x=79, mirrored */}
       <text
