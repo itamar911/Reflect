@@ -31,26 +31,28 @@ const HEBREW_MONTHS = [
   'יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר',
 ];
 
-// Full Hebrew day names, Sunday-first (matches JS getDay())
 const DAY_NAMES = ['ראשון','שני','שלישי','רביעי','חמישי','שישי','שבת'];
 
-// Backgrounds — rich dark tints that cover the whole cell
-const PROFIT_BG = 'rgba(0, 160, 55, 0.22)';
-const LOSS_BG   = 'rgba(210, 30, 20, 0.20)';
-const EMPTY_BG  = 'rgba(255,255,255,0.018)';
+const PROFIT_BG  = 'rgba(0, 200, 83, 0.22)';
+const LOSS_BG    = 'rgba(255, 59, 48, 0.22)';
+const NEUTRAL_BG = 'var(--color-tg-surface-2)';
+const EMPTY_BG   = 'var(--color-tg-surface)';
 
-// Text colours
 const PROFIT_FG  = '#00C853';
-const LOSS_FG    = '#FF453A';
+const LOSS_FG    = '#FF3B30';
 const NEUTRAL_FG = 'var(--color-tg-text-2)';
+
+const CELL_H = 96;
+const WEEK_COL = '62px';
+const COLS = `repeat(7, 1fr) ${WEEK_COL}`;
 
 function toDayKey(d: Date): string {
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
 }
 
-function pnlLabel(pnl: number, decimals = 2): string {
-  if (pnl === 0) return `$0`;
-  return `${pnl > 0 ? '+' : '-'}$${Math.abs(pnl).toFixed(decimals)}`;
+function pnlLabel(pnl: number, decimals = 1): string {
+  if (pnl === 0) return '$0';
+  return `${pnl > 0 ? '+' : '−'}$${Math.abs(pnl).toFixed(decimals)}`;
 }
 
 function pnlColor(pnl: number): string {
@@ -62,7 +64,6 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
   const [year, setYear]   = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
 
-  // ── Build daily aggregates ──────────────────────────────────────
   const dailyMap = useMemo<Map<string, DayData>>(() => {
     const map = new Map<string, DayData>();
     for (const t of trades) {
@@ -81,7 +82,6 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
     return map;
   }, [trades]);
 
-  // ── Monthly totals ──────────────────────────────────────────────
   const stats = useMemo(() => {
     let pnl = 0, days = 0, total = 0;
     for (const [key, d] of dailyMap) {
@@ -91,9 +91,8 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
     return { pnl, days, total };
   }, [dailyMap, year, month]);
 
-  // ── Calendar weeks ──────────────────────────────────────────────
   const weeks = useMemo(() => {
-    const startDow = new Date(year, month, 1).getDay();      // 0=Sun
+    const startDow = new Date(year, month, 1).getDay();
     const numDays  = new Date(year, month + 1, 0).getDate();
     const cells: (number | null)[] = [
       ...Array<null>(startDow).fill(null),
@@ -121,65 +120,86 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
 
   const todayKey = toDayKey(today);
 
-  // Grid column template: 7 equal day cols + 44 px summary
-  const COLS = 'repeat(7, 1fr) 44px';
-
   return (
-    <div dir="rtl" className="flex flex-col gap-4">
+    <div dir="rtl" className="flex flex-col gap-3">
 
-      {/* ═══ Monthly stats ═══════════════════════════════════════ */}
-      <div className="grid grid-cols-3 gap-2">
+      {/* ── Monthly stats bar ───────────────────────────────── */}
+      <div
+        className="flex rounded-2xl overflow-hidden"
+        style={{ background: 'var(--color-tg-surface)' }}
+      >
         {[
-          { label: 'רווח/הפסד', value: pnlLabel(stats.pnl), color: pnlColor(stats.pnl) },
-          { label: 'עסקאות',    value: String(stats.total),  color: 'var(--color-tg-text)' },
-          { label: 'ימי מסחר', value: String(stats.days),   color: 'var(--color-tg-text)' },
-        ].map(({ label, value, color }) => (
-          <div key={label}
-            className="rounded-2xl py-3 px-2 flex flex-col items-center gap-1"
-            style={{ background: 'var(--color-tg-surface)' }}>
-            <span className="text-[10px]" style={{ color: 'var(--color-tg-muted)' }}>{label}</span>
-            <span className="text-base font-bold leading-none" style={{ color }}>{value}</span>
+          { label: 'רווח / הפסד', value: pnlLabel(stats.pnl, 2), color: pnlColor(stats.pnl) },
+          { label: 'עסקאות',      value: String(stats.total),       color: 'var(--color-tg-text)' },
+          { label: 'ימי מסחר',    value: String(stats.days),        color: 'var(--color-tg-text)' },
+        ].map(({ label, value, color }, i) => (
+          <div
+            key={label}
+            className="flex-1 flex flex-col items-center justify-center py-4 gap-1"
+            style={{
+              borderRight: i > 0 ? '1px solid var(--color-tg-border)' : undefined,
+            }}
+          >
+            <span className="text-[10px] font-medium" style={{ color: 'var(--color-tg-muted)' }}>
+              {label}
+            </span>
+            <span className="text-lg font-bold leading-none" style={{ color }}>
+              {value}
+            </span>
           </div>
         ))}
       </div>
 
-      {/* ═══ Month navigation ════════════════════════════════════ */}
-      {/* dir=ltr keeps « visually left (prev) and » visually right (next) */}
-      <div className="flex items-center justify-between gap-3" style={{ direction: 'ltr' }}>
-        <button onClick={() => navMonth(-1)}
-          className="w-10 h-10 flex items-center justify-center rounded-xl text-xl font-bold transition-opacity hover:opacity-60"
-          style={{ background: 'var(--color-tg-surface)', color: 'var(--color-tg-text-2)' }}>
+      {/* ── Month navigation ────────────────────────────────── */}
+      <div
+        className="flex items-center justify-between px-1"
+        style={{ direction: 'ltr' }}
+      >
+        <button
+          onClick={() => navMonth(-1)}
+          className="w-10 h-10 flex items-center justify-center rounded-xl text-lg font-bold transition-opacity hover:opacity-60 active:scale-95"
+          style={{ background: 'var(--color-tg-surface)', color: 'var(--color-tg-text-2)' }}
+        >
           «
         </button>
 
-        <h2 className="text-xl font-bold" style={{ direction: 'rtl', color: 'var(--color-tg-text)' }}>
-          {HEBREW_MONTHS[month]} {year}
+        <h2
+          className="text-2xl font-bold tracking-tight"
+          style={{ direction: 'rtl', color: 'var(--color-tg-text)' }}
+        >
+          {HEBREW_MONTHS[month]}&nbsp;{year}
         </h2>
 
-        <button onClick={() => navMonth(1)}
-          className="w-10 h-10 flex items-center justify-center rounded-xl text-xl font-bold transition-opacity hover:opacity-60"
-          style={{ background: 'var(--color-tg-surface)', color: 'var(--color-tg-text-2)' }}>
+        <button
+          onClick={() => navMonth(1)}
+          className="w-10 h-10 flex items-center justify-center rounded-xl text-lg font-bold transition-opacity hover:opacity-60 active:scale-95"
+          style={{ background: 'var(--color-tg-surface)', color: 'var(--color-tg-text-2)' }}
+        >
           »
         </button>
       </div>
 
-      {/* ═══ Calendar grid ═══════════════════════════════════════ */}
-      {/* Use gap-px with border-color background for clean 1-px dividers */}
-      <div className="rounded-2xl overflow-hidden flex flex-col gap-px"
-        style={{ background: 'var(--color-tg-border)' }}>
+      {/* ── Calendar grid ───────────────────────────────────── */}
+      <div
+        className="rounded-2xl overflow-hidden flex flex-col gap-px"
+        style={{ background: 'var(--color-tg-border)' }}
+      >
 
-        {/* Day-name header row */}
+        {/* Day-name header */}
         <div className="grid gap-px" style={{ gridTemplateColumns: COLS }}>
           {DAY_NAMES.map((name) => (
-            <div key={name}
-              className="py-2.5 text-center text-[9px] font-semibold tracking-wide"
-              style={{ background: 'var(--color-tg-surface)', color: 'var(--color-tg-muted)' }}>
+            <div
+              key={name}
+              className="py-2.5 text-center text-[10px] font-semibold tracking-wide"
+              style={{ background: 'var(--color-tg-surface)', color: 'var(--color-tg-muted)' }}
+            >
               {name}
             </div>
           ))}
-          {/* Summary column header */}
-          <div className="py-2.5 text-center text-[9px] font-semibold"
-            style={{ background: 'var(--color-tg-surface-2)', color: 'var(--color-tg-muted)' }}>
+          <div
+            className="py-2.5 text-center text-[9px] font-semibold"
+            style={{ background: 'var(--color-tg-surface-2)', color: 'var(--color-tg-muted)' }}
+          >
             שבוע
           </div>
         </div>
@@ -189,48 +209,66 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
           <div key={wi} className="grid gap-px" style={{ gridTemplateColumns: COLS }}>
 
             {week.days.map((day, di) => {
-              /* ── No-trading / padding cell ── */
+              /* Padding / non-month cell */
               if (!day) {
                 return (
-                  <div key={di} className="min-h-[80px]" style={{ background: EMPTY_BG }} />
+                  <div
+                    key={di}
+                    style={{ height: CELL_H, background: EMPTY_BG }}
+                  />
                 );
               }
 
-              const key  = `${year}-${month + 1}-${day}`;
-              const data = dailyMap.get(key);
+              const key   = `${year}-${month + 1}-${day}`;
+              const data  = dailyMap.get(key);
               const isToday = key === todayKey;
 
               const bg = data
-                ? data.pnl > 0 ? PROFIT_BG
-                : data.pnl < 0 ? LOSS_BG
-                : 'var(--color-tg-surface-2)'
-                : 'var(--color-tg-surface)';
+                ? data.pnl > 0  ? PROFIT_BG
+                : data.pnl < 0  ? LOSS_BG
+                : NEUTRAL_BG
+                : EMPTY_BG;
 
               return (
-                <div key={di}
-                  className="min-h-[80px] flex flex-col"
-                  style={{ background: bg }}>
-
-                  {/* Top row: day number + optional red dot */}
+                <div
+                  key={di}
+                  className="flex flex-col"
+                  style={{ height: CELL_H, background: bg }}
+                >
+                  {/* Top row: day number + violation dot */}
                   <div className="flex items-start justify-between px-1.5 pt-1.5">
-                    <span className="text-[10px] font-semibold leading-none"
-                      style={{ color: isToday ? 'var(--color-tg-primary)' : 'var(--color-tg-muted)' }}>
+                    <span
+                      className="text-[11px] font-semibold leading-none"
+                      style={{
+                        color: isToday
+                          ? 'var(--color-tg-primary)'
+                          : 'var(--color-tg-muted)',
+                        fontWeight: isToday ? 800 : 600,
+                      }}
+                    >
                       {day}
                     </span>
                     {data?.hasViolation && (
-                      <span className="w-2 h-2 rounded-full shrink-0"
-                        style={{ background: 'var(--color-tg-danger)' }} />
+                      <span
+                        className="w-2 h-2 rounded-full shrink-0 mt-0.5"
+                        style={{ background: 'var(--color-tg-danger)' }}
+                      />
                     )}
                   </div>
 
-                  {/* Centre: P&L + trade count */}
+                  {/* Center: P&L + trade count */}
                   {data ? (
                     <div className="flex-1 flex flex-col items-center justify-center gap-0.5 pb-1">
-                      <span className="text-[11px] font-bold leading-tight"
-                        style={{ color: pnlColor(data.pnl) }}>
+                      <span
+                        className="text-[13px] font-extrabold leading-tight"
+                        style={{ color: pnlColor(data.pnl) }}
+                      >
                         {pnlLabel(data.pnl, 1)}
                       </span>
-                      <span className="text-[9px]" style={{ color: 'var(--color-tg-muted)' }}>
+                      <span
+                        className="text-[9px]"
+                        style={{ color: 'var(--color-tg-muted)' }}
+                      >
                         ({data.tradeCount})
                       </span>
                     </div>
@@ -241,21 +279,28 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
               );
             })}
 
-            {/* ── Weekly summary column ── */}
-            <div className="min-h-[80px] flex flex-col items-center justify-center gap-1 px-0.5"
-              style={{ background: 'var(--color-tg-surface-2)' }}>
+            {/* Weekly summary column */}
+            <div
+              className="flex flex-col items-center justify-center gap-1 px-0.5"
+              style={{ height: CELL_H, background: 'var(--color-tg-surface-2)' }}
+            >
               {week.trades > 0 ? (
                 <>
-                  <span className="text-[9px] font-bold leading-none text-center"
-                    style={{ color: pnlColor(week.pnl) }}>
-                    {pnlLabel(week.pnl, 1)}
+                  <span
+                    className="text-[10px] font-bold leading-tight text-center"
+                    style={{ color: pnlColor(week.pnl) }}
+                  >
+                    {pnlLabel(week.pnl, 0)}
                   </span>
-                  <span className="text-[8px] leading-none" style={{ color: 'var(--color-tg-muted)' }}>
-                    {week.trades} ע׳
+                  <span
+                    className="text-[8px] leading-none text-center"
+                    style={{ color: 'var(--color-tg-muted)' }}
+                  >
+                    {week.trades}&thinsp;ע׳
                   </span>
                 </>
               ) : (
-                <span style={{ color: 'var(--color-tg-border-light)', fontSize: '12px' }}>—</span>
+                <span style={{ color: 'var(--color-tg-border-light)', fontSize: '14px' }}>—</span>
               )}
             </div>
 
