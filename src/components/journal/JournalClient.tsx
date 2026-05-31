@@ -7,10 +7,12 @@ import Card from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import TradeDebrief from '@/components/journal/TradeDebrief';
 import CloseTrade from '@/components/journal/CloseTrade';
+import TradeCalendar from '@/components/journal/TradeCalendar';
 
 const TradingViewChart = dynamic(() => import('@/components/journal/TradingViewChart'), { ssr: false });
 
 type FilterTab = 'all' | 'open' | 'closed';
+type ViewMode = 'list' | 'calendar';
 
 const EMOTIONAL_EMOJIS: Record<number, string> = { 1: '😰', 2: '😟', 3: '😐', 4: '🙂', 5: '😎' };
 
@@ -39,6 +41,7 @@ interface JournalClientProps {
 }
 
 export default function JournalClient({ trades }: JournalClientProps) {
+  const [view, setView] = useState<ViewMode>('list');
   const [activeFilter, setActiveFilter] = useState<FilterTab>('all');
   const [strategyFilter, setStrategyFilter] = useState<string>('all');
   const router = useRouter();
@@ -62,6 +65,30 @@ export default function JournalClient({ trades }: JournalClientProps) {
 
   return (
     <div className="flex flex-col gap-4">
+      {/* View toggle */}
+      <div className="flex gap-1 p-1 rounded-xl" style={{ background: 'var(--color-tg-surface)' }}>
+        {[
+          { key: 'list' as ViewMode, label: 'רשימה' },
+          { key: 'calendar' as ViewMode, label: 'לוח שנה' },
+        ].map(({ key, label }) => (
+          <button
+            key={key}
+            onClick={() => setView(key)}
+            className="flex-1 py-1.5 rounded-lg text-xs font-medium transition-all"
+            style={{
+              background: view === key ? 'var(--color-tg-primary)' : 'transparent',
+              color: view === key ? '#000' : 'var(--color-tg-text-2)',
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {view === 'calendar' && <TradeCalendar trades={trades} />}
+
+      {view === 'list' && (
+      <>
       {/* Filter tabs */}
       <div className="flex gap-1 p-1 rounded-xl" style={{ background: 'var(--color-tg-surface)' }}>
         {[
@@ -108,6 +135,8 @@ export default function JournalClient({ trades }: JournalClientProps) {
             <TradeCard key={trade.id} trade={trade} onClose={() => router.refresh()} />
           ))}
         </div>
+      )}
+      </>
       )}
     </div>
   );
