@@ -7,8 +7,11 @@ const geistSans = Geist({ variable: '--font-geist-sans', subsets: ['latin'] });
 const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'Reflekt — השוק בוחן את האסטרטגיה שלך',
-  description: 'השוק בוחן את האסטרטגיה שלך. רפלקט בוחן אותך. מערכת משמעת מסחר מבוססת AI.',
+  title: 'Reflect — השוק בוחן את האסטרטגיה שלך',
+  description: 'השוק בוחן את האסטרטגיה שלך. Reflect בוחן אותך. מערכת משמעת מסחר מבוססת AI.',
+  icons: {
+    icon: '/logo-mark.svg',
+  },
 };
 
 export const viewport: Viewport = {

@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/client';
 import TradePlanForm from '@/components/trade/TradePlanForm';
 import { cn } from '@/lib/utils';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
+import { ReflectLogo } from '@/components/brand/ReflectLogo';
 
 // ── Icons ────────────────────────────────────────────────────────────────────
 
@@ -128,21 +129,12 @@ export default function AppShell({
           className="flex items-center h-16 shrink-0 px-3 gap-2.5"
           style={{ borderBottom: '1px solid var(--shell-divider)' }}
         >
-          <div
-            className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 animate-gold-breathe"
-            style={{
-              background: 'linear-gradient(135deg, #F5C518 0%, #D4A017 100%)',
-              boxShadow: '0 0 12px rgba(245,197,24,0.45), 0 0 24px rgba(245,197,24,0.15)',
-            }}
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="black" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="22 7 13.5 15.5 8.5 10.5 2 17" />
-              <polyline points="16 7 22 7 22 13" />
-            </svg>
+          <div className="shrink-0">
+            <ReflectLogo width={36} wordmark={false} />
           </div>
           <span
-            className="font-bold text-base text-glow-gold flex-1 whitespace-nowrap overflow-hidden transition-opacity duration-200"
-            style={{ color: GOLD, opacity: collapsed ? 0 : 1 }}
+            className="font-bold text-base flex-1 whitespace-nowrap overflow-hidden transition-opacity duration-200"
+            style={{ color: 'var(--color-tg-text)', opacity: collapsed ? 0 : 1 }}
           >
             Reflect
           </span>
@@ -271,19 +263,8 @@ export default function AppShell({
           }}
         >
           <div className="flex items-center gap-2">
-            <div
-              className="w-7 h-7 rounded-lg flex items-center justify-center animate-gold-breathe"
-              style={{
-                background: 'linear-gradient(135deg, #F5C518 0%, #D4A017 100%)',
-                boxShadow: '0 0 12px rgba(245,197,24,0.45), 0 0 24px rgba(245,197,24,0.15)',
-              }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="black" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="22 7 13.5 15.5 8.5 10.5 2 17" />
-                <polyline points="16 7 22 7 22 13" />
-              </svg>
-            </div>
-            <span className="font-bold text-sm text-glow-gold" style={{ color: GOLD }}>Reflect</span>
+            <ReflectLogo width={30} wordmark={false} />
+            <span className="font-bold text-sm" style={{ color: 'var(--color-tg-text)' }}>Reflect</span>
           </div>
           <div className="flex items-center gap-3">
             <ThemeToggle className="p-1.5 rounded-md hover:bg-[var(--shell-hover)] transition-colors" />

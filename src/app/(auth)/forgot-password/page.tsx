@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
+import { ReflectLogo } from '@/components/brand/ReflectLogo';
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
@@ -34,14 +35,9 @@ export default function ForgotPasswordPage() {
     <div className="w-full max-w-sm animate-fade-in">
       {/* Logo */}
       <div className="text-center mb-8">
-        <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl mb-4"
-          style={{ background: 'var(--color-tg-primary)' }}>
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="22 7 13.5 15.5 8.5 10.5 2 17" />
-            <polyline points="16 7 22 7 22 13" />
-          </svg>
+        <div className="flex justify-center mb-3">
+          <ReflectLogo width={110} wordmark={true} />
         </div>
-        <h1 className="text-2xl font-bold text-tg-text">Reflect</h1>
         <p className="text-sm text-tg-text-2 mt-1">שחזור סיסמא</p>
       </div>
 
