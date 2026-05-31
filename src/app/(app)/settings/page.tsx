@@ -1,10 +1,9 @@
 import { redirect } from 'next/navigation';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import Card from '@/components/ui/Card';
-import RulesEditor from '@/components/rules/RulesEditor';
 import AlertsPanel from '@/components/settings/AlertsPanel';
 import StrategyBuilder from '@/components/strategies/StrategyBuilder';
-import type { PresetRules, CustomRule } from '@/lib/types';
 import type { PersonalStrategy } from '@/components/strategies/StrategyBuilder';
 import type { AlertSettingsData } from '@/components/settings/AlertsPanel';
 
@@ -15,28 +14,16 @@ export default async function SettingsPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  const [profileRes, presetRes, customRes, strategiesRes, alertRes] = await Promise.all([
+  const [profileRes, strategiesRes, alertRes] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', user.id).single(),
-    supabase.from('preset_rules').select('*').eq('user_id', user.id).single(),
-    supabase.from('custom_rules').select('*').eq('user_id', user.id).order('sort_order').order('created_at'),
     supabase.from('personal_strategies').select('*').eq('user_id', user.id).order('created_at'),
     supabase.from('alert_settings').select('*').eq('user_id', user.id).single(),
   ]);
 
   const profile = profileRes.data;
   const plan = (profile?.subscription_tier ?? 'free') as 'free' | 'basic' | 'pro';
-  const presetRules = presetRes.data as PresetRules | null;
-  const customRules = (customRes.data ?? []) as CustomRule[];
   const strategies = (strategiesRes.data ?? []) as PersonalStrategy[];
   const alertSettings = alertRes.data as AlertSettingsData | null;
-
-  if (!presetRules) {
-    return (
-      <div className="px-4 py-5 text-center">
-        <p className="text-sm text-tg-muted">שגיאה בטעינת החוקים. רענן את הדף.</p>
-      </div>
-    );
-  }
 
   return (
     <div className="px-4 py-5 flex flex-col gap-5 md:max-w-none">
@@ -61,46 +48,30 @@ export default async function SettingsPage() {
         </div>
       </Card>
 
-      {/* Rules Editor */}
-      <Card>
-        <h2 className="text-sm font-semibold text-tg-text mb-4">חוקי המסחר שלי</h2>
-        <RulesEditor
-          presetRules={presetRules}
-          customRules={customRules}
-          userId={user.id}
-          plan={plan}
-        />
-      </Card>
-
-      {/* Rule activation history — Pro */}
-      <Card>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold text-tg-text">היסטוריית הפעלות חוקים</h2>
-          {plan !== 'pro' && (
-            <span className="px-2 py-0.5 rounded-full text-xs font-bold"
-              style={{ background: 'rgba(245,158,11,0.15)', color: '#f59e0b' }}>Pro</span>
-          )}
-        </div>
-        {plan === 'pro' ? (
-          <div className="flex items-center justify-center py-8 rounded-xl"
-            style={{ background: 'var(--color-tg-surface-2)' }}>
-            <div className="text-center">
-              <div className="text-2xl mb-2">📜</div>
-              <p className="text-sm text-tg-text-2">אין עדיין הפעלות חוקים מתועדות</p>
+      {/* Link to Rules page */}
+      <Link href="/rules">
+        <Card className="transition-colors hover:border-[rgba(212,175,55,0.3)]">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div
+                className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
+                style={{ background: 'rgba(212,175,55,0.1)' }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                </svg>
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-tg-text">חוקי מסחר</p>
+                <p className="text-xs text-tg-muted">ניהול חוקים מובנים ואישיים</p>
+              </div>
             </div>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-tg-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="9 18 15 12 9 6"/>
+            </svg>
           </div>
-        ) : (
-          <div className="flex items-center justify-center py-8 rounded-xl"
-            style={{ background: 'var(--color-tg-surface-2)' }}>
-            <div className="text-center">
-              <div className="text-2xl mb-2">📜</div>
-              <p className="text-sm text-tg-text-2 mb-1">היסטוריית כל החוקים שהופעלו</p>
-              <p className="text-xs text-tg-muted">תאריך · שם החוק · פעולה שבוצעה</p>
-              <p className="text-xs font-medium mt-2" style={{ color: '#f59e0b' }}>זמין במסלול Pro</p>
-            </div>
-          </div>
-        )}
-      </Card>
+        </Card>
+      </Link>
 
       {/* Personal Strategies */}
       <Card>
