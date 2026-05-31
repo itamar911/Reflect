@@ -53,7 +53,7 @@ export default function NotebookClient({
   const [panel,      setPanel]      = useState<MobilePanel>('list');
   const [tagInput,   setTagInput]   = useState('');
 
-  const saveTimer = useRef<ReturnType<typeof setTimeout>>();
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const supabase  = createClient();
 
   const selected     = pages.find(p => p.id === selectedId) ?? null;
