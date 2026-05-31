@@ -27,73 +27,90 @@ interface DayData {
 }
 
 const HEBREW_MONTHS = [
-  'ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני',
-  'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר',
+  'ינואר','פברואר','מרץ','אפריל','מאי','יוני',
+  'יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר',
 ];
-// Sunday=א through Saturday=ש
-const DAY_LABELS = ['א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ש'];
 
-function toDayKey(d: Date) {
+// Full Hebrew day names, Sunday-first (matches JS getDay())
+const DAY_NAMES = ['ראשון','שני','שלישי','רביעי','חמישי','שישי','שבת'];
+
+// Backgrounds — rich dark tints that cover the whole cell
+const PROFIT_BG = 'rgba(0, 160, 55, 0.22)';
+const LOSS_BG   = 'rgba(210, 30, 20, 0.20)';
+const EMPTY_BG  = 'rgba(255,255,255,0.018)';
+
+// Text colours
+const PROFIT_FG  = '#00C853';
+const LOSS_FG    = '#FF453A';
+const NEUTRAL_FG = 'var(--color-tg-text-2)';
+
+function toDayKey(d: Date): string {
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+}
+
+function pnlLabel(pnl: number, decimals = 2): string {
+  if (pnl === 0) return `$0`;
+  return `${pnl > 0 ? '+' : '-'}$${Math.abs(pnl).toFixed(decimals)}`;
+}
+
+function pnlColor(pnl: number): string {
+  return pnl > 0 ? PROFIT_FG : pnl < 0 ? LOSS_FG : NEUTRAL_FG;
 }
 
 export default function TradeCalendar({ trades }: { trades: Trade[] }) {
   const today = new Date();
-  const [year, setYear] = useState(today.getFullYear());
+  const [year, setYear]   = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
 
+  // ── Build daily aggregates ──────────────────────────────────────
   const dailyMap = useMemo<Map<string, DayData>>(() => {
     const map = new Map<string, DayData>();
     for (const t of trades) {
-      const key = toDayKey(new Date(t.submitted_at));
+      const key  = toDayKey(new Date(t.submitted_at));
       const prev = map.get(key) ?? { pnl: 0, tradeCount: 0, hasViolation: false };
-      const pnl =
-        t.status === 'closed' && t.exit_price != null ? t.exit_price - t.entry_price : 0;
+      const pnl  = t.status === 'closed' && t.exit_price != null
+        ? t.exit_price - t.entry_price : 0;
       const violation =
         t.emotional_state <= 2 || (t.plan_score != null && t.plan_score < 70);
       map.set(key, {
-        pnl: prev.pnl + pnl,
-        tradeCount: prev.tradeCount + 1,
+        pnl:          prev.pnl + pnl,
+        tradeCount:   prev.tradeCount + 1,
         hasViolation: prev.hasViolation || violation,
       });
     }
     return map;
   }, [trades]);
 
+  // ── Monthly totals ──────────────────────────────────────────────
   const stats = useMemo(() => {
     let pnl = 0, days = 0, total = 0;
     for (const [key, d] of dailyMap) {
-      const parts = key.split('-');
-      if (Number(parts[0]) === year && Number(parts[1]) === month + 1) {
-        pnl += d.pnl;
-        days++;
-        total += d.tradeCount;
-      }
+      const [y, m] = key.split('-').map(Number);
+      if (y === year && m === month + 1) { pnl += d.pnl; days++; total += d.tradeCount; }
     }
     return { pnl, days, total };
   }, [dailyMap, year, month]);
 
+  // ── Calendar weeks ──────────────────────────────────────────────
   const weeks = useMemo(() => {
-    const startDow = new Date(year, month, 1).getDay();
-    const numDays = new Date(year, month + 1, 0).getDate();
+    const startDow = new Date(year, month, 1).getDay();      // 0=Sun
+    const numDays  = new Date(year, month + 1, 0).getDate();
     const cells: (number | null)[] = [
       ...Array<null>(startDow).fill(null),
       ...Array.from({ length: numDays }, (_, i) => i + 1),
     ];
     while (cells.length % 7 !== 0) cells.push(null);
 
-    const result: { days: (number | null)[]; pnl: number; trades: number }[] = [];
-    for (let i = 0; i < cells.length; i += 7) {
-      const slice = cells.slice(i, i + 7);
+    return Array.from({ length: cells.length / 7 }, (_, wi) => {
+      const slice = cells.slice(wi * 7, wi * 7 + 7);
       let wPnl = 0, wTrades = 0;
       for (const d of slice) {
         if (!d) continue;
         const data = dailyMap.get(`${year}-${month + 1}-${d}`);
         if (data) { wPnl += data.pnl; wTrades += data.tradeCount; }
       }
-      result.push({ days: slice, pnl: wPnl, trades: wTrades });
-    }
-    return result;
+      return { days: slice, pnl: wPnl, trades: wTrades };
+    });
   }, [year, month, dailyMap]);
 
   function navMonth(dir: 1 | -1) {
@@ -103,202 +120,148 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
   }
 
   const todayKey = toDayKey(today);
-  const statPnlColor =
-    stats.pnl > 0
-      ? 'var(--color-tg-success)'
-      : stats.pnl < 0
-      ? 'var(--color-tg-danger)'
-      : 'var(--color-tg-text-2)';
+
+  // Grid column template: 7 equal day cols + 44 px summary
+  const COLS = 'repeat(7, 1fr) 44px';
 
   return (
-    <div dir="rtl" className="flex flex-col gap-3">
-      {/* Monthly totals */}
+    <div dir="rtl" className="flex flex-col gap-4">
+
+      {/* ═══ Monthly stats ═══════════════════════════════════════ */}
       <div className="grid grid-cols-3 gap-2">
-        <StatBox label="רווח/הפסד" value={`${stats.pnl > 0 ? '+' : ''}${stats.pnl.toFixed(2)}`}
-          sub="נק'" valueColor={statPnlColor} />
-        <StatBox label="עסקאות" value={String(stats.total)} />
-        <StatBox label="ימי מסחר" value={String(stats.days)} />
+        {[
+          { label: 'רווח/הפסד', value: pnlLabel(stats.pnl), color: pnlColor(stats.pnl) },
+          { label: 'עסקאות',    value: String(stats.total),  color: 'var(--color-tg-text)' },
+          { label: 'ימי מסחר', value: String(stats.days),   color: 'var(--color-tg-text)' },
+        ].map(({ label, value, color }) => (
+          <div key={label}
+            className="rounded-2xl py-3 px-2 flex flex-col items-center gap-1"
+            style={{ background: 'var(--color-tg-surface)' }}>
+            <span className="text-[10px]" style={{ color: 'var(--color-tg-muted)' }}>{label}</span>
+            <span className="text-base font-bold leading-none" style={{ color }}>{value}</span>
+          </div>
+        ))}
       </div>
 
-      {/* Month navigation — use ltr container so ‹/› stay on correct sides */}
-      <div className="flex items-center" style={{ direction: 'ltr' }}>
-        <button
-          onClick={() => navMonth(-1)}
-          className="w-8 h-8 flex items-center justify-center rounded-lg text-base transition-opacity hover:opacity-70"
-          style={{ color: 'var(--color-tg-text-2)', background: 'var(--color-tg-surface)' }}
-        >
-          ‹
+      {/* ═══ Month navigation ════════════════════════════════════ */}
+      {/* dir=ltr keeps « visually left (prev) and » visually right (next) */}
+      <div className="flex items-center justify-between gap-3" style={{ direction: 'ltr' }}>
+        <button onClick={() => navMonth(-1)}
+          className="w-10 h-10 flex items-center justify-center rounded-xl text-xl font-bold transition-opacity hover:opacity-60"
+          style={{ background: 'var(--color-tg-surface)', color: 'var(--color-tg-text-2)' }}>
+          «
         </button>
-        <h2 className="flex-1 text-center text-sm font-bold text-tg-text" style={{ direction: 'rtl' }}>
+
+        <h2 className="text-xl font-bold" style={{ direction: 'rtl', color: 'var(--color-tg-text)' }}>
           {HEBREW_MONTHS[month]} {year}
         </h2>
-        <button
-          onClick={() => navMonth(1)}
-          className="w-8 h-8 flex items-center justify-center rounded-lg text-base transition-opacity hover:opacity-70"
-          style={{ color: 'var(--color-tg-text-2)', background: 'var(--color-tg-surface)' }}
-        >
-          ›
+
+        <button onClick={() => navMonth(1)}
+          className="w-10 h-10 flex items-center justify-center rounded-xl text-xl font-bold transition-opacity hover:opacity-60"
+          style={{ background: 'var(--color-tg-surface)', color: 'var(--color-tg-text-2)' }}>
+          »
         </button>
       </div>
 
-      {/* Calendar grid */}
-      <div
-        className="rounded-2xl overflow-hidden border"
-        style={{ borderColor: 'var(--color-tg-border)', background: 'var(--color-tg-surface)' }}
-      >
-        {/* Day-of-week headers — 7 equal cols + 44px summary col on left */}
-        <div
-          className="grid border-b"
-          style={{ gridTemplateColumns: 'repeat(7, 1fr) 44px', borderColor: 'var(--color-tg-border)' }}
-        >
-          {DAY_LABELS.map((l) => (
-            <div key={l} className="py-2 text-center text-[10px] font-medium"
-              style={{ color: 'var(--color-tg-muted)' }}>
-              {l}
+      {/* ═══ Calendar grid ═══════════════════════════════════════ */}
+      {/* Use gap-px with border-color background for clean 1-px dividers */}
+      <div className="rounded-2xl overflow-hidden flex flex-col gap-px"
+        style={{ background: 'var(--color-tg-border)' }}>
+
+        {/* Day-name header row */}
+        <div className="grid gap-px" style={{ gridTemplateColumns: COLS }}>
+          {DAY_NAMES.map((name) => (
+            <div key={name}
+              className="py-2.5 text-center text-[9px] font-semibold tracking-wide"
+              style={{ background: 'var(--color-tg-surface)', color: 'var(--color-tg-muted)' }}>
+              {name}
             </div>
           ))}
-          <div className="py-2 text-center text-[10px] font-medium"
-            style={{ color: 'var(--color-tg-muted)', background: 'var(--color-tg-surface-2)' }}>
+          {/* Summary column header */}
+          <div className="py-2.5 text-center text-[9px] font-semibold"
+            style={{ background: 'var(--color-tg-surface-2)', color: 'var(--color-tg-muted)' }}>
             שבוע
           </div>
         </div>
 
         {/* Week rows */}
         {weeks.map((week, wi) => (
-          <div
-            key={wi}
-            className="grid border-b last:border-b-0"
-            style={{ gridTemplateColumns: 'repeat(7, 1fr) 44px', borderColor: 'var(--color-tg-border)' }}
-          >
+          <div key={wi} className="grid gap-px" style={{ gridTemplateColumns: COLS }}>
+
             {week.days.map((day, di) => {
+              /* ── No-trading / padding cell ── */
               if (!day) {
                 return (
-                  <div
-                    key={di}
-                    className="h-[58px] border-r"
-                    style={{ borderColor: 'var(--color-tg-border)', background: 'var(--color-tg-bg)' }}
-                  />
+                  <div key={di} className="min-h-[80px]" style={{ background: EMPTY_BG }} />
                 );
               }
-              const key = `${year}-${month + 1}-${day}`;
+
+              const key  = `${year}-${month + 1}-${day}`;
               const data = dailyMap.get(key);
               const isToday = key === todayKey;
-              const isProfit = data && data.pnl > 0;
-              const isLoss = data && data.pnl < 0;
-              const cellBg = data
-                ? isProfit
-                  ? 'rgba(0, 200, 83, 0.10)'
-                  : isLoss
-                  ? 'rgba(255, 59, 48, 0.09)'
-                  : 'var(--color-tg-surface-2)'
-                : 'transparent';
-              const pnlColor = isProfit
-                ? 'var(--color-tg-success)'
-                : isLoss
-                ? 'var(--color-tg-danger)'
-                : 'var(--color-tg-text-2)';
+
+              const bg = data
+                ? data.pnl > 0 ? PROFIT_BG
+                : data.pnl < 0 ? LOSS_BG
+                : 'var(--color-tg-surface-2)'
+                : 'var(--color-tg-surface)';
 
               return (
-                <div
-                  key={di}
-                  className="h-[58px] p-1.5 border-r flex flex-col justify-between"
-                  style={{ borderColor: 'var(--color-tg-border)', background: cellBg }}
-                >
-                  {/* Day number + violation dot */}
-                  <div className="flex items-center justify-between">
-                    <span
-                      className="text-[10px] font-semibold leading-none"
-                      style={{ color: isToday ? 'var(--color-tg-primary)' : 'var(--color-tg-text-2)' }}
-                    >
+                <div key={di}
+                  className="min-h-[80px] flex flex-col"
+                  style={{ background: bg }}>
+
+                  {/* Top row: day number + optional red dot */}
+                  <div className="flex items-start justify-between px-1.5 pt-1.5">
+                    <span className="text-[10px] font-semibold leading-none"
+                      style={{ color: isToday ? 'var(--color-tg-primary)' : 'var(--color-tg-muted)' }}>
                       {day}
                     </span>
                     {data?.hasViolation && (
-                      <span
-                        className="w-1.5 h-1.5 rounded-full"
-                        style={{ background: 'var(--color-tg-danger)' }}
-                      />
+                      <span className="w-2 h-2 rounded-full shrink-0"
+                        style={{ background: 'var(--color-tg-danger)' }} />
                     )}
                   </div>
 
-                  {/* P&L and trade count */}
-                  {data && (
-                    <div className="flex flex-col gap-px">
-                      <span className="text-[9px] font-bold leading-none" style={{ color: pnlColor }}>
-                        {isProfit ? '+' : ''}{data.pnl.toFixed(1)}
+                  {/* Centre: P&L + trade count */}
+                  {data ? (
+                    <div className="flex-1 flex flex-col items-center justify-center gap-0.5 pb-1">
+                      <span className="text-[11px] font-bold leading-tight"
+                        style={{ color: pnlColor(data.pnl) }}>
+                        {pnlLabel(data.pnl, 1)}
                       </span>
-                      <span className="text-[8px] leading-none" style={{ color: 'var(--color-tg-muted)' }}>
-                        {data.tradeCount} ע׳
+                      <span className="text-[9px]" style={{ color: 'var(--color-tg-muted)' }}>
+                        ({data.tradeCount})
                       </span>
                     </div>
+                  ) : (
+                    <div className="flex-1" />
                   )}
                 </div>
               );
             })}
 
-            {/* Weekly summary column */}
-            <div
-              className="h-[58px] flex flex-col items-center justify-center gap-0.5"
-              style={{ background: 'var(--color-tg-surface-2)' }}
-            >
+            {/* ── Weekly summary column ── */}
+            <div className="min-h-[80px] flex flex-col items-center justify-center gap-1 px-0.5"
+              style={{ background: 'var(--color-tg-surface-2)' }}>
               {week.trades > 0 ? (
                 <>
-                  <span
-                    className="text-[9px] font-bold leading-none"
-                    style={{
-                      color:
-                        week.pnl > 0
-                          ? 'var(--color-tg-success)'
-                          : week.pnl < 0
-                          ? 'var(--color-tg-danger)'
-                          : 'var(--color-tg-text-2)',
-                    }}
-                  >
-                    {week.pnl > 0 ? '+' : ''}{week.pnl.toFixed(1)}
+                  <span className="text-[9px] font-bold leading-none text-center"
+                    style={{ color: pnlColor(week.pnl) }}>
+                    {pnlLabel(week.pnl, 1)}
                   </span>
                   <span className="text-[8px] leading-none" style={{ color: 'var(--color-tg-muted)' }}>
                     {week.trades} ע׳
                   </span>
                 </>
               ) : (
-                <span className="text-[9px]" style={{ color: 'var(--color-tg-border-light)' }}>
-                  —
-                </span>
+                <span style={{ color: 'var(--color-tg-border-light)', fontSize: '12px' }}>—</span>
               )}
             </div>
+
           </div>
         ))}
       </div>
-    </div>
-  );
-}
-
-function StatBox({
-  label,
-  value,
-  sub,
-  valueColor,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-  valueColor?: string;
-}) {
-  return (
-    <div
-      className="rounded-xl p-3 text-center"
-      style={{ background: 'var(--color-tg-surface)' }}
-    >
-      <p className="text-[10px] mb-1" style={{ color: 'var(--color-tg-muted)' }}>
-        {label}
-      </p>
-      <p className="text-sm font-bold leading-none" style={{ color: valueColor ?? 'var(--color-tg-text)' }}>
-        {value}
-        {sub && (
-          <span className="text-[9px] font-normal mr-0.5" style={{ color: 'var(--color-tg-muted)' }}>
-            {sub}
-          </span>
-        )}
-      </p>
     </div>
   );
 }
