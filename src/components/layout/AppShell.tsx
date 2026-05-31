@@ -9,68 +9,81 @@ import { cn } from '@/lib/utils';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
 import { ReflectLogo } from '@/components/brand/ReflectLogo';
 
-// ── Icons ────────────────────────────────────────────────────────────────────
+// ── Design tokens ─────────────────────────────────────────────────────────────
+const GOLD   = '#D4AF37';
+const NAV_BG = '#06101E';
+const SEP    = 'rgba(212,175,55,0.14)';
+const W_OPEN = 240;
+const W_SHUT = 64;
 
-const IconHome = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
-    <polyline points="9 22 9 12 15 12 15 22" />
-  </svg>
-);
+// ── Icon helper ───────────────────────────────────────────────────────────────
+function Svg({ children }: { children: React.ReactNode }) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      {children}
+    </svg>
+  );
+}
 
-const IconJournal = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-    <polyline points="14 2 14 8 20 8" />
-    <line x1="16" y1="13" x2="8" y2="13" />
-    <line x1="16" y1="17" x2="8" y2="17" />
-  </svg>
-);
+const IconDashboard  = () => <Svg><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></Svg>;
+const IconCalendar   = () => <Svg><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></Svg>;
+const IconList       = () => <Svg><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="4" cy="6" r="1.2" fill="currentColor" stroke="none"/><circle cx="4" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="4" cy="18" r="1.2" fill="currentColor" stroke="none"/></Svg>;
+const IconStats      = () => <Svg><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><line x1="2" y1="20" x2="22" y2="20"/></Svg>;
+const IconTag        = () => <Svg><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></Svg>;
+const IconNotebook   = () => <Svg><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/><line x1="9" y1="15" x2="13" y2="15"/></Svg>;
+const IconAI         = () => <Svg><path d="M12 2l2.4 5.2 5.6.8-4 4 .9 5.6-5-2.7-5 2.7.9-5.6-4-4 5.6-.8L12 2z"/></Svg>;
+const IconShield     = () => <Svg><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></Svg>;
+const IconStrategy   = () => <Svg><path d="M21 3H3v7h18V3z"/><path d="M21 14H3v7h18v-7z"/><line x1="8" y1="10" x2="8" y2="14"/><line x1="16" y1="10" x2="16" y2="14"/></Svg>;
+const IconSettings   = () => <Svg><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></Svg>;
+const IconFeedback   = () => <Svg><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="15" x2="12.01" y2="15"/></Svg>;
+const IconLogout     = () => <Svg><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></Svg>;
+const IconPlus       = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>;
 
-const IconCoach = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="12" cy="12" r="10" />
-    <path d="M12 8v4l3 3" />
-  </svg>
-);
+// ── Nav config ────────────────────────────────────────────────────────────────
+interface NavItem { href: string; label: string; icon: React.ReactNode }
 
-const IconSettings = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="12" cy="12" r="3" />
-    <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
-  </svg>
-);
-
-const IconPlus = ({ size = 20, strokeColor = 'currentColor' }: { size?: number; strokeColor?: string }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={strokeColor} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <line x1="12" y1="5" x2="12" y2="19" />
-    <line x1="5" y1="12" x2="19" y2="12" />
-  </svg>
-);
-
-// ── Nav config ───────────────────────────────────────────────────────────────
-
-const SIDEBAR_NAV = [
-  { href: '/dashboard', label: 'דשבורד', icon: <IconHome /> },
-  { href: '/journal',   label: 'יומן',    icon: <IconJournal /> },
-  { href: '/coach',     label: 'Coach',   icon: <IconCoach /> },
-  { href: '/settings',  label: 'הגדרות',  icon: <IconSettings /> },
+const PRIMARY_NAV: NavItem[] = [
+  { href: '/dashboard',  label: 'דשבורד',            icon: <IconDashboard /> },
+  { href: '/journal',    label: 'יומן חודשי',         icon: <IconCalendar /> },
+  { href: '/trades',     label: 'כל העסקאות',         icon: <IconList /> },
+  { href: '/stats',      label: 'סטטיסטיקה',          icon: <IconStats /> },
+  { href: '/setups',     label: 'סטאפים ותגיות',      icon: <IconTag /> },
+  { href: '/notebook',   label: 'מחברת',              icon: <IconNotebook /> },
+  { href: '/coach',      label: 'מאמן AI',             icon: <IconAI /> },
+  { href: '/rules',      label: 'חוקי מסחר',          icon: <IconShield /> },
+  { href: '/strategies', label: 'אסטרטגיות',          icon: <IconStrategy /> },
 ];
 
-const MOBILE_NAV_LEFT = [
-  { href: '/dashboard', label: 'בית',    icon: <IconHome /> },
-  { href: '/journal',   label: 'עסקאות', icon: <IconJournal /> },
+const SECONDARY_NAV: NavItem[] = [
+  { href: '/settings', label: 'הגדרות',            icon: <IconSettings /> },
+  { href: '/feedback', label: 'באג / הצעה לשיפור', icon: <IconFeedback /> },
 ];
 
-const MOBILE_NAV_RIGHT = [
-  { href: '/coach',    label: "קואץ'",  icon: <IconCoach /> },
-  { href: '/settings', label: 'הגדרות', icon: <IconSettings /> },
-];
+// ── NavLink ───────────────────────────────────────────────────────────────────
+function NavLink({ item, expanded, active }: { item: NavItem; expanded: boolean; active: boolean }) {
+  return (
+    <Link
+      href={item.href}
+      prefetch={true}
+      title={!expanded ? item.label : undefined}
+      className={cn(
+        'flex items-center rounded-xl transition-all duration-150 select-none',
+        expanded ? 'gap-3 px-3 py-2.5' : 'justify-center py-3',
+      )}
+      style={{
+        color:      active ? GOLD : 'rgba(255,255,255,0.45)',
+        background: active ? 'rgba(212,175,55,0.11)' : 'transparent',
+        boxShadow:  active ? `inset 0 0 0 1px rgba(212,175,55,0.22)` : undefined,
+      }}
+    >
+      {item.icon}
+      {expanded && <span className="text-sm font-medium truncate">{item.label}</span>}
+    </Link>
+  );
+}
 
-const GOLD = 'var(--color-tg-primary)';
-
-// ── Component ─────────────────────────────────────────────────────────────────
-
+// ── AppShell ──────────────────────────────────────────────────────────────────
 export default function AppShell({
   children,
   userId,
@@ -81,261 +94,215 @@ export default function AppShell({
   displayName: string;
 }) {
   const pathname = usePathname();
-  const router = useRouter();
-  const [formOpen, setFormOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
+  const router   = useRouter();
 
+  const [formOpen,  setFormOpen]  = useState(false);
+  const [expanded,  setExpanded]  = useState(false);
+  const [isMobile,  setIsMobile]  = useState(false);
+
+  // Detect mobile viewport
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+
+  // Restore desktop saved state
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('sidebar-expanded');
+      if (saved === 'true') setExpanded(true);
+    }
+  }, []);
+
+  // External trigger (other components can dispatch 'open-trade-form')
   useEffect(() => {
     const handler = () => setFormOpen(true);
     window.addEventListener('open-trade-form', handler);
     return () => window.removeEventListener('open-trade-form', handler);
   }, []);
 
-  useEffect(() => {
-    const saved = localStorage.getItem('sidebar-collapsed');
-    if (saved === 'true') setCollapsed(true);
-  }, []);
-
-  function toggleCollapsed() {
-    const next = !collapsed;
-    setCollapsed(next);
-    localStorage.setItem('sidebar-collapsed', String(next));
+  function toggle() {
+    const next = !expanded;
+    setExpanded(next);
+    if (!isMobile) localStorage.setItem('sidebar-expanded', String(next));
   }
 
   async function handleSignOut() {
-    const supabase = createClient();
-    await supabase.auth.signOut();
+    await createClient().auth.signOut();
     router.push('/login');
   }
 
-  const active = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+  function isActive(href: string) {
+    return pathname === href || pathname.startsWith(href + '/');
+  }
+
+  const sidebarW  = expanded ? W_OPEN : W_SHUT;
+  // On mobile, expanded sidebar overlays content (no push); collapsed always pushes W_SHUT
+  const contentMr = isMobile ? W_SHUT : sidebarW;
+
+  const easing = 'cubic-bezier(0.4,0,0.2,1)';
 
   return (
-    <div className="min-h-screen" style={{ background: 'transparent' }}>
+    <div dir="rtl" className="min-h-screen">
 
-      {/* ── Desktop sidebar ──────────────────────────────────────────────── */}
-      <aside
-        className="hidden md:flex flex-col fixed inset-y-0 left-0 z-40 overflow-hidden"
+      {/* Mobile overlay when expanded */}
+      {expanded && isMobile && (
+        <div
+          className="fixed inset-0 z-30"
+          style={{ background: 'rgba(0,0,0,0.55)' }}
+          onClick={() => setExpanded(false)}
+        />
+      )}
+
+      {/* ── Toggle tab (fixed, left edge of sidebar) ───────────────── */}
+      <button
+        onClick={toggle}
+        aria-label={expanded ? 'כווץ סרגל' : 'הרחב סרגל'}
+        className="fixed z-50 flex items-center justify-center w-5 h-9 transition-[right]"
         style={{
-          width: collapsed ? 60 : 220,
-          transition: 'width 250ms ease',
-          background: 'var(--shell-bg)',
-          borderRight: '1px solid var(--shell-border)',
-          boxShadow: 'var(--shell-sidebar-shadow)',
+          right:        sidebarW,
+          top:          '50%',
+          transform:    'translateY(-50%)',
+          transition:   `right 250ms ${easing}`,
+          background:   NAV_BG,
+          border:       `1px solid ${SEP}`,
+          borderRight:  'none',
+          borderRadius: '6px 0 0 6px',
+          color:        'rgba(212,175,55,0.55)',
         }}
       >
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+          style={{ transform: expanded ? 'rotate(0deg)' : 'rotate(180deg)', transition: `transform 250ms ${easing}` }}>
+          <polyline points="9 18 15 12 9 6"/>
+        </svg>
+      </button>
+
+      {/* ── Right sidebar ─────────────────────────────────────────── */}
+      <aside
+        dir="rtl"
+        className="fixed inset-y-0 right-0 z-40 flex flex-col"
+        style={{
+          width:        sidebarW,
+          background:   NAV_BG,
+          borderLeft:   `1px solid ${SEP}`,
+          transition:   `width 250ms ${easing}`,
+          overflowX:    'hidden',
+          overflowY:    'hidden',
+        }}
+      >
+
         {/* Logo */}
         <div
-          className="flex items-center h-16 shrink-0 px-3 gap-2.5"
-          style={{ borderBottom: '1px solid var(--shell-divider)' }}
+          className="flex items-center h-16 shrink-0"
+          style={{
+            borderBottom: `1px solid ${SEP}`,
+            padding:       expanded ? '0 14px' : '0',
+            justifyContent: expanded ? 'flex-start' : 'center',
+            gap:           expanded ? '10px' : '0',
+          }}
         >
           <div className="shrink-0">
-            <ReflectLogo width={36} wordmark={false} />
+            <ReflectLogo width={expanded ? 44 : 34} wordmark={false} />
           </div>
           <span
-            className="font-bold text-base flex-1 whitespace-nowrap overflow-hidden transition-opacity duration-200"
-            style={{ color: 'var(--color-tg-text)', opacity: collapsed ? 0 : 1 }}
+            className="font-bold text-base whitespace-nowrap overflow-hidden transition-opacity duration-200"
+            style={{
+              color:   GOLD,
+              opacity: expanded ? 1 : 0,
+              width:   expanded ? 'auto' : 0,
+            }}
           >
             Reflect
           </span>
         </div>
 
-        {/* Nav links */}
-        <nav className="flex-1 flex flex-col gap-0.5 px-2 py-5 overflow-y-auto">
-          {SIDEBAR_NAV.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              prefetch={true}
-              className={cn(
-                'flex items-center py-2.5 rounded-lg transition-all duration-200 text-sm font-medium',
-                collapsed ? 'justify-center px-0' : 'gap-3 px-3',
-                active(item.href)
-                  ? 'sidebar-link-active'
-                  : 'text-tg-muted hover:text-tg-text-2 hover:bg-[var(--shell-hover)]',
-              )}
-              style={active(item.href) ? {
-                color: GOLD,
-                background: 'rgba(245, 197, 24, 0.1)',
-                boxShadow: 'inset 0 0 0 1px rgba(245,197,24,0.15)',
-              } : {}}
-              title={collapsed ? item.label : undefined}
-            >
-              {item.icon}
-              {!collapsed && <span>{item.label}</span>}
-            </Link>
+        {/* Primary nav */}
+        <nav className="flex-1 overflow-y-auto overflow-x-hidden py-2 flex flex-col gap-0.5 px-2">
+          {PRIMARY_NAV.map(item => (
+            <NavLink key={item.href} item={item} expanded={expanded} active={isActive(item.href)} />
           ))}
 
-          {/* New trade */}
+          {/* Separator */}
+          <div className="my-2 mx-1" style={{ height: 1, background: SEP }} />
+
+          {SECONDARY_NAV.map(item => (
+            <NavLink key={item.href} item={item} expanded={expanded} active={isActive(item.href)} />
+          ))}
+
+          {/* Sign out */}
           <button
-            onClick={() => setFormOpen(true)}
+            onClick={handleSignOut}
+            title={!expanded ? 'התנתק' : undefined}
             className={cn(
-              'flex items-center py-2.5 rounded-lg transition-all duration-200 text-sm font-semibold w-full mt-3',
-              collapsed ? 'justify-center px-0' : 'gap-3 px-3',
+              'flex items-center rounded-xl transition-colors hover:bg-white/5 cursor-pointer',
+              expanded ? 'gap-3 px-3 py-2.5' : 'justify-center py-3',
             )}
-            style={{
-              color: '#0a0a0f',
-              background: 'linear-gradient(135deg, #F5C518 0%, #D4A017 100%)',
-              boxShadow: '0 2px 14px rgba(245,197,24,0.4)',
-            }}
-            title={collapsed ? 'עסקה חדשה' : undefined}
+            style={{ color: 'rgba(255,255,255,0.35)' }}
           >
-            <IconPlus size={18} strokeColor="black" />
-            {!collapsed && <span>עסקה חדשה</span>}
+            <IconLogout />
+            {expanded && <span className="text-sm font-medium">התנתק</span>}
           </button>
         </nav>
 
-        {/* User info */}
-        <div
-          className="px-2 pb-4 pt-3 shrink-0"
-          style={{ borderTop: '1px solid var(--shell-divider)' }}
-        >
-          {collapsed ? (
-            <div className="flex justify-center">
+        {/* User area + CTA */}
+        <div className="shrink-0 px-2 pb-3 pt-2 flex flex-col gap-2" style={{ borderTop: `1px solid ${SEP}` }}>
+
+          {/* Avatar / user info */}
+          {expanded ? (
+            <div className="flex items-center gap-2 px-1 py-1">
               <div
-                className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold"
-                style={{ background: 'rgba(245,197,24,0.15)', color: GOLD }}
+                className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
+                style={{ background: 'rgba(212,175,55,0.14)', color: GOLD }}
+              >
+                {(displayName || '?').charAt(0).toUpperCase()}
+              </div>
+              <p className="flex-1 text-xs font-medium truncate min-w-0" style={{ color: 'rgba(255,255,255,0.65)' }}>
+                {displayName}
+              </p>
+              <ThemeToggle className="p-1 rounded-md transition-opacity hover:opacity-70 shrink-0" />
+            </div>
+          ) : (
+            <div className="flex justify-center py-1">
+              <div
+                className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold"
+                style={{ background: 'rgba(212,175,55,0.14)', color: GOLD }}
                 title={displayName}
               >
                 {(displayName || '?').charAt(0).toUpperCase()}
               </div>
             </div>
-          ) : (
-            <div className="flex items-center gap-3 px-2 py-1.5 rounded-lg">
-              <div
-                className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
-                style={{ background: 'rgba(245,197,24,0.15)', color: GOLD }}
-              >
-                {(displayName || '?').charAt(0).toUpperCase()}
-              </div>
-              <p className="flex-1 text-xs font-medium text-tg-text truncate min-w-0">{displayName}</p>
-              <ThemeToggle className="p-1 rounded-md hover:bg-[var(--shell-hover)] transition-colors shrink-0" />
-              <button
-                onClick={handleSignOut}
-                className="text-xs text-tg-muted hover:text-tg-danger transition-colors shrink-0"
-              >
-                יציאה
-              </button>
-            </div>
           )}
+
+          {/* New trade */}
+          <button
+            onClick={() => setFormOpen(true)}
+            title={!expanded ? 'עסקה חדשה' : undefined}
+            className={cn(
+              'flex items-center justify-center rounded-xl py-2.5 font-semibold text-sm',
+              'transition-opacity hover:opacity-85 active:scale-95',
+              expanded ? 'gap-2 px-3' : '',
+            )}
+            style={{ background: GOLD, color: '#06101E' }}
+          >
+            <IconPlus />
+            {expanded && <span>עסקה חדשה</span>}
+          </button>
+
         </div>
       </aside>
 
-      {/* ── Sidebar toggle — fixed to right edge, always visible on desktop ── */}
-      <button
-        onClick={toggleCollapsed}
-        className="hidden md:flex fixed z-50 items-center justify-center w-5 h-9 rounded-r-lg transition-colors"
+      {/* ── Main content ─────────────────────────────────────────── */}
+      <div
+        className="min-h-screen"
         style={{
-          left: collapsed ? 60 : 220,
-          top: '50%',
-          transform: 'translateY(-50%)',
-          transition: 'left 250ms ease, background-color 150ms ease',
-          background: 'var(--shell-bg)',
-          border: '1px solid var(--shell-border)',
-          borderLeft: 'none',
-          color: 'var(--color-tg-muted)',
-          boxShadow: '2px 0 6px rgba(0,0,0,0.12)',
+          marginRight: contentMr,
+          transition:  `margin-right 250ms ${easing}`,
         }}
-        title={collapsed ? 'הרחב סרגל' : 'כווץ סרגל'}
       >
-        <svg
-          width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-          strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-          style={{ transition: 'transform 250ms ease', transform: collapsed ? 'rotate(180deg)' : 'rotate(0deg)' }}
-        >
-          <polyline points="15 18 9 12 15 6" />
-        </svg>
-      </button>
-
-      {/* ── Main content column ──────────────────────────────────────────── */}
-      <div className={cn(
-        'flex flex-col min-h-screen transition-[margin-left] duration-[250ms] ease-in-out',
-        collapsed ? 'md:ml-[60px]' : 'md:ml-[220px]',
-      )}>
-
-        {/* Mobile-only top bar */}
-        <header
-          className="glass-dark sticky top-0 z-30 flex items-center justify-between px-4 h-14 border-b md:hidden"
-          style={{
-            background: 'var(--shell-header-bg)',
-            borderColor: 'var(--shell-border)',
-            boxShadow: 'var(--shell-header-shadow)',
-          }}
-        >
-          <div className="flex items-center gap-2">
-            <ReflectLogo width={30} wordmark={false} />
-            <span className="font-bold text-sm" style={{ color: 'var(--color-tg-text)' }}>Reflect</span>
-          </div>
-          <div className="flex items-center gap-3">
-            <ThemeToggle className="p-1.5 rounded-md hover:bg-[var(--shell-hover)] transition-colors" />
-            <button onClick={handleSignOut} className="text-xs text-tg-muted hover:text-tg-danger transition-colors">
-              יציאה
-            </button>
-          </div>
-        </header>
-
-        {/* Page content — no bottom padding on desktop since there's no bottom nav */}
-        <main className="flex-1 overflow-auto pb-24 md:pb-0">{children}</main>
-
-        {/* Mobile-only bottom navigation */}
-        <nav
-          className="glass-dark fixed bottom-0 left-0 right-0 z-30 flex items-center h-16 border-t md:hidden"
-          style={{
-            background: 'var(--shell-nav-bg)',
-            borderColor: 'var(--shell-divider)',
-            boxShadow: 'var(--shell-nav-shadow)',
-            overflow: 'visible',
-          }}
-        >
-          {MOBILE_NAV_LEFT.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              prefetch={true}
-              className={cn(
-                'flex flex-col items-center gap-0.5 flex-1 py-2 transition-all duration-200',
-                active(item.href) ? '' : 'text-tg-muted hover:text-tg-text-2',
-              )}
-              style={active(item.href) ? { color: GOLD, filter: 'drop-shadow(0 0 6px rgba(245,197,24,0.6))' } : {}}
-            >
-              {item.icon}
-              <span className="text-[10px] font-medium">{item.label}</span>
-            </Link>
-          ))}
-
-          {/* Centre raised add button */}
-          <div className="flex-1 flex flex-col items-center justify-center -translate-y-3">
-            <button
-              onClick={() => setFormOpen(true)}
-              aria-label="הוסף עסקה"
-              className="w-14 h-14 rounded-full flex items-center justify-center transition-transform active:scale-95"
-              style={{
-                background: 'linear-gradient(135deg, #F5C518 0%, #D4A017 100%)',
-                boxShadow: '0 4px 20px rgba(245,197,24,0.65), 0 0 48px rgba(245,197,24,0.25), inset 0 1px 0 rgba(255,255,255,0.25)',
-              }}
-            >
-              <IconPlus size={24} strokeColor="black" />
-            </button>
-            <span className="text-[10px] font-semibold mt-1" style={{ color: GOLD }}>הוסף עסקה</span>
-          </div>
-
-          {MOBILE_NAV_RIGHT.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              prefetch={true}
-              className={cn(
-                'flex flex-col items-center gap-0.5 flex-1 py-2 transition-all duration-200',
-                active(item.href) ? '' : 'text-tg-muted hover:text-tg-text-2',
-              )}
-              style={active(item.href) ? { color: GOLD, filter: 'drop-shadow(0 0 6px rgba(245,197,24,0.6))' } : {}}
-            >
-              {item.icon}
-              <span className="text-[10px] font-medium">{item.label}</span>
-            </Link>
-          ))}
-        </nav>
-
+        {children}
       </div>
 
       <TradePlanForm
