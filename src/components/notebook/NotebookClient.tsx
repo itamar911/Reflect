@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, type CSSProperties } from 'react';
 import { createClient } from '@/lib/supabase/client';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -399,7 +399,7 @@ function SaveBadge({ status }: { status: SaveStatus }) {
 
 // ── Shared style helpers ──────────────────────────────────────────────────────
 
-const btnStyle: React.CSSProperties = {
+const btnStyle: CSSProperties = {
   width: '100%', padding: '8px 12px', borderRadius: 10,
   background: GOLD, color: '#0a0a0f',
   fontSize: 13, fontWeight: 600,
@@ -407,7 +407,7 @@ const btnStyle: React.CSSProperties = {
   cursor: 'pointer', border: 'none', direction: 'rtl',
 };
 
-const inputBase: React.CSSProperties = {
+const inputBase: CSSProperties = {
   width: '100%', padding: '7px 10px', borderRadius: 8,
   background: SURF2, border: `1px solid ${BORDER}`,
   color: TEXT, outline: 'none', boxSizing: 'border-box',
