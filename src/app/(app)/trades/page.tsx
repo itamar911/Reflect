@@ -1,10 +1,10 @@
 import { createClient } from '@/lib/supabase/server';
 import JournalExport from '@/components/journal/JournalExport';
-import TradeCalendar from '@/components/journal/TradeCalendar';
+import JournalClient from '@/components/journal/JournalClient';
 
-export const metadata = { title: 'יומן חודשי — Reflect' };
+export const metadata = { title: 'כל העסקאות — Reflect' };
 
-export default async function JournalPage() {
+export default async function TradesPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
@@ -19,6 +19,7 @@ export default async function JournalPage() {
   const allTrades = (trades ?? []).map((t) => ({
     id:               t.id               as string,
     strategy:         t.strategy         as string,
+    symbol:           (t.symbol          as string | null) ?? null,
     entry_price:      Number(t.entry_price),
     stop_loss:        Number(t.stop_loss),
     take_profit:      Number(t.take_profit),
@@ -52,7 +53,7 @@ export default async function JournalPage() {
     <div dir="rtl" className="px-4 py-5 flex flex-col gap-4 md:max-w-none">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-tg-text">יומן חודשי</h1>
+          <h1 className="text-xl font-bold text-tg-text">כל העסקאות</h1>
           <p className="text-xs text-tg-muted mt-0.5">
             {allTrades.filter((t) => t.status === 'open').length} פתוחות ·{' '}
             {allTrades.filter((t) => t.status === 'closed').length} סגורות
@@ -60,16 +61,7 @@ export default async function JournalPage() {
         </div>
         <JournalExport trades={exportTrades} />
       </div>
-      {allTrades.length === 0 ? (
-        <div className="text-center py-12 rounded-2xl border border-tg-border"
-          style={{ background: 'var(--color-tg-surface)' }}>
-          <div className="text-4xl mb-3">📓</div>
-          <h3 className="text-base font-semibold text-tg-text mb-1">היומן ריק עדיין</h3>
-          <p className="text-sm text-tg-text-2">לחץ על + כדי להגיש את תוכנית העסקה הראשונה שלך</p>
-        </div>
-      ) : (
-        <TradeCalendar trades={allTrades} />
-      )}
+      <JournalClient trades={allTrades} />
     </div>
   );
 }
