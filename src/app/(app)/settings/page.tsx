@@ -1,5 +1,4 @@
 import { redirect } from 'next/navigation';
-import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import Card from '@/components/ui/Card';
 import AlertsPanel from '@/components/settings/AlertsPanel';
@@ -43,55 +42,6 @@ export default async function SettingsPage() {
           ))}
         </div>
       </Card>
-
-      {/* Link to Rules page */}
-      <Link href="/rules">
-        <Card className="transition-colors hover:border-[rgba(212,175,55,0.3)]">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div
-                className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
-                style={{ background: 'rgba(212,175,55,0.1)' }}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-                </svg>
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-tg-text">חוקי מסחר</p>
-                <p className="text-xs text-tg-muted">ניהול חוקים מובנים ואישיים</p>
-              </div>
-            </div>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-tg-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="9 18 15 12 9 6"/>
-            </svg>
-          </div>
-        </Card>
-      </Link>
-
-      {/* Link to Strategies page */}
-      <Link href="/strategies">
-        <Card className="transition-colors hover:border-[rgba(212,175,55,0.3)]">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
-                style={{ background: 'rgba(212,175,55,0.1)' }}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 3H3v7h18V3z"/><path d="M21 14H3v7h18v-7z"/>
-                  <line x1="8" y1="10" x2="8" y2="14"/><line x1="16" y1="10" x2="16" y2="14"/>
-                </svg>
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-tg-text">האסטרטגיות שלי</p>
-                <p className="text-xs text-tg-muted">ניהול אסטרטגיות עם סטטיסטיקות וניתוח AI</p>
-              </div>
-            </div>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-tg-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="9 18 15 12 9 6"/>
-            </svg>
-          </div>
-        </Card>
-      </Link>
 
       {/* Alerts */}
       <Card>

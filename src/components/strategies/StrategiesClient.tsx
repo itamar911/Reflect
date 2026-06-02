@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, type CSSProperties } from 'react';
+import { useState, type CSSProperties } from 'react';
 import { createClient } from '@/lib/supabase/client';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
@@ -73,7 +73,69 @@ function computeStats(strategyName: string, trades: TradeSummary[]) {
 }
 
 const DIR_LABELS: Record<string, string> = { long: 'Long', short: 'Short', both: 'שניהם' };
-const BUILTIN_TEMPLATES = [
+
+// ── Builtin strategies (shown to all users, not editable) ─────────────────────
+interface BuiltinDef {
+  id: string;
+  name: string;
+  description: string;
+  detail: string;
+  icon: string;
+  direction: 'long' | 'short' | 'both';
+}
+
+const BUILTIN_STRATEGIES: BuiltinDef[] = [
+  {
+    id: '__trend_following',
+    name: 'Trend Following',
+    description: 'מסחר בכיוון המגמה הראשית',
+    detail: 'מזהה מגמה ברורה על Higher Timeframe ונכנס בכיוונה. מחפש Higher Highs / Higher Lows לעלייה ו-Lower Highs / Lower Lows לירידה. כניסה על תיקון לעבר EMA/אזור תמיכה.',
+    icon: '📈',
+    direction: 'both',
+  },
+  {
+    id: '__breakout',
+    name: 'Breakout',
+    description: 'פריצת רמות תמיכה/התנגדות',
+    detail: 'כניסה על פריצה מעל התנגדות ידועה או מתחת לתמיכה, עם נר סגירה מחוץ לטווח. מחפש עלייה בנפח לאישור. SL מתחת/מעל לרמה הנפרצת.',
+    icon: '🚀',
+    direction: 'both',
+  },
+  {
+    id: '__range_reversal',
+    name: 'Range Reversal',
+    description: 'היפוך בטווח מסחר',
+    detail: 'מזהה שוק בטווח (Range) ברור עם תמיכה והתנגדות. כניסה בהיפוך מקצוות הטווח עם אישור rejection candle. TP בצד השני של הטווח.',
+    icon: '↔️',
+    direction: 'both',
+  },
+  {
+    id: '__pullback',
+    name: 'Pullback Entry',
+    description: 'כניסה בנסיגה בכיוון המגמה',
+    detail: 'ממתין לנסיגה (Pullback) אל EMA, Fibonacci 50-61.8%, או אזור Supply/Demand קודם. כניסה עם אישור נר מגמה. Stop מתחת לנסיגה.',
+    icon: '🔄',
+    direction: 'both',
+  },
+  {
+    id: '__smc',
+    name: 'SMC / Order Blocks',
+    description: 'Smart Money Concepts — Order Blocks',
+    detail: 'כניסה על Order Blocks (OB) — הנר האחרון לפני תנועה חזקה. מחפש Liquidity Grab, Break of Structure (BOS) לאישור כיוון, ו-Fair Value Gap (FVG) לדיוק כניסה.',
+    icon: '🏦',
+    direction: 'both',
+  },
+  {
+    id: '__vwap',
+    name: 'VWAP Reversion',
+    description: 'חזרה ל-VWAP אחרי סטייה',
+    detail: 'מחפש סטייה גדולה מ-VWAP (מעל/מתחת ל-1-2 Standard Deviations). כניסה בהיפוך עם momentum חלש ו-Volume יורד. TP ב-VWAP, SL מעל/מתחת לנקודת הקיצון.',
+    icon: '〰️',
+    direction: 'both',
+  },
+];
+
+const FORM_TEMPLATES = [
   { name: 'Asia Range Breakout', description: 'כניסה על פריצת טווח אסיה בתחילת סשן לונדון. מחפש Break of Structure מעל/מתחת לגבולות הטווח.' },
   { name: 'London Breakout',     description: 'כניסה בפתיחת סשן לונדון על פריצת high/low של 30 הדקות הראשונות.' },
   { name: 'ICT — Order Blocks',  description: 'כניסה על Order Blocks עם Liquidity Grab, מגמת Higher Timeframe, FVG לאישור.' },
@@ -106,9 +168,10 @@ export default function StrategiesClient({
   const [saving,      setSaving]      = useState(false);
   const [saveError,   setSaveError]   = useState<string | null>(null);
   const [deletingId,  setDeletingId]  = useState<string | null>(null);
-  const [expandTrades, setExpandTrades] = useState<Record<string, boolean>>({});
-  const [aiReviews,   setAiReviews]   = useState<Record<string, string | null>>({});
-  const [aiLoading,   setAiLoading]   = useState<Record<string, boolean>>({});
+  const [expandTrades,  setExpandTrades]  = useState<Record<string, boolean>>({});
+  const [expandBuiltin, setExpandBuiltin] = useState<Record<string, boolean>>({});
+  const [aiReviews,     setAiReviews]     = useState<Record<string, string | null>>({});
+  const [aiLoading,     setAiLoading]     = useState<Record<string, boolean>>({});
   const supabase = createClient();
 
   // ── Form handlers ──────────────────────────────────────────────────────────
@@ -125,7 +188,7 @@ export default function StrategiesClient({
     });
     setSaveError(null); setShowForm(true);
   }
-  function useTemplate(t: typeof BUILTIN_TEMPLATES[0]) {
+  function useTemplate(t: typeof FORM_TEMPLATES[0]) {
     setForm({ ...EMPTY_FORM, name: t.name, description: t.description });
     setEditId(null); setSaveError(null); setShowForm(true);
   }
@@ -182,8 +245,182 @@ export default function StrategiesClient({
     setExpandTrades(prev => ({ ...prev, [id]: !prev[id] }));
   }
 
+  async function fetchAiReviewBuiltin(b: BuiltinDef) {
+    setAiLoading(prev => ({ ...prev, [b.id]: true }));
+    const stats = computeStats(b.name, allTrades);
+    try {
+      const res = await fetch('/api/ai-strategy-review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          strategy: { name: b.name, description: b.detail, direction: b.direction, risk_rules: '' },
+          stats,
+        }),
+      });
+      const { review } = await res.json();
+      setAiReviews(prev => ({ ...prev, [b.id]: review || 'לא ניתן לטעון ניתוח.' }));
+    } catch {
+      setAiReviews(prev => ({ ...prev, [b.id]: 'שגיאה בטעינת ניתוח AI.' }));
+    }
+    setAiLoading(prev => ({ ...prev, [b.id]: false }));
+  }
+
   return (
-    <div dir="rtl" className="flex flex-col gap-4">
+    <div dir="rtl" className="flex flex-col gap-5">
+
+      {/* ── Builtin strategies ──────────────────────────────────────────── */}
+      <div className="flex flex-col gap-3">
+        <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: MUTED }}>
+          אסטרטגיות מובנות
+        </p>
+        <div className="flex flex-col gap-2">
+          {BUILTIN_STRATEGIES.map(b => {
+            const stats      = computeStats(b.name, allTrades);
+            const linked     = allTrades.filter(t => t.strategy === b.name);
+            const isOpen     = expandBuiltin[b.id];
+            const aiText     = aiReviews[b.id];
+            const aiLoad     = aiLoading[b.id];
+
+            return (
+              <div key={b.id} className="rounded-2xl overflow-hidden"
+                style={{ background: SURF, border: `1px solid ${BORDER}` }}>
+
+                {/* Header row — click to expand */}
+                <button
+                  className="w-full text-right p-4 flex items-start gap-3 transition-opacity hover:opacity-90"
+                  onClick={() => setExpandBuiltin(prev => ({ ...prev, [b.id]: !prev[b.id] }))}>
+                  <span className="text-2xl leading-none mt-0.5 shrink-0">{b.icon}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-bold" style={{ color: TEXT }}>{b.name}</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-md font-semibold"
+                        style={{ background: 'rgba(212,175,55,0.12)', color: GOLD }}>מובנית</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-md"
+                        style={{ background: SURF2, color: MUTED }}>{DIR_LABELS[b.direction]}</span>
+                    </div>
+                    <p className="text-xs mt-0.5" style={{ color: TEXT2 }}>{b.description}</p>
+                  </div>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={MUTED} strokeWidth="2"
+                    strokeLinecap="round" strokeLinejoin="round" className="shrink-0 mt-1"
+                    style={{ transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>
+                    <polyline points="6 9 12 15 18 9"/>
+                  </svg>
+                </button>
+
+                {/* Expanded panel */}
+                {isOpen && (
+                  <div style={{ borderTop: `1px solid ${BORDER}` }}>
+                    {/* Detail text */}
+                    <div className="px-4 pt-3 pb-2">
+                      <p className="text-xs leading-relaxed" style={{ color: TEXT2 }}>{b.detail}</p>
+                    </div>
+
+                    {/* Stats */}
+                    <div className="grid grid-cols-4 gap-2 px-4 pb-3">
+                      <StatBox label="עסקאות"  value={String(stats.tradeCount)} />
+                      <StatBox label="הצלחה"   value={stats.closedCount > 0 ? `${stats.winRate}%` : '—'}
+                        color={stats.winRate >= 60 ? GREEN : stats.winRate >= 40 ? GOLD : stats.closedCount > 0 ? RED : MUTED} />
+                      <StatBox label="ממוצע"   value={stats.closedCount > 0 ? fmtPnl(stats.avgPnl) : '—'}
+                        color={stats.avgPnl > 0 ? GREEN : stats.avgPnl < 0 ? RED : MUTED} />
+                      <StatBox label="R:R"      value={stats.tradeCount > 0 ? `1:${stats.avgRR}` : '—'} color={GOLD} />
+                    </div>
+
+                    {/* Action buttons */}
+                    <div className="flex gap-2 px-4 pb-4">
+                      <button onClick={() => setExpandTrades(prev => ({ ...prev, [b.id]: !prev[b.id] }))}
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-medium"
+                        style={{
+                          background: expandTrades[b.id] ? 'rgba(212,175,55,0.12)' : SURF2,
+                          color:      expandTrades[b.id] ? GOLD : TEXT2,
+                          border:     `1px solid ${expandTrades[b.id] ? 'rgba(212,175,55,0.3)' : BORDER}`,
+                        }}>
+                        <ListIcon /> עסקאות ({linked.length})
+                      </button>
+                      <button
+                        onClick={() => !aiText && fetchAiReviewBuiltin(b)}
+                        disabled={aiLoad}
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-medium disabled:opacity-50"
+                        style={{
+                          background: aiText ? 'rgba(212,175,55,0.12)' : SURF2,
+                          color:      aiText ? GOLD : TEXT2,
+                          border:     `1px solid ${aiText ? 'rgba(212,175,55,0.3)' : BORDER}`,
+                        }}>
+                        <SparkIcon /> {aiLoad ? 'מנתח...' : aiText ? 'ניתוח AI ✓' : 'ניתוח AI'}
+                      </button>
+                    </div>
+
+                    {/* Trades list */}
+                    {expandTrades[b.id] && (
+                      <div style={{ borderTop: `1px solid ${BORDER}` }}>
+                        {linked.length === 0 ? (
+                          <p className="text-sm text-center py-5" style={{ color: MUTED }}>
+                            אין עסקאות עם האסטרטגיה הזו עדיין
+                          </p>
+                        ) : linked.map((t, i) => {
+                          const pnl = calcPnl(t);
+                          return (
+                            <div key={t.id} className="flex items-center gap-3 px-4 py-2.5"
+                              style={{ borderTop: i > 0 ? `1px solid ${BORDER}` : undefined }}>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-sm font-medium" style={{ color: TEXT }}>{t.symbol ?? '—'}</span>
+                                  <span className="text-xs px-1.5 py-0.5 rounded-md"
+                                    style={{
+                                      background: t.status === 'closed'
+                                        ? (pnl != null && pnl > 0 ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.1)')
+                                        : 'rgba(212,175,55,0.1)',
+                                      color: t.status === 'closed'
+                                        ? (pnl != null && pnl > 0 ? GREEN : RED) : GOLD,
+                                    }}>
+                                    {t.status === 'closed' ? (pnl != null && pnl > 0 ? 'רווח' : 'הפסד') : 'פתוח'}
+                                  </span>
+                                </div>
+                                <p className="text-[10px] mt-0.5" style={{ color: MUTED }}>
+                                  {fmtDate(t.submitted_at)}{t.closed_at ? ` → ${fmtDate(t.closed_at)}` : ''}
+                                </p>
+                              </div>
+                              <div className="text-left shrink-0">
+                                {pnl !== null && (
+                                  <p className="text-sm font-semibold" style={{ color: pnl >= 0 ? GREEN : RED }}>
+                                    {fmtPnl(pnl)}
+                                  </p>
+                                )}
+                                <p className="text-[10px]" style={{ color: MUTED }}>R:R 1:{t.rr_ratio.toFixed(1)}</p>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* AI review */}
+                    {(aiText || aiLoad) && (
+                      <div className="px-4 pb-4" style={{ borderTop: `1px solid ${BORDER}` }}>
+                        <p className="text-xs font-semibold mt-3 mb-2" style={{ color: MUTED }}>ניתוח AI</p>
+                        {aiLoad ? (
+                          <div className="flex flex-col gap-2">
+                            {[80, 65, 75].map((w, i) => (
+                              <div key={i} className="h-3 rounded animate-pulse" style={{ background: SURF2, width: `${w}%` }} />
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: TEXT2 }}>{aiText}</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── User strategies ──────────────────────────────────────────────── */}
+      <div className="flex flex-col gap-3">
+        <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: MUTED }}>
+          האסטרטגיות שלי
+        </p>
 
       {/* Empty state */}
       {strategies.length === 0 && !showForm && (
@@ -391,7 +628,7 @@ export default function StrategiesClient({
         <div className="flex flex-col gap-2">
           <p className="text-xs font-semibold" style={{ color: MUTED }}>תבניות מובנות — לחץ להוסיף</p>
           <div className="flex flex-wrap gap-1.5">
-            {BUILTIN_TEMPLATES.map(t => (
+            {FORM_TEMPLATES.map(t => (
               <button key={t.name} onClick={() => useTemplate(t)}
                 className="px-3 py-1.5 rounded-full text-xs border transition-all hover:opacity-80"
                 style={{ background: SURF2, borderColor: BORDER, color: TEXT2 }}>
@@ -483,6 +720,7 @@ export default function StrategiesClient({
           </div>
         </div>
       )}
+      </div>{/* end user strategies */}
     </div>
   );
 }
