@@ -35,8 +35,8 @@ Return JSON exactly in this format (no additional text):
 
 CRITICAL: Every insight must quantify financial impact using the actual numbers from the data. Use the P&L values, counts, and percentages provided. Examples of the style required:
 - "עצרנו אותך מ-3 עסקאות Revenge החודש — חסכת $X לפי הממוצע של עסקאות דומות"
-- "ה-Win Rate שלך עם מצב רגשי גבוה (4-5) הוא X% לעומת X% כשאתה במצב נמוך — הפרש של $X בממוצע לעסקה"
-- "שעות X-Y הכניסו לך X% מסך ה-P&L עם X% Win Rate"
+- "ה-אחוז ההצלחה שלך עם מצב רגשי גבוה (4-5) הוא X% לעומת X% כשאתה במצב נמוך — הפרש של $X בממוצע לעסקה"
+- "שעות X-Y הכניסו לך X% מסך ה-P&L עם X% הצלחה"
 - "האסטרטגיה הטובה ביותר שלך הרוויחה $X, הגרועה ביותר הפסידה $X"
 
 Insight types: time (best/worst hours by P&L), emotional (emotional state vs P&L), performance (overall numbers), pattern (patterns), revenge (revenge trading cost in $), discipline (rules impact in $).

@@ -15,7 +15,7 @@ const QUICK_QUESTIONS = [
   'כמה להסתכן בעסקה הבאה?',
   'הסבר לי ICT Order Blocks',
   'איך להתמודד עם Revenge Trading?',
-  'האם Win Rate שלי טוב?',
+  'האם אחוז ההצלחה שלי טוב?',
 ];
 
 export default function TradingBot() {

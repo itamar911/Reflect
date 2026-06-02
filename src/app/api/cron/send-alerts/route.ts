@@ -26,13 +26,13 @@ function motivation(trades: number, winRate: number, totalPL: number): string {
   if (trades === 0)
     return '🌙 יום ללא עסקאות — לפעמים ההמתנה לסטאפ הנכון היא ההחלטה הנכונה ביותר.';
   if (totalPL > 0 && winRate >= 60)
-    return '🔥 יום מצוין! Win Rate גבוה ורווחי — המשך לשמור על הגישה הזאת.';
+    return '🔥 יום מצוין! אחוז הצלחה גבוה ורווחי — המשך לשמור על הגישה הזאת.';
   if (totalPL > 0 && winRate >= 50)
     return '✅ יום רווחי — שמור על המשמעת ותן לרווחים לרוץ.';
   if (totalPL > 0)
     return '💚 יום בצד החיובי — בדוק אם ה-R:R תומך בגדילה לטווח ארוך.';
   if (totalPL < 0 && winRate >= 50)
-    return '📊 Win Rate טוב למרות ההפסד — שפר את ה-R:R כדי שהרווחים יכסו את ההפסדים.';
+    return '📊 אחוז הצלחה טוב למרות ההפסד — שפר את ה-R:R כדי שהרווחים יכסו את ההפסדים.';
   if (totalPL < 0 && trades <= 2)
     return '💡 יום קשה, אבל רק ' + trades + ' עסקאות — שמור על הסבלנות למחר.';
   if (totalPL < 0)
@@ -79,7 +79,7 @@ function dailySummaryHtml(
     </div>
     <div style="background:#111827;border:1px solid #1a2535;border-radius:12px;padding:16px;text-align:center">
       <div style="font-size:26px;font-weight:bold;color:${wrColor}">${stats.winRate}%</div>
-      <div style="font-size:12px;color:#7b8fa8;margin-top:5px">Win Rate</div>
+      <div style="font-size:12px;color:#7b8fa8;margin-top:5px">אחוז הצלחה</div>
     </div>
     <div style="background:#111827;border:1px solid #1a2535;border-radius:12px;padding:16px;text-align:center">
       <div style="font-size:26px;font-weight:bold;color:${rrColor}">1:${stats.avgRR}</div>
@@ -140,7 +140,7 @@ function weeklySummaryHtml(
   const plColor     = stats.totalPL >= 0 ? '#00C853' : '#FF3B30';
   const plFormatted = (stats.totalPL >= 0 ? '+$' : '-$') + Math.abs(stats.totalPL).toFixed(2);
   const tip =
-    stats.winRate < 40  ? 'Win Rate נמוך — בדוק את תנאי הכניסה שלך ואת ה-R:R' :
+    stats.winRate < 40  ? 'אחוז הצלחה נמוך — בדוק את תנאי הכניסה שלך ואת ה-R:R' :
     stats.avgRR  < 1.5  ? 'שפר את יחס ה-R:R — חפש סטאפים עם לפחות 1:2' :
                           'כל הכבוד — המשך לפי התוכנית!';
 
@@ -162,7 +162,7 @@ function weeklySummaryHtml(
     </div>
     <div style="background:#111827;border:1px solid #1a2535;border-radius:12px;padding:16px;text-align:center">
       <div style="font-size:26px;font-weight:bold;color:${stats.winRate >= 50 ? '#00C853' : '#FF3B30'}">${stats.winRate}%</div>
-      <div style="font-size:12px;color:#7b8fa8;margin-top:5px">Win Rate</div>
+      <div style="font-size:12px;color:#7b8fa8;margin-top:5px">אחוז הצלחה</div>
     </div>
     <div style="background:#111827;border:1px solid #1a2535;border-radius:12px;padding:16px;text-align:center">
       <div style="font-size:26px;font-weight:bold;color:${stats.avgRR >= 2 ? '#00C853' : '#F59E0B'}">1:${stats.avgRR}</div>

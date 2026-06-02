@@ -72,7 +72,7 @@ function computeStats(strategyName: string, trades: TradeSummary[]) {
   };
 }
 
-const DIR_LABELS: Record<string, string> = { long: 'Long', short: 'Short', both: 'שניהם' };
+const DIR_LABELS: Record<string, string> = { long: 'לונג', short: 'שורט', both: 'שניהם' };
 
 // ── Builtin strategies (shown to all users, not editable) ─────────────────────
 interface BuiltinDef {

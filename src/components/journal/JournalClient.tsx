@@ -138,7 +138,7 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
         <StatCard label="רווח / הפסד"   value={fmtPnl(totalPnl)}
           icon={<DollarIcon />}
           color={totalPnl >= 0 ? GREEN : RED} />
-        <StatCard label="PROFIT FACTOR" value={pfStr}
+        <StatCard label="פקטור רווח" value={pfStr}
           icon={<TargetIcon />}
           color={pfNum !== null ? (pfNum >= 1.5 ? GREEN : pfNum >= 1 ? GOLD : RED) : MUTED} />
       </div>
@@ -312,7 +312,7 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
                       <Chip
                         bg={dir === 'long' ? 'rgba(74,222,128,0.12)' : 'rgba(248,113,113,0.12)'}
                         color={dir === 'long' ? GREEN : RED}>
-                        {dir === 'long' ? 'Long' : 'Short'}
+                        {dir === 'long' ? 'לונג' : 'שורט'}
                       </Chip>
                     </TD>
 

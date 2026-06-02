@@ -176,7 +176,7 @@ function CircleGauge({ pct, size = 72, color }: { pct: number; size?: number; co
 }
 
 // ── Radar chart ───────────────────────────────────────────────────────────────
-const R_LABELS = ['Win Rate', 'Profit Factor', 'Consistency', 'Avg W/L', 'Drawdown', 'Recovery'];
+const R_LABELS = ['אחוז הצלחה', 'פקטור רווח', 'עקביות', 'ממוצע רווח/הפסד', 'ירידת ערך', 'התאוששות'];
 const R_DESCS  = [
   'אחוז הצלחה מבין עסקאות סגורות',
   'רווח גולמי חלקי הפסד גולמי',
@@ -450,7 +450,7 @@ function TradeDetailPanel({ trade, onClose, aiReview, aiLoading, onAiReview }: {
                     background: dir === 'long' ? 'rgba(74,222,128,0.12)' : 'rgba(248,113,113,0.12)',
                     color: dir === 'long' ? GREEN : RED,
                   }}>
-                  {dir === 'long' ? 'Long ↑' : 'Short ↓'}
+                  {dir === 'long' ? 'לונג ↑' : 'שורט ↓'}
                 </span>
                 <span className="text-[10px]" style={{ color: MUTED }}>{fmtDateTime(trade.submitted_at)}</span>
               </div>
@@ -817,7 +817,7 @@ export default function DashboardClient({
                               background: dir === 'long' ? 'rgba(74,222,128,0.12)' : 'rgba(248,113,113,0.12)',
                               color: dir === 'long' ? GREEN : RED,
                             }}>
-                            {dir === 'long' ? '↑ Long' : '↓ Short'}
+                            {dir === 'long' ? '↑ לונג' : '↓ שורט'}
                           </span>
                         </div>
                         <p className="text-[10px] mt-0.5" style={{ color: MUTED }}>

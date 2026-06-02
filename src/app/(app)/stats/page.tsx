@@ -266,7 +266,7 @@ export default async function StatsPage() {
           color="#D4AF37"
         />
         <SumCard
-          label="Profit Factor"
+          label="פקטור רווח"
           value={profitFactor > 0 ? profitFactor.toFixed(2) : '—'}
           color={profitFactor >= 1.5 ? '#4ade80' : profitFactor >= 1 ? '#facc15' : '#f87171'}
           sub="רווח ÷ הפסד"

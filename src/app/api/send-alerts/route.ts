@@ -107,7 +107,7 @@ function buildWeeklySummaryEmail(name: string, stats: { trades: number; winRate:
   <div style="background:#1a1a1a;border-radius:12px;padding:16px">
     <p style="color:#F5C518;font-weight:bold;margin:0 0 8px">💡 טיפ לשבוע הבא</p>
     <p style="color:#ccc;margin:0;font-size:14px">
-      ${stats.winRate < 40 ? 'Win Rate נמוך — בדוק את תנאי הכניסה שלך ואת ה-R:R' :
+      ${stats.winRate < 40 ? 'אחוז הצלחה נמוך — בדוק את תנאי הכניסה שלך ואת ה-R:R' :
         stats.avgRR < 1.5 ? 'שפר את יחס ה-R:R — חפש סטאפים עם לפחות 1:2' :
         'כל הכבוד — המשך לפי התוכנית!'}
     </p>

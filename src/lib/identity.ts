@@ -138,13 +138,13 @@ export function computeTraderProfile(trades: TradeStat[]): TraderProfile {
   const rr = avgRR.toFixed(1);
   const em = avgEmotional.toFixed(1);
 
-  if (winRate >= 0.55) strengths.push(`Win Rate ${wr}% — מעל הממוצע`);
+  if (winRate >= 0.55) strengths.push(`אחוז הצלחה ${wr}% — מעל הממוצע`);
   if (avgRR >= 2.0) strengths.push(`R:R ממוצע 1:${rr} — יחס סיכוי/סיכון מצוין`);
   if (avgEmotional >= 4.0) strengths.push(`מצב רגשי ${em}/5 — מסחר קר ומחושב`);
   if (revengePct === 0 && closed.length >= 5) strengths.push('0% עסקאות Revenge — שליטה עצמית מלאה');
   else if (revengePct < 0.05 && closed.length >= 5) strengths.push('פחות מ-5% Revenge — שליטה עצמית גבוהה');
   if (bestStrat && bestStrat[1].w / bestStrat[1].n >= 0.6)
-    strengths.push(`${bestStrat[0]}: ${Math.round((bestStrat[1].w / bestStrat[1].n) * 100)}% Win Rate`);
+    strengths.push(`${bestStrat[0]}: ${Math.round((bestStrat[1].w / bestStrat[1].n) * 100)}% הצלחה`);
   if (bestHour && bestHour[1].w / bestHour[1].n >= 0.65)
     strengths.push(`שעה ${bestHour[0]}:00 — ${Math.round((bestHour[1].w / bestHour[1].n) * 100)}% הצלחה`);
   if (highRRPct >= 0.4) strengths.push(`${Math.round(highRRPct * 100)}% עסקאות עם R:R מעל 1:2.5`);
@@ -154,7 +154,7 @@ export function computeTraderProfile(trades: TradeStat[]): TraderProfile {
   // ── Weaknesses ─────────────────────────────────────────────────
   const weaknesses: string[] = [];
 
-  if (winRate < 0.45) weaknesses.push(`Win Rate ${wr}% — בדוק תנאי כניסה`);
+  if (winRate < 0.45) weaknesses.push(`אחוז הצלחה ${wr}% — בדוק תנאי כניסה`);
   if (avgRR < 1.5) weaknesses.push(`R:R ממוצע 1:${rr} — מוותר מהר מדי על רווחים`);
   if (avgEmotional < 3.0) weaknesses.push(`מצב רגשי ${em}/5 — רגשות משפיעים על ההחלטות`);
   if (revengePct > 0.1) weaknesses.push(`${Math.round(revengePct * 100)}% עסקאות Revenge — עלות גבוהה`);
