@@ -11,6 +11,10 @@ export interface Setup {
   name: string;
   symbol: string | null;
   description: string;
+  entry_conditions: string | null;
+  stop_loss: string | null;
+  take_profit: string | null;
+  market_context: string | null;
   image_url: string | null;
   created_at: string;
   updated_at: string;
@@ -237,9 +241,9 @@ function SetupCard({ setup, stats, onClick }: {
         )}
       </div>
 
-      {setup.description && (
+      {(setup.entry_conditions || setup.description) && (
         <p className="text-xs leading-relaxed line-clamp-2" style={{ color: TEXT2 }}>
-          {setup.description}
+          {setup.entry_conditions || setup.description}
         </p>
       )}
 
@@ -314,9 +318,26 @@ function DetailView({ setup, stats, linked, unlinked, aiReview, aiLoading, onBac
             <img src={setup.image_url} alt="" className="w-24 h-16 rounded-xl object-cover shrink-0" />
           )}
         </div>
-        {setup.description && (
-          <p className="text-sm leading-relaxed" style={{ color: TEXT2 }}>{setup.description}</p>
-        )}
+        {(setup.entry_conditions || setup.stop_loss || setup.take_profit || setup.market_context)
+          ? (
+            <div className="flex flex-col gap-3 mt-1">
+              {([
+                { label: 'תנאי כניסה',  value: setup.entry_conditions },
+                { label: 'Stop Loss',    value: setup.stop_loss },
+                { label: 'Take Profit',  value: setup.take_profit },
+                { label: 'הקשר שוק',    value: setup.market_context },
+              ] as { label: string; value: string | null }[]).filter(f => f.value).map(f => (
+                <div key={f.label}>
+                  <p className="text-[10px] font-semibold uppercase tracking-wide mb-0.5" style={{ color: MUTED }}>{f.label}</p>
+                  <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: TEXT2 }}>{f.value}</p>
+                </div>
+              ))}
+            </div>
+          )
+          : setup.description
+            ? <p className="text-sm leading-relaxed" style={{ color: TEXT2 }}>{setup.description}</p>
+            : null
+        }
       </div>
 
       {/* Stats strip */}
@@ -450,7 +471,10 @@ function CreateForm({ userId, supabase, onSave, onCancel }: {
   onSave: (s: Setup) => void;
   onCancel: () => void;
 }) {
-  const [form, setForm] = useState({ name: '', symbol: '', description: '' });
+  const [form, setForm] = useState({
+    name: '', symbol: '',
+    entryConditions: '', stopLoss: '', takeProfit: '', marketContext: '',
+  });
   const [imgFile, setImgFile] = useState<File | null>(null);
   const [imgPreview, setImgPreview] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -483,7 +507,17 @@ function CreateForm({ userId, supabase, onSave, onCancel }: {
 
     const { data, error: dbErr } = await supabase
       .from('setups')
-      .insert({ user_id: userId, name: form.name.trim(), symbol: form.symbol.trim() || null, description: form.description.trim(), image_url })
+      .insert({
+        user_id: userId,
+        name: form.name.trim(),
+        symbol: form.symbol.trim() || null,
+        description: '',
+        entry_conditions: form.entryConditions.trim() || null,
+        stop_loss:        form.stopLoss.trim()        || null,
+        take_profit:      form.takeProfit.trim()      || null,
+        market_context:   form.marketContext.trim()   || null,
+        image_url,
+      })
       .select().single();
 
     if (dbErr || !data) {
@@ -522,11 +556,32 @@ function CreateForm({ userId, supabase, onSave, onCancel }: {
             style={{ ...inputStyle }} />
         </FormField>
 
-        {/* Description */}
-        <FormField label="תיאור הסטאפ" hint="תנאי כניסה, SL, TP, זמנים, הקשר שוק">
-          <textarea value={form.description}
-            onChange={e => setForm({ ...form, description: e.target.value })}
-            rows={6} placeholder={'תנאי כניסה:\n\nStop Loss:\n\nTake Profit:\n\nהקשר שוק:'}
+        {/* Structured setup fields */}
+        <FormField label="תנאי כניסה" hint="מה צריך לקרות כדי להיכנס לעסקה">
+          <textarea value={form.entryConditions}
+            onChange={e => setForm({ ...form, entryConditions: e.target.value })}
+            rows={3} placeholder="לדוגמה: מחיר שובר סיסטנס, נר סגירה מעל, RSI > 50..."
+            style={{ ...inputStyle, resize: 'vertical', lineHeight: '1.7' }} />
+        </FormField>
+
+        <FormField label="Stop Loss" hint="איפה שמים את הסטופ">
+          <textarea value={form.stopLoss}
+            onChange={e => setForm({ ...form, stopLoss: e.target.value })}
+            rows={2} placeholder="לדוגמה: מתחת לנר הקודם, מתחת לסאפורט..."
+            style={{ ...inputStyle, resize: 'vertical', lineHeight: '1.7' }} />
+        </FormField>
+
+        <FormField label="Take Profit" hint="היעד">
+          <textarea value={form.takeProfit}
+            onChange={e => setForm({ ...form, takeProfit: e.target.value })}
+            rows={2} placeholder="לדוגמה: R:R 1:2, יעד קודם, סיסטנס הבא..."
+            style={{ ...inputStyle, resize: 'vertical', lineHeight: '1.7' }} />
+        </FormField>
+
+        <FormField label="הקשר שוק" hint="טיימפריים, סשן, תנאים כלליים">
+          <textarea value={form.marketContext}
+            onChange={e => setForm({ ...form, marketContext: e.target.value })}
+            rows={2} placeholder="לדוגמה: טיימפריים H1+M15, סשן לונדון, טרנד עולה ב-D1..."
             style={{ ...inputStyle, resize: 'vertical', lineHeight: '1.7' }} />
         </FormField>
 
