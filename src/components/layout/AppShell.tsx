@@ -19,7 +19,7 @@ const W_SHUT = 64;
 // ── Icon helper ───────────────────────────────────────────────────────────────
 function Svg({ children }: { children: React.ReactNode }) {
   return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
       strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
       {children}
     </svg>
@@ -78,7 +78,7 @@ function NavLink({ item, expanded, active }: { item: NavItem; expanded: boolean;
       }}
     >
       {item.icon}
-      {expanded && <span className="text-sm font-medium truncate">{item.label}</span>}
+      {expanded && <span className="font-medium truncate" style={{ fontSize: 16 }}>{item.label}</span>}
     </Link>
   );
 }

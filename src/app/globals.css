@@ -272,3 +272,19 @@ input[type="button"] {
 .text-primary   { color: var(--text-primary); }
 .text-secondary { color: var(--text-secondary); }
 .text-muted-var { color: var(--text-muted); }
+
+/* ── Global font-size scale — every class bumped up one step ─────
+   text-xs  12→14  text-sm  14→16  text-base 16→18
+   text-lg  18→20  text-xl  20→24  text-2xl  24→30  text-3xl 30→36
+   ─────────────────────────────────────────────────────────────── */
+html { font-size: 16px; }
+
+.text-xs   { font-size: 0.875rem;  line-height: 1.25rem;  }  /* 14 px */
+.text-sm   { font-size: 1rem;      line-height: 1.5rem;   }  /* 16 px */
+.text-base { font-size: 1.125rem;  line-height: 1.75rem;  }  /* 18 px */
+.text-lg   { font-size: 1.25rem;   line-height: 1.875rem; }  /* 20 px */
+.text-xl   { font-size: 1.5rem;    line-height: 2rem;     }  /* 24 px */
+.text-2xl  { font-size: 1.875rem;  line-height: 2.25rem;  }  /* 30 px */
+.text-3xl  { font-size: 2.25rem;   line-height: 2.75rem;  }  /* 36 px */
+.text-4xl  { font-size: 2.625rem;  line-height: 3rem;     }  /* 42 px */
+.text-5xl  { font-size: 3.5rem;    line-height: 3.75rem;  }  /* 56 px */

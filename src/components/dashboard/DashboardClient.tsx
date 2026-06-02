@@ -216,16 +216,16 @@ function RadarChart({ scores }: { scores: number[] }) {
           );
         })}
         {Array.from({ length: N }, (_, i) => {
-          const [x, y] = pt(i, 1.22);
+          const [x, y] = pt(i, 1.28);
           return (
             <text key={i} x={x} y={y} textAnchor="middle" dominantBaseline="middle"
-              fontSize={9} fill={hov === i ? GOLD : MUTED}>{R_LABELS[i]}</text>
+              fontSize={14} fontWeight={600} fill={hov === i ? GOLD : MUTED}>{R_LABELS[i]}</text>
           );
         })}
-        <text x={cx} y={cy - 10} textAnchor="middle" fontSize={22} fontWeight="bold" fill={GOLD}>
+        <text x={cx} y={cy + 10} textAnchor="middle" fontSize={56} fontWeight="bold" fill={GOLD}>
           {avgScore}
         </text>
-        <text x={cx} y={cy + 10} textAnchor="middle" fontSize={9} fill={MUTED}>ציון כולל</text>
+        <text x={cx} y={cy + 34} textAnchor="middle" fontSize={13} fill={MUTED}>ציון כולל</text>
       </svg>
       {hov !== null && (
         <div className="text-center text-xs px-3 py-1.5 rounded-xl mx-4"
@@ -552,7 +552,7 @@ function Card({ children, className = '' }: { children: React.ReactNode; classNa
 }
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
-  return <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: MUTED }}>{children}</p>;
+  return <p style={{ fontSize: 18, fontWeight: 700, color: MUTED, marginBottom: 12 }}>{children}</p>;
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -627,63 +627,54 @@ export default function DashboardClient({
 
             {/* Card 1: Profitable Days */}
             <Card>
-              <p className="text-[10px] font-semibold mb-2" style={{ color: MUTED }}>ימים רווחיים</p>
-              <div className="flex items-center gap-3">
-                <div className="relative">
-                  <CircleGauge pct={stats.profitDayPct}
-                    color={stats.profitDayPct >= 50 ? GREEN : stats.profitDayPct >= 35 ? GOLD : RED} />
-                  <div className="absolute inset-0 flex items-center justify-center"
-                    style={{ transform: 'none' }}>
-                    <p className="text-sm font-bold" style={{ color: TEXT }}>{stats.profitDayPct}%</p>
-                  </div>
-                </div>
-                <div className="flex flex-col gap-0.5">
-                  <p className="text-[10px]" style={{ color: GREEN }}>▲ {stats.profitDays} רווח</p>
-                  <p className="text-[10px]" style={{ color: RED }}>▼ {stats.lossDays} הפסד</p>
-                  <p className="text-[10px]" style={{ color: MUTED }}>— {stats.neutralDays} ניטרלי</p>
+              <p style={{ fontSize: 14, fontWeight: 600, color: MUTED, marginBottom: 4 }}>ימים רווחיים</p>
+              <p style={{ fontSize: 42, fontWeight: 700, lineHeight: 1, color: stats.profitDayPct >= 50 ? GREEN : stats.profitDayPct >= 35 ? GOLD : RED }}>
+                {stats.profitDayPct}%
+              </p>
+              <div className="flex items-center gap-3 mt-3">
+                <CircleGauge size={56} pct={stats.profitDayPct}
+                  color={stats.profitDayPct >= 50 ? GREEN : stats.profitDayPct >= 35 ? GOLD : RED} />
+                <div className="flex flex-col gap-1">
+                  <p style={{ fontSize: 13, color: GREEN }}>▲ {stats.profitDays} רווח</p>
+                  <p style={{ fontSize: 13, color: RED }}>▼ {stats.lossDays} הפסד</p>
+                  <p style={{ fontSize: 13, color: MUTED }}>— {stats.neutralDays} ניטרלי</p>
                 </div>
               </div>
             </Card>
 
             {/* Card 2: Win Rate */}
             <Card>
-              <p className="text-[10px] font-semibold mb-2" style={{ color: MUTED }}>אחוז הצלחה</p>
-              <div className="flex items-center gap-3">
-                <div className="relative">
-                  <CircleGauge pct={stats.winPct}
-                    color={stats.winPct >= 55 ? GREEN : stats.winPct >= 40 ? GOLD : RED} />
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <p className="text-sm font-bold" style={{ color: TEXT }}>{stats.winPct}%</p>
-                  </div>
-                </div>
-                <div className="flex flex-col gap-0.5">
-                  <p className="text-[10px]" style={{ color: GREEN }}>▲ {stats.winTrades} רווח</p>
-                  <p className="text-[10px]" style={{ color: RED }}>▼ {stats.lossTrades} הפסד</p>
-                  <p className="text-[10px]" style={{ color: MUTED }}>— {stats.neutralTrades} ניטרלי</p>
+              <p style={{ fontSize: 14, fontWeight: 600, color: MUTED, marginBottom: 4 }}>אחוז הצלחה</p>
+              <p style={{ fontSize: 42, fontWeight: 700, lineHeight: 1, color: stats.winPct >= 55 ? GREEN : stats.winPct >= 40 ? GOLD : RED }}>
+                {stats.winPct}%
+              </p>
+              <div className="flex items-center gap-3 mt-3">
+                <CircleGauge size={56} pct={stats.winPct}
+                  color={stats.winPct >= 55 ? GREEN : stats.winPct >= 40 ? GOLD : RED} />
+                <div className="flex flex-col gap-1">
+                  <p style={{ fontSize: 13, color: GREEN }}>▲ {stats.winTrades} רווח</p>
+                  <p style={{ fontSize: 13, color: RED }}>▼ {stats.lossTrades} הפסד</p>
+                  <p style={{ fontSize: 13, color: MUTED }}>— {stats.neutralTrades} ניטרלי</p>
                 </div>
               </div>
             </Card>
 
             {/* Card 3: Avg P/L ratio */}
             <Card>
-              <p className="text-[10px] font-semibold mb-2" style={{ color: MUTED }}>יחס רווח/הפסד</p>
-              <div className="flex items-center gap-3">
-                <div className="relative">
-                  <CircleGauge pct={stats.wlGaugePct}
-                    color={stats.wlGaugePct >= 60 ? GREEN : stats.wlGaugePct >= 35 ? GOLD : RED} />
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <p className="text-[10px] font-bold" style={{ color: TEXT }}>
-                      {stats.avgWin > 0 && stats.avgLoss < 0
-                        ? `${(stats.avgWin / Math.abs(stats.avgLoss)).toFixed(1)}x`
-                        : '—'}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex flex-col gap-0.5">
-                  <p className="text-[10px]" style={{ color: GREEN }}>
+              <p style={{ fontSize: 14, fontWeight: 600, color: MUTED, marginBottom: 4 }}>יחס רווח/הפסד</p>
+              <p style={{ fontSize: 42, fontWeight: 700, lineHeight: 1, color: stats.wlGaugePct >= 60 ? GREEN : stats.wlGaugePct >= 35 ? GOLD : RED }}>
+                {stats.avgWin > 0 && stats.avgLoss < 0
+                  ? `${(stats.avgWin / Math.abs(stats.avgLoss)).toFixed(1)}x`
+                  : '—'}
+              </p>
+              <div className="flex items-center gap-3 mt-3">
+                <CircleGauge size={56} pct={stats.wlGaugePct}
+                  color={stats.wlGaugePct >= 60 ? GREEN : stats.wlGaugePct >= 35 ? GOLD : RED} />
+                <div className="flex flex-col gap-1">
+                  <p style={{ fontSize: 13, color: GREEN }}>
                     ממוצע רווח {stats.avgWin > 0 ? `+${stats.avgWin.toFixed(1)}` : '—'}
                   </p>
-                  <p className="text-[10px]" style={{ color: RED }}>
+                  <p style={{ fontSize: 13, color: RED }}>
                     ממוצע הפסד {stats.avgLoss < 0 ? stats.avgLoss.toFixed(1) : '—'}
                   </p>
                 </div>
@@ -692,26 +683,17 @@ export default function DashboardClient({
 
             {/* Card 4: P&L Balance */}
             <Card>
-              <p className="text-[10px] font-semibold mb-2" style={{ color: MUTED }}>P&L + מאזן</p>
-              <div className="flex items-center gap-3">
-                <div className="relative">
-                  <CircleGauge pct={stats.balGaugePct}
-                    color={stats.totalPnl >= 0 ? GREEN : RED} />
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <p className="text-[9px] font-bold"
-                      style={{ color: stats.totalPnl >= 0 ? GREEN : RED }}>
-                      {stats.totalPnl >= 0 ? '+' : ''}{stats.totalPnl.toFixed(0)}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex flex-col gap-0.5">
-                  <p className="text-[10px]" style={{ color: GREEN }}>
-                    רווח +{stats.grossProfit.toFixed(1)}
-                  </p>
-                  <p className="text-[10px]" style={{ color: RED }}>
-                    הפסד ({Math.abs(stats.grossLoss).toFixed(1)})
-                  </p>
-                  <p className="text-[10px]" style={{ color: MUTED }}>{totalClosed} עסקאות</p>
+              <p style={{ fontSize: 14, fontWeight: 600, color: MUTED, marginBottom: 4 }}>P&L + מאזן</p>
+              <p style={{ fontSize: 42, fontWeight: 700, lineHeight: 1, color: stats.totalPnl >= 0 ? GREEN : RED }}>
+                {stats.totalPnl >= 0 ? '+' : ''}{stats.totalPnl.toFixed(0)}
+              </p>
+              <div className="flex items-center gap-3 mt-3">
+                <CircleGauge size={56} pct={stats.balGaugePct}
+                  color={stats.totalPnl >= 0 ? GREEN : RED} />
+                <div className="flex flex-col gap-1">
+                  <p style={{ fontSize: 13, color: GREEN }}>רווח +{stats.grossProfit.toFixed(1)}</p>
+                  <p style={{ fontSize: 13, color: RED }}>הפסד ({Math.abs(stats.grossLoss).toFixed(1)})</p>
+                  <p style={{ fontSize: 13, color: MUTED }}>{totalClosed} עסקאות</p>
                 </div>
               </div>
             </Card>
@@ -722,14 +704,14 @@ export default function DashboardClient({
 
             {/* Radar */}
             <Card>
-              <SectionTitle>Discipline Score</SectionTitle>
+              <SectionTitle>ניקוד משמעת</SectionTitle>
               <RadarChart scores={stats.radarScores} />
               <div className="grid grid-cols-3 gap-1 mt-2">
                 {R_LABELS.map((l, i) => (
-                  <div key={l} className="text-center rounded-lg py-1"
+                  <div key={l} className="text-center rounded-lg py-1.5"
                     style={{ background: SURF2 }}>
-                    <p className="text-[8px]" style={{ color: MUTED }}>{l}</p>
-                    <p className="text-[10px] font-bold" style={{ color: stats.radarScores[i] >= 60 ? GREEN : stats.radarScores[i] >= 35 ? GOLD : RED }}>
+                    <p style={{ fontSize: 11, color: MUTED }}>{l}</p>
+                    <p style={{ fontSize: 15, fontWeight: 700, color: stats.radarScores[i] >= 60 ? GREEN : stats.radarScores[i] >= 35 ? GOLD : RED }}>
                       {stats.radarScores[i]}
                     </p>
                   </div>
@@ -744,7 +726,7 @@ export default function DashboardClient({
                 <div className="flex gap-1">
                   {(['daily', 'weekly', 'monthly'] as const).map(m => (
                     <button key={m} onClick={() => setBarMode(m)}
-                      className="px-2 py-0.5 rounded-lg text-[10px] font-medium transition-all"
+                      className="px-2 py-0.5 rounded-lg text-sm font-medium transition-all"
                       style={{
                         background: barMode === m ? 'rgba(212,175,55,0.15)' : SURF2,
                         color: barMode === m ? GOLD : MUTED,
@@ -764,7 +746,7 @@ export default function DashboardClient({
                 <div className="flex gap-1">
                   {(['cumulative', 'daily'] as const).map(m => (
                     <button key={m} onClick={() => setLineMode(m)}
-                      className="px-2 py-0.5 rounded-lg text-[10px] font-medium transition-all"
+                      className="px-2 py-0.5 rounded-lg text-sm font-medium transition-all"
                       style={{
                         background: lineMode === m ? 'rgba(212,175,55,0.15)' : SURF2,
                         color: lineMode === m ? GOLD : MUTED,
