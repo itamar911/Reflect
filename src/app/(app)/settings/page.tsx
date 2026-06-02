@@ -3,8 +3,6 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import Card from '@/components/ui/Card';
 import AlertsPanel from '@/components/settings/AlertsPanel';
-import StrategyBuilder from '@/components/strategies/StrategyBuilder';
-import type { PersonalStrategy } from '@/components/strategies/StrategyBuilder';
 import type { AlertSettingsData } from '@/components/settings/AlertsPanel';
 
 export const metadata = { title: 'הגדרות — Reflect' };
@@ -14,15 +12,13 @@ export default async function SettingsPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  const [profileRes, strategiesRes, alertRes] = await Promise.all([
+  const [profileRes, alertRes] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', user.id).single(),
-    supabase.from('personal_strategies').select('*').eq('user_id', user.id).order('created_at'),
     supabase.from('alert_settings').select('*').eq('user_id', user.id).single(),
   ]);
 
   const profile = profileRes.data;
   const plan = (profile?.subscription_tier ?? 'free') as 'free' | 'basic' | 'pro';
-  const strategies = (strategiesRes.data ?? []) as PersonalStrategy[];
   const alertSettings = alertRes.data as AlertSettingsData | null;
 
   return (
@@ -73,11 +69,29 @@ export default async function SettingsPage() {
         </Card>
       </Link>
 
-      {/* Personal Strategies */}
-      <Card>
-        <h2 className="text-sm font-semibold text-tg-text mb-4">האסטרטגיות שלי</h2>
-        <StrategyBuilder userId={user.id} initialStrategies={strategies} />
-      </Card>
+      {/* Link to Strategies page */}
+      <Link href="/strategies">
+        <Card className="transition-colors hover:border-[rgba(212,175,55,0.3)]">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
+                style={{ background: 'rgba(212,175,55,0.1)' }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 3H3v7h18V3z"/><path d="M21 14H3v7h18v-7z"/>
+                  <line x1="8" y1="10" x2="8" y2="14"/><line x1="16" y1="10" x2="16" y2="14"/>
+                </svg>
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-tg-text">האסטרטגיות שלי</p>
+                <p className="text-xs text-tg-muted">ניהול אסטרטגיות עם סטטיסטיקות וניתוח AI</p>
+              </div>
+            </div>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-tg-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="9 18 15 12 9 6"/>
+            </svg>
+          </div>
+        </Card>
+      </Link>
 
       {/* Alerts */}
       <Card>
