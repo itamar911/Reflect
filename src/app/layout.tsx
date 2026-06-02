@@ -1,10 +1,9 @@
 import type { Metadata, Viewport } from 'next';
-import { Geist, Geist_Mono } from 'next/font/google';
+import { Inter } from 'next/font/google';
 import { ThemeProvider } from '@/components/theme/ThemeProvider';
 import './globals.css';
 
-const geistSans = Geist({ variable: '--font-geist-sans', subsets: ['latin'] });
-const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin'] });
+const inter = Inter({ variable: '--font-inter', subsets: ['latin'], display: 'swap' });
 
 export const metadata: Metadata = {
   title: 'Reflect — השוק בוחן את האסטרטגיה שלך',
@@ -20,7 +19,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="he" dir="rtl" className={`${geistSans.variable} ${geistMono.variable} h-full`} suppressHydrationWarning>
+    <html lang="he" dir="rtl" className={`${inter.variable} h-full`} suppressHydrationWarning>
       <body className="min-h-full antialiased">
         <ThemeProvider>{children}</ThemeProvider>
       </body>
