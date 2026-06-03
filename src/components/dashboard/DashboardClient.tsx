@@ -4,9 +4,9 @@ import { useState, useMemo } from 'react';
 
 // ── Tokens ────────────────────────────────────────────────────────────────────
 const ACCENT  = '#00d2d2';
-const SURF    = '#14141e';
-const SURF2   = '#1c1c28';
-const BORDER  = '#2e2e42';
+const SURF    = '#141420';
+const SURF2   = '#1c1c2c';
+const BORDER  = '#32324a';
 const TEXT    = '#f1f5f9';
 const TEXT2   = '#94a3b8';
 const MUTED   = '#64748b';

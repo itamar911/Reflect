@@ -67,7 +67,7 @@ function Section({ title, icon, children }: {
 }) {
   return (
     <div className="rounded-xl p-5 flex flex-col gap-4"
-      style={{ background: '#14141e', border: '1px solid #2e2e42', boxShadow: '0 1px 3px rgba(0,0,0,0.4)' }}>
+      style={{ background: '#141420', border: '1px solid #2e2e42', boxShadow: '0 1px 3px rgba(0,0,0,0.4)' }}>
       <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: 'var(--color-tg-text)' }}>
         {icon && <span>{icon}</span>}
         {title}
@@ -81,7 +81,7 @@ function Section({ title, icon, children }: {
 function SumCard({ label, value, sub, color }: { label: string; value: string; sub?: string; color: string }) {
   return (
     <div className="rounded-xl p-4 flex flex-col gap-1"
-      style={{ background: '#14141e', border: '1px solid #2e2e42', boxShadow: '0 1px 3px rgba(0,0,0,0.4)' }}>
+      style={{ background: '#141420', border: '1px solid #2e2e42', boxShadow: '0 1px 3px rgba(0,0,0,0.4)' }}>
       <p className="text-[11px] font-medium" style={{ color: 'var(--color-tg-muted)' }}>{label}</p>
       <p className="text-2xl font-bold leading-none" style={{ color }}>{value}</p>
       {sub && <p className="text-[10px]" style={{ color: 'var(--color-tg-muted)' }}>{sub}</p>}
