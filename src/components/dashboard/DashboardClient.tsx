@@ -4,12 +4,12 @@ import { useState, useMemo } from 'react';
 
 // ── Tokens ────────────────────────────────────────────────────────────────────
 const ACCENT  = '#00d2d2';
-const SURF    = 'var(--color-tg-surface)';
-const SURF2   = 'var(--color-tg-surface-2)';
-const BORDER  = 'var(--color-tg-border)';
-const TEXT    = 'var(--color-tg-text)';
-const TEXT2   = 'var(--color-tg-text-2)';
-const MUTED   = 'var(--color-tg-muted)';
+const SURF    = '#13131c';
+const SURF2   = '#1a1a26';
+const BORDER  = '#2a2a3d';
+const TEXT    = '#f1f5f9';
+const TEXT2   = '#94a3b8';
+const MUTED   = '#64748b';
 const GREEN   = '#22c55e';
 const RED     = '#ef4444';
 
@@ -544,15 +544,26 @@ function TradeDetailPanel({ trade, onClose, aiReview, aiLoading, onAiReview }: {
 // ── Card wrapper ──────────────────────────────────────────────────────────────
 function Card({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={`rounded-2xl p-4 ${className}`}
-      style={{ background: SURF, border: `1px solid ${BORDER}` }}>
+    <div className={`rounded-xl p-5 ${className}`}
+      style={{
+        background: SURF,
+        border: `1px solid ${BORDER}`,
+        boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+      }}>
       {children}
     </div>
   );
 }
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
-  return <p style={{ fontSize: 18, fontWeight: 700, color: MUTED, marginBottom: 12 }}>{children}</p>;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+      <div style={{ width: 3, height: 14, background: ACCENT, borderRadius: 99, flexShrink: 0 }} />
+      <p style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: MUTED }}>
+        {children}
+      </p>
+    </div>
+  );
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -603,12 +614,16 @@ export default function DashboardClient({
   function nextMonth() { setCalDate(d => new Date(d.getFullYear(), d.getMonth() + 1, 1)); }
 
   return (
-    <div dir="rtl" className="min-h-screen px-4 py-5 flex flex-col gap-5">
+    <div dir="rtl" className="min-h-screen px-5 py-6 flex flex-col gap-4">
 
       {/* ── Greeting ──────────────────────────────────────────────────────── */}
-      <div>
-        <p className="text-xs font-medium mb-0.5" style={{ color: ACCENT }}>{dateStr}</p>
-        <h1 className="text-xl font-bold" style={{ color: TEXT }}>{greeting}, {displayName}</h1>
+      <div style={{ marginBottom: 4 }}>
+        <p style={{ fontSize: 11, fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase', color: MUTED, marginBottom: 4 }}>
+          {dateStr}
+        </p>
+        <h1 style={{ fontSize: 22, fontWeight: 700, color: TEXT, letterSpacing: '-0.02em', lineHeight: 1 }}>
+          {greeting}, <span style={{ color: ACCENT }}>{displayName}</span>
+        </h1>
       </div>
 
       {/* ── Empty state ───────────────────────────────────────────────────── */}
@@ -623,16 +638,16 @@ export default function DashboardClient({
       {trades.length > 0 && (
         <>
           {/* ── Top 4 stat cards ─────────────────────────────────────────── */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
 
             {/* Card 1: Profitable Days */}
             <Card>
-              <p style={{ fontSize: 14, fontWeight: 600, color: MUTED, marginBottom: 4 }}>ימים רווחיים</p>
-              <p style={{ fontSize: 42, fontWeight: 700, lineHeight: 1, color: stats.profitDayPct >= 50 ? GREEN : stats.profitDayPct >= 35 ? ACCENT : RED }}>
+              <p style={{ fontSize: 11, fontWeight: 500, letterSpacing: '0.07em', textTransform: 'uppercase', color: MUTED, marginBottom: 6 }}>ימים רווחיים</p>
+              <p style={{ fontSize: 36, fontWeight: 800, lineHeight: 1, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums', color: stats.profitDayPct >= 50 ? GREEN : stats.profitDayPct >= 35 ? ACCENT : RED }}>
                 {stats.profitDayPct}%
               </p>
               <div className="flex items-center gap-3 mt-3">
-                <CircleGauge size={56} pct={stats.profitDayPct}
+                <CircleGauge size={52} pct={stats.profitDayPct}
                   color={stats.profitDayPct >= 50 ? GREEN : stats.profitDayPct >= 35 ? ACCENT : RED} />
                 <div className="flex flex-col gap-1">
                   <p style={{ fontSize: 13, color: GREEN }}>▲ {stats.profitDays} רווח</p>
@@ -644,12 +659,12 @@ export default function DashboardClient({
 
             {/* Card 2: Win Rate */}
             <Card>
-              <p style={{ fontSize: 14, fontWeight: 600, color: MUTED, marginBottom: 4 }}>אחוז הצלחה</p>
-              <p style={{ fontSize: 42, fontWeight: 700, lineHeight: 1, color: stats.winPct >= 55 ? GREEN : stats.winPct >= 40 ? ACCENT : RED }}>
+              <p style={{ fontSize: 11, fontWeight: 500, letterSpacing: '0.07em', textTransform: 'uppercase', color: MUTED, marginBottom: 6 }}>אחוז הצלחה</p>
+              <p style={{ fontSize: 36, fontWeight: 800, lineHeight: 1, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums', color: stats.winPct >= 55 ? GREEN : stats.winPct >= 40 ? ACCENT : RED }}>
                 {stats.winPct}%
               </p>
               <div className="flex items-center gap-3 mt-3">
-                <CircleGauge size={56} pct={stats.winPct}
+                <CircleGauge size={52} pct={stats.winPct}
                   color={stats.winPct >= 55 ? GREEN : stats.winPct >= 40 ? ACCENT : RED} />
                 <div className="flex flex-col gap-1">
                   <p style={{ fontSize: 13, color: GREEN }}>▲ {stats.winTrades} רווח</p>
@@ -661,14 +676,14 @@ export default function DashboardClient({
 
             {/* Card 3: Avg P/L ratio */}
             <Card>
-              <p style={{ fontSize: 14, fontWeight: 600, color: MUTED, marginBottom: 4 }}>יחס רווח/הפסד</p>
-              <p style={{ fontSize: 42, fontWeight: 700, lineHeight: 1, color: stats.wlGaugePct >= 60 ? GREEN : stats.wlGaugePct >= 35 ? ACCENT : RED }}>
+              <p style={{ fontSize: 11, fontWeight: 500, letterSpacing: '0.07em', textTransform: 'uppercase', color: MUTED, marginBottom: 6 }}>יחס רווח/הפסד</p>
+              <p style={{ fontSize: 36, fontWeight: 800, lineHeight: 1, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums', color: stats.wlGaugePct >= 60 ? GREEN : stats.wlGaugePct >= 35 ? ACCENT : RED }}>
                 {stats.avgWin > 0 && stats.avgLoss < 0
                   ? `${(stats.avgWin / Math.abs(stats.avgLoss)).toFixed(1)}x`
                   : '—'}
               </p>
               <div className="flex items-center gap-3 mt-3">
-                <CircleGauge size={56} pct={stats.wlGaugePct}
+                <CircleGauge size={52} pct={stats.wlGaugePct}
                   color={stats.wlGaugePct >= 60 ? GREEN : stats.wlGaugePct >= 35 ? ACCENT : RED} />
                 <div className="flex flex-col gap-1">
                   <p style={{ fontSize: 13, color: GREEN }}>
@@ -683,12 +698,12 @@ export default function DashboardClient({
 
             {/* Card 4: P&L Balance */}
             <Card>
-              <p style={{ fontSize: 14, fontWeight: 600, color: MUTED, marginBottom: 4 }}>P&L + מאזן</p>
-              <p style={{ fontSize: 42, fontWeight: 700, lineHeight: 1, color: stats.totalPnl >= 0 ? GREEN : RED }}>
+              <p style={{ fontSize: 11, fontWeight: 500, letterSpacing: '0.07em', textTransform: 'uppercase', color: MUTED, marginBottom: 6 }}>P&L + מאזן</p>
+              <p style={{ fontSize: 36, fontWeight: 800, lineHeight: 1, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums', color: stats.totalPnl >= 0 ? GREEN : RED }}>
                 {stats.totalPnl >= 0 ? '+' : ''}{stats.totalPnl.toFixed(0)}
               </p>
               <div className="flex items-center gap-3 mt-3">
-                <CircleGauge size={56} pct={stats.balGaugePct}
+                <CircleGauge size={52} pct={stats.balGaugePct}
                   color={stats.totalPnl >= 0 ? GREEN : RED} />
                 <div className="flex flex-col gap-1">
                   <p style={{ fontSize: 13, color: GREEN }}>רווח +{stats.grossProfit.toFixed(1)}</p>
@@ -700,7 +715,7 @@ export default function DashboardClient({
           </div>
 
           {/* ── Middle: Radar + Bar + Line ────────────────────────────────── */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
 
             {/* Radar */}
             <Card>
@@ -709,7 +724,7 @@ export default function DashboardClient({
               <div className="grid grid-cols-3 gap-1 mt-2">
                 {R_LABELS.map((l, i) => (
                   <div key={l} className="text-center rounded-lg py-1.5"
-                    style={{ background: SURF2 }}>
+                    style={{ background: SURF2, border: `1px solid ${BORDER}`, borderRadius: 8, padding: '6px 4px' }}>
                     <p style={{ fontSize: 11, color: MUTED }}>{l}</p>
                     <p style={{ fontSize: 15, fontWeight: 700, color: stats.radarScores[i] >= 60 ? GREEN : stats.radarScores[i] >= 35 ? ACCENT : RED }}>
                       {stats.radarScores[i]}
@@ -726,10 +741,15 @@ export default function DashboardClient({
                 <div className="flex gap-1">
                   {(['daily', 'weekly', 'monthly'] as const).map(m => (
                     <button key={m} onClick={() => setBarMode(m)}
-                      className="px-2 py-0.5 rounded-lg text-sm font-medium transition-all"
+                      className="transition-all"
                       style={{
-                        background: barMode === m ? 'rgba(0,210,210,0.15)' : SURF2,
+                        background: barMode === m ? 'rgba(0,210,210,0.12)' : 'transparent',
                         color: barMode === m ? ACCENT : MUTED,
+                        border: barMode === m ? `1px solid rgba(0,210,210,0.3)` : '1px solid transparent',
+                        borderRadius: 6,
+                        padding: '3px 10px',
+                        fontSize: 11,
+                        fontWeight: 600,
                       }}>
                       {m === 'daily' ? 'יומי' : m === 'weekly' ? 'שבועי' : 'חודשי'}
                     </button>
@@ -746,10 +766,15 @@ export default function DashboardClient({
                 <div className="flex gap-1">
                   {(['cumulative', 'daily'] as const).map(m => (
                     <button key={m} onClick={() => setLineMode(m)}
-                      className="px-2 py-0.5 rounded-lg text-sm font-medium transition-all"
+                      className="transition-all"
                       style={{
-                        background: lineMode === m ? 'rgba(0,210,210,0.15)' : SURF2,
+                        background: lineMode === m ? 'rgba(0,210,210,0.12)' : 'transparent',
                         color: lineMode === m ? ACCENT : MUTED,
+                        border: lineMode === m ? `1px solid rgba(0,210,210,0.3)` : '1px solid transparent',
+                        borderRadius: 6,
+                        padding: '3px 10px',
+                        fontSize: 11,
+                        fontWeight: 600,
                       }}>
                       {m === 'cumulative' ? 'מצטבר' : 'יומי'}
                     </button>
@@ -767,7 +792,7 @@ export default function DashboardClient({
           </div>
 
           {/* ── Bottom: Calendar + Recent trades ─────────────────────────── */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
 
             {/* Calendar */}
             <Card>
@@ -786,7 +811,7 @@ export default function DashboardClient({
                   const pnl  = calcPnl(t);
                   const dir  = tradeDir(t);
                   return (
-                    <div key={t.id} className="flex items-center gap-2 py-2.5"
+                    <div key={t.id} className="flex items-center gap-2 py-3"
                       style={{ borderTop: i > 0 ? `1px solid ${BORDER}` : undefined }}>
                       {/* Date + asset */}
                       <div className="flex-1 min-w-0">
