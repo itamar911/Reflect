@@ -4,9 +4,9 @@ import { useState, useMemo } from 'react';
 
 // ── Tokens ────────────────────────────────────────────────────────────────────
 const ACCENT  = '#00d2d2';
-const SURF    = '#13131c';
-const SURF2   = '#1a1a26';
-const BORDER  = '#2a2a3d';
+const SURF    = '#14141e';
+const SURF2   = '#1c1c28';
+const BORDER  = '#2e2e42';
 const TEXT    = '#f1f5f9';
 const TEXT2   = '#94a3b8';
 const MUTED   = '#64748b';
@@ -279,17 +279,17 @@ function LineChart({ data }: { data: BarItem[] }) {
   const lineD = pts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
   const areaD = `${lineD} L${W},${H} L0,${H} Z`;
   const isUp  = vals[vals.length - 1] >= vals[0];
-  const col   = isUp ? GREEN : RED;
+  const col   = isUp ? ACCENT : RED;
   const step  = Math.max(1, Math.floor(data.length / 8));
   return (
     <svg width="100%" viewBox={`0 0 ${W} ${H + 18}`} preserveAspectRatio="none">
       <defs>
-        <linearGradient id="lc" x1="0" y1="0" x2="0" y2="1">
+        <linearGradient id="lcGrad" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor={col} stopOpacity={0.2} />
           <stop offset="100%" stopColor={col} stopOpacity={0} />
         </linearGradient>
       </defs>
-      <path d={areaD} fill="url(#lc)" />
+      <path d={areaD} fill="url(#lcGrad)" />
       <path d={lineD} fill="none" stroke={col} strokeWidth={1.8}
         strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
       {data.map((d, i) => i % step === 0 ? (
@@ -370,7 +370,7 @@ function MonthCalendar({
               const has = day ? hasTrade(day) : false;
               return (
                 <div key={di} className="rounded flex flex-col items-center justify-center py-0.5"
-                  style={{ background: day ? bg(pnl) : 'transparent', minHeight: 30 }}>
+                  style={{ background: day ? bg(pnl) : 'transparent', minHeight: 30, border: `1px solid ${BORDER}`, borderRadius: 6 }}>
                   {day && (
                     <>
                       <span className="text-[10px] font-medium leading-none"
@@ -548,7 +548,7 @@ function Card({ children, className = '' }: { children: React.ReactNode; classNa
       style={{
         background: SURF,
         border: `1px solid ${BORDER}`,
-        boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)',
       }}>
       {children}
     </div>

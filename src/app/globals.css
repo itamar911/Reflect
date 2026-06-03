@@ -4,11 +4,11 @@
   --font-sans: var(--font-inter), system-ui, sans-serif;
   --font-mono: ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
 
-  --color-tg-bg: #09090e;
-  --color-tg-surface: #13131c;
-  --color-tg-surface-2: #1a1a26;
-  --color-tg-border: #2a2a3d;
-  --color-tg-border-light: #ffffff14;
+  --color-tg-bg: #0b0b12;
+  --color-tg-surface: #14141e;
+  --color-tg-surface-2: #1c1c28;
+  --color-tg-border: #2e2e42;
+  --color-tg-border-light: #ffffff18;
 
   --color-tg-primary: #00d2d2;
   --color-tg-primary-hover: #00a8a8;

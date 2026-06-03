@@ -10,9 +10,9 @@ import { ThemeToggle } from '@/components/theme/ThemeToggle';
 import { ReflectLogo } from '@/components/brand/ReflectLogo';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
-const GOLD   = '#D4AF37';
+const ACCENT = '#00d2d2';
 const NAV_BG = '#06101E';
-const SEP    = 'rgba(212,175,55,0.14)';
+const SEP    = 'rgba(0,210,210,0.12)';
 const W_OPEN = 240;
 const W_SHUT = 64;
 
@@ -72,9 +72,9 @@ function NavLink({ item, expanded, active }: { item: NavItem; expanded: boolean;
         expanded ? 'gap-3 px-3 py-2.5' : 'justify-center py-3',
       )}
       style={{
-        color:      active ? GOLD : 'rgba(255,255,255,0.45)',
-        background: active ? 'rgba(212,175,55,0.11)' : 'transparent',
-        boxShadow:  active ? `inset 0 0 0 1px rgba(212,175,55,0.22)` : undefined,
+        color:      active ? ACCENT : 'rgba(255,255,255,0.45)',
+        background: active ? 'rgba(0,210,210,0.12)' : 'transparent',
+        boxShadow:  active ? `inset 0 0 0 1px rgba(0,210,210,0.22)` : undefined,
       }}
     >
       {item.icon}
@@ -170,7 +170,7 @@ export default function AppShell({
           border:       `1px solid ${SEP}`,
           borderRight:  'none',
           borderRadius: '6px 0 0 6px',
-          color:        'rgba(212,175,55,0.55)',
+          color:        'rgba(0,210,210,0.55)',
         }}
       >
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -210,7 +210,7 @@ export default function AppShell({
           <span
             className="font-bold text-base whitespace-nowrap overflow-hidden transition-opacity duration-200"
             style={{
-              color:   GOLD,
+              color:   ACCENT,
               opacity: expanded ? 1 : 0,
               width:   expanded ? 'auto' : 0,
             }}
@@ -255,7 +255,7 @@ export default function AppShell({
             <div className="flex items-center gap-2 px-1 py-1">
               <div
                 className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
-                style={{ background: 'rgba(212,175,55,0.14)', color: GOLD }}
+                style={{ background: 'rgba(0,210,210,0.12)', color: ACCENT }}
               >
                 {(displayName || '?').charAt(0).toUpperCase()}
               </div>
@@ -268,7 +268,7 @@ export default function AppShell({
             <div className="flex justify-center py-1">
               <div
                 className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold"
-                style={{ background: 'rgba(212,175,55,0.14)', color: GOLD }}
+                style={{ background: 'rgba(0,210,210,0.12)', color: ACCENT }}
                 title={displayName}
               >
                 {(displayName || '?').charAt(0).toUpperCase()}
@@ -285,7 +285,7 @@ export default function AppShell({
               'transition-opacity hover:opacity-85 active:scale-95',
               expanded ? 'gap-2 px-3' : '',
             )}
-            style={{ background: GOLD, color: '#06101E' }}
+            style={{ background: ACCENT, color: '#000' }}
           >
             <IconPlus />
             {expanded && <span>עסקה חדשה</span>}
