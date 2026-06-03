@@ -20,7 +20,7 @@ export default function ValidationResultBanner({ result }: ValidationResultBanne
   const isBlocked = result.status === 'blocked';
   const color = isBlocked ? 'var(--color-tg-danger)' : 'var(--color-tg-warning)';
   const bg = isBlocked ? 'var(--color-tg-danger-muted)' : 'var(--color-tg-warning-muted)';
-  const border = isBlocked ? 'rgba(244,63,94,0.3)' : 'rgba(245,158,11,0.3)';
+  const border = isBlocked ? 'rgba(244,63,94,0.3)' : 'rgba(0,210,210,0.3)';
 
   return (
     <div className="flex flex-col gap-2 px-4 py-3 rounded-xl text-sm animate-fade-in"

@@ -1,0 +1,846 @@
+'use client';
+
+import { useState, useMemo } from 'react';
+
+// ── Tokens ────────────────────────────────────────────────────────────────────
+const ACCENT  = '#00d2d2';
+const SURF    = 'var(--color-tg-surface)';
+const SURF2   = 'var(--color-tg-surface-2)';
+const BORDER  = 'var(--color-tg-border)';
+const TEXT    = 'var(--color-tg-text)';
+const TEXT2   = 'var(--color-tg-text-2)';
+const MUTED   = 'var(--color-tg-muted)';
+const GREEN   = '#22c55e';
+const RED     = '#ef4444';
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+export interface DashTrade {
+  id: string;
+  strategy: string;
+  symbol: string | null;
+  entry_price: number;
+  exit_price: number | null;
+  stop_loss: number;
+  take_profit: number;
+  rr_ratio: number;
+  emotional_state: number;
+  trade_reason: string;
+  status: string;
+  exit_reason: string | null;
+  submitted_at: string;
+  closed_at: string | null;
+}
+
+// ── Pure helpers ──────────────────────────────────────────────────────────────
+function tradeDir(t: DashTrade): 'long' | 'short' {
+  return t.take_profit >= t.entry_price ? 'long' : 'short';
+}
+function calcPnl(t: DashTrade): number | null {
+  if (t.status !== 'closed' || t.exit_price == null) return null;
+  return tradeDir(t) === 'long' ? t.exit_price - t.entry_price : t.entry_price - t.exit_price;
+}
+function dayKey(iso: string) { return iso.slice(0, 10); }
+function fmtPnl(v: number) { return `${v >= 0 ? '+' : ''}${v.toFixed(2)}`; }
+function fmtDate(iso: string) {
+  return new Date(iso).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit' });
+}
+function fmtDateTime(iso: string) {
+  const d = new Date(iso);
+  return d.toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', year: '2-digit' })
+    + ' ' + d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+}
+
+// ── Series builders ───────────────────────────────────────────────────────────
+type BarItem = { label: string; value: number };
+
+function buildDailySeries(dm: Record<string, number>, n: number): BarItem[] {
+  return Array.from({ length: n }, (_, i) => {
+    const d = new Date(); d.setDate(d.getDate() - (n - 1 - i));
+    const k = d.toISOString().slice(0, 10);
+    return { label: k.slice(5).replace('-', '/'), value: dm[k] ?? 0 };
+  });
+}
+function buildWeeklySeries(dm: Record<string, number>, n: number): BarItem[] {
+  return Array.from({ length: n }, (_, i) => {
+    const start = new Date();
+    start.setDate(start.getDate() - start.getDay() - (n - 1 - i) * 7);
+    let sum = 0;
+    for (let d = 0; d < 7; d++) {
+      const day = new Date(start); day.setDate(start.getDate() + d);
+      sum += dm[day.toISOString().slice(0, 10)] ?? 0;
+    }
+    return { label: `W${i + 1}`, value: sum };
+  });
+}
+function buildMonthlySeries(dm: Record<string, number>, n: number): BarItem[] {
+  const now = new Date();
+  return Array.from({ length: n }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - (n - 1 - i), 1);
+    const yr = d.getFullYear(), mo = d.getMonth();
+    const sum = Object.keys(dm).reduce<number>((s, k) => {
+      const kd = new Date(k);
+      return kd.getFullYear() === yr && kd.getMonth() === mo ? s + (dm[k] ?? 0) : s;
+    }, 0);
+    return { label: `${mo + 1}/${String(yr).slice(2)}`, value: sum };
+  });
+}
+function buildCumulativeSeries(dm: Record<string, number>, n: number): BarItem[] {
+  let cum = 0;
+  return buildDailySeries(dm, n).map(d => { cum += d.value; return { label: d.label, value: cum }; });
+}
+
+// ── Compute all stats ─────────────────────────────────────────────────────────
+function computeAll(trades: DashTrade[]) {
+  const closed = trades.filter(t => t.status === 'closed' && t.exit_price != null);
+  const pnls   = closed.map(t => calcPnl(t)!);
+  const wins   = pnls.filter(p => p > 0);
+  const losses = pnls.filter(p => p < 0);
+
+  const winTrades     = wins.length;
+  const lossTrades    = losses.length;
+  const neutralTrades = pnls.filter(p => p === 0).length;
+  const grossProfit   = wins.reduce((s, p) => s + p, 0);
+  const grossLoss     = losses.reduce((s, p) => s + p, 0);
+  const totalPnl      = pnls.reduce((s, p) => s + p, 0);
+  const avgWin        = winTrades  > 0 ? grossProfit / winTrades  : 0;
+  const avgLoss       = lossTrades > 0 ? grossLoss   / lossTrades : 0;
+
+  const dayMap: Record<string, number> = {};
+  for (const t of closed) {
+    const k = dayKey(t.closed_at ?? t.submitted_at);
+    dayMap[k] = (dayMap[k] ?? 0) + calcPnl(t)!;
+  }
+
+  let profitDays = 0, lossDays = 0, neutralDays = 0;
+  for (const v of Object.values(dayMap)) {
+    if (v > 0) profitDays++; else if (v < 0) lossDays++; else neutralDays++;
+  }
+
+  // Drawdown
+  let cum = 0, peak = 0, maxDD = 0;
+  for (const k of Object.keys(dayMap).sort()) {
+    cum += dayMap[k]; if (cum > peak) peak = cum;
+    const dd = peak - cum; if (dd > maxDD) maxDD = dd;
+  }
+
+  const totalDays = profitDays + lossDays + neutralDays;
+  const winRate   = (winTrades + lossTrades) > 0 ? winTrades / (winTrades + lossTrades) * 100 : 0;
+  const pf        = Math.abs(grossLoss) > 0.001 ? grossProfit / Math.abs(grossLoss) : grossProfit > 0 ? 3 : 0;
+  const consist   = totalDays > 0 ? profitDays / totalDays * 100 : 0;
+  const wlRatio   = Math.abs(avgLoss) > 0.001 ? avgWin / Math.abs(avgLoss) : avgWin > 0 ? 2 : 0;
+  const ddCtrl    = peak > 0.001 ? Math.max(100 - maxDD / peak * 100, 0) : 50;
+  const recovery  = maxDD > 0.001 ? Math.min(Math.max(totalPnl, 0) / maxDD / 2 * 100, 100) : totalPnl > 0 ? 75 : 50;
+
+  const radarScores = [
+    Math.round(Math.min(winRate, 100)),
+    Math.round(Math.min(pf / 3 * 100, 100)),
+    Math.round(Math.min(consist, 100)),
+    Math.round(Math.min(wlRatio / 2 * 100, 100)),
+    Math.round(Math.max(ddCtrl, 0)),
+    Math.round(Math.max(recovery, 0)),
+  ];
+
+  const profitDayPct = totalDays > 0 ? Math.round(profitDays / totalDays * 100) : 0;
+  const winPct       = (winTrades + lossTrades) > 0 ? Math.round(winTrades / (winTrades + lossTrades) * 100) : 0;
+  const wlGaugePct   = Math.round(Math.min(wlRatio / 2 * 100, 100));
+  const balGaugePct  = (grossProfit + Math.abs(grossLoss)) > 0
+    ? Math.round(grossProfit / (grossProfit + Math.abs(grossLoss)) * 100) : 0;
+
+  return {
+    profitDays, lossDays, neutralDays, profitDayPct,
+    winTrades, lossTrades, neutralTrades, winPct,
+    avgWin, avgLoss, grossProfit, grossLoss, totalPnl,
+    wlGaugePct, balGaugePct,
+    radarScores,
+    dayMap,
+    dailySeries:      buildDailySeries(dayMap, 30),
+    weeklySeries:     buildWeeklySeries(dayMap, 12),
+    monthlySeries:    buildMonthlySeries(dayMap, 12),
+    cumulativeSeries: buildCumulativeSeries(dayMap, 60),
+  };
+}
+
+// ── CircleGauge ───────────────────────────────────────────────────────────────
+function CircleGauge({ pct, size = 72, color }: { pct: number; size?: number; color: string }) {
+  const r    = (size - 10) / 2;
+  const circ = 2 * Math.PI * r;
+  const off  = circ * (1 - Math.min(Math.max(pct, 0), 100) / 100);
+  return (
+    <svg width={size} height={size} style={{ transform: 'rotate(-90deg)', flexShrink: 0 }}>
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={7} />
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color}
+        strokeWidth={7} strokeLinecap="round"
+        strokeDasharray={`${circ} ${circ}`} strokeDashoffset={off} />
+    </svg>
+  );
+}
+
+// ── Radar chart ───────────────────────────────────────────────────────────────
+const R_LABELS = ['אחוז הצלחה', 'פקטור רווח', 'עקביות', 'ממוצע רווח/הפסד', 'ירידת ערך', 'התאוששות'];
+const R_DESCS  = [
+  'אחוז הצלחה מבין עסקאות סגורות',
+  'רווח גולמי חלקי הפסד גולמי',
+  'אחוז ימים רווחיים מכלל ימי מסחר',
+  'ממוצע רווח חלקי ממוצע הפסד',
+  'שליטה בירידה מקסימלית מהשיא',
+  'רווח כולל חלקי מקסימום ירידה',
+];
+
+function RadarChart({ scores }: { scores: number[] }) {
+  const [hov, setHov] = useState<number | null>(null);
+  const N = 6; const cx = 120; const cy = 120; const R = 80;
+  const ang = (i: number) => -Math.PI / 2 + (i * 2 * Math.PI) / N;
+  const pt  = (i: number, s: number): [number, number] =>
+    [cx + R * s * Math.cos(ang(i)), cy + R * s * Math.sin(ang(i))];
+  const poly = (s: number) => Array.from({ length: N }, (_, i) => pt(i, s).join(',')).join(' ');
+  const dataPoly = scores.map((v, i) => pt(i, Math.min(v, 100) / 100).join(',')).join(' ');
+  const avgScore = Math.round(scores.reduce((s, v) => s + v, 0) / N);
+
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <svg width={240} height={240}>
+        {[0.25, 0.5, 0.75, 1].map(s => (
+          <polygon key={s} points={poly(s)} fill="none" stroke={BORDER} strokeWidth={0.8} />
+        ))}
+        {Array.from({ length: N }, (_, i) => {
+          const [x, y] = pt(i, 1);
+          return <line key={i} x1={cx} y1={cy} x2={x} y2={y} stroke={BORDER} strokeWidth={0.8} />;
+        })}
+        <polygon points={dataPoly} fill="rgba(0,210,210,0.15)" stroke={ACCENT} strokeWidth={1.5} />
+        {scores.map((v, i) => {
+          const [x, y] = pt(i, Math.min(v, 100) / 100);
+          return (
+            <circle key={i} cx={x} cy={y} r={4} fill={ACCENT} style={{ cursor: 'pointer' }}
+              onMouseEnter={() => setHov(i)} onMouseLeave={() => setHov(null)}
+              onClick={() => setHov(hov === i ? null : i)} />
+          );
+        })}
+        {Array.from({ length: N }, (_, i) => {
+          const [x, y] = pt(i, 1.28);
+          return (
+            <text key={i} x={x} y={y} textAnchor="middle" dominantBaseline="middle"
+              fontSize={14} fontWeight={600} fill={hov === i ? ACCENT : MUTED}>{R_LABELS[i]}</text>
+          );
+        })}
+        <text x={cx} y={cy + 10} textAnchor="middle" fontSize={56} fontWeight="bold" fill={ACCENT}>
+          {avgScore}
+        </text>
+        <text x={cx} y={cy + 34} textAnchor="middle" fontSize={13} fill={MUTED}>ציון כולל</text>
+      </svg>
+      {hov !== null && (
+        <div className="text-center text-xs px-3 py-1.5 rounded-xl mx-4"
+          style={{ background: SURF2, color: TEXT2 }}>
+          <span style={{ color: ACCENT, fontWeight: 600 }}>{R_LABELS[hov]}</span>
+          {' '}— {scores[hov]}% — {R_DESCS[hov]}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Bar chart ─────────────────────────────────────────────────────────────────
+function BarChart({ data }: { data: BarItem[] }) {
+  const maxAbs = Math.max(...data.map(d => Math.abs(d.value)), 0.001);
+  const W = 400; const H = 100; const bw = Math.max(2, Math.floor(W / data.length) - 2);
+  const step = Math.max(1, Math.floor(data.length / 8));
+  return (
+    <svg width="100%" viewBox={`0 0 ${W} ${H + 18}`} preserveAspectRatio="none">
+      <line x1={0} y1={H / 2} x2={W} y2={H / 2} stroke={BORDER} strokeWidth={0.8} />
+      {data.map((d, i) => {
+        const x  = (i / data.length) * W + 1;
+        const h  = (Math.abs(d.value) / maxAbs) * (H * 0.44);
+        const y  = d.value >= 0 ? H / 2 - h : H / 2;
+        return (
+          <g key={i}>
+            <rect x={x} y={y} width={Math.max(bw, 2)} height={Math.max(h, 1)}
+              fill={d.value === 0 ? SURF2 : d.value > 0 ? GREEN : RED} opacity={0.85} rx={1} />
+            {i % step === 0 && (
+              <text x={x + bw / 2} y={H + 13} textAnchor="middle" fontSize={7} fill={MUTED}>
+                {d.label}
+              </text>
+            )}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+// ── Line chart ────────────────────────────────────────────────────────────────
+function LineChart({ data }: { data: BarItem[] }) {
+  if (data.length < 2) return null;
+  const vals = data.map(d => d.value);
+  const minV = Math.min(...vals); const maxV = Math.max(...vals);
+  const span = Math.max(maxV - minV, 0.001);
+  const W = 400; const H = 100; const pd = 4;
+  const toX = (i: number) => (i / (data.length - 1)) * W;
+  const toY = (v: number) => H - pd - ((v - minV) / span) * (H - pd * 2);
+  const pts  = data.map((d, i) => [toX(i), toY(d.value)] as [number, number]);
+  const lineD = pts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+  const areaD = `${lineD} L${W},${H} L0,${H} Z`;
+  const isUp  = vals[vals.length - 1] >= vals[0];
+  const col   = isUp ? GREEN : RED;
+  const step  = Math.max(1, Math.floor(data.length / 8));
+  return (
+    <svg width="100%" viewBox={`0 0 ${W} ${H + 18}`} preserveAspectRatio="none">
+      <defs>
+        <linearGradient id="lc" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={col} stopOpacity={0.2} />
+          <stop offset="100%" stopColor={col} stopOpacity={0} />
+        </linearGradient>
+      </defs>
+      <path d={areaD} fill="url(#lc)" />
+      <path d={lineD} fill="none" stroke={col} strokeWidth={1.8}
+        strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+      {data.map((d, i) => i % step === 0 ? (
+        <text key={i} x={toX(i)} y={H + 13} textAnchor="middle" fontSize={7} fill={MUTED}>
+          {d.label}
+        </text>
+      ) : null)}
+    </svg>
+  );
+}
+
+// ── Month Calendar ────────────────────────────────────────────────────────────
+const MONTHS_HE = ['ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר'];
+const DAYS_SH   = ['א','ב','ג','ד','ה','ו','ש'];
+
+function MonthCalendar({
+  dayMap, calDate, onPrev, onNext,
+}: {
+  dayMap: Record<string, number>;
+  calDate: Date;
+  onPrev: () => void;
+  onNext: () => void;
+}) {
+  const yr = calDate.getFullYear(); const mo = calDate.getMonth();
+  const firstDow = new Date(yr, mo, 1).getDay();
+  const daysInM  = new Date(yr, mo + 1, 0).getDate();
+  const cells: (number | null)[] = [...Array(firstDow).fill(null)];
+  for (let d = 1; d <= daysInM; d++) cells.push(d);
+  while (cells.length % 7 !== 0) cells.push(null);
+  const weeks: (number | null)[][] = [];
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+
+  function key(d: number) {
+    return `${yr}-${String(mo + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  }
+  function dayPnl(d: number) { return dayMap[key(d)] ?? 0; }
+  function hasTrade(d: number) { return key(d) in dayMap; }
+  function bg(pnl: number) {
+    if (pnl === 0) return 'rgba(255,255,255,0.03)';
+    const i = Math.min(Math.abs(pnl) / 3, 1);
+    return pnl > 0 ? `rgba(34,197,94,${0.12 + i * 0.45})` : `rgba(239,68,68,${0.12 + i * 0.45})`;
+  }
+
+  const monthPnl  = Array.from({ length: daysInM }, (_, i) => dayPnl(i + 1)).reduce((s, v) => s + v, 0);
+  const tradeDays = Array.from({ length: daysInM }, (_, i) => i + 1).filter(d => hasTrade(d)).length;
+  const profitDs  = Array.from({ length: daysInM }, (_, i) => dayPnl(i + 1)).filter(v => v > 0).length;
+
+  return (
+    <div className="flex flex-col gap-2">
+      {/* Nav */}
+      <div className="flex items-center justify-between mb-1">
+        <button onClick={onPrev} className="p-1.5 rounded-lg" style={{ background: SURF2, color: TEXT2 }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+            strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+        <p className="text-sm font-semibold" style={{ color: TEXT }}>{MONTHS_HE[mo]} {yr}</p>
+        <button onClick={onNext} className="p-1.5 rounded-lg" style={{ background: SURF2, color: TEXT2 }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+            strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+      </div>
+
+      {/* Day headers */}
+      <div className="grid gap-0.5" style={{ gridTemplateColumns: 'repeat(8, 1fr)' }}>
+        {DAYS_SH.map(d => (
+          <div key={d} className="text-center text-[9px] font-semibold" style={{ color: MUTED }}>{d}</div>
+        ))}
+        <div className="text-center text-[9px] font-semibold" style={{ color: MUTED }}>שבוע</div>
+      </div>
+
+      {/* Weeks */}
+      {weeks.map((week, wi) => {
+        const weekPnl = week.reduce<number>((s, d) => s + (d != null ? dayPnl(d) : 0), 0);
+        return (
+          <div key={wi} className="grid gap-0.5" style={{ gridTemplateColumns: 'repeat(8, 1fr)' }}>
+            {week.map((day, di) => {
+              const pnl = day ? dayPnl(day) : 0;
+              const has = day ? hasTrade(day) : false;
+              return (
+                <div key={di} className="rounded flex flex-col items-center justify-center py-0.5"
+                  style={{ background: day ? bg(pnl) : 'transparent', minHeight: 30 }}>
+                  {day && (
+                    <>
+                      <span className="text-[10px] font-medium leading-none"
+                        style={{ color: has ? (pnl >= 0 ? GREEN : RED) : MUTED }}>{day}</span>
+                      {has && (
+                        <span className="text-[8px] font-semibold leading-none mt-0.5"
+                          style={{ color: pnl >= 0 ? GREEN : RED }}>
+                          {pnl > 0 ? '+' : ''}{pnl.toFixed(0)}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })}
+            <div className="flex items-center justify-center rounded px-0.5"
+              style={{ background: SURF2, minHeight: 30 }}>
+              <span className="text-[9px] font-bold"
+                style={{ color: weekPnl > 0 ? GREEN : weekPnl < 0 ? RED : MUTED }}>
+                {weekPnl > 0 ? '+' : ''}{weekPnl.toFixed(0)}
+              </span>
+            </div>
+          </div>
+        );
+      })}
+
+      {/* Monthly summary */}
+      <div className="grid grid-cols-3 gap-2 mt-1">
+        {[
+          { label: 'P&L חודשי', value: fmtPnl(monthPnl), color: monthPnl >= 0 ? GREEN : RED },
+          { label: 'ימי מסחר', value: String(tradeDays), color: TEXT },
+          { label: 'ימים רווחיים', value: tradeDays > 0 ? `${Math.round(profitDs / tradeDays * 100)}%` : '—', color: GREEN },
+        ].map(({ label, value, color }) => (
+          <div key={label} className="rounded-xl p-2 text-center" style={{ background: SURF2 }}>
+            <p className="text-[9px]" style={{ color: MUTED }}>{label}</p>
+            <p className="text-xs font-bold" style={{ color }}>{value}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Trade detail panel ────────────────────────────────────────────────────────
+function TradeDetailPanel({ trade, onClose, aiReview, aiLoading, onAiReview }: {
+  trade: DashTrade;
+  onClose: () => void;
+  aiReview: string | null;
+  aiLoading: boolean;
+  onAiReview: () => void;
+}) {
+  const pnl = calcPnl(trade);
+  const dir = tradeDir(trade);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end" style={{ background: 'rgba(0,0,0,0.7)' }}
+      onClick={onClose}>
+      <div className="w-full max-h-[88vh] overflow-y-auto rounded-t-2xl"
+        style={{ background: '#0d1117', border: `1px solid ${BORDER}` }}
+        onClick={e => e.stopPropagation()}>
+        <div className="flex justify-center pt-3 pb-1">
+          <div className="w-10 h-1 rounded-full" style={{ background: BORDER }} />
+        </div>
+        <div dir="rtl" className="px-4 pb-8 flex flex-col gap-4">
+
+          {/* Header */}
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-base font-bold" style={{ color: TEXT }}>{trade.strategy}</p>
+              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                {trade.symbol && (
+                  <span className="text-xs px-2 py-0.5 rounded-md font-semibold font-mono"
+                    style={{ background: 'rgba(0,210,210,0.12)', color: ACCENT }}>{trade.symbol}</span>
+                )}
+                <span className="text-xs px-2 py-0.5 rounded-md font-semibold"
+                  style={{
+                    background: dir === 'long' ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)',
+                    color: dir === 'long' ? GREEN : RED,
+                  }}>
+                  {dir === 'long' ? 'לונג ↑' : 'שורט ↓'}
+                </span>
+                <span className="text-[10px]" style={{ color: MUTED }}>{fmtDateTime(trade.submitted_at)}</span>
+              </div>
+            </div>
+            {pnl !== null && (
+              <p className="text-2xl font-bold" style={{ color: pnl >= 0 ? GREEN : RED }}>
+                {fmtPnl(pnl)}
+              </p>
+            )}
+          </div>
+
+          {/* Prices */}
+          <div className="grid grid-cols-3 gap-2">
+            {([['כניסה', trade.entry_price.toFixed(2), TEXT],
+               ['Stop Loss', trade.stop_loss.toFixed(2), RED],
+               ['Take Profit', trade.take_profit.toFixed(2), GREEN]] as [string,string,string][]).map(([l,v,c]) => (
+              <div key={l} className="rounded-xl p-2.5 text-center" style={{ background: SURF2 }}>
+                <p className="text-[10px]" style={{ color: MUTED }}>{l}</p>
+                <p className="text-sm font-bold font-mono" style={{ color: c }}>{v}</p>
+              </div>
+            ))}
+          </div>
+
+          {trade.exit_price != null && (
+            <div className="rounded-xl px-3 py-2.5 flex items-center justify-between"
+              style={{ background: pnl != null && pnl >= 0 ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)' }}>
+              <div>
+                <p className="text-[10px]" style={{ color: MUTED }}>מחיר יציאה</p>
+                <p className="text-sm font-bold font-mono"
+                  style={{ color: pnl != null && pnl >= 0 ? GREEN : RED }}>
+                  {Number(trade.exit_price).toFixed(2)}
+                </p>
+              </div>
+              <div className="text-left">
+                <p className="text-[10px]" style={{ color: MUTED }}>R:R</p>
+                <p className="text-sm font-bold" style={{ color: ACCENT }}>1:{trade.rr_ratio.toFixed(1)}</p>
+              </div>
+              {trade.closed_at && (
+                <div className="text-left">
+                  <p className="text-[10px]" style={{ color: MUTED }}>נסגרה</p>
+                  <p className="text-xs" style={{ color: TEXT2 }}>{fmtDate(trade.closed_at)}</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {trade.trade_reason && (
+            <div className="rounded-xl p-3" style={{ background: SURF2, borderRight: `2px solid ${ACCENT}` }}>
+              <p className="text-[10px] font-semibold mb-1" style={{ color: MUTED }}>סיבת כניסה</p>
+              <p className="text-xs leading-relaxed" style={{ color: TEXT2 }}>{trade.trade_reason}</p>
+            </div>
+          )}
+
+          {trade.exit_reason && (
+            <div className="rounded-xl p-3" style={{ background: SURF2, borderRight: `2px solid ${BORDER}` }}>
+              <p className="text-[10px] font-semibold mb-1" style={{ color: MUTED }}>סיבת יציאה</p>
+              <p className="text-xs leading-relaxed" style={{ color: TEXT2 }}>{trade.exit_reason}</p>
+            </div>
+          )}
+
+          {/* AI Review */}
+          {!aiReview && !aiLoading && (
+            <button onClick={onAiReview}
+              className="w-full py-2.5 rounded-xl text-sm font-semibold transition-opacity hover:opacity-80"
+              style={{ background: 'rgba(0,210,210,0.12)', color: ACCENT, border: `1px solid rgba(0,210,210,0.25)` }}>
+              ✦ ניתוח AI על העסקה
+            </button>
+          )}
+          {aiLoading && (
+            <div className="flex flex-col gap-2">
+              {[80, 60, 70].map((w, i) => (
+                <div key={i} className="h-3 rounded animate-pulse" style={{ background: SURF2, width: `${w}%` }} />
+              ))}
+            </div>
+          )}
+          {aiReview && (
+            <div>
+              <p className="text-xs font-semibold mb-2" style={{ color: MUTED }}>ניתוח AI</p>
+              <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: TEXT2 }}>{aiReview}</p>
+            </div>
+          )}
+
+          <button onClick={onClose} className="py-2.5 rounded-xl text-sm font-medium"
+            style={{ background: SURF2, color: TEXT2 }}>סגור</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Card wrapper ──────────────────────────────────────────────────────────────
+function Card({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+  return (
+    <div className={`rounded-2xl p-4 ${className}`}
+      style={{ background: SURF, border: `1px solid ${BORDER}` }}>
+      {children}
+    </div>
+  );
+}
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return <p style={{ fontSize: 18, fontWeight: 700, color: MUTED, marginBottom: 12 }}>{children}</p>;
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
+export default function DashboardClient({
+  trades,
+  displayName,
+}: {
+  trades: DashTrade[];
+  displayName: string;
+}) {
+  const [barMode,  setBarMode]  = useState<'daily' | 'weekly' | 'monthly'>('daily');
+  const [lineMode, setLineMode] = useState<'cumulative' | 'daily'>('cumulative');
+  const [calDate,  setCalDate]  = useState(new Date());
+  const [selTrade, setSelTrade] = useState<DashTrade | null>(null);
+  const [tradeAi,  setTradeAi]  = useState<Record<string, string>>({});
+  const [tradeAiL, setTradeAiL] = useState<Record<string, boolean>>({});
+
+  const stats = useMemo(() => computeAll(trades), [trades]);
+
+  async function fetchTradeAi(t: DashTrade) {
+    setTradeAiL(p => ({ ...p, [t.id]: true }));
+    try {
+      const res = await fetch('/api/ai-trade-review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trade: t, pnl: calcPnl(t) }),
+      });
+      const { review } = await res.json();
+      setTradeAi(p => ({ ...p, [t.id]: review || 'לא ניתן לטעון ניתוח.' }));
+    } catch {
+      setTradeAi(p => ({ ...p, [t.id]: 'שגיאה בטעינת ניתוח AI.' }));
+    }
+    setTradeAiL(p => ({ ...p, [t.id]: false }));
+  }
+
+  const barData  = barMode === 'daily' ? stats.dailySeries : barMode === 'weekly' ? stats.weeklySeries : stats.monthlySeries;
+  const lineData = lineMode === 'cumulative' ? stats.cumulativeSeries : stats.dailySeries;
+  const recent   = trades.slice(0, 10);
+
+  const dateStr  = new Date().toLocaleDateString('he-IL', { weekday: 'long', day: 'numeric', month: 'long' });
+  const hour     = new Date().getHours();
+  const greeting = hour < 5 ? 'לילה טוב' : hour < 12 ? 'בוקר טוב' : hour < 17 ? 'צהריים טובים' : 'ערב טוב';
+
+  const totalClosed = stats.winTrades + stats.lossTrades + stats.neutralTrades;
+  const totalDays   = stats.profitDays + stats.lossDays + stats.neutralDays;
+
+  function prevMonth() { setCalDate(d => new Date(d.getFullYear(), d.getMonth() - 1, 1)); }
+  function nextMonth() { setCalDate(d => new Date(d.getFullYear(), d.getMonth() + 1, 1)); }
+
+  return (
+    <div dir="rtl" className="min-h-screen px-4 py-5 flex flex-col gap-5">
+
+      {/* ── Greeting ──────────────────────────────────────────────────────── */}
+      <div>
+        <p className="text-xs font-medium mb-0.5" style={{ color: ACCENT }}>{dateStr}</p>
+        <h1 className="text-xl font-bold" style={{ color: TEXT }}>{greeting}, {displayName}</h1>
+      </div>
+
+      {/* ── Empty state ───────────────────────────────────────────────────── */}
+      {trades.length === 0 && (
+        <Card className="text-center py-12 flex flex-col items-center gap-3">
+          <div style={{ fontSize: 48 }}>📈</div>
+          <p className="text-base font-semibold" style={{ color: TEXT }}>ברוך הבא ל-Reflect</p>
+          <p className="text-sm" style={{ color: TEXT2 }}>תעד עסקה ראשונה כדי להתחיל</p>
+        </Card>
+      )}
+
+      {trades.length > 0 && (
+        <>
+          {/* ── Top 4 stat cards ─────────────────────────────────────────── */}
+          <div className="grid grid-cols-2 gap-3">
+
+            {/* Card 1: Profitable Days */}
+            <Card>
+              <p style={{ fontSize: 14, fontWeight: 600, color: MUTED, marginBottom: 4 }}>ימים רווחיים</p>
+              <p style={{ fontSize: 42, fontWeight: 700, lineHeight: 1, color: stats.profitDayPct >= 50 ? GREEN : stats.profitDayPct >= 35 ? ACCENT : RED }}>
+                {stats.profitDayPct}%
+              </p>
+              <div className="flex items-center gap-3 mt-3">
+                <CircleGauge size={56} pct={stats.profitDayPct}
+                  color={stats.profitDayPct >= 50 ? GREEN : stats.profitDayPct >= 35 ? ACCENT : RED} />
+                <div className="flex flex-col gap-1">
+                  <p style={{ fontSize: 13, color: GREEN }}>▲ {stats.profitDays} רווח</p>
+                  <p style={{ fontSize: 13, color: RED }}>▼ {stats.lossDays} הפסד</p>
+                  <p style={{ fontSize: 13, color: MUTED }}>— {stats.neutralDays} ניטרלי</p>
+                </div>
+              </div>
+            </Card>
+
+            {/* Card 2: Win Rate */}
+            <Card>
+              <p style={{ fontSize: 14, fontWeight: 600, color: MUTED, marginBottom: 4 }}>אחוז הצלחה</p>
+              <p style={{ fontSize: 42, fontWeight: 700, lineHeight: 1, color: stats.winPct >= 55 ? GREEN : stats.winPct >= 40 ? ACCENT : RED }}>
+                {stats.winPct}%
+              </p>
+              <div className="flex items-center gap-3 mt-3">
+                <CircleGauge size={56} pct={stats.winPct}
+                  color={stats.winPct >= 55 ? GREEN : stats.winPct >= 40 ? ACCENT : RED} />
+                <div className="flex flex-col gap-1">
+                  <p style={{ fontSize: 13, color: GREEN }}>▲ {stats.winTrades} רווח</p>
+                  <p style={{ fontSize: 13, color: RED }}>▼ {stats.lossTrades} הפסד</p>
+                  <p style={{ fontSize: 13, color: MUTED }}>— {stats.neutralTrades} ניטרלי</p>
+                </div>
+              </div>
+            </Card>
+
+            {/* Card 3: Avg P/L ratio */}
+            <Card>
+              <p style={{ fontSize: 14, fontWeight: 600, color: MUTED, marginBottom: 4 }}>יחס רווח/הפסד</p>
+              <p style={{ fontSize: 42, fontWeight: 700, lineHeight: 1, color: stats.wlGaugePct >= 60 ? GREEN : stats.wlGaugePct >= 35 ? ACCENT : RED }}>
+                {stats.avgWin > 0 && stats.avgLoss < 0
+                  ? `${(stats.avgWin / Math.abs(stats.avgLoss)).toFixed(1)}x`
+                  : '—'}
+              </p>
+              <div className="flex items-center gap-3 mt-3">
+                <CircleGauge size={56} pct={stats.wlGaugePct}
+                  color={stats.wlGaugePct >= 60 ? GREEN : stats.wlGaugePct >= 35 ? ACCENT : RED} />
+                <div className="flex flex-col gap-1">
+                  <p style={{ fontSize: 13, color: GREEN }}>
+                    ממוצע רווח {stats.avgWin > 0 ? `+${stats.avgWin.toFixed(1)}` : '—'}
+                  </p>
+                  <p style={{ fontSize: 13, color: RED }}>
+                    ממוצע הפסד {stats.avgLoss < 0 ? stats.avgLoss.toFixed(1) : '—'}
+                  </p>
+                </div>
+              </div>
+            </Card>
+
+            {/* Card 4: P&L Balance */}
+            <Card>
+              <p style={{ fontSize: 14, fontWeight: 600, color: MUTED, marginBottom: 4 }}>P&L + מאזן</p>
+              <p style={{ fontSize: 42, fontWeight: 700, lineHeight: 1, color: stats.totalPnl >= 0 ? GREEN : RED }}>
+                {stats.totalPnl >= 0 ? '+' : ''}{stats.totalPnl.toFixed(0)}
+              </p>
+              <div className="flex items-center gap-3 mt-3">
+                <CircleGauge size={56} pct={stats.balGaugePct}
+                  color={stats.totalPnl >= 0 ? GREEN : RED} />
+                <div className="flex flex-col gap-1">
+                  <p style={{ fontSize: 13, color: GREEN }}>רווח +{stats.grossProfit.toFixed(1)}</p>
+                  <p style={{ fontSize: 13, color: RED }}>הפסד ({Math.abs(stats.grossLoss).toFixed(1)})</p>
+                  <p style={{ fontSize: 13, color: MUTED }}>{totalClosed} עסקאות</p>
+                </div>
+              </div>
+            </Card>
+          </div>
+
+          {/* ── Middle: Radar + Bar + Line ────────────────────────────────── */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+            {/* Radar */}
+            <Card>
+              <SectionTitle>ניקוד משמעת</SectionTitle>
+              <RadarChart scores={stats.radarScores} />
+              <div className="grid grid-cols-3 gap-1 mt-2">
+                {R_LABELS.map((l, i) => (
+                  <div key={l} className="text-center rounded-lg py-1.5"
+                    style={{ background: SURF2 }}>
+                    <p style={{ fontSize: 11, color: MUTED }}>{l}</p>
+                    <p style={{ fontSize: 15, fontWeight: 700, color: stats.radarScores[i] >= 60 ? GREEN : stats.radarScores[i] >= 35 ? ACCENT : RED }}>
+                      {stats.radarScores[i]}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </Card>
+
+            {/* Bar chart */}
+            <Card>
+              <div className="flex items-center justify-between mb-3">
+                <SectionTitle>רווח/הפסד</SectionTitle>
+                <div className="flex gap-1">
+                  {(['daily', 'weekly', 'monthly'] as const).map(m => (
+                    <button key={m} onClick={() => setBarMode(m)}
+                      className="px-2 py-0.5 rounded-lg text-sm font-medium transition-all"
+                      style={{
+                        background: barMode === m ? 'rgba(0,210,210,0.15)' : SURF2,
+                        color: barMode === m ? ACCENT : MUTED,
+                      }}>
+                      {m === 'daily' ? 'יומי' : m === 'weekly' ? 'שבועי' : 'חודשי'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <BarChart data={barData} />
+            </Card>
+
+            {/* Line chart */}
+            <Card>
+              <div className="flex items-center justify-between mb-3">
+                <SectionTitle>P&L עקומה</SectionTitle>
+                <div className="flex gap-1">
+                  {(['cumulative', 'daily'] as const).map(m => (
+                    <button key={m} onClick={() => setLineMode(m)}
+                      className="px-2 py-0.5 rounded-lg text-sm font-medium transition-all"
+                      style={{
+                        background: lineMode === m ? 'rgba(0,210,210,0.15)' : SURF2,
+                        color: lineMode === m ? ACCENT : MUTED,
+                      }}>
+                      {m === 'cumulative' ? 'מצטבר' : 'יומי'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <LineChart data={lineData} />
+              {lineData.length > 0 && (
+                <p className="text-xs font-bold mt-2"
+                  style={{ color: lineData[lineData.length - 1].value >= 0 ? GREEN : RED }}>
+                  {fmtPnl(lineData[lineData.length - 1].value)}
+                </p>
+              )}
+            </Card>
+          </div>
+
+          {/* ── Bottom: Calendar + Recent trades ─────────────────────────── */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+            {/* Calendar */}
+            <Card>
+              <SectionTitle>לוח שנה חודשי</SectionTitle>
+              <MonthCalendar dayMap={stats.dayMap} calDate={calDate}
+                onPrev={prevMonth} onNext={nextMonth} />
+            </Card>
+
+            {/* Recent trades */}
+            <Card>
+              <SectionTitle>עסקאות אחרונות</SectionTitle>
+              <div className="flex flex-col gap-0">
+                {recent.length === 0 ? (
+                  <p className="text-sm text-center py-6" style={{ color: MUTED }}>אין עסקאות</p>
+                ) : recent.map((t, i) => {
+                  const pnl  = calcPnl(t);
+                  const dir  = tradeDir(t);
+                  return (
+                    <div key={t.id} className="flex items-center gap-2 py-2.5"
+                      style={{ borderTop: i > 0 ? `1px solid ${BORDER}` : undefined }}>
+                      {/* Date + asset */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-sm font-semibold truncate" style={{ color: TEXT }}>
+                            {t.symbol ?? t.strategy}
+                          </span>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded font-semibold"
+                            style={{
+                              background: dir === 'long' ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)',
+                              color: dir === 'long' ? GREEN : RED,
+                            }}>
+                            {dir === 'long' ? '↑ לונג' : '↓ שורט'}
+                          </span>
+                        </div>
+                        <p className="text-[10px] mt-0.5" style={{ color: MUTED }}>
+                          {fmtDateTime(t.submitted_at)} · כניסה {t.entry_price.toFixed(2)}
+                          {t.exit_price != null ? ` · יציאה ${t.exit_price.toFixed(2)}` : ''}
+                        </p>
+                      </div>
+                      {/* P&L + button */}
+                      <div className="flex items-center gap-2 shrink-0">
+                        {pnl !== null ? (
+                          <p className="text-sm font-bold" style={{ color: pnl >= 0 ? GREEN : RED }}>
+                            {fmtPnl(pnl)}
+                          </p>
+                        ) : (
+                          <p className="text-xs font-semibold" style={{ color: ACCENT }}>פתוח</p>
+                        )}
+                        <button onClick={() => setSelTrade(t)}
+                          className="text-[10px] px-2 py-1 rounded-lg font-medium transition-opacity hover:opacity-80"
+                          style={{ background: SURF2, color: TEXT2, whiteSpace: 'nowrap' }}>
+                          פרטים
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+          </div>
+        </>
+      )}
+
+      {/* ── Trade detail panel ────────────────────────────────────────────── */}
+      {selTrade && (
+        <TradeDetailPanel
+          trade={selTrade}
+          onClose={() => setSelTrade(null)}
+          aiReview={tradeAi[selTrade.id] ?? null}
+          aiLoading={tradeAiL[selTrade.id] ?? false}
+          onAiReview={() => fetchTradeAi(selTrade)}
+        />
+      )}
+    </div>
+  );
+}

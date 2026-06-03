@@ -371,7 +371,7 @@ function CustomRuleBuilder({
                   cursor: plan === 'pro' ? 'pointer' : 'default',
                 }}>
                 {ex}
-                {plan !== 'pro' && <span className="text-[10px] font-bold" style={{ color: '#f59e0b' }}>Pro</span>}
+                {plan !== 'pro' && <span className="text-[10px] font-bold" style={{ color: '#00d2d2' }}>Pro</span>}
               </button>
             ))}
           </div>
@@ -431,7 +431,7 @@ function CustomRuleBuilder({
                 }}
               >
                 {label}
-                {isBasicLocked && <span className="text-[10px] font-bold" style={{ color: '#f59e0b' }}>Pro</span>}
+                {isBasicLocked && <span className="text-[10px] font-bold" style={{ color: '#00d2d2' }}>Pro</span>}
               </button>
             );
           })}
@@ -449,7 +449,7 @@ function CustomRuleBuilder({
             }}
           >
             חסימה עצמית מלאה
-            <span className="text-[10px] font-bold" style={{ color: '#f59e0b' }}>Pro</span>
+            <span className="text-[10px] font-bold" style={{ color: '#00d2d2' }}>Pro</span>
           </button>
         </div>
         {plan !== 'pro' && (
@@ -457,13 +457,13 @@ function CustomRuleBuilder({
         )}
         {/* Self-block explanation — always visible */}
         <div className="flex items-start gap-2 p-3 rounded-xl"
-          style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)' }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 shrink-0">
+          style={{ background: 'rgba(0,210,210,0.08)', border: '1px solid rgba(0,210,210,0.2)' }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#00d2d2" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 shrink-0">
             <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
             <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
           </svg>
           <div>
-            <p className="text-xs font-semibold" style={{ color: '#f59e0b' }}>חסימה עצמית מלאה — Pro</p>
+            <p className="text-xs font-semibold" style={{ color: '#00d2d2' }}>חסימה עצמית מלאה — Pro</p>
             <p className="text-xs mt-0.5" style={{ color: 'var(--color-tg-text-2)' }}>
               כשהחוק מופעל — לא ניתן להגיש תוכנית עסקה. לא ניתן לעקוף. אתה בוחר מראש לחסום את עצמך. הסבר מלא יוצג לפני ההפעלה.
             </p>

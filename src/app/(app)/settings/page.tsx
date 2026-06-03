@@ -132,14 +132,14 @@ export default async function SettingsPage() {
 
         {/* Pro */}
         <div className="rounded-2xl border-2 p-4 relative overflow-hidden" style={{
-          borderColor: plan === 'pro' ? '#f59e0b' : 'var(--color-tg-border)',
+          borderColor: plan === 'pro' ? '#00d2d2' : 'var(--color-tg-border)',
           background: 'var(--color-tg-surface)',
         }}>
           <div className="absolute top-3 left-3">
             {plan === 'pro' ? (
-              <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: 'rgba(245,158,11,0.15)', color: '#f59e0b' }}>המסלול שלך</span>
+              <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: 'rgba(0,210,210,0.12)', color: '#00d2d2' }}>המסלול שלך</span>
             ) : (
-              <span className="px-2 py-0.5 rounded-full text-xs font-bold" style={{ background: 'linear-gradient(135deg, #f59e0b, #ef4444)', color: 'white' }}>
+              <span className="px-2 py-0.5 rounded-full text-xs font-bold" style={{ background: '#00d2d2', color: '#000' }}>
                 פופולרי
               </span>
             )}
@@ -175,7 +175,7 @@ export default async function SettingsPage() {
           {plan !== 'pro' && (
             <button
               className="w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-all duration-150 active:scale-95"
-              style={{ background: 'linear-gradient(135deg, #f59e0b, #ef4444)' }}
+              style={{ background: '#00d2d2' }}
             >
               שדרג ל-Pro
             </button>
@@ -198,7 +198,7 @@ function PlanFeature({ text, disabled, pro }: { text: string; disabled?: boolean
           <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
         </svg>
       ) : (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={pro ? '#f59e0b' : 'var(--color-tg-success)'} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={pro ? '#00d2d2' : 'var(--color-tg-success)'} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
           <polyline points="20 6 9 17 4 12" />
         </svg>
       )}

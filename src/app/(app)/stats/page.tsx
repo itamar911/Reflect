@@ -263,7 +263,7 @@ export default async function StatsPage() {
         <SumCard
           label="ממוצע R:R"
           value={trades.length > 0 ? `1:${avgRR.toFixed(1)}` : '—'}
-          color="#D4AF37"
+          color="#00d2d2"
         />
         <SumCard
           label="פקטור רווח"
@@ -314,7 +314,7 @@ export default async function StatsPage() {
                     </div>
                     {/* Usage bar */}
                     <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--color-tg-surface-2)' }}>
-                      <div className="h-full rounded-full" style={{ width: `${barPct}%`, background: '#D4AF37' }} />
+                      <div className="h-full rounded-full" style={{ width: `${barPct}%`, background: '#00d2d2' }} />
                     </div>
                   </div>
                   {/* Stats */}
@@ -356,7 +356,7 @@ export default async function StatsPage() {
           {bestHour && bestHour.count > 0 && (
             <InfoPill label="שעה רווחית ביותר"
               value={`${bestHour.label}:00 (${fmt(bestHour.value)})`}
-              color="#D4AF37" />
+              color="#00d2d2" />
           )}
         </Section>
       )}

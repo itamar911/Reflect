@@ -38,9 +38,9 @@ export default async function RulesPage() {
         <div className="flex items-center gap-3 mb-1">
           <div
             className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
-            style={{ background: 'rgba(212,175,55,0.12)', border: '1px solid rgba(212,175,55,0.2)' }}
+            style={{ background: 'rgba(0,210,210,0.12)', border: '1px solid rgba(0,210,210,0.2)' }}
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#00d2d2" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
             </svg>
           </div>
@@ -65,13 +65,13 @@ export default async function RulesPage() {
         <StatPill
           label="חוקים אישיים פעילים"
           value={String(activeCustom)}
-          color={activeCustom > 0 ? '#D4AF37' : 'var(--color-tg-muted)'}
+          color={activeCustom > 0 ? '#00d2d2' : 'var(--color-tg-muted)'}
         />
         <div style={{ width: 1, background: 'var(--color-tg-border)' }} />
         <StatPill
           label="מסלול"
           value={plan === 'pro' ? 'Pro' : plan === 'basic' ? 'Basic' : 'Free'}
-          color={plan === 'pro' ? '#f59e0b' : plan === 'basic' ? 'var(--color-tg-primary)' : 'var(--color-tg-muted)'}
+          color={plan === 'pro' ? '#00d2d2' : plan === 'basic' ? 'var(--color-tg-primary)' : 'var(--color-tg-muted)'}
         />
       </div>
 
@@ -103,7 +103,7 @@ export default async function RulesPage() {
           {plan !== 'pro' && (
             <span
               className="px-2 py-0.5 rounded-full text-[11px] font-bold"
-              style={{ background: 'rgba(245,158,11,0.14)', color: '#f59e0b' }}
+              style={{ background: 'rgba(0,210,210,0.12)', color: '#00d2d2' }}
             >
               Pro
             </span>
@@ -135,7 +135,7 @@ export default async function RulesPage() {
               <p className="text-xs" style={{ color: 'var(--color-tg-muted)' }}>
                 תאריך · שם החוק · פעולה שבוצעה
               </p>
-              <p className="text-xs font-semibold mt-2" style={{ color: '#f59e0b' }}>
+              <p className="text-xs font-semibold mt-2" style={{ color: '#00d2d2' }}>
                 זמין במסלול Pro
               </p>
             </div>
@@ -168,9 +168,9 @@ function HowItWorks() {
   return (
     <div
       className="rounded-2xl p-4 flex flex-col gap-3"
-      style={{ background: 'rgba(212,175,55,0.05)', border: '1px solid rgba(212,175,55,0.12)' }}
+      style={{ background: 'rgba(0,210,210,0.05)', border: '1px solid rgba(0,210,210,0.12)' }}
     >
-      <p className="text-xs font-semibold" style={{ color: '#D4AF37' }}>איך זה עובד?</p>
+      <p className="text-xs font-semibold" style={{ color: '#00d2d2' }}>איך זה עובד?</p>
       <div className="flex flex-col gap-2">
         {steps.map(({ icon, text }) => (
           <div key={text} className="flex items-center gap-2.5">

@@ -172,7 +172,7 @@ export default function PerformanceSection({ trades, plan }: PerformanceSectionP
           <div className="shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs border"
             style={{ borderColor: 'var(--color-tg-border)', color: 'var(--color-tg-muted)' }}>
             30/90/שנה
-            <span className="font-bold" style={{ color: '#f59e0b' }}>Pro</span>
+            <span className="font-bold" style={{ color: '#00d2d2' }}>Pro</span>
           </div>
         )}
       </div>
@@ -275,7 +275,7 @@ export default function PerformanceSection({ trades, plan }: PerformanceSectionP
               <h3 className="text-sm font-semibold text-tg-text">מפת חום — שעות וימים</h3>
               {plan !== 'pro' && (
                 <span className="px-2 py-0.5 rounded-full text-xs font-bold"
-                  style={{ background: 'rgba(245,158,11,0.15)', color: '#f59e0b' }}>Pro</span>
+                  style={{ background: 'rgba(0,210,210,0.12)', color: '#00d2d2' }}>Pro</span>
               )}
             </div>
             {plan === 'pro' ? (

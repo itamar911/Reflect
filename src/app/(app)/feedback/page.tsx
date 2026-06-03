@@ -9,7 +9,7 @@ type SubmitState = 'idle' | 'sending' | 'success' | 'error';
 
 const TYPES: { value: FeedbackType; label: string; icon: string; color: string; desc: string }[] = [
   { value: 'bug',      label: 'דיווח על באג',  icon: '🐛', color: '#f87171', desc: 'משהו לא עובד כמו שצריך' },
-  { value: 'feature',  label: 'הצעה לשיפור',   icon: '💡', color: '#D4AF37', desc: 'רעיון לפיצ׳ר חדש' },
+  { value: 'feature',  label: 'הצעה לשיפור',   icon: '💡', color: '#00d2d2', desc: 'רעיון לפיצ׳ר חדש' },
   { value: 'question', label: 'שאלה',          icon: '❓', color: '#60A5FA', desc: 'שאלה כללית' },
 ];
 
@@ -22,7 +22,7 @@ const BORDER = 'var(--color-tg-border)';
 const TEXT   = 'var(--color-tg-text)';
 const TEXT2  = 'var(--color-tg-text-2)';
 const MUTED  = 'var(--color-tg-muted)';
-const GOLD   = '#D4AF37';
+const GOLD   = '#00d2d2';
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 

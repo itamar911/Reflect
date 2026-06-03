@@ -124,7 +124,7 @@ export default function AlertsPanel({ plan, userId, initialSettings }: AlertsPan
                 <p className="text-sm font-medium text-tg-text">{alert.label}</p>
                 {alert.proOnly && (
                   <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold"
-                    style={{ background: 'rgba(245,158,11,0.15)', color: '#f59e0b' }}>Pro</span>
+                    style={{ background: 'rgba(0,210,210,0.12)', color: '#00d2d2' }}>Pro</span>
                 )}
                 {!canCustomize && !alert.proOnly && (
                   <span className="px-1.5 py-0.5 rounded-md text-[10px]"

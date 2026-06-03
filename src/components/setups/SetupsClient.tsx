@@ -35,7 +35,7 @@ export interface LinkedTrade {
 type View = 'list' | 'create' | 'detail';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
-const GOLD   = '#D4AF37';
+const GOLD   = '#00d2d2';
 const BG     = 'var(--color-tg-bg)';
 const SURF   = 'var(--color-tg-surface)';
 const SURF2  = 'var(--color-tg-surface-2)';
@@ -170,7 +170,7 @@ export default function SetupsClient({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
-            style={{ background: 'rgba(212,175,55,0.12)', border: `1px solid rgba(212,175,55,0.22)` }}>
+            style={{ background: 'rgba(0,210,210,0.12)', border: `1px solid rgba(0,210,210,0.22)` }}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={GOLD} strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
               <path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/>
               <line x1="7" y1="7" x2="7.01" y2="7"/>
@@ -231,7 +231,7 @@ function SetupCard({ setup, stats, onClick }: {
           <p className="text-base font-bold truncate" style={{ color: TEXT }}>{setup.name}</p>
           {setup.symbol && (
             <span className="text-xs px-2 py-0.5 rounded-md font-semibold mt-0.5 inline-block"
-              style={{ background: `rgba(212,175,55,0.12)`, color: GOLD }}>
+              style={{ background: `rgba(0,210,210,0.12)`, color: GOLD }}>
               {setup.symbol}
             </span>
           )}
@@ -309,7 +309,7 @@ function DetailView({ setup, stats, linked, unlinked, aiReview, aiLoading, onBac
             <h1 className="text-xl font-bold" style={{ color: TEXT }}>{setup.name}</h1>
             {setup.symbol && (
               <span className="text-xs px-2 py-0.5 rounded-md font-semibold mt-1 inline-block"
-                style={{ background: `rgba(212,175,55,0.12)`, color: GOLD }}>
+                style={{ background: `rgba(0,210,210,0.12)`, color: GOLD }}>
                 {setup.symbol}
               </span>
             )}
@@ -364,7 +364,7 @@ function DetailView({ setup, stats, linked, unlinked, aiReview, aiLoading, onBac
           {!aiReview && (
             <button onClick={onAiReview} disabled={aiLoading}
               className="text-xs px-3 py-1.5 rounded-lg font-semibold transition-opacity hover:opacity-80 disabled:opacity-50"
-              style={{ background: `rgba(212,175,55,0.15)`, color: GOLD }}>
+              style={{ background: `rgba(0,210,210,0.12)`, color: GOLD }}>
               {aiLoading ? '⟳ מנתח...' : '✦ קבל ביקורת AI'}
             </button>
           )}

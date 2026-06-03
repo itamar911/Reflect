@@ -4,7 +4,7 @@ import { useState, type CSSProperties } from 'react';
 import { createClient } from '@/lib/supabase/client';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
-const GOLD   = '#D4AF37';
+const GOLD   = '#00d2d2';
 const SURF   = 'var(--color-tg-surface)';
 const SURF2  = 'var(--color-tg-surface-2)';
 const BORDER = 'var(--color-tg-border)';
@@ -294,7 +294,7 @@ export default function StrategiesClient({
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-bold" style={{ color: TEXT }}>{b.name}</span>
                       <span className="text-[10px] px-1.5 py-0.5 rounded-md font-semibold"
-                        style={{ background: 'rgba(212,175,55,0.12)', color: GOLD }}>מובנית</span>
+                        style={{ background: 'rgba(0,210,210,0.12)', color: GOLD }}>מובנית</span>
                       <span className="text-[10px] px-1.5 py-0.5 rounded-md"
                         style={{ background: SURF2, color: MUTED }}>{DIR_LABELS[b.direction]}</span>
                     </div>
@@ -330,9 +330,9 @@ export default function StrategiesClient({
                       <button onClick={() => setExpandTrades(prev => ({ ...prev, [b.id]: !prev[b.id] }))}
                         className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-medium"
                         style={{
-                          background: expandTrades[b.id] ? 'rgba(212,175,55,0.12)' : SURF2,
+                          background: expandTrades[b.id] ? 'rgba(0,210,210,0.12)' : SURF2,
                           color:      expandTrades[b.id] ? GOLD : TEXT2,
-                          border:     `1px solid ${expandTrades[b.id] ? 'rgba(212,175,55,0.3)' : BORDER}`,
+                          border:     `1px solid ${expandTrades[b.id] ? 'rgba(0,210,210,0.3)' : BORDER}`,
                         }}>
                         <ListIcon /> עסקאות ({linked.length})
                       </button>
@@ -341,9 +341,9 @@ export default function StrategiesClient({
                         disabled={aiLoad}
                         className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-medium disabled:opacity-50"
                         style={{
-                          background: aiText ? 'rgba(212,175,55,0.12)' : SURF2,
+                          background: aiText ? 'rgba(0,210,210,0.12)' : SURF2,
                           color:      aiText ? GOLD : TEXT2,
-                          border:     `1px solid ${aiText ? 'rgba(212,175,55,0.3)' : BORDER}`,
+                          border:     `1px solid ${aiText ? 'rgba(0,210,210,0.3)' : BORDER}`,
                         }}>
                         <SparkIcon /> {aiLoad ? 'מנתח...' : aiText ? 'ניתוח AI ✓' : 'ניתוח AI'}
                       </button>
@@ -368,7 +368,7 @@ export default function StrategiesClient({
                                     style={{
                                       background: t.status === 'closed'
                                         ? (pnl != null && pnl > 0 ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.1)')
-                                        : 'rgba(212,175,55,0.1)',
+                                        : 'rgba(0,210,210,0.1)',
                                       color: t.status === 'closed'
                                         ? (pnl != null && pnl > 0 ? GREEN : RED) : GOLD,
                                     }}>
@@ -452,7 +452,7 @@ export default function StrategiesClient({
                   <div className="flex items-center gap-2 flex-wrap">
                     <h2 className="text-base font-bold" style={{ color: TEXT }}>{s.name}</h2>
                     <span className="text-[10px] px-2 py-0.5 rounded-md font-semibold"
-                      style={{ background: 'rgba(212,175,55,0.12)', color: GOLD }}>
+                      style={{ background: 'rgba(0,210,210,0.12)', color: GOLD }}>
                       {DIR_LABELS[s.direction]}
                     </span>
                   </div>
@@ -516,9 +516,9 @@ export default function StrategiesClient({
                 <button onClick={() => toggleTrades(s.id)}
                   className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-medium transition-all"
                   style={{
-                    background: isOpen ? 'rgba(212,175,55,0.12)' : SURF2,
+                    background: isOpen ? 'rgba(0,210,210,0.12)' : SURF2,
                     color:      isOpen ? GOLD : TEXT2,
-                    border:     `1px solid ${isOpen ? 'rgba(212,175,55,0.3)' : BORDER}`,
+                    border:     `1px solid ${isOpen ? 'rgba(0,210,210,0.3)' : BORDER}`,
                   }}>
                   <ListIcon />
                   עסקאות ({linked.length})
@@ -528,9 +528,9 @@ export default function StrategiesClient({
                   disabled={aiLoad}
                   className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-medium transition-all disabled:opacity-50"
                   style={{
-                    background: aiText ? 'rgba(212,175,55,0.12)' : SURF2,
+                    background: aiText ? 'rgba(0,210,210,0.12)' : SURF2,
                     color:      aiText ? GOLD : TEXT2,
-                    border:     `1px solid ${aiText ? 'rgba(212,175,55,0.3)' : BORDER}`,
+                    border:     `1px solid ${aiText ? 'rgba(0,210,210,0.3)' : BORDER}`,
                   }}>
                   <SparkIcon />
                   {aiLoad ? 'מנתח...' : aiText ? 'ניתוח AI ✓' : 'ניתוח AI'}
@@ -562,7 +562,7 @@ export default function StrategiesClient({
                                 style={{
                                   background: t.status === 'closed'
                                     ? (pnl != null && pnl > 0 ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.1)')
-                                    : 'rgba(212,175,55,0.1)',
+                                    : 'rgba(0,210,210,0.1)',
                                   color: t.status === 'closed'
                                     ? (pnl != null && pnl > 0 ? GREEN : RED)
                                     : GOLD,
@@ -666,7 +666,7 @@ export default function StrategiesClient({
                 <button key={d} onClick={() => setForm({ ...form, direction: d })}
                   className="flex-1 py-1.5 rounded-xl text-xs font-medium border transition-all"
                   style={{
-                    background:   form.direction === d ? 'rgba(212,175,55,0.12)' : SURF2,
+                    background:   form.direction === d ? 'rgba(0,210,210,0.12)' : SURF2,
                     borderColor:  form.direction === d ? GOLD : BORDER,
                     color:        form.direction === d ? GOLD : TEXT2,
                   }}>

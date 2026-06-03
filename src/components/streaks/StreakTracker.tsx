@@ -19,7 +19,7 @@ export default function StreakTracker({
   fullDisciplineStreak,
 }: StreakTrackerProps) {
   const streaks: StreakItem[] = [
-    { icon: '🎯', label: 'לפי החוקים',  current: disciplineStreak,     color: '#F5C518' },
+    { icon: '🎯', label: 'לפי החוקים',  current: disciplineStreak,     color: '#00d2d2' },
     { icon: '🧘', label: 'ללא Revenge', current: noRevengeStreak,      color: '#00C853' },
     { icon: '🛡️', label: 'עם Stop Loss', current: stopLossStreak,       color: '#60A5FA' },
     { icon: '⭐', label: 'משמעת מלאה',  current: fullDisciplineStreak, color: '#A78BFA' },

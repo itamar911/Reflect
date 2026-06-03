@@ -4,7 +4,7 @@ import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
-const GOLD   = '#D4AF37';
+const GOLD   = '#00d2d2';
 const SURF   = 'var(--color-tg-surface)';
 const SURF2  = 'var(--color-tg-surface-2)';
 const BORDER = 'var(--color-tg-border)';
@@ -167,7 +167,7 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
                     onClick={() => { setFilterStatus(s); setShowFilter(false); setPage(1); }}
                     className="px-3 py-1.5 rounded-lg text-sm text-right transition-all"
                     style={{
-                      background: filterStatus === s ? 'rgba(212,175,55,0.12)' : 'transparent',
+                      background: filterStatus === s ? 'rgba(0,210,210,0.12)' : 'transparent',
                       color: filterStatus === s ? GOLD : TEXT2,
                     }}>
                     {s === 'all' ? 'הכל' : s === 'open' ? 'פתוחות' : 'סגורות'}
@@ -267,7 +267,7 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
                     onClick={() => toggleOne(t.id)}
                     style={{
                       background: isChecked
-                        ? 'rgba(212,175,55,0.06)'
+                        ? 'rgba(0,210,210,0.06)'
                         : i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.015)',
                       borderBottom: `1px solid ${BORDER}`,
                       cursor: 'pointer',
@@ -293,7 +293,7 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
                     <TD>
                       {isClosed
                         ? <StatusBadge win={isWin} />
-                        : <Chip bg="rgba(212,175,55,0.12)" color={GOLD}>פתוח</Chip>
+                        : <Chip bg="rgba(0,210,210,0.12)" color={GOLD}>פתוח</Chip>
                       }
                     </TD>
 
@@ -403,7 +403,7 @@ function StatCard({ label, value, icon, color = TEXT }: {
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium" style={{ color: MUTED }}>{label}</span>
         <div className="w-7 h-7 rounded-lg flex items-center justify-center"
-          style={{ background: 'rgba(212,175,55,0.1)' }}>
+          style={{ background: 'rgba(0,210,210,0.1)' }}>
           {icon}
         </div>
       </div>
@@ -458,7 +458,7 @@ function AssetDot({ symbol }: { symbol: string | null }) {
   const s = (symbol ?? '?').slice(0, 2).toUpperCase();
   return (
     <div className="w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold shrink-0"
-      style={{ background: 'rgba(212,175,55,0.15)', color: GOLD }}>
+      style={{ background: 'rgba(0,210,210,0.12)', color: GOLD }}>
       {s}
     </div>
   );

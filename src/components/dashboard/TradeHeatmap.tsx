@@ -160,10 +160,10 @@ export default function TradeHeatmap({ trades }: { trades: Trade[] }) {
             top: Math.max(tooltip.y - 76, 8),
             zIndex: 9999,
             background: 'rgba(10,10,15,0.97)',
-            border: '1px solid rgba(245,197,24,0.28)',
+            border: '1px solid rgba(0,210,210,0.28)',
             borderRadius: 8,
             padding: '7px 11px',
-            boxShadow: '0 4px 24px rgba(0,0,0,0.7), 0 0 12px rgba(245,197,24,0.06)',
+            boxShadow: '0 4px 24px rgba(0,0,0,0.7), 0 0 12px rgba(0,210,210,0.06)',
             minWidth: 132,
           }}
         >

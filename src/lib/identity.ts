@@ -26,7 +26,7 @@ interface TradeStat {
 const IDENTITY_CONFIG: Record<TraderIdentity, { icon: string; color: string; tagline: string }> = {
   'Disciplined Sniper': {
     icon: '🎯',
-    color: '#F5C518',
+    color: '#00d2d2',
     tagline: 'מחכה לסטאפ המושלם — מכה ברגע הנכון',
   },
   'Emotional Trader': {

@@ -19,12 +19,12 @@ interface Trade {
 }
 
 const TYPE_CONFIG: Record<string, { icon: string; color: string; label: string }> = {
-  time:        { icon: '🕐', color: '#F5C518', label: 'שעות מסחר' },
+  time:        { icon: '🕐', color: '#00d2d2', label: 'שעות מסחר' },
   emotional:   { icon: '💙', color: '#60A5FA', label: 'מצב רגשי' },
   revenge:     { icon: '⚠️', color: '#FF3B30', label: 'Revenge Trading' },
   performance: { icon: '📈', color: '#00C853', label: 'ביצועים' },
   pattern:     { icon: '🔍', color: '#A78BFA', label: 'דפוס' },
-  discipline:  { icon: '🎯', color: '#F5C518', label: 'משמעת' },
+  discipline:  { icon: '🎯', color: '#00d2d2', label: 'משמעת' },
 };
 
 export default function AICoachCard({ trades }: { trades: Trade[] }) {

@@ -6,9 +6,9 @@ export default function EmptyStateButton() {
       onClick={() => window.dispatchEvent(new CustomEvent('open-trade-form'))}
       className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-semibold text-sm transition-transform active:scale-95"
       style={{
-        background: 'linear-gradient(135deg, #F5C518 0%, #D4A017 100%)',
+        background: '#00d2d2',
         color: '#000',
-        boxShadow: '0 4px 20px rgba(245,197,24,0.5), 0 0 40px rgba(245,197,24,0.2)',
+        boxShadow: '0 4px 20px rgba(0,210,210,0.4), 0 0 40px rgba(0,210,210,0.15)',
       }}>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
         <line x1="12" y1="5" x2="12" y2="19" />

@@ -23,13 +23,13 @@ type MobilePanel = 'list' | 'editor';
 
 const PAGE_TYPES = [
   { value: 'journal',  label: 'יומן יומי',     icon: '📔', color: '#60A5FA' },
-  { value: 'insights', label: 'תובנות מסחר',   icon: '💡', color: '#D4AF37' },
+  { value: 'insights', label: 'תובנות מסחר',   icon: '💡', color: '#00d2d2' },
   { value: 'plan',     label: 'תוכנית מסחר',   icon: '📋', color: '#4ade80' },
 ] as const;
 
 const PRESET_TAGS = ['חשוב', 'אסטרטגיה', 'פסיכולוגיה', 'ריגשי', 'ניהול סיכונים', 'לבדיקה'];
 
-const GOLD   = '#D4AF37';
+const GOLD   = '#00d2d2';
 const BORDER = 'var(--color-tg-border)';
 const SURF   = 'var(--color-tg-surface)';
 const SURF2  = 'var(--color-tg-surface-2)';
@@ -166,7 +166,7 @@ export default function NotebookClient({
                 style={{
                   padding: '10px 12px', cursor: 'pointer',
                   borderBottom: `1px solid ${BORDER}`,
-                  background:   active ? 'rgba(212,175,55,0.07)' : 'transparent',
+                  background:   active ? 'rgba(0,210,210,0.07)' : 'transparent',
                   borderRight:  active ? `3px solid ${GOLD}` : '3px solid transparent',
                   direction: 'rtl',
                 }}
@@ -290,7 +290,7 @@ export default function NotebookClient({
                 <button key={tag} onClick={() => toggleTag(tag)} style={{
                   padding: '3px 8px', borderRadius: 20, cursor: 'pointer', fontSize: 11,
                   border:     `1px solid ${on ? GOLD : BORDER}`,
-                  background: on ? 'rgba(212,175,55,0.14)' : 'transparent',
+                  background: on ? 'rgba(0,210,210,0.12)' : 'transparent',
                   color:      on ? GOLD : MUTED,
                   fontWeight: on ? 600 : 400,
                 }}>{tag}</button>
@@ -300,7 +300,7 @@ export default function NotebookClient({
 
           {/* Custom tags */}
           {selected.tags.filter(t => !PRESET_TAGS.includes(t)).map(tag => (
-            <span key={tag} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 7px', borderRadius: 20, border: `1px solid ${GOLD}`, background: 'rgba(212,175,55,0.12)', color: GOLD, fontSize: 11, marginLeft: 4, marginBottom: 4 }}>
+            <span key={tag} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 7px', borderRadius: 20, border: `1px solid ${GOLD}`, background: 'rgba(0,210,210,0.12)', color: GOLD, fontSize: 11, marginLeft: 4, marginBottom: 4 }}>
               {tag}
               <button onClick={() => toggleTag(tag)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', padding: 0, lineHeight: 1 }}>×</button>
             </span>

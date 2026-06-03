@@ -17,7 +17,7 @@ interface Props {
   monthly: PeriodPoint[];
 }
 
-const GOLD = '#D4AF37';
+const GOLD = '#00d2d2';
 
 function fmt(v: number) {
   if (v === 0) return '$0';
