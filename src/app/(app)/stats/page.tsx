@@ -67,7 +67,7 @@ function Section({ title, icon, children }: {
 }) {
   return (
     <div className="rounded-xl p-5 flex flex-col gap-4"
-      style={{ background: 'var(--color-tg-surface)', border: '1px solid #2e2e42', boxShadow: '0 1px 3px rgba(0,0,0,0.4)' }}>
+      style={{ background: '#14141e', border: '1px solid #2e2e42', boxShadow: '0 1px 3px rgba(0,0,0,0.4)' }}>
       <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: 'var(--color-tg-text)' }}>
         {icon && <span>{icon}</span>}
         {title}
@@ -81,7 +81,7 @@ function Section({ title, icon, children }: {
 function SumCard({ label, value, sub, color }: { label: string; value: string; sub?: string; color: string }) {
   return (
     <div className="rounded-xl p-4 flex flex-col gap-1"
-      style={{ background: 'var(--color-tg-surface)', border: '1px solid #2e2e42', boxShadow: '0 1px 3px rgba(0,0,0,0.4)' }}>
+      style={{ background: '#14141e', border: '1px solid #2e2e42', boxShadow: '0 1px 3px rgba(0,0,0,0.4)' }}>
       <p className="text-[11px] font-medium" style={{ color: 'var(--color-tg-muted)' }}>{label}</p>
       <p className="text-2xl font-bold leading-none" style={{ color }}>{value}</p>
       {sub && <p className="text-[10px]" style={{ color: 'var(--color-tg-muted)' }}>{sub}</p>}
@@ -277,12 +277,12 @@ export default async function StatsPage() {
       {closedCount > 0 && (
         <div className="grid grid-cols-2 gap-3">
           <div className="rounded-2xl p-3 flex flex-col gap-0.5"
-            style={{ background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.15)' }}>
+            style={{ background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.18)' }}>
             <p className="text-[11px]" style={{ color: 'rgba(34,197,94,0.7)' }}>ממוצע רווח</p>
             <p className="text-lg font-bold" style={{ color: '#22c55e' }}>{fmt(avgWin)}</p>
           </div>
           <div className="rounded-2xl p-3 flex flex-col gap-0.5"
-            style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.15)' }}>
+            style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.18)' }}>
             <p className="text-[11px]" style={{ color: 'rgba(239,68,68,0.7)' }}>ממוצע הפסד</p>
             <p className="text-lg font-bold" style={{ color: '#ef4444' }}>{fmt(avgLoss)}</p>
           </div>
