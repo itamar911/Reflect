@@ -3,15 +3,15 @@
 import { useState, useMemo } from 'react';
 
 // ── Tokens ────────────────────────────────────────────────────────────────────
-const GOLD   = '#D4AF37';
-const SURF   = 'var(--color-tg-surface)';
-const SURF2  = 'var(--color-tg-surface-2)';
-const BORDER = 'var(--color-tg-border)';
-const TEXT   = 'var(--color-tg-text)';
-const TEXT2  = 'var(--color-tg-text-2)';
-const MUTED  = 'var(--color-tg-muted)';
-const GREEN  = '#4ade80';
-const RED    = '#f87171';
+const ACCENT  = '#00d2d2';
+const SURF    = 'var(--color-tg-surface)';
+const SURF2   = 'var(--color-tg-surface-2)';
+const BORDER  = 'var(--color-tg-border)';
+const TEXT    = 'var(--color-tg-text)';
+const TEXT2   = 'var(--color-tg-text-2)';
+const MUTED   = 'var(--color-tg-muted)';
+const GREEN   = '#22c55e';
+const RED     = '#ef4444';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 export interface DashTrade {
@@ -167,7 +167,7 @@ function CircleGauge({ pct, size = 72, color }: { pct: number; size?: number; co
   const off  = circ * (1 - Math.min(Math.max(pct, 0), 100) / 100);
   return (
     <svg width={size} height={size} style={{ transform: 'rotate(-90deg)', flexShrink: 0 }}>
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={SURF2} strokeWidth={7} />
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={7} />
       <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color}
         strokeWidth={7} strokeLinecap="round"
         strokeDasharray={`${circ} ${circ}`} strokeDashoffset={off} />
@@ -206,11 +206,11 @@ function RadarChart({ scores }: { scores: number[] }) {
           const [x, y] = pt(i, 1);
           return <line key={i} x1={cx} y1={cy} x2={x} y2={y} stroke={BORDER} strokeWidth={0.8} />;
         })}
-        <polygon points={dataPoly} fill="rgba(212,175,55,0.15)" stroke={GOLD} strokeWidth={1.5} />
+        <polygon points={dataPoly} fill="rgba(0,210,210,0.15)" stroke={ACCENT} strokeWidth={1.5} />
         {scores.map((v, i) => {
           const [x, y] = pt(i, Math.min(v, 100) / 100);
           return (
-            <circle key={i} cx={x} cy={y} r={4} fill={GOLD} style={{ cursor: 'pointer' }}
+            <circle key={i} cx={x} cy={y} r={4} fill={ACCENT} style={{ cursor: 'pointer' }}
               onMouseEnter={() => setHov(i)} onMouseLeave={() => setHov(null)}
               onClick={() => setHov(hov === i ? null : i)} />
           );
@@ -219,10 +219,10 @@ function RadarChart({ scores }: { scores: number[] }) {
           const [x, y] = pt(i, 1.28);
           return (
             <text key={i} x={x} y={y} textAnchor="middle" dominantBaseline="middle"
-              fontSize={14} fontWeight={600} fill={hov === i ? GOLD : MUTED}>{R_LABELS[i]}</text>
+              fontSize={14} fontWeight={600} fill={hov === i ? ACCENT : MUTED}>{R_LABELS[i]}</text>
           );
         })}
-        <text x={cx} y={cy + 10} textAnchor="middle" fontSize={56} fontWeight="bold" fill={GOLD}>
+        <text x={cx} y={cy + 10} textAnchor="middle" fontSize={56} fontWeight="bold" fill={ACCENT}>
           {avgScore}
         </text>
         <text x={cx} y={cy + 34} textAnchor="middle" fontSize={13} fill={MUTED}>ציון כולל</text>
@@ -230,7 +230,7 @@ function RadarChart({ scores }: { scores: number[] }) {
       {hov !== null && (
         <div className="text-center text-xs px-3 py-1.5 rounded-xl mx-4"
           style={{ background: SURF2, color: TEXT2 }}>
-          <span style={{ color: GOLD, fontWeight: 600 }}>{R_LABELS[hov]}</span>
+          <span style={{ color: ACCENT, fontWeight: 600 }}>{R_LABELS[hov]}</span>
           {' '}— {scores[hov]}% — {R_DESCS[hov]}
         </div>
       )}
@@ -328,9 +328,9 @@ function MonthCalendar({
   function dayPnl(d: number) { return dayMap[key(d)] ?? 0; }
   function hasTrade(d: number) { return key(d) in dayMap; }
   function bg(pnl: number) {
-    if (pnl === 0) return 'transparent';
+    if (pnl === 0) return 'rgba(255,255,255,0.03)';
     const i = Math.min(Math.abs(pnl) / 3, 1);
-    return pnl > 0 ? `rgba(74,222,128,${0.12 + i * 0.45})` : `rgba(248,113,113,${0.12 + i * 0.45})`;
+    return pnl > 0 ? `rgba(34,197,94,${0.12 + i * 0.45})` : `rgba(239,68,68,${0.12 + i * 0.45})`;
   }
 
   const monthPnl  = Array.from({ length: daysInM }, (_, i) => dayPnl(i + 1)).reduce((s, v) => s + v, 0);
@@ -443,11 +443,11 @@ function TradeDetailPanel({ trade, onClose, aiReview, aiLoading, onAiReview }: {
               <div className="flex items-center gap-2 mt-1 flex-wrap">
                 {trade.symbol && (
                   <span className="text-xs px-2 py-0.5 rounded-md font-semibold font-mono"
-                    style={{ background: 'rgba(212,175,55,0.12)', color: GOLD }}>{trade.symbol}</span>
+                    style={{ background: 'rgba(0,210,210,0.12)', color: ACCENT }}>{trade.symbol}</span>
                 )}
                 <span className="text-xs px-2 py-0.5 rounded-md font-semibold"
                   style={{
-                    background: dir === 'long' ? 'rgba(74,222,128,0.12)' : 'rgba(248,113,113,0.12)',
+                    background: dir === 'long' ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)',
                     color: dir === 'long' ? GREEN : RED,
                   }}>
                   {dir === 'long' ? 'לונג ↑' : 'שורט ↓'}
@@ -476,7 +476,7 @@ function TradeDetailPanel({ trade, onClose, aiReview, aiLoading, onAiReview }: {
 
           {trade.exit_price != null && (
             <div className="rounded-xl px-3 py-2.5 flex items-center justify-between"
-              style={{ background: pnl != null && pnl >= 0 ? 'rgba(74,222,128,0.08)' : 'rgba(248,113,113,0.08)' }}>
+              style={{ background: pnl != null && pnl >= 0 ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)' }}>
               <div>
                 <p className="text-[10px]" style={{ color: MUTED }}>מחיר יציאה</p>
                 <p className="text-sm font-bold font-mono"
@@ -486,7 +486,7 @@ function TradeDetailPanel({ trade, onClose, aiReview, aiLoading, onAiReview }: {
               </div>
               <div className="text-left">
                 <p className="text-[10px]" style={{ color: MUTED }}>R:R</p>
-                <p className="text-sm font-bold" style={{ color: GOLD }}>1:{trade.rr_ratio.toFixed(1)}</p>
+                <p className="text-sm font-bold" style={{ color: ACCENT }}>1:{trade.rr_ratio.toFixed(1)}</p>
               </div>
               {trade.closed_at && (
                 <div className="text-left">
@@ -498,7 +498,7 @@ function TradeDetailPanel({ trade, onClose, aiReview, aiLoading, onAiReview }: {
           )}
 
           {trade.trade_reason && (
-            <div className="rounded-xl p-3" style={{ background: SURF2, borderRight: `2px solid ${GOLD}` }}>
+            <div className="rounded-xl p-3" style={{ background: SURF2, borderRight: `2px solid ${ACCENT}` }}>
               <p className="text-[10px] font-semibold mb-1" style={{ color: MUTED }}>סיבת כניסה</p>
               <p className="text-xs leading-relaxed" style={{ color: TEXT2 }}>{trade.trade_reason}</p>
             </div>
@@ -515,7 +515,7 @@ function TradeDetailPanel({ trade, onClose, aiReview, aiLoading, onAiReview }: {
           {!aiReview && !aiLoading && (
             <button onClick={onAiReview}
               className="w-full py-2.5 rounded-xl text-sm font-semibold transition-opacity hover:opacity-80"
-              style={{ background: 'rgba(212,175,55,0.12)', color: GOLD, border: `1px solid rgba(212,175,55,0.25)` }}>
+              style={{ background: 'rgba(0,210,210,0.12)', color: ACCENT, border: `1px solid rgba(0,210,210,0.25)` }}>
               ✦ ניתוח AI על העסקה
             </button>
           )}
@@ -607,7 +607,7 @@ export default function DashboardClient({
 
       {/* ── Greeting ──────────────────────────────────────────────────────── */}
       <div>
-        <p className="text-xs font-medium mb-0.5" style={{ color: GOLD }}>{dateStr}</p>
+        <p className="text-xs font-medium mb-0.5" style={{ color: ACCENT }}>{dateStr}</p>
         <h1 className="text-xl font-bold" style={{ color: TEXT }}>{greeting}, {displayName}</h1>
       </div>
 
@@ -628,12 +628,12 @@ export default function DashboardClient({
             {/* Card 1: Profitable Days */}
             <Card>
               <p style={{ fontSize: 14, fontWeight: 600, color: MUTED, marginBottom: 4 }}>ימים רווחיים</p>
-              <p style={{ fontSize: 42, fontWeight: 700, lineHeight: 1, color: stats.profitDayPct >= 50 ? GREEN : stats.profitDayPct >= 35 ? GOLD : RED }}>
+              <p style={{ fontSize: 42, fontWeight: 700, lineHeight: 1, color: stats.profitDayPct >= 50 ? GREEN : stats.profitDayPct >= 35 ? ACCENT : RED }}>
                 {stats.profitDayPct}%
               </p>
               <div className="flex items-center gap-3 mt-3">
                 <CircleGauge size={56} pct={stats.profitDayPct}
-                  color={stats.profitDayPct >= 50 ? GREEN : stats.profitDayPct >= 35 ? GOLD : RED} />
+                  color={stats.profitDayPct >= 50 ? GREEN : stats.profitDayPct >= 35 ? ACCENT : RED} />
                 <div className="flex flex-col gap-1">
                   <p style={{ fontSize: 13, color: GREEN }}>▲ {stats.profitDays} רווח</p>
                   <p style={{ fontSize: 13, color: RED }}>▼ {stats.lossDays} הפסד</p>
@@ -645,12 +645,12 @@ export default function DashboardClient({
             {/* Card 2: Win Rate */}
             <Card>
               <p style={{ fontSize: 14, fontWeight: 600, color: MUTED, marginBottom: 4 }}>אחוז הצלחה</p>
-              <p style={{ fontSize: 42, fontWeight: 700, lineHeight: 1, color: stats.winPct >= 55 ? GREEN : stats.winPct >= 40 ? GOLD : RED }}>
+              <p style={{ fontSize: 42, fontWeight: 700, lineHeight: 1, color: stats.winPct >= 55 ? GREEN : stats.winPct >= 40 ? ACCENT : RED }}>
                 {stats.winPct}%
               </p>
               <div className="flex items-center gap-3 mt-3">
                 <CircleGauge size={56} pct={stats.winPct}
-                  color={stats.winPct >= 55 ? GREEN : stats.winPct >= 40 ? GOLD : RED} />
+                  color={stats.winPct >= 55 ? GREEN : stats.winPct >= 40 ? ACCENT : RED} />
                 <div className="flex flex-col gap-1">
                   <p style={{ fontSize: 13, color: GREEN }}>▲ {stats.winTrades} רווח</p>
                   <p style={{ fontSize: 13, color: RED }}>▼ {stats.lossTrades} הפסד</p>
@@ -662,14 +662,14 @@ export default function DashboardClient({
             {/* Card 3: Avg P/L ratio */}
             <Card>
               <p style={{ fontSize: 14, fontWeight: 600, color: MUTED, marginBottom: 4 }}>יחס רווח/הפסד</p>
-              <p style={{ fontSize: 42, fontWeight: 700, lineHeight: 1, color: stats.wlGaugePct >= 60 ? GREEN : stats.wlGaugePct >= 35 ? GOLD : RED }}>
+              <p style={{ fontSize: 42, fontWeight: 700, lineHeight: 1, color: stats.wlGaugePct >= 60 ? GREEN : stats.wlGaugePct >= 35 ? ACCENT : RED }}>
                 {stats.avgWin > 0 && stats.avgLoss < 0
                   ? `${(stats.avgWin / Math.abs(stats.avgLoss)).toFixed(1)}x`
                   : '—'}
               </p>
               <div className="flex items-center gap-3 mt-3">
                 <CircleGauge size={56} pct={stats.wlGaugePct}
-                  color={stats.wlGaugePct >= 60 ? GREEN : stats.wlGaugePct >= 35 ? GOLD : RED} />
+                  color={stats.wlGaugePct >= 60 ? GREEN : stats.wlGaugePct >= 35 ? ACCENT : RED} />
                 <div className="flex flex-col gap-1">
                   <p style={{ fontSize: 13, color: GREEN }}>
                     ממוצע רווח {stats.avgWin > 0 ? `+${stats.avgWin.toFixed(1)}` : '—'}
@@ -711,7 +711,7 @@ export default function DashboardClient({
                   <div key={l} className="text-center rounded-lg py-1.5"
                     style={{ background: SURF2 }}>
                     <p style={{ fontSize: 11, color: MUTED }}>{l}</p>
-                    <p style={{ fontSize: 15, fontWeight: 700, color: stats.radarScores[i] >= 60 ? GREEN : stats.radarScores[i] >= 35 ? GOLD : RED }}>
+                    <p style={{ fontSize: 15, fontWeight: 700, color: stats.radarScores[i] >= 60 ? GREEN : stats.radarScores[i] >= 35 ? ACCENT : RED }}>
                       {stats.radarScores[i]}
                     </p>
                   </div>
@@ -728,8 +728,8 @@ export default function DashboardClient({
                     <button key={m} onClick={() => setBarMode(m)}
                       className="px-2 py-0.5 rounded-lg text-sm font-medium transition-all"
                       style={{
-                        background: barMode === m ? 'rgba(212,175,55,0.15)' : SURF2,
-                        color: barMode === m ? GOLD : MUTED,
+                        background: barMode === m ? 'rgba(0,210,210,0.15)' : SURF2,
+                        color: barMode === m ? ACCENT : MUTED,
                       }}>
                       {m === 'daily' ? 'יומי' : m === 'weekly' ? 'שבועי' : 'חודשי'}
                     </button>
@@ -748,8 +748,8 @@ export default function DashboardClient({
                     <button key={m} onClick={() => setLineMode(m)}
                       className="px-2 py-0.5 rounded-lg text-sm font-medium transition-all"
                       style={{
-                        background: lineMode === m ? 'rgba(212,175,55,0.15)' : SURF2,
-                        color: lineMode === m ? GOLD : MUTED,
+                        background: lineMode === m ? 'rgba(0,210,210,0.15)' : SURF2,
+                        color: lineMode === m ? ACCENT : MUTED,
                       }}>
                       {m === 'cumulative' ? 'מצטבר' : 'יומי'}
                     </button>
@@ -796,7 +796,7 @@ export default function DashboardClient({
                           </span>
                           <span className="text-[9px] px-1.5 py-0.5 rounded font-semibold"
                             style={{
-                              background: dir === 'long' ? 'rgba(74,222,128,0.12)' : 'rgba(248,113,113,0.12)',
+                              background: dir === 'long' ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)',
                               color: dir === 'long' ? GREEN : RED,
                             }}>
                             {dir === 'long' ? '↑ לונג' : '↓ שורט'}
@@ -814,7 +814,7 @@ export default function DashboardClient({
                             {fmtPnl(pnl)}
                           </p>
                         ) : (
-                          <p className="text-xs font-semibold" style={{ color: GOLD }}>פתוח</p>
+                          <p className="text-xs font-semibold" style={{ color: ACCENT }}>פתוח</p>
                         )}
                         <button onClick={() => setSelTrade(t)}
                           className="text-[10px] px-2 py-1 rounded-lg font-medium transition-opacity hover:opacity-80"

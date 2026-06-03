@@ -4,47 +4,44 @@
   --font-sans: var(--font-inter), system-ui, sans-serif;
   --font-mono: ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
 
-  /* Deep Space design tokens */
-  --color-tg-bg: #0a0a0f;
-  --color-tg-surface: #0d1117;
-  --color-tg-surface-2: #111827;
-  --color-tg-border: #1a2535;
-  --color-tg-border-light: #1e3448;
+  --color-tg-bg: #09090e;
+  --color-tg-surface: #111118;
+  --color-tg-surface-2: #16161f;
+  --color-tg-border: #1e1e2a;
+  --color-tg-border-light: #ffffff14;
 
-  --color-tg-primary: #F5C518;
-  --color-tg-primary-hover: #D4A017;
-  --color-tg-primary-muted: rgba(245, 197, 24, 0.1);
+  --color-tg-primary: #00d2d2;
+  --color-tg-primary-hover: #00a8a8;
+  --color-tg-primary-muted: rgba(0, 210, 210, 0.15);
 
-  --color-tg-success: #00C853;
-  --color-tg-success-muted: rgba(0, 200, 83, 0.12);
-  --color-tg-warning: #F59E0B;
+  --color-tg-success: #22c55e;
+  --color-tg-success-muted: rgba(34, 197, 94, 0.10);
+  --color-tg-warning: #f59e0b;
   --color-tg-warning-muted: rgba(245, 158, 11, 0.12);
-  --color-tg-danger: #FF3B30;
-  --color-tg-danger-muted: rgba(255, 59, 48, 0.12);
+  --color-tg-danger: #ef4444;
+  --color-tg-danger-muted: rgba(239, 68, 68, 0.10);
 
-  --color-tg-text: #e8edf5;
-  --color-tg-text-2: #7b8fa8;
-  --color-tg-muted: #3d5068;
+  --color-tg-text: #f1f5f9;
+  --color-tg-text-2: #94a3b8;
+  --color-tg-muted: #475569;
 }
 
 :root {
   color-scheme: dark;
 
-  /* Text hierarchy — dark defaults */
-  --text-primary:   #e8edf5;  /* near-white, inherits from --color-tg-text */
-  --text-secondary: #7b8fa8;  /* mid-blue-grey */
-  --text-muted:     #3d5068;  /* dim blue-grey */
+  --text-primary:   #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted:     #475569;
 
-  /* Shell chrome — dark defaults */
-  --shell-bg:             rgba(10, 10, 15, 0.97);
-  --shell-header-bg:      rgba(10, 10, 15, 0.88);
-  --shell-nav-bg:         rgba(10, 10, 15, 0.92);
-  --shell-border:         rgba(245, 197, 24, 0.13);
-  --shell-divider:        rgba(245, 197, 24, 0.10);
-  --shell-hover:          rgba(255, 255, 255, 0.05);
+  --shell-bg:             rgba(9, 9, 14, 0.97);
+  --shell-header-bg:      rgba(9, 9, 14, 0.88);
+  --shell-nav-bg:         rgba(9, 9, 14, 0.92);
+  --shell-border:         rgba(0, 210, 210, 0.13);
+  --shell-divider:        rgba(255, 255, 255, 0.05);
+  --shell-hover:          rgba(255, 255, 255, 0.04);
   --shell-sidebar-shadow: 4px 0 32px rgba(0,0,0,0.5);
-  --shell-header-shadow:  0 1px 0 rgba(245,197,24,0.06), 0 4px 32px rgba(0,0,0,0.5);
-  --shell-nav-shadow:     0 -1px 0 rgba(245,197,24,0.05), 0 -4px 32px rgba(0,0,0,0.6);
+  --shell-header-shadow:  0 1px 0 rgba(0,210,210,0.06), 0 4px 32px rgba(0,0,0,0.5);
+  --shell-nav-shadow:     0 -1px 0 rgba(0,210,210,0.05), 0 -4px 32px rgba(0,0,0,0.6);
 }
 
 /* ── Light mode token overrides ─────────────────────────────── */
@@ -288,3 +285,34 @@ html { font-size: 16px; }
 .text-3xl  { font-size: 2.25rem;   line-height: 2.75rem;  }  /* 36 px */
 .text-4xl  { font-size: 2.625rem;  line-height: 3rem;     }  /* 42 px */
 .text-5xl  { font-size: 3.5rem;    line-height: 3.75rem;  }  /* 56 px */
+
+/* ── Value & tag utilities ───────────────────────────────────── */
+
+.value-profit  { color: #22c55e !important; }
+.value-loss    { color: #ef4444 !important; }
+.value-neutral { color: #94a3b8 !important; }
+.value-accent  { color: #00d2d2 !important; }
+
+.tag-long {
+  background: rgba(34, 197, 94, 0.10);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.tag-short {
+  background: rgba(239, 68, 68, 0.10);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.stat-value-positive { color: #22c55e; font-weight: 700; font-variant-numeric: tabular-nums; }
+.stat-value-negative { color: #ef4444; font-weight: 700; font-variant-numeric: tabular-nums; }
+.stat-value-accent   { color: #00d2d2; font-weight: 700; font-variant-numeric: tabular-nums; }
