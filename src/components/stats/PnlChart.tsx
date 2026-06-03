@@ -33,7 +33,7 @@ export default function PnlChart({ daily, weekly, monthly }: Props) {
   const totalTrades = data.reduce((s, d) => s + d.trades, 0);
   const totalWins  = data.reduce((s, d) => s + d.wins, 0);
   const isUp       = totalPnl >= 0;
-  const pnlColor   = isUp ? '#4ade80' : '#f87171';
+  const pnlColor   = isUp ? '#22c55e' : '#ef4444';
 
   const W = 300, H = 96;
   const MID = 56;              // zero-line y
@@ -69,8 +69,9 @@ export default function PnlChart({ daily, weekly, monthly }: Props) {
             onClick={() => setPeriod(key)}
             className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
             style={{
-              background: period === key ? GOLD : 'var(--color-tg-surface-2)',
-              color:      period === key ? '#0a0a0f' : 'var(--color-tg-text-2)',
+              background: period === key ? 'rgba(0,210,210,0.15)' : 'var(--color-tg-surface-2)',
+              color:      period === key ? '#00d2d2' : 'var(--color-tg-text-2)',
+              border:     period === key ? '1px solid rgba(0,210,210,0.3)' : '1px solid transparent',
             }}
           >
             {lbl}
@@ -98,7 +99,7 @@ export default function PnlChart({ daily, weekly, monthly }: Props) {
                   key={i}
                   x={x.toFixed(1)} y={y.toFixed(1)}
                   width={barW.toFixed(1)} height={bh.toFixed(1)}
-                  fill={d.pnl > 0 ? 'rgba(74,222,128,0.55)' : d.pnl < 0 ? 'rgba(248,113,113,0.55)' : 'rgba(100,116,139,0.25)'}
+                  fill={d.pnl > 0 ? 'rgba(34,197,94,0.6)' : d.pnl < 0 ? 'rgba(239,68,68,0.6)' : 'rgba(100,116,139,0.25)'}
                   rx="1.5"
                 />
               );
@@ -135,7 +136,7 @@ export default function PnlChart({ daily, weekly, monthly }: Props) {
           <div className="flex gap-4 text-xs" style={{ color: 'var(--color-tg-muted)' }}>
             <span>{totalTrades} עסקאות</span>
             {totalTrades > 0 && (
-              <span style={{ color: totalWins / totalTrades >= 0.5 ? '#4ade80' : 'var(--color-tg-muted)' }}>
+              <span style={{ color: totalWins / totalTrades >= 0.5 ? '#22c55e' : 'var(--color-tg-muted)' }}>
                 {Math.round((totalWins / totalTrades) * 100)}% הצלחה
               </span>
             )}
