@@ -207,16 +207,6 @@ export default function AppShell({
           <div className="shrink-0">
             <ReflectLogo width={expanded ? 44 : 34} wordmark={false} />
           </div>
-          <span
-            className="font-bold text-base whitespace-nowrap overflow-hidden transition-opacity duration-200"
-            style={{
-              color:   ACCENT,
-              opacity: expanded ? 1 : 0,
-              width:   expanded ? 'auto' : 0,
-            }}
-          >
-            Reflect
-          </span>
         </div>
 
         {/* Primary nav */}
