@@ -207,6 +207,23 @@ export default function AppShell({
           <div className="shrink-0">
             <ReflectLogo width={expanded ? 44 : 34} wordmark={false} />
           </div>
+          <span
+            className="whitespace-nowrap overflow-hidden transition-opacity duration-200"
+            style={{
+              opacity:                expanded ? 1 : 0,
+              width:                  expanded ? 'auto' : 0,
+              fontFamily:             "Georgia, 'Times New Roman', serif",
+              fontSize:               18,
+              fontWeight:             400,
+              letterSpacing:          '0.15em',
+              background:             'linear-gradient(180deg, #e8d5a3 0%, #c9a84c 40%, #a07830 70%, #c9a84c 100%)',
+              WebkitBackgroundClip:   'text',
+              WebkitTextFillColor:    'transparent',
+              backgroundClip:         'text',
+            }}
+          >
+            Reflect
+          </span>
         </div>
 
         {/* Primary nav */}
