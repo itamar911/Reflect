@@ -18,28 +18,13 @@ export function ReflectLogo({ width = 100, wordmark = true }: ReflectLogoProps) 
       role="img"
       style={{ direction: 'ltr' }}
     >
-      <defs>
-        <linearGradient id="rGold" x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%"   stopColor="#e8d5a3" />
-          <stop offset="40%"  stopColor="#c9a84c" />
-          <stop offset="70%"  stopColor="#a07830" />
-          <stop offset="100%" stopColor="#c9a84c" />
-        </linearGradient>
-        <linearGradient id="rMirror" x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%"   stopColor="#d4c89a" stopOpacity="0.85" />
-          <stop offset="40%"  stopColor="#b8923e" stopOpacity="0.85" />
-          <stop offset="70%"  stopColor="#8a6525" stopOpacity="0.85" />
-          <stop offset="100%" stopColor="#b8923e" stopOpacity="0.85" />
-        </linearGradient>
-      </defs>
-
       {/* Reversed Я */}
       <text
         x="0"
         y="100"
         fontFamily="Georgia, 'Times New Roman', serif"
         fontSize="120"
-        fill="url(#rMirror)"
+        fill="#C4BAA8"
         transform="translate(79, 0) scale(-1, 1)"
       >
         R
@@ -51,7 +36,7 @@ export function ReflectLogo({ width = 100, wordmark = true }: ReflectLogoProps) 
         y="100"
         fontFamily="Georgia, 'Times New Roman', serif"
         fontSize="120"
-        fill="url(#rGold)"
+        fill="#2C2418"
       >
         R
       </text>
@@ -63,7 +48,7 @@ export function ReflectLogo({ width = 100, wordmark = true }: ReflectLogoProps) 
           y="132"
           fontFamily="Georgia, 'Times New Roman', serif"
           fontSize="13"
-          fill="#c9a84c"
+          fill="#7A6E5A"
           textAnchor="middle"
           letterSpacing="6"
         >

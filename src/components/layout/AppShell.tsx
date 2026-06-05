@@ -210,16 +210,13 @@ export default function AppShell({
           <span
             className="whitespace-nowrap overflow-hidden transition-opacity duration-200"
             style={{
-              opacity:                expanded ? 1 : 0,
-              width:                  expanded ? 'auto' : 0,
-              fontFamily:             "Georgia, 'Times New Roman', serif",
-              fontSize:               18,
-              fontWeight:             400,
-              letterSpacing:          '0.15em',
-              background:             'linear-gradient(180deg, #e8d5a3 0%, #c9a84c 40%, #a07830 70%, #c9a84c 100%)',
-              WebkitBackgroundClip:   'text',
-              WebkitTextFillColor:    'transparent',
-              backgroundClip:         'text',
+              opacity:       expanded ? 1 : 0,
+              width:         expanded ? 'auto' : 0,
+              fontFamily:    "Georgia, 'Times New Roman', serif",
+              fontSize:      17,
+              fontWeight:    400,
+              letterSpacing: '0.12em',
+              color:         '#C4BAA8',
             }}
           >
             Reflect
