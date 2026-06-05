@@ -1,5 +1,5 @@
 import type { TraderProfile } from '@/lib/identity';
-import { AlertTriangle, Dumbbell, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Dumbbell, RefreshCw, Check, X } from 'lucide-react';
 
 export default function TraderIdentityCard({ profile }: { profile: TraderProfile }) {
   const { identity, icon, color, tagline, strengths, weaknesses, totalTrades } = profile;
@@ -62,7 +62,7 @@ export default function TraderIdentityCard({ profile }: { profile: TraderProfile
           <div className="flex flex-col gap-2">
             {strengths.map((s, i) => (
               <div key={i} className="flex items-start gap-1.5">
-                <span className="text-[9px] font-bold mt-0.5 shrink-0" style={{ color: '#00C853' }}>✓</span>
+                <Check size={9} className="shrink-0 mt-0.5" style={{ color: '#00C853' }} />
                 <p className="text-[11px] text-tg-text-2 leading-tight">{s}</p>
               </div>
             ))}
@@ -78,7 +78,7 @@ export default function TraderIdentityCard({ profile }: { profile: TraderProfile
           <div className="flex flex-col gap-2">
             {weaknesses.map((w, i) => (
               <div key={i} className="flex items-start gap-1.5">
-                <span className="text-[9px] font-bold mt-0.5 shrink-0" style={{ color: '#FF3B30' }}>✗</span>
+                <X size={9} className="shrink-0 mt-0.5" style={{ color: '#FF3B30' }} />
                 <p className="text-[11px] text-tg-text-2 leading-tight">{w}</p>
               </div>
             ))}

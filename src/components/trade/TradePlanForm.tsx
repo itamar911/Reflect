@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Check } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { validateTradePlan, DEFAULT_PRESET_RULES } from '@/lib/validators/RulesetValidator';
 import { calcRR } from '@/lib/utils';
@@ -479,7 +480,7 @@ function FormSection({
             color: done || active ? 'white' : 'var(--color-tg-muted)',
           }}
         >
-          {done ? '✓' : step}
+          {done ? <Check size={9} /> : step}
         </span>
         <span
           className="text-xs font-semibold"

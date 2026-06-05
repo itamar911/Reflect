@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { Ban } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
@@ -107,7 +108,7 @@ export default function ResetPasswordPage() {
 
         {status === 'invalid' && (
           <div className="text-center py-4 animate-fade-in">
-            <div className="text-3xl mb-3">⛔</div>
+            <div className="mb-3"><Ban size={36} /></div>
             <p className="text-sm font-semibold text-tg-text mb-1">הלינק לא תקין או פג תוקף</p>
             <p className="text-xs text-tg-muted mb-4">לינקים לאיפוס סיסמא תקפים למשך שעה אחת</p>
             <a href="/forgot-password"

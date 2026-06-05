@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import RulesEditor from '@/components/rules/RulesEditor';
 import type { PresetRules, CustomRule } from '@/lib/types';
-import { Zap } from 'lucide-react';
+import { Zap, FileText, Shield } from 'lucide-react';
 
 export const metadata = { title: 'חוקי מסחר — Reflect' };
 
@@ -117,7 +117,7 @@ export default async function RulesPage() {
             style={{ background: 'var(--color-tg-surface-2)' }}
           >
             <div className="text-center">
-              <div className="text-2xl mb-2">📜</div>
+              <div className="mb-2"><FileText size={28} /></div>
               <p className="text-sm" style={{ color: 'var(--color-tg-text-2)' }}>
                 אין עדיין הפעלות חוקים מתועדות
               </p>
@@ -129,7 +129,7 @@ export default async function RulesPage() {
             style={{ background: 'var(--color-tg-surface-2)' }}
           >
             <div className="text-center">
-              <div className="text-2xl mb-2">📜</div>
+              <div className="mb-2"><FileText size={28} /></div>
               <p className="text-sm mb-1" style={{ color: 'var(--color-tg-text-2)' }}>
                 היסטוריית כל החוקים שהופעלו
               </p>
@@ -161,9 +161,9 @@ function StatPill({ label, value, color }: { label: string; value: string; color
 
 function HowItWorks() {
   const steps = [
-    { icon: '📝', text: 'מגדיר חוק: "אם X קרה — אז Y"' },
-    { icon: <Zap size={16} />, text: 'לפני כל עסקה — המערכת בודקת את כל החוקים' },
-    { icon: '🛡️', text: 'חריגה מפעילה אזהרה, נעילה, או חסימה עצמית' },
+    { icon: <FileText size={16} />, text: 'מגדיר חוק: "אם X קרה — אז Y"' },
+    { icon: <Zap size={16} />,     text: 'לפני כל עסקה — המערכת בודקת את כל החוקים' },
+    { icon: <Shield size={16} />,  text: 'חריגה מפעילה אזהרה, נעילה, או חסימה עצמית' },
   ];
 
   return (

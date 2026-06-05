@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { BookOpen } from 'lucide-react';
 import JournalExport from '@/components/journal/JournalExport';
 import TradeCalendar from '@/components/journal/TradeCalendar';
 
@@ -63,7 +64,7 @@ export default async function JournalPage() {
       {allTrades.length === 0 ? (
         <div className="text-center py-12 rounded-2xl border border-tg-border"
           style={{ background: 'var(--color-tg-surface)' }}>
-          <div className="text-4xl mb-3">📓</div>
+          <div className="mb-3"><BookOpen size={40} /></div>
           <h3 className="text-base font-semibold text-tg-text mb-1">היומן ריק עדיין</h3>
           <p className="text-sm text-tg-text-2">לחץ על + כדי להגיש את תוכנית העסקה הראשונה שלך</p>
         </div>

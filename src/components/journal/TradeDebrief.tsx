@@ -102,7 +102,7 @@ export default function TradeDebrief({ trade, existingAnswer }: TradeDebriefProp
           style={{ background: 'var(--color-tg-surface-2)', color: 'var(--color-tg-text-2)' }}>
           {answer}
         </div>
-        {saved && <p className="text-xs" style={{ color: 'var(--color-tg-success)' }}>✓ נשמר</p>}
+        {saved && <p className="text-xs" style={{ color: 'var(--color-tg-success)' }}>נשמר</p>}
       </div>
     );
   }

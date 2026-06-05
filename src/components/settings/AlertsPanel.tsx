@@ -170,7 +170,7 @@ export default function AlertsPanel({ plan, userId, initialSettings }: AlertsPan
       )}
 
       {saving && <p className="text-xs text-tg-muted text-center mt-2">שומר...</p>}
-      {saved && <p className="text-xs text-tg-success text-center mt-2 animate-fade-in">✓ הגדרות נשמרו</p>}
+      {saved && <p className="text-xs text-tg-success text-center mt-2 animate-fade-in">הגדרות נשמרו</p>}
       {saveError && <p className="text-xs text-tg-danger text-center mt-2">{saveError}</p>}
     </div>
   );

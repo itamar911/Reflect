@@ -346,7 +346,7 @@ export default function StrategiesClient({
                           color:      aiText ? GOLD : TEXT2,
                           border:     `1px solid ${aiText ? 'rgba(0,210,210,0.3)' : BORDER}`,
                         }}>
-                        <SparkIcon /> {aiLoad ? 'מנתח...' : aiText ? 'ניתוח AI ✓' : 'ניתוח AI'}
+                        <SparkIcon /> {aiLoad ? 'מנתח...' : aiText ? 'ניתוח AI' : 'ניתוח AI'}
                       </button>
                     </div>
 
@@ -534,7 +534,7 @@ export default function StrategiesClient({
                     border:     `1px solid ${aiText ? 'rgba(0,210,210,0.3)' : BORDER}`,
                   }}>
                   <SparkIcon />
-                  {aiLoad ? 'מנתח...' : aiText ? 'ניתוח AI ✓' : 'ניתוח AI'}
+                  {aiLoad ? 'מנתח...' : aiText ? 'ניתוח AI' : 'ניתוח AI'}
                 </button>
               </div>
             </div>

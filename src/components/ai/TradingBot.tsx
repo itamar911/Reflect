@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import Button from '@/components/ui/Button';
+import { Bot } from 'lucide-react';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -94,7 +95,7 @@ export default function TradingBot() {
             <div className="rounded-2xl p-4"
               style={{ background: 'var(--color-tg-surface-2)' }}>
               <div className="flex items-center gap-2 mb-2">
-                <span className="text-xl">🤖</span>
+                <Bot size={18} />
                 <p className="text-sm font-bold text-tg-text">יועץ המסחר שלי</p>
               </div>
               <p className="text-xs text-tg-text-2 leading-relaxed">
@@ -126,9 +127,9 @@ export default function TradingBot() {
             {messages.map((msg, i) => (
               <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 {msg.role === 'assistant' && (
-                  <div className="w-6 h-6 rounded-full flex items-center justify-center text-sm shrink-0 mt-0.5 mr-2"
+                  <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-0.5 mr-2"
                     style={{ background: 'var(--color-tg-primary-muted)' }}>
-                    🤖
+                    <Bot size={13} />
                   </div>
                 )}
                 <div className="max-w-[85%] rounded-2xl px-3 py-2.5"

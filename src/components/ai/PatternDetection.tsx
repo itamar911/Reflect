@@ -2,7 +2,7 @@
 
 import { useState, useEffect, type ReactNode } from 'react';
 import Card from '@/components/ui/Card';
-import { Smile, AlertTriangle, CheckCircle } from 'lucide-react';
+import { Smile, AlertTriangle, CheckCircle, RefreshCw, Clock, TrendingDown, Search, BarChart2 } from 'lucide-react';
 
 interface Pattern {
   type: string;
@@ -26,7 +26,7 @@ interface Trade {
 
 const SEVERITY_COLOR = { high: '#FF3B30', medium: '#F59E0B', low: '#00C853' };
 const TYPE_ICON: Record<string, ReactNode> = {
-  revenge: '🔄', loss_hours: '⏰', weak_setup: '📉',
+  revenge: <RefreshCw size={14} />, loss_hours: <Clock size={14} />, weak_setup: <TrendingDown size={14} />,
   emotional: <Smile size={14} />, discipline: <AlertTriangle size={14} />, positive: <CheckCircle size={14} />,
 };
 
@@ -58,7 +58,7 @@ export default function PatternDetection({ trades }: { trades: Trade[] }) {
     return (
       <Card>
         <div className="flex items-center gap-2 mb-2">
-          <span className="text-base">🔍</span>
+          <Search size={16} />
           <h3 className="text-sm font-semibold text-tg-text">זיהוי דפוסים</h3>
         </div>
         <p className="text-xs text-tg-text-2">נדרשות לפחות 5 עסקאות לזיהוי דפוסים</p>
@@ -70,7 +70,7 @@ export default function PatternDetection({ trades }: { trades: Trade[] }) {
     <Card>
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
-          <span className="text-base">🔍</span>
+          <Search size={16} />
           <h3 className="text-sm font-semibold text-tg-text">דפוסים שזוהו</h3>
         </div>
         {!loading && (
@@ -102,7 +102,7 @@ export default function PatternDetection({ trades }: { trades: Trade[] }) {
                 onClick={() => setExpanded(expanded === i ? null : i)}
                 className="w-full flex items-center gap-3 p-3 rounded-xl text-right transition-colors"
                 style={{ background: 'var(--color-tg-surface-2)', border: `1px solid ${SEVERITY_COLOR[p.severity]}30` }}>
-                <span className="text-base shrink-0">{TYPE_ICON[p.type] ?? '📊'}</span>
+                <span className="text-base shrink-0">{TYPE_ICON[p.type] ?? <BarChart2 size={14} />}</span>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-semibold text-tg-text">{p.title}</span>

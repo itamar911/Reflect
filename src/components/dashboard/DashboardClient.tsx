@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { Sparkles } from 'lucide-react';
+import { Sparkles, TrendingUp } from 'lucide-react';
 
 // ── Tokens ────────────────────────────────────────────────────────────────────
 const ACCENT  = '#00d2d2';
@@ -630,7 +630,7 @@ export default function DashboardClient({
       {/* ── Empty state ───────────────────────────────────────────────────── */}
       {trades.length === 0 && (
         <Card className="text-center py-12 flex flex-col items-center gap-3">
-          <div style={{ fontSize: 48 }}>📈</div>
+          <TrendingUp size={48} />
           <p className="text-base font-semibold" style={{ color: TEXT }}>ברוך הבא ל-Reflect</p>
           <p className="text-sm" style={{ color: TEXT2 }}>תעד עסקה ראשונה כדי להתחיל</p>
         </Card>

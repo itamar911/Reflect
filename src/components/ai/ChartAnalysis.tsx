@@ -3,7 +3,7 @@
 import { useState, useRef } from 'react';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, BarChart2, Upload } from 'lucide-react';
 
 export default function ChartAnalysis() {
   const [image, setImage] = useState<File | null>(null);
@@ -58,7 +58,7 @@ export default function ChartAnalysis() {
   return (
     <Card>
       <div className="flex items-center gap-2 mb-4">
-        <span className="text-base">📊</span>
+        <BarChart2 size={16} />
         <h3 className="text-sm font-semibold text-tg-text">ניתוח גרף AI</h3>
       </div>
 
@@ -66,7 +66,7 @@ export default function ChartAnalysis() {
         <button onClick={() => fileRef.current?.click()}
           className="w-full py-10 rounded-xl border-2 border-dashed flex flex-col items-center gap-2 transition-colors active:scale-[0.98]"
           style={{ borderColor: 'var(--color-tg-border)', background: 'var(--color-tg-surface-2)' }}>
-          <span className="text-3xl">📤</span>
+          <Upload size={32} />
           <span className="text-sm text-tg-text-2">העלה גרף לניתוח טכני</span>
           <span className="text-xs text-tg-muted">PNG, JPG, WEBP — עד 5MB</span>
         </button>

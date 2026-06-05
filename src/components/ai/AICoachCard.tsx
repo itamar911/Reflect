@@ -2,7 +2,7 @@
 
 import { useState, useEffect, type ReactNode } from 'react';
 import Card from '@/components/ui/Card';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Clock, Heart, TrendingUp, Search, Target, DollarSign } from 'lucide-react';
 
 interface Insight {
   type: 'time' | 'emotional' | 'revenge' | 'performance' | 'pattern' | 'discipline';
@@ -20,12 +20,12 @@ interface Trade {
 }
 
 const TYPE_CONFIG: Record<string, { icon: ReactNode; color: string; label: string }> = {
-  time:        { icon: '🕐', color: '#00d2d2', label: 'שעות מסחר' },
-  emotional:   { icon: '💙', color: '#60A5FA', label: 'מצב רגשי' },
+  time:        { icon: <Clock size={14} />,         color: '#00d2d2', label: 'שעות מסחר' },
+  emotional:   { icon: <Heart size={14} />,         color: '#60A5FA', label: 'מצב רגשי' },
   revenge:     { icon: <AlertTriangle size={14} />, color: '#FF3B30', label: 'Revenge Trading' },
-  performance: { icon: '📈', color: '#00C853', label: 'ביצועים' },
-  pattern:     { icon: '🔍', color: '#A78BFA', label: 'דפוס' },
-  discipline:  { icon: '🎯', color: '#00d2d2', label: 'משמעת' },
+  performance: { icon: <TrendingUp size={14} />,    color: '#00C853', label: 'ביצועים' },
+  pattern:     { icon: <Search size={14} />,        color: '#A78BFA', label: 'דפוס' },
+  discipline:  { icon: <Target size={14} />,        color: '#00d2d2', label: 'משמעת' },
 };
 
 export default function AICoachCard({ trades }: { trades: Trade[] }) {
@@ -60,7 +60,7 @@ export default function AICoachCard({ trades }: { trades: Trade[] }) {
     return (
       <Card>
         <div className="flex items-center gap-2 mb-3">
-          <span className="text-lg">💰</span>
+          <DollarSign size={18} />
           <h3 className="text-sm font-semibold text-tg-text">ניתוח השפעה פיננסית</h3>
         </div>
         <p className="text-xs text-tg-text-2">נדרשות לפחות 3 עסקאות כדי לחשב כמה אתה חוסך ומרוויח</p>
@@ -74,7 +74,7 @@ export default function AICoachCard({ trades }: { trades: Trade[] }) {
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-lg flex items-center justify-center"
             style={{ background: 'var(--color-tg-primary-muted)', border: '1px solid var(--color-tg-primary)' }}>
-            <span className="text-sm">💰</span>
+            <DollarSign size={14} />
           </div>
           <h3 className="text-sm font-semibold text-tg-text">ניתוח השפעה פיננסית</h3>
         </div>

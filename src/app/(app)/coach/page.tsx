@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { Bot } from 'lucide-react';
 import ChartAnalysis from '@/components/ai/ChartAnalysis';
 import AICoachCard from '@/components/ai/AICoachCard';
 import PatternDetection from '@/components/ai/PatternDetection';
@@ -43,7 +44,7 @@ export default async function CoachPage() {
           style={{ background: 'var(--color-tg-surface-2)' }}>
           <div className="w-8 h-8 rounded-full flex items-center justify-center"
             style={{ background: 'var(--color-tg-primary-muted)' }}>
-            🤖
+            <Bot size={18} />
           </div>
           <div>
             <p className="text-sm font-bold text-tg-text">יועץ המסחר שלי</p>

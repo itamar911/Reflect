@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { Siren } from 'lucide-react';
 
 interface DangerModeProps {
   consecutiveLosses: number;
@@ -36,7 +37,7 @@ export default function DangerMode({
         <div className="flex items-start gap-3">
           <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-0.5"
             style={{ background: '#FF3B3030' }}>
-            <span className="text-sm">🚨</span>
+            <Siren size={16} />
           </div>
           <div>
             <p className="text-sm font-bold" style={{ color: '#FF3B30' }}>מצב סיכון — Danger Mode</p>

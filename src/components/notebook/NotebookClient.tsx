@@ -389,10 +389,10 @@ export default function NotebookClient({
 
 function SaveBadge({ status }: { status: SaveStatus }) {
   const map = {
-    saved:   { text: '✓ נשמר',      color: '#4ade80' },
+    saved:   { text: 'נשמר',         color: '#4ade80' },
     saving:  { text: '⟳ שומר...',   color: 'var(--color-tg-muted)' },
     unsaved: { text: '● לא נשמר',   color: 'var(--color-tg-warning)' },
-    error:   { text: '✗ שגיאה',     color: '#f87171' },
+    error:   { text: 'שגיאה',        color: '#f87171' },
   };
   const s = map[status];
   return <span style={{ fontSize: 11, color: s.color, flexShrink: 0, transition: 'color 0.2s' }}>{s.text}</span>;

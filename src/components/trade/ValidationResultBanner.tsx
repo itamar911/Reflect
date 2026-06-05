@@ -1,4 +1,5 @@
 import type { RulesetValidationResult } from '@/lib/types';
+import { X, AlertTriangle } from 'lucide-react';
 
 interface ValidationResultBannerProps {
   result: RulesetValidationResult;
@@ -45,13 +46,13 @@ export default function ValidationResultBanner({ result }: ValidationResultBanne
 
       {result.blockedReasons.map((r, i) => (
         <div key={i} className="flex items-start gap-2 text-xs" style={{ color }}>
-          <span className="shrink-0 mt-0.5">✗</span>
+          <X size={10} className="shrink-0 mt-0.5" />
           <span>{r}</span>
         </div>
       ))}
       {result.warningReasons.map((r, i) => (
         <div key={i} className="flex items-start gap-2 text-xs" style={{ color: 'var(--color-tg-warning)' }}>
-          <span className="shrink-0 mt-0.5">⚠</span>
+          <AlertTriangle size={10} className="shrink-0 mt-0.5" />
           <span>{r}</span>
         </div>
       ))}

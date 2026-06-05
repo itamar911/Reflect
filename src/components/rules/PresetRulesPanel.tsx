@@ -226,7 +226,7 @@ export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: Prese
           {saved && (
             <p className="text-sm text-tg-success px-3 py-2 rounded-xl"
               style={{ background: 'var(--color-tg-success-muted)' }}>
-              ✓ החוקים נשמרו ויופעלו בעסקה הבאה
+              החוקים נשמרו ויופעלו בעסקה הבאה
             </p>
           )}
           <Button onClick={handleSave} loading={loading}>

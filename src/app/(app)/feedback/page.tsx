@@ -1,16 +1,17 @@
 'use client';
 
-import { useState, useRef, type CSSProperties } from 'react';
+import { useState, useRef, type CSSProperties, type ReactNode } from 'react';
+import { Bug, Lightbulb, HelpCircle, CheckCircle } from 'lucide-react';
 
 // ── Types & config ─────────────────────────────────────────────────────────────
 
 type FeedbackType = 'bug' | 'feature' | 'question';
 type SubmitState = 'idle' | 'sending' | 'success' | 'error';
 
-const TYPES: { value: FeedbackType; label: string; icon: string; color: string; desc: string }[] = [
-  { value: 'bug',      label: 'דיווח על באג',  icon: '🐛', color: '#f87171', desc: 'משהו לא עובד כמו שצריך' },
-  { value: 'feature',  label: 'הצעה לשיפור',   icon: '💡', color: '#00d2d2', desc: 'רעיון לפיצ׳ר חדש' },
-  { value: 'question', label: 'שאלה',          icon: '❓', color: '#60A5FA', desc: 'שאלה כללית' },
+const TYPES: { value: FeedbackType; label: string; icon: ReactNode; color: string; desc: string }[] = [
+  { value: 'bug',      label: 'דיווח על באג',  icon: <Bug size={16} />,        color: '#f87171', desc: 'משהו לא עובד כמו שצריך' },
+  { value: 'feature',  label: 'הצעה לשיפור',   icon: <Lightbulb size={16} />,  color: '#00d2d2', desc: 'רעיון לפיצ׳ר חדש' },
+  { value: 'question', label: 'שאלה',          icon: <HelpCircle size={16} />, color: '#60A5FA', desc: 'שאלה כללית' },
 ];
 
 const MAX_IMG_MB = 3;
@@ -100,9 +101,9 @@ export default function FeedbackPage() {
   if (submitState === 'success') {
     return (
       <div dir="rtl" className="min-h-screen flex flex-col items-center justify-center px-6 gap-5">
-        <div className="rounded-full w-20 h-20 flex items-center justify-center text-4xl animate-fade-in"
+        <div className="rounded-full w-20 h-20 flex items-center justify-center animate-fade-in"
           style={{ background: 'rgba(74,222,128,0.12)', border: '2px solid rgba(74,222,128,0.3)' }}>
-          ✓
+          <CheckCircle size={40} style={{ color: '#4ade80' }} />
         </div>
         <div className="text-center">
           <h2 className="text-xl font-bold mb-2" style={{ color: TEXT }}>הפנייה נשלחה!</h2>
