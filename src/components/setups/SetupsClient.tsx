@@ -2,7 +2,7 @@
 
 import { useState, useRef, type CSSProperties } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { Sparkles } from 'lucide-react';
+import { Sparkles, Target } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -193,7 +193,7 @@ export default function SetupsClient({
       {/* Empty state */}
       {setups.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center py-20 gap-4">
-          <div style={{ fontSize: 52 }}>🎯</div>
+          <Target size={52} />
           <p className="text-base font-semibold" style={{ color: TEXT }}>אין סטאפים עדיין</p>
           <p className="text-sm text-center" style={{ color: MUTED }}>
             הגדר סטאפ, קשר אליו עסקאות<br/>וקבל ניתוח AI מפורט

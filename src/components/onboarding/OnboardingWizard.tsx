@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import { Zap } from 'lucide-react';
+import { Zap, Waves, Leaf, TrendingUp, Target, Landmark, RefreshCw } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
 import type { TradingType, ExperienceLevel, Market } from '@/lib/types';
@@ -174,7 +174,7 @@ function Step1({ value, onChange }: { value: TradingType; onChange: (v: TradingT
       <p className="text-sm text-tg-text-2 mb-4">נתאים את Reflekt לסגנון המסחר שלך</p>
       <div className="flex flex-col gap-3">
         <OptionButton active={value === 'day'} onClick={() => onChange('day')} icon={<Zap size={24} />} label="Day Trading" description="פתיחה וסגירה של עסקאות ביום אחד" />
-        <OptionButton active={value === 'swing'} onClick={() => onChange('swing')} icon="🌊" label="Swing Trading" description="החזקת עסקאות מספר ימים עד שבועות" />
+        <OptionButton active={value === 'swing'} onClick={() => onChange('swing')} icon={<Waves size={24} />} label="Swing Trading" description="החזקת עסקאות מספר ימים עד שבועות" />
         <OptionButton active={value === 'crypto'} onClick={() => onChange('crypto')} icon="🪙" label="Crypto Trading" description="מסחר בקריפטו — סביב השעון" />
       </div>
     </div>
@@ -187,9 +187,9 @@ function Step2({ value, onChange }: { value: ExperienceLevel; onChange: (v: Expe
       <h2 className="text-lg font-semibold text-tg-text mb-1">מה רמת הניסיון שלך?</h2>
       <p className="text-sm text-tg-text-2 mb-4">נעזור לך בהתאם</p>
       <div className="flex flex-col gap-3">
-        <OptionButton active={value === 'beginner'} onClick={() => onChange('beginner')} icon="🌱" label="מתחיל" description="פחות משנה של מסחר" />
-        <OptionButton active={value === 'intermediate'} onClick={() => onChange('intermediate')} icon="📈" label="בינוני" description="1-3 שנות ניסיון" />
-        <OptionButton active={value === 'advanced'} onClick={() => onChange('advanced')} icon="🎯" label="מתקדם" description="מעל 3 שנות ניסיון" />
+        <OptionButton active={value === 'beginner'} onClick={() => onChange('beginner')} icon={<Leaf size={24} />} label="מתחיל" description="פחות משנה של מסחר" />
+        <OptionButton active={value === 'intermediate'} onClick={() => onChange('intermediate')} icon={<TrendingUp size={24} />} label="בינוני" description="1-3 שנות ניסיון" />
+        <OptionButton active={value === 'advanced'} onClick={() => onChange('advanced')} icon={<Target size={24} />} label="מתקדם" description="מעל 3 שנות ניסיון" />
       </div>
     </div>
   );
@@ -201,9 +201,9 @@ function Step3({ value, onChange }: { value: Market; onChange: (v: Market) => vo
       <h2 className="text-lg font-semibold text-tg-text mb-1">באיזה שוק אתה פועל בעיקר?</h2>
       <p className="text-sm text-tg-text-2 mb-4">ניתן לשנות בהגדרות מאוחר יותר</p>
       <div className="flex flex-col gap-3">
-        <OptionButton active={value === 'stocks'} onClick={() => onChange('stocks')} icon="🏛️" label="מניות" description="NYSE, NASDAQ, ת&quot;א" />
+        <OptionButton active={value === 'stocks'} onClick={() => onChange('stocks')} icon={<Landmark size={24} />} label="מניות" description="NYSE, NASDAQ, ת&quot;א" />
         <OptionButton active={value === 'crypto'} onClick={() => onChange('crypto')} icon="₿" label="קריפטו" description="BTC, ETH ועוד" />
-        <OptionButton active={value === 'forex'} onClick={() => onChange('forex')} icon="💱" label="פורקס" description="זוגות מטבעות" />
+        <OptionButton active={value === 'forex'} onClick={() => onChange('forex')} icon={<RefreshCw size={24} />} label="פורקס" description="זוגות מטבעות" />
       </div>
     </div>
   );
@@ -265,7 +265,7 @@ function Step5({ data }: { data: WizardData }) {
   return (
     <div>
       <div className="text-center mb-5">
-        <div className="text-4xl mb-2">🎯</div>
+        <div className="mb-2"><Target size={40} /></div>
         <h2 className="text-lg font-semibold text-tg-text">מוכן להתחיל!</h2>
         <p className="text-sm text-tg-text-2 mt-1">הנה הסיכום שלך</p>
       </div>

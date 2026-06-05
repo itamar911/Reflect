@@ -1,5 +1,5 @@
 import type { TraderProfile } from '@/lib/identity';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Dumbbell, RefreshCw } from 'lucide-react';
 
 export default function TraderIdentityCard({ profile }: { profile: TraderProfile }) {
   const { identity, icon, color, tagline, strengths, weaknesses, totalTrades } = profile;
@@ -55,8 +55,9 @@ export default function TraderIdentityCard({ profile }: { profile: TraderProfile
       <div className="grid grid-cols-2 gap-3">
         {/* Strengths */}
         <div>
-          <p className="text-[10px] font-semibold text-tg-text-2 mb-2" style={{ color: '#00C853' }}>
-            💪 חוזקות
+          <p className="text-[10px] font-semibold text-tg-text-2 mb-2 flex items-center gap-1" style={{ color: '#00C853' }}>
+            <Dumbbell size={10} />
+            חוזקות
           </p>
           <div className="flex flex-col gap-2">
             {strengths.map((s, i) => (
@@ -91,7 +92,7 @@ export default function TraderIdentityCard({ profile }: { profile: TraderProfile
         style={{ borderColor: `${color}15` }}
       >
         <p className="text-[10px] text-tg-muted">מבוסס על {totalTrades} עסקאות</p>
-        <p className="text-[10px] text-tg-muted">🔄 עודכן {updatedLabel}</p>
+        <p className="text-[10px] text-tg-muted flex items-center gap-1"><RefreshCw size={9} /> עודכן {updatedLabel}</p>
       </div>
     </div>
   );

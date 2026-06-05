@@ -1,11 +1,11 @@
 'use client';
 
 const STATES = [
-  { value: 1, emoji: '😰', label: 'מתוח מאוד', color: 'var(--color-tg-danger)' },
-  { value: 2, emoji: '😟', label: 'לא בטוב', color: 'var(--color-tg-warning)' },
-  { value: 3, emoji: '😐', label: 'ניטרלי', color: '#64748b' },
-  { value: 4, emoji: '🙂', label: 'טוב', color: 'var(--color-tg-success)' },
-  { value: 5, emoji: '😎', label: 'מצוין', color: 'var(--color-tg-primary)' },
+  { value: 1, color: '#ef4444', label: 'מתוח מאוד' },
+  { value: 2, color: '#f97316', label: 'לא בטוב' },
+  { value: 3, color: '#eab308', label: 'ניטרלי' },
+  { value: 4, color: '#84cc16', label: 'טוב' },
+  { value: 5, color: '#22c55e', label: 'מצוין' },
 ];
 
 interface EmotionalStateSliderProps {
@@ -21,7 +21,7 @@ export default function EmotionalStateSlider({ value, onChange }: EmotionalState
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium text-tg-text-2">מצב רגשי</span>
         <div className="flex items-center gap-1.5">
-          <span className="text-lg">{current.emoji}</span>
+          <span className="w-3 h-3 rounded-full inline-block shrink-0" style={{ background: current.color }} />
           <span className="text-xs font-medium" style={{ color: current.color }}>
             {current.label}
           </span>
@@ -35,14 +35,14 @@ export default function EmotionalStateSlider({ value, onChange }: EmotionalState
             onClick={() => onChange(s.value)}
             className="flex-1 flex flex-col items-center gap-1.5 py-2 rounded-xl border transition-all duration-150"
             style={{
-              background: value === s.value ? `${current.color}20` : 'var(--color-tg-surface-2)',
-              borderColor: value === s.value ? current.color : 'var(--color-tg-border)',
+              background: value === s.value ? `${s.color}20` : 'var(--color-tg-surface-2)',
+              borderColor: value === s.value ? s.color : 'var(--color-tg-border)',
               transform: value === s.value ? 'scale(1.05)' : 'scale(1)',
             }}
             title={s.label}
           >
-            <span className="text-xl">{s.emoji}</span>
-            <span className="text-xs font-bold" style={{ color: value === s.value ? current.color : 'var(--color-tg-muted)' }}>
+            <span className="w-5 h-5 rounded-full inline-block" style={{ background: s.color }} />
+            <span className="text-xs font-bold" style={{ color: value === s.value ? s.color : 'var(--color-tg-muted)' }}>
               {s.value}
             </span>
           </button>

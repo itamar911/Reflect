@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
+import { Ruler } from 'lucide-react';
 
 export interface PersonalStrategy {
   id: string;
@@ -166,7 +167,7 @@ export default function StrategyBuilder({ userId, initialStrategies }: StrategyB
       {strategies.length === 0 && !showForm && (
         <div className="text-center py-8 rounded-xl"
           style={{ background: 'var(--color-tg-surface-2)' }}>
-          <div className="text-3xl mb-2">📐</div>
+          <div className="mb-2"><Ruler size={36} /></div>
           <p className="text-sm text-tg-text-2 mb-1">אין אסטרטגיות עדיין</p>
           <p className="text-xs text-tg-muted">הוסף את האסטרטגיה הראשונה שלך או בחר תבנית</p>
         </div>

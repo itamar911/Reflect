@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
+import { Bot } from 'lucide-react';
 
 interface AIDebriefResult {
   overall?: string;
@@ -142,7 +143,7 @@ export default function CloseTrade({
     return (
       <div className="flex flex-col gap-3 pt-3 border-t border-tg-border animate-fade-in">
         <div className="flex items-center justify-between">
-          <p className="text-sm font-bold text-tg-text">🤖 משוב AI על העסקה</p>
+          <p className="text-sm font-bold text-tg-text flex items-center gap-1.5"><Bot size={14} /> משוב AI על העסקה</p>
           {debriefResult.score !== undefined && (
             <span className="text-lg font-bold"
               style={{ color: debriefResult.score >= 70 ? 'var(--color-tg-success)' : debriefResult.score >= 40 ? 'var(--color-tg-warning)' : 'var(--color-tg-danger)' }}>

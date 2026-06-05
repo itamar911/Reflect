@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import PresetRulesPanel from './PresetRulesPanel';
 import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
+import { Lock, ClipboardList } from 'lucide-react';
 import type { PresetRules, CustomRule, Enforcement } from '@/lib/types';
 
 type Tab = 'preset' | 'custom';
@@ -98,7 +99,7 @@ function CustomRulesTab({
   if (plan === 'free') {
     return (
       <div className="text-center py-10">
-        <div className="text-3xl mb-3">🔒</div>
+        <div className="mb-3"><Lock size={36} /></div>
         <p className="text-sm font-medium text-tg-text mb-1">חוקים אישיים זמינים ב-Basic ומעלה</p>
         <p className="text-xs text-tg-muted mb-5">עד 3 חוקים ב-Basic · ללא הגבלה ב-Pro</p>
         <div className="flex flex-col gap-2 text-right px-2 mb-5">
@@ -130,7 +131,7 @@ function CustomRulesTab({
 
       {rules.length === 0 && !showBuilder && (
         <div className="text-center py-10">
-          <div className="text-3xl mb-2">📋</div>
+          <div className="mb-2"><ClipboardList size={36} /></div>
           <p className="text-sm text-tg-text-2 mb-4">אין עדיין חוקים אישיים</p>
           <Button onClick={() => setShowBuilder(true)}>+ הוסף חוק ראשון</Button>
         </div>

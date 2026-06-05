@@ -2,6 +2,7 @@
 
 import { useState, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { Bot, Camera } from 'lucide-react';
 
 interface TradeData {
   id: string;
@@ -92,7 +93,7 @@ export default function TradeDebrief({ trade, existingAnswer }: TradeDebriefProp
             <button onClick={() => setShowAI(true)}
               className="text-xs px-2 py-0.5 rounded-lg"
               style={{ color: 'var(--color-tg-primary)', background: 'var(--color-tg-primary-muted)' }}>
-              🤖 AI ניתוח
+              <Bot size={12} className="inline-block mr-1" /> AI ניתוח
             </button>
             <button onClick={() => setEditing(true)} className="text-xs text-tg-text-2">ערוך</button>
           </div>
@@ -110,7 +111,7 @@ export default function TradeDebrief({ trade, existingAnswer }: TradeDebriefProp
     return (
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
-          <p className="text-xs font-semibold text-tg-text">🤖 תחקיר AI</p>
+          <p className="text-xs font-semibold text-tg-text flex items-center gap-1"><Bot size={12} /> תחקיר AI</p>
           <button onClick={() => setShowAI(false)} className="text-xs text-tg-text-2">חזרה</button>
         </div>
         {!aiResult && (
@@ -119,7 +120,7 @@ export default function TradeDebrief({ trade, existingAnswer }: TradeDebriefProp
               <button onClick={() => fileRef.current?.click()}
                 className="w-full py-6 rounded-xl border-2 border-dashed flex flex-col items-center gap-1"
                 style={{ borderColor: 'var(--color-tg-border)', background: 'var(--color-tg-surface-2)' }}>
-                <span className="text-2xl">📸</span>
+                <Camera size={24} />
                 <span className="text-xs text-tg-text-2">העלה Screenshot (אופציונלי)</span>
               </button>
             ) : (
@@ -202,7 +203,7 @@ export default function TradeDebrief({ trade, existingAnswer }: TradeDebriefProp
         <button onClick={() => setShowAI(true)}
           className="py-1.5 px-3 rounded-xl text-xs border transition-all"
           style={{ borderColor: 'var(--color-tg-primary)40', color: 'var(--color-tg-primary)', background: 'var(--color-tg-primary-muted)' }}>
-          🤖
+          <Bot size={16} />
         </button>
       </div>
     </div>

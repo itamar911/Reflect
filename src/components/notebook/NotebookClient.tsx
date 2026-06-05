@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useRef, useCallback, type CSSProperties } from 'react';
+import { useState, useRef, useCallback, type CSSProperties, type ReactNode } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { BookOpen, Lightbulb, ClipboardList } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -21,11 +22,11 @@ type MobilePanel = 'list' | 'editor';
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
-const PAGE_TYPES = [
-  { value: 'journal',  label: 'יומן יומי',     icon: '📔', color: '#60A5FA' },
-  { value: 'insights', label: 'תובנות מסחר',   icon: '💡', color: '#00d2d2' },
-  { value: 'plan',     label: 'תוכנית מסחר',   icon: '📋', color: '#4ade80' },
-] as const;
+const PAGE_TYPES: { value: 'journal' | 'insights' | 'plan'; label: string; icon: ReactNode; color: string }[] = [
+  { value: 'journal',  label: 'יומן יומי',     icon: <BookOpen size={14} />,      color: '#60A5FA' },
+  { value: 'insights', label: 'תובנות מסחר',   icon: <Lightbulb size={14} />,     color: '#00d2d2' },
+  { value: 'plan',     label: 'תוכנית מסחר',   icon: <ClipboardList size={14} />, color: '#4ade80' },
+];
 
 const PRESET_TAGS = ['חשוב', 'אסטרטגיה', 'פסיכולוגיה', 'ריגשי', 'ניהול סיכונים', 'לבדיקה'];
 
@@ -211,7 +212,7 @@ export default function NotebookClient({
     if (!selected) {
       return (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, direction: 'rtl' }}>
-          <div style={{ fontSize: 48 }}>📓</div>
+          <BookOpen size={48} />
           <p style={{ color: TEXT2, fontSize: 14 }}>בחר דף או צור דף חדש</p>
           <button onClick={createPage} style={btnStyle}>+ דף חדש</button>
         </div>

@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, type CSSProperties } from 'react';
+import { useState, type CSSProperties, type ReactNode } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { TrendingUp, Rocket, ArrowLeftRight, RefreshCw, Building2, Activity, Ruler } from 'lucide-react';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const GOLD   = '#00d2d2';
@@ -80,7 +81,7 @@ interface BuiltinDef {
   name: string;
   description: string;
   detail: string;
-  icon: string;
+  icon: ReactNode;
   direction: 'long' | 'short' | 'both';
 }
 
@@ -90,7 +91,7 @@ const BUILTIN_STRATEGIES: BuiltinDef[] = [
     name: 'Trend Following',
     description: 'מסחר בכיוון המגמה הראשית',
     detail: 'מזהה מגמה ברורה על Higher Timeframe ונכנס בכיוונה. מחפש Higher Highs / Higher Lows לעלייה ו-Lower Highs / Lower Lows לירידה. כניסה על תיקון לעבר EMA/אזור תמיכה.',
-    icon: '📈',
+    icon: <TrendingUp size={22} />,
     direction: 'both',
   },
   {
@@ -98,7 +99,7 @@ const BUILTIN_STRATEGIES: BuiltinDef[] = [
     name: 'Breakout',
     description: 'פריצת רמות תמיכה/התנגדות',
     detail: 'כניסה על פריצה מעל התנגדות ידועה או מתחת לתמיכה, עם נר סגירה מחוץ לטווח. מחפש עלייה בנפח לאישור. SL מתחת/מעל לרמה הנפרצת.',
-    icon: '🚀',
+    icon: <Rocket size={22} />,
     direction: 'both',
   },
   {
@@ -106,7 +107,7 @@ const BUILTIN_STRATEGIES: BuiltinDef[] = [
     name: 'Range Reversal',
     description: 'היפוך בטווח מסחר',
     detail: 'מזהה שוק בטווח (Range) ברור עם תמיכה והתנגדות. כניסה בהיפוך מקצוות הטווח עם אישור rejection candle. TP בצד השני של הטווח.',
-    icon: '↔️',
+    icon: <ArrowLeftRight size={22} />,
     direction: 'both',
   },
   {
@@ -114,7 +115,7 @@ const BUILTIN_STRATEGIES: BuiltinDef[] = [
     name: 'Pullback Entry',
     description: 'כניסה בנסיגה בכיוון המגמה',
     detail: 'ממתין לנסיגה (Pullback) אל EMA, Fibonacci 50-61.8%, או אזור Supply/Demand קודם. כניסה עם אישור נר מגמה. Stop מתחת לנסיגה.',
-    icon: '🔄',
+    icon: <RefreshCw size={22} />,
     direction: 'both',
   },
   {
@@ -122,7 +123,7 @@ const BUILTIN_STRATEGIES: BuiltinDef[] = [
     name: 'SMC / Order Blocks',
     description: 'Smart Money Concepts — Order Blocks',
     detail: 'כניסה על Order Blocks (OB) — הנר האחרון לפני תנועה חזקה. מחפש Liquidity Grab, Break of Structure (BOS) לאישור כיוון, ו-Fair Value Gap (FVG) לדיוק כניסה.',
-    icon: '🏦',
+    icon: <Building2 size={22} />,
     direction: 'both',
   },
   {
@@ -130,7 +131,7 @@ const BUILTIN_STRATEGIES: BuiltinDef[] = [
     name: 'VWAP Reversion',
     description: 'חזרה ל-VWAP אחרי סטייה',
     detail: 'מחפש סטייה גדולה מ-VWAP (מעל/מתחת ל-1-2 Standard Deviations). כניסה בהיפוך עם momentum חלש ו-Volume יורד. TP ב-VWAP, SL מעל/מתחת לנקודת הקיצון.',
-    icon: '〰️',
+    icon: <Activity size={22} />,
     direction: 'both',
   },
 ];
@@ -426,7 +427,7 @@ export default function StrategiesClient({
       {strategies.length === 0 && !showForm && (
         <div className="text-center py-14 rounded-2xl flex flex-col items-center gap-3"
           style={{ background: SURF, border: `1px solid ${BORDER}` }}>
-          <div style={{ fontSize: 48 }}>📐</div>
+          <Ruler size={48} />
           <p className="text-base font-semibold" style={{ color: TEXT }}>אין אסטרטגיות עדיין</p>
           <p className="text-sm" style={{ color: MUTED }}>הוסף אסטרטגיה ראשונה או בחר תבנית</p>
         </div>

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
+import { Map, ClipboardList } from 'lucide-react';
 
 type Plan = 'free' | 'basic' | 'pro';
 
@@ -65,7 +66,6 @@ function isWin(t: SimpleTrade) {
   return t.exit_price > (t.entry_price ?? 0);
 }
 
-const EMOTIONAL_EMOJIS: Record<number, string> = { 1: '😰', 2: '😟', 3: '😐', 4: '🙂', 5: '😎' };
 const EMOTIONAL_COLORS: Record<number, string> = {
   1: 'var(--color-tg-danger)',
   2: 'var(--color-tg-warning)',
@@ -218,7 +218,7 @@ export default function PerformanceSection({ trades, plan }: PerformanceSectionP
                       opacity: count === 0 ? 0.15 : 0.85,
                       minHeight: '4px',
                     }} />
-                    <span className="text-base leading-none">{EMOTIONAL_EMOJIS[n]}</span>
+                    <span className="w-3 h-3 rounded-full inline-block" style={{ background: EMOTIONAL_COLORS[n] }} />
                   </div>
                 );
               })}
@@ -284,7 +284,7 @@ export default function PerformanceSection({ trades, plan }: PerformanceSectionP
               <div className="flex items-center justify-center py-6 rounded-xl"
                 style={{ background: 'var(--color-tg-surface-2)' }}>
                 <div className="text-center">
-                  <div className="text-2xl mb-1">🗺️</div>
+                  <div className="mb-1"><Map size={24} /></div>
                   <p className="text-xs text-tg-muted">מציג שעות חולשה ושיא · זמין ב-Pro</p>
                 </div>
               </div>
@@ -303,7 +303,7 @@ export default function PerformanceSection({ trades, plan }: PerformanceSectionP
               <div className="flex items-center justify-center py-6 rounded-xl"
                 style={{ background: 'var(--color-tg-surface-2)' }}>
                 <div className="text-center">
-                  <div className="text-2xl mb-1">📋</div>
+                  <div className="mb-1"><ClipboardList size={24} /></div>
                   <p className="text-xs text-tg-muted mb-0.5">סיכום מספרי · דפוס מרכזי · גרף התקדמות</p>
                   <p className="text-xs font-medium" style={{ color: 'var(--color-tg-primary)' }}>זמין ב-Basic ומעלה</p>
                 </div>

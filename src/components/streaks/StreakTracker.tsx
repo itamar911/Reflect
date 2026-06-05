@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Star } from 'lucide-react';
+import { Star, Target, Wind, Shield, Flame } from 'lucide-react';
 
 interface StreakTrackerProps {
   disciplineStreak: number;
@@ -22,9 +22,9 @@ export default function StreakTracker({
   fullDisciplineStreak,
 }: StreakTrackerProps) {
   const streaks: StreakItem[] = [
-    { icon: '🎯', label: 'לפי החוקים',  current: disciplineStreak,     color: '#00d2d2' },
-    { icon: '🧘', label: 'ללא Revenge', current: noRevengeStreak,      color: '#00C853' },
-    { icon: '🛡️', label: 'עם Stop Loss', current: stopLossStreak,       color: '#60A5FA' },
+    { icon: <Target size={16} />, label: 'לפי החוקים',  current: disciplineStreak,     color: '#00d2d2' },
+    { icon: <Wind size={16} />,   label: 'ללא Revenge', current: noRevengeStreak,      color: '#00C853' },
+    { icon: <Shield size={16} />, label: 'עם Stop Loss', current: stopLossStreak,       color: '#60A5FA' },
     { icon: <Star size={16} />, label: 'משמעת מלאה',  current: fullDisciplineStreak, color: '#A78BFA' },
   ];
 
@@ -42,7 +42,7 @@ export default function StreakTracker({
             {s.current >= 3 && (
               <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium"
                 style={{ background: `${s.color}20`, color: s.color }}>
-                🔥
+                <Flame size={10} />
               </span>
             )}
           </div>
