@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
+import { Zap } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
 import type { TradingType, ExperienceLevel, Market } from '@/lib/types';
@@ -144,7 +145,7 @@ function OptionButton({
 }: {
   active: boolean;
   onClick: () => void;
-  icon: string;
+  icon: ReactNode;
   label: string;
   description: string;
 }) {
@@ -172,7 +173,7 @@ function Step1({ value, onChange }: { value: TradingType; onChange: (v: TradingT
       <h2 className="text-lg font-semibold text-tg-text mb-1">איך אתה סוחר?</h2>
       <p className="text-sm text-tg-text-2 mb-4">נתאים את Reflekt לסגנון המסחר שלך</p>
       <div className="flex flex-col gap-3">
-        <OptionButton active={value === 'day'} onClick={() => onChange('day')} icon="⚡" label="Day Trading" description="פתיחה וסגירה של עסקאות ביום אחד" />
+        <OptionButton active={value === 'day'} onClick={() => onChange('day')} icon={<Zap size={24} />} label="Day Trading" description="פתיחה וסגירה של עסקאות ביום אחד" />
         <OptionButton active={value === 'swing'} onClick={() => onChange('swing')} icon="🌊" label="Swing Trading" description="החזקת עסקאות מספר ימים עד שבועות" />
         <OptionButton active={value === 'crypto'} onClick={() => onChange('crypto')} icon="🪙" label="Crypto Trading" description="מסחר בקריפטו — סביב השעון" />
       </div>

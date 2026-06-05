@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import RulesEditor from '@/components/rules/RulesEditor';
 import type { PresetRules, CustomRule } from '@/lib/types';
+import { Zap } from 'lucide-react';
 
 export const metadata = { title: 'חוקי מסחר — Reflect' };
 
@@ -161,7 +162,7 @@ function StatPill({ label, value, color }: { label: string; value: string; color
 function HowItWorks() {
   const steps = [
     { icon: '📝', text: 'מגדיר חוק: "אם X קרה — אז Y"' },
-    { icon: '⚡', text: 'לפני כל עסקה — המערכת בודקת את כל החוקים' },
+    { icon: <Zap size={16} />, text: 'לפני כל עסקה — המערכת בודקת את כל החוקים' },
     { icon: '🛡️', text: 'חריגה מפעילה אזהרה, נעילה, או חסימה עצמית' },
   ];
 

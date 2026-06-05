@@ -1,3 +1,6 @@
+import type { ReactNode } from 'react';
+import { Star } from 'lucide-react';
+
 interface StreakTrackerProps {
   disciplineStreak: number;
   noRevengeStreak: number;
@@ -6,7 +9,7 @@ interface StreakTrackerProps {
 }
 
 interface StreakItem {
-  icon: string;
+  icon: ReactNode;
   label: string;
   current: number;
   color: string;
@@ -22,7 +25,7 @@ export default function StreakTracker({
     { icon: '🎯', label: 'לפי החוקים',  current: disciplineStreak,     color: '#00d2d2' },
     { icon: '🧘', label: 'ללא Revenge', current: noRevengeStreak,      color: '#00C853' },
     { icon: '🛡️', label: 'עם Stop Loss', current: stopLossStreak,       color: '#60A5FA' },
-    { icon: '⭐', label: 'משמעת מלאה',  current: fullDisciplineStreak, color: '#A78BFA' },
+    { icon: <Star size={16} />, label: 'משמעת מלאה',  current: fullDisciplineStreak, color: '#A78BFA' },
   ];
 
   return (

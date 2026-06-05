@@ -2,6 +2,7 @@
 
 import { useState, useRef, type CSSProperties } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { Sparkles } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -363,9 +364,9 @@ function DetailView({ setup, stats, linked, unlinked, aiReview, aiLoading, onBac
           <h2 className="text-sm font-semibold" style={{ color: TEXT }}>ביקורת AI</h2>
           {!aiReview && (
             <button onClick={onAiReview} disabled={aiLoading}
-              className="text-xs px-3 py-1.5 rounded-lg font-semibold transition-opacity hover:opacity-80 disabled:opacity-50"
+              className="inline-flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg font-semibold transition-opacity hover:opacity-80 disabled:opacity-50"
               style={{ background: `rgba(0,210,210,0.12)`, color: GOLD }}>
-              {aiLoading ? '⟳ מנתח...' : '✦ קבל ביקורת AI'}
+              {aiLoading ? '⟳ מנתח...' : <><Sparkles size={12} /> קבל ביקורת AI</>}
             </button>
           )}
         </div>

@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import Card from '@/components/ui/Card';
+import { Smile, AlertTriangle, CheckCircle } from 'lucide-react';
 
 interface Pattern {
   type: string;
@@ -24,9 +25,9 @@ interface Trade {
 }
 
 const SEVERITY_COLOR = { high: '#FF3B30', medium: '#F59E0B', low: '#00C853' };
-const TYPE_ICON: Record<string, string> = {
+const TYPE_ICON: Record<string, ReactNode> = {
   revenge: '🔄', loss_hours: '⏰', weak_setup: '📉',
-  emotional: '😤', discipline: '⚠️', positive: '✅',
+  emotional: <Smile size={14} />, discipline: <AlertTriangle size={14} />, positive: <CheckCircle size={14} />,
 };
 
 export default function PatternDetection({ trades }: { trades: Trade[] }) {

@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import Card from '@/components/ui/Card';
+import { AlertTriangle } from 'lucide-react';
 
 interface Insight {
   type: 'time' | 'emotional' | 'revenge' | 'performance' | 'pattern' | 'discipline';
@@ -18,10 +19,10 @@ interface Trade {
   exit_price: number | null;
 }
 
-const TYPE_CONFIG: Record<string, { icon: string; color: string; label: string }> = {
+const TYPE_CONFIG: Record<string, { icon: ReactNode; color: string; label: string }> = {
   time:        { icon: '🕐', color: '#00d2d2', label: 'שעות מסחר' },
   emotional:   { icon: '💙', color: '#60A5FA', label: 'מצב רגשי' },
-  revenge:     { icon: '⚠️', color: '#FF3B30', label: 'Revenge Trading' },
+  revenge:     { icon: <AlertTriangle size={14} />, color: '#FF3B30', label: 'Revenge Trading' },
   performance: { icon: '📈', color: '#00C853', label: 'ביצועים' },
   pattern:     { icon: '🔍', color: '#A78BFA', label: 'דפוס' },
   discipline:  { icon: '🎯', color: '#00d2d2', label: 'משמעת' },

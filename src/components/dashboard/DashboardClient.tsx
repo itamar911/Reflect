@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
+import { Sparkles } from 'lucide-react';
 
 // ── Tokens ────────────────────────────────────────────────────────────────────
 const ACCENT  = '#00d2d2';
@@ -514,9 +515,9 @@ function TradeDetailPanel({ trade, onClose, aiReview, aiLoading, onAiReview }: {
           {/* AI Review */}
           {!aiReview && !aiLoading && (
             <button onClick={onAiReview}
-              className="w-full py-2.5 rounded-xl text-sm font-semibold transition-opacity hover:opacity-80"
+              className="w-full py-2.5 rounded-xl text-sm font-semibold transition-opacity hover:opacity-80 flex items-center justify-center gap-1.5"
               style={{ background: 'rgba(0,210,210,0.12)', color: ACCENT, border: `1px solid rgba(0,210,210,0.25)` }}>
-              ✦ ניתוח AI על העסקה
+              <Sparkles size={14} /> ניתוח AI על העסקה
             </button>
           )}
           {aiLoading && (

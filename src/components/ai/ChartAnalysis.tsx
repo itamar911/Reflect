@@ -3,6 +3,7 @@
 import { useState, useRef } from 'react';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
+import { AlertTriangle } from 'lucide-react';
 
 export default function ChartAnalysis() {
   const [image, setImage] = useState<File | null>(null);
@@ -98,9 +99,10 @@ export default function ChartAnalysis() {
       )}
 
       {error && (
-        <div className="mt-3 p-3 rounded-xl text-sm"
+        <div className="mt-3 p-3 rounded-xl text-sm flex items-center gap-1.5"
           style={{ background: 'var(--color-tg-danger-muted)', color: 'var(--color-tg-danger)' }}>
-          ⚠️ {error}
+          <AlertTriangle size={14} />
+          {error}
         </div>
       )}
 

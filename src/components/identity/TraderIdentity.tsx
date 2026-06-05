@@ -1,4 +1,5 @@
 import type { TraderProfile } from '@/lib/identity';
+import { AlertTriangle } from 'lucide-react';
 
 export default function TraderIdentityCard({ profile }: { profile: TraderProfile }) {
   const { identity, icon, color, tagline, strengths, weaknesses, totalTrades } = profile;
@@ -69,8 +70,9 @@ export default function TraderIdentityCard({ profile }: { profile: TraderProfile
 
         {/* Weaknesses */}
         <div>
-          <p className="text-[10px] font-semibold text-tg-text-2 mb-2" style={{ color: '#FF3B30' }}>
-            ⚠️ לשיפור
+          <p className="text-[10px] font-semibold text-tg-text-2 mb-2 flex items-center gap-1" style={{ color: '#FF3B30' }}>
+            <AlertTriangle size={10} />
+            לשיפור
           </p>
           <div className="flex flex-col gap-2">
             {weaknesses.map((w, i) => (

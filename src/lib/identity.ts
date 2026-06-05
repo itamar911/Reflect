@@ -40,7 +40,7 @@ const IDENTITY_CONFIG: Record<TraderIdentity, { icon: string; color: string; tag
     tagline: 'שואף לרווחים גדולים — סיכון גבוה, תגמול גבוה',
   },
   'Aggressive Scalper': {
-    icon: '⚡',
+    icon: '',
     color: '#F59E0B',
     tagline: 'הרבה עסקאות, מהיר — קונסיסטנטיות היא האתגר',
   },

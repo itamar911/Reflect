@@ -2,6 +2,8 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import PnlChart, { type PeriodPoint } from '@/components/stats/PnlChart';
 import type { TradePlan } from '@/lib/types';
+import type { ReactNode } from 'react';
+import { Zap, TrendingUp, AlertTriangle } from 'lucide-react';
 
 export const metadata = { title: 'סטטיסטיקה — Reflect' };
 
@@ -394,7 +396,7 @@ export default async function StatsPage() {
         <Section title="רצפים ושיאים" icon="🏆">
           <div className="grid grid-cols-2 gap-3">
             <StreakCard label="רצף רווחים ארוך ביותר" value={maxW} color="#22c55e" icon="🔥" />
-            <StreakCard label="רצף הפסדים ארוך ביותר" value={maxL} color="#ef4444" icon="⚡" />
+            <StreakCard label="רצף הפסדים ארוך ביותר" value={maxL} color="#ef4444" icon={<Zap size={14} />} />
 
             {currentStreak && (
               <div className="col-span-2 rounded-xl p-3 flex items-center gap-3"
@@ -402,7 +404,7 @@ export default async function StatsPage() {
                   background: currentStreak.type === 'win' ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)',
                   border: `1px solid ${currentStreak.type === 'win' ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)'}`,
                 }}>
-                <span className="text-xl">{currentStreak.type === 'win' ? '🚀' : '⚠️'}</span>
+                <span>{currentStreak.type === 'win' ? <TrendingUp size={20} /> : <AlertTriangle size={20} />}</span>
                 <div>
                   <p className="text-xs" style={{ color: 'var(--color-tg-muted)' }}>רצף נוכחי</p>
                   <p className="text-sm font-bold" style={{ color: currentStreak.type === 'win' ? '#22c55e' : '#ef4444' }}>
@@ -488,7 +490,7 @@ function InfoPill({ label, value, color }: { label: string; value: string; color
   );
 }
 
-function StreakCard({ label, value, color, icon }: { label: string; value: number; color: string; icon: string }) {
+function StreakCard({ label, value, color, icon }: { label: string; value: number; color: string; icon: ReactNode }) {
   return (
     <div className="rounded-xl p-3 flex flex-col gap-1" style={{ background: 'var(--color-tg-surface-2)' }}>
       <div className="flex items-center gap-1.5">
