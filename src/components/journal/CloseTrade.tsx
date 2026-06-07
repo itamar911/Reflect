@@ -64,12 +64,14 @@ export default function CloseTrade({
   const [error, setError] = useState('');
   const [debriefResult, setDebriefResult] = useState<AIDebriefResult | null>(null);
   const [debriefLoading, setDebriefLoading] = useState(false);
+  const [pnlMode, setPnlMode] = useState<'points' | 'percent'>('points');
 
   const supabase = createClient();
 
   const exit = parseFloat(exitPrice);
-  const pnlPoints = exitPrice ? (exit - entryPrice).toFixed(2) : null;
-  const isWin = pnlPoints !== null ? parseFloat(pnlPoints) > 0 : null;
+  const pnlPoints = exitPrice && !isNaN(exit) ? (exit - entryPrice) : null;
+  const pnlPercent = pnlPoints !== null ? ((pnlPoints / entryPrice) * 100) : null;
+  const isWin = pnlPoints !== null ? pnlPoints > 0 : null;
 
   async function handleClose() {
     if (!exitPrice || !exitReason) { setError('מלא מחיר יציאה וסיבה'); return; }
@@ -197,12 +199,34 @@ export default function CloseTrade({
             style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)' }}
           />
           {pnlPoints !== null && (
-            <div className="px-3 py-1.5 rounded-xl text-sm font-bold shrink-0"
-              style={{
-                background: isWin ? 'var(--color-tg-success-muted)' : 'var(--color-tg-danger-muted)',
-                color: isWin ? 'var(--color-tg-success)' : 'var(--color-tg-danger)',
-              }}>
-              {isWin ? '+' : ''}{pnlPoints} נק׳
+            <div className="flex items-center gap-1">
+              <div className="px-2.5 py-1.5 rounded-xl text-sm font-bold shrink-0"
+                style={{
+                  background: isWin ? 'var(--color-tg-success-muted)' : 'var(--color-tg-danger-muted)',
+                  color: isWin ? 'var(--color-tg-success)' : 'var(--color-tg-danger)',
+                }}>
+                {isWin ? '+' : ''}{pnlMode === 'points' ? pnlPoints.toFixed(2) + ' נק׳' : pnlPercent!.toFixed(2) + '%'}
+              </div>
+              <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-tg-border)' }}>
+                <button
+                  onClick={() => setPnlMode('points')}
+                  className="px-2 py-1 text-[10px] font-semibold transition-all"
+                  style={{
+                    background: pnlMode === 'points' ? 'var(--color-tg-primary-muted)' : 'transparent',
+                    color: pnlMode === 'points' ? 'var(--color-tg-primary)' : 'var(--color-tg-muted)',
+                  }}>
+                  נק׳
+                </button>
+                <button
+                  onClick={() => setPnlMode('percent')}
+                  className="px-2 py-1 text-[10px] font-semibold transition-all"
+                  style={{
+                    background: pnlMode === 'percent' ? 'var(--color-tg-primary-muted)' : 'transparent',
+                    color: pnlMode === 'percent' ? 'var(--color-tg-primary)' : 'var(--color-tg-muted)',
+                  }}>
+                  %
+                </button>
+              </div>
             </div>
           )}
         </div>

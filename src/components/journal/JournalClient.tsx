@@ -71,6 +71,7 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
   const [showFilter,   setShowFilter]   = useState(false);
   const [filterStatus, setFilterStatus] = useState<'all' | 'open' | 'closed'>('all');
   const [closingTradeId, setClosingTradeId] = useState<string | null>(null);
+  const [viewTradeId, setViewTradeId] = useState<string | null>(null);
   const router = useRouter();
 
   // ── Stats ──────────────────────────────────────────────────────────────────
@@ -267,7 +268,7 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
 
                 return (
                   <tr key={t.id}
-                    onClick={() => toggleOne(t.id)}
+                    onClick={() => setViewTradeId(t.id)}
                     style={{
                       background: isChecked
                         ? 'rgba(0,210,210,0.06)'
@@ -354,33 +355,17 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
                     {/* Actions */}
                     <TD>
                       {t.status === 'open' ? (
-                        closingTradeId === t.id ? (
-                          <div onClick={e => e.stopPropagation()} className="min-w-[260px] p-2">
-                            <CloseTrade
-                              tradeId={t.id}
-                              entryPrice={t.entry_price}
-                              stopLoss={t.stop_loss}
-                              takeProfit={t.take_profit}
-                              rrRatio={t.rr_ratio}
-                              emotionalState={t.emotional_state}
-                              strategy={t.strategy}
-                              tradeReason={t.trade_reason}
-                              onClosed={() => { router.refresh(); }}
-                            />
-                          </div>
-                        ) : (
-                          <button
-                            onClick={e => { e.stopPropagation(); setClosingTradeId(t.id); }}
-                            className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
-                            style={{
-                              background: 'var(--color-tg-danger-muted)',
-                              color: 'var(--color-tg-danger)',
-                              border: '1px solid rgba(239,68,68,0.3)',
-                              whiteSpace: 'nowrap',
-                            }}>
-                            סגור עסקה
-                          </button>
-                        )
+                        <button
+                          onClick={e => { e.stopPropagation(); setClosingTradeId(t.id); }}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                          style={{
+                            background: 'var(--color-tg-danger-muted)',
+                            color: 'var(--color-tg-danger)',
+                            border: '1px solid rgba(239,68,68,0.3)',
+                            whiteSpace: 'nowrap',
+                          }}>
+                          סגור עסקה
+                        </button>
                       ) : (
                         <span style={{ color: MUTED, fontSize: 11 }}>—</span>
                       )}
@@ -426,6 +411,36 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
           </div>
         </div>
       </div>
+
+      {closingTradeId && (() => {
+        const t = trades.find(tr => tr.id === closingTradeId);
+        if (!t) return null;
+        return (
+          <Modal onClose={() => setClosingTradeId(null)}>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-base font-bold" style={{ color: TEXT }}>סגירת עסקה — {t.strategy}</p>
+              <button onClick={() => setClosingTradeId(null)} style={{ color: MUTED, fontSize: 18, lineHeight: 1 }}>×</button>
+            </div>
+            <CloseTrade
+              tradeId={t.id}
+              entryPrice={t.entry_price}
+              stopLoss={t.stop_loss}
+              takeProfit={t.take_profit}
+              rrRatio={t.rr_ratio}
+              emotionalState={t.emotional_state}
+              strategy={t.strategy}
+              tradeReason={t.trade_reason}
+              onClosed={() => { setClosingTradeId(null); router.refresh(); }}
+            />
+          </Modal>
+        );
+      })()}
+
+      {viewTradeId && (() => {
+        const t = trades.find(tr => tr.id === viewTradeId);
+        if (!t) return null;
+        return <TradeDetailModal trade={t} onClose={() => setViewTradeId(null)} />;
+      })()}
     </div>
   );
 }
@@ -518,6 +533,87 @@ function PgBtn({ children, onClick, disabled, active }: {
       }}>
       {children}
     </button>
+  );
+}
+
+// ── Modals ────────────────────────────────────────────────────────────────────
+
+function Modal({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl p-5 flex flex-col gap-3"
+        style={{ background: 'var(--color-tg-surface)', border: '1px solid var(--color-tg-border)', boxShadow: '0 24px 64px rgba(0,0,0,0.8)' }}
+        onClick={e => e.stopPropagation()}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function TradeDetailModal({ trade, onClose }: { trade: any; onClose: () => void }) {
+  const dir = trade.take_profit >= trade.entry_price ? 'long' : 'short';
+  const pnl = trade.status === 'closed' && trade.exit_price != null
+    ? (dir === 'long' ? trade.exit_price - trade.entry_price : trade.entry_price - trade.exit_price)
+    : null;
+
+  const rows: [string, string | number | null][] = [
+    ['אסטרטגיה', trade.strategy],
+    ['נכס', trade.symbol ?? '—'],
+    ['כיוון', dir === 'long' ? 'לונג ↑' : 'שורט ↓'],
+    ['מחיר כניסה', trade.entry_price],
+    ['Stop Loss', trade.stop_loss],
+    ['Take Profit', trade.take_profit],
+    ['יחס R:R', trade.rr_ratio],
+    ['מצב רגשי', `${trade.emotional_state}/5`],
+    ['סיבת כניסה', trade.trade_reason],
+    ['סטטוס', trade.status === 'open' ? 'פתוח' : 'סגור'],
+    ['מחיר יציאה', trade.exit_price ?? '—'],
+    ['סיבת יציאה', trade.exit_reason ?? '—'],
+    ['הערות', trade.post_trade_notes ?? '—'],
+    ['ניתוח AI', trade.debrief_answer ?? '—'],
+  ];
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl p-5 flex flex-col gap-4"
+        style={{ background: 'var(--color-tg-surface)', border: '1px solid var(--color-tg-border)', boxShadow: '0 24px 64px rgba(0,0,0,0.8)' }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between">
+          <p className="text-base font-bold" style={{ color: 'var(--color-tg-text)' }}>
+            {trade.symbol ?? trade.strategy}
+            {pnl !== null && (
+              <span className="mr-2 text-sm" style={{ color: pnl >= 0 ? '#22c55e' : '#ef4444' }}>
+                {pnl >= 0 ? '+' : ''}{pnl.toFixed(2)}
+              </span>
+            )}
+          </p>
+          <button onClick={onClose} style={{ color: 'var(--color-tg-muted)', fontSize: 20, lineHeight: 1 }}>×</button>
+        </div>
+
+        <div className="flex flex-col gap-0">
+          {rows.map(([label, value], i) => (
+            <div key={label}
+              className="flex items-start justify-between gap-4 py-2.5"
+              style={{ borderBottom: i < rows.length - 1 ? '1px solid var(--color-tg-border)' : 'none' }}>
+              <span className="text-xs shrink-0" style={{ color: 'var(--color-tg-muted)', minWidth: 90 }}>{label}</span>
+              <span className="text-xs text-right" style={{ color: 'var(--color-tg-text)', wordBreak: 'break-word' }}>{String(value ?? '—')}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 
