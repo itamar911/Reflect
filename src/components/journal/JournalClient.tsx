@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import CloseTrade from '@/components/journal/CloseTrade';
+import CloseTrade, { AIDebriefView, type AIDebriefResult } from '@/components/journal/CloseTrade';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const GOLD   = '#00d2d2';
@@ -72,6 +72,8 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
   const [filterStatus, setFilterStatus] = useState<'all' | 'open' | 'closed'>('all');
   const [closingTradeId, setClosingTradeId] = useState<string | null>(null);
   const [viewTradeId, setViewTradeId] = useState<string | null>(null);
+  const [debriefResults, setDebriefResults] = useState<Record<string, AIDebriefResult>>({});
+  const [viewDebriefId, setViewDebriefId] = useState<string | null>(null);
   const router = useRouter();
 
   // ── Stats ──────────────────────────────────────────────────────────────────
@@ -354,21 +356,37 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
 
                     {/* Actions */}
                     <TD>
-                      {t.status === 'open' ? (
-                        <button
-                          onClick={e => { e.stopPropagation(); setClosingTradeId(t.id); }}
-                          className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
-                          style={{
-                            background: 'var(--color-tg-danger-muted)',
-                            color: 'var(--color-tg-danger)',
-                            border: '1px solid rgba(239,68,68,0.3)',
-                            whiteSpace: 'nowrap',
-                          }}>
-                          סגור עסקה
-                        </button>
-                      ) : (
-                        <span style={{ color: MUTED, fontSize: 11 }}>—</span>
-                      )}
+                      <div className="flex items-center gap-1.5 justify-end">
+                        {t.status === 'open' && (
+                          <button
+                            onClick={e => { e.stopPropagation(); setClosingTradeId(t.id); }}
+                            className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                            style={{
+                              background: 'var(--color-tg-danger-muted)',
+                              color: 'var(--color-tg-danger)',
+                              border: '1px solid rgba(239,68,68,0.3)',
+                              whiteSpace: 'nowrap',
+                            }}>
+                            סגור עסקה
+                          </button>
+                        )}
+                        {debriefResults[t.id] && (
+                          <button
+                            onClick={e => { e.stopPropagation(); setViewDebriefId(t.id); }}
+                            className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                            style={{
+                              background: 'var(--color-tg-primary-muted)',
+                              color: 'var(--color-tg-primary)',
+                              border: '1px solid rgba(0,210,210,0.3)',
+                              whiteSpace: 'nowrap',
+                            }}>
+                            ניתוח AI
+                          </button>
+                        )}
+                        {t.status !== 'open' && !debriefResults[t.id] && (
+                          <span style={{ color: MUTED, fontSize: 11 }}>—</span>
+                        )}
+                      </div>
                     </TD>
                   </tr>
                 );
@@ -431,10 +449,21 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
               strategy={t.strategy}
               tradeReason={t.trade_reason}
               onClosed={() => { setClosingTradeId(null); router.refresh(); }}
+              onDebrief={result => setDebriefResults(prev => ({ ...prev, [t.id]: result }))}
             />
           </Modal>
         );
       })()}
+
+      {viewDebriefId && debriefResults[viewDebriefId] && (
+        <Modal onClose={() => setViewDebriefId(null)}>
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-base font-bold" style={{ color: TEXT }}>ניתוח AI על העסקה</p>
+            <button onClick={() => setViewDebriefId(null)} style={{ color: MUTED, fontSize: 18, lineHeight: 1 }}>×</button>
+          </div>
+          <AIDebriefView result={debriefResults[viewDebriefId]} />
+        </Modal>
+      )}
 
       {viewTradeId && (() => {
         const t = trades.find(tr => tr.id === viewTradeId);

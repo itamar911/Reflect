@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
 import { Bot } from 'lucide-react';
 
-interface AIDebriefResult {
+export interface AIDebriefResult {
   overall?: string;
   entry_quality?: string;
   risk_management?: string;
@@ -39,6 +39,7 @@ interface CloseTradeProps {
   strategy: string;
   tradeReason: string;
   onClosed: () => void;
+  onDebrief?: (result: AIDebriefResult) => void;
 }
 
 const EXIT_REASONS = [
@@ -54,9 +55,8 @@ const EXIT_REASONS = [
 
 export default function CloseTrade({
   tradeId, entryPrice, stopLoss, takeProfit, rrRatio,
-  emotionalState, strategy, tradeReason, onClosed
+  emotionalState, strategy, tradeReason, onClosed, onDebrief
 }: CloseTradeProps) {
-  const [open, setOpen] = useState(false);
   const [exitPrice, setExitPrice] = useState('');
   const [exitReason, setExitReason] = useState('');
   const [notes, setNotes] = useState('');
@@ -112,6 +112,7 @@ export default function CloseTrade({
       if (res.ok) {
         const data = await res.json();
         setDebriefResult(data);
+        onDebrief?.(data);
       }
     } catch {
       // debrief failed silently — trade was still closed
@@ -119,16 +120,6 @@ export default function CloseTrade({
       setDebriefLoading(false);
       // onClosed is called only after user dismisses the debrief
     }
-  }
-
-  if (!open) {
-    return (
-      <button onClick={() => setOpen(true)}
-        className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
-        style={{ background: 'var(--color-tg-danger-muted)', color: 'var(--color-tg-danger)', border: '1px solid rgba(255,59,48,0.3)' }}>
-        סגור עסקה
-      </button>
-    );
   }
 
   if (debriefLoading) {
@@ -144,31 +135,7 @@ export default function CloseTrade({
   if (debriefResult) {
     return (
       <div className="flex flex-col gap-3 pt-3 border-t border-tg-border animate-fade-in">
-        <div className="flex items-center justify-between">
-          <p className="text-sm font-bold text-tg-text flex items-center gap-1.5"><Bot size={14} /> משוב AI על העסקה</p>
-          {debriefResult.score !== undefined && (
-            <span className="text-lg font-bold"
-              style={{ color: debriefResult.score >= 70 ? 'var(--color-tg-success)' : debriefResult.score >= 40 ? 'var(--color-tg-warning)' : 'var(--color-tg-danger)' }}>
-              {debriefResult.score}/100
-            </span>
-          )}
-        </div>
-
-        {([
-          ['סיכום', debriefResult.overall],
-          ['איכות כניסה', debriefResult.entry_quality],
-          ['ניהול סיכונים', debriefResult.risk_management],
-          ['ביצוע', debriefResult.execution],
-          ['מצב רגשי', debriefResult.emotional],
-          ['לקחים לפעם הבאה', debriefResult.lessons],
-        ] as [string, string | undefined][]).filter(([, v]) => v).map(([label, value]) => (
-          <div key={label} className="rounded-xl p-3"
-            style={{ background: 'var(--color-tg-surface-2)' }}>
-            <p className="text-[10px] font-bold text-tg-muted mb-1 uppercase tracking-wide">{label}</p>
-            <p className="text-xs leading-relaxed text-tg-text">{value}</p>
-          </div>
-        ))}
-
+        <AIDebriefView result={debriefResult} />
         <button
           onClick={onClosed}
           className="w-full py-2.5 rounded-xl text-sm font-semibold mt-2"
@@ -184,12 +151,7 @@ export default function CloseTrade({
   }
 
   return (
-    <div className="flex flex-col gap-3 pt-3 border-t border-tg-border animate-fade-in">
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-semibold text-tg-text">סגירת עסקה — {strategy}</p>
-        <button onClick={() => setOpen(false)} className="text-xs text-tg-muted">ביטול</button>
-      </div>
-
+    <div className="flex flex-col gap-3 animate-fade-in">
       <div className="flex flex-col gap-1">
         <label className="text-xs text-tg-muted">מחיר יציאה *</label>
         <div className="flex items-center gap-2">
@@ -265,6 +227,37 @@ export default function CloseTrade({
         variant={isWin === false ? 'danger' : 'primary'}>
         סגור עסקה + קבל ניתוח AI
       </Button>
+    </div>
+  );
+}
+
+export function AIDebriefView({ result }: { result: AIDebriefResult }) {
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-bold text-tg-text flex items-center gap-1.5"><Bot size={14} /> משוב AI על העסקה</p>
+        {result.score !== undefined && (
+          <span className="text-lg font-bold"
+            style={{ color: result.score >= 70 ? 'var(--color-tg-success)' : result.score >= 40 ? 'var(--color-tg-warning)' : 'var(--color-tg-danger)' }}>
+            {result.score}/100
+          </span>
+        )}
+      </div>
+
+      {([
+        ['סיכום', result.overall],
+        ['איכות כניסה', result.entry_quality],
+        ['ניהול סיכונים', result.risk_management],
+        ['ביצוע', result.execution],
+        ['מצב רגשי', result.emotional],
+        ['לקחים לפעם הבאה', result.lessons],
+      ] as [string, string | undefined][]).filter(([, v]) => v).map(([label, value]) => (
+        <div key={label} className="rounded-xl p-3"
+          style={{ background: 'var(--color-tg-surface-2)' }}>
+          <p className="text-[10px] font-bold text-tg-muted mb-1 uppercase tracking-wide">{label}</p>
+          <p className="text-xs leading-relaxed text-tg-text">{value}</p>
+        </div>
+      ))}
     </div>
   );
 }
