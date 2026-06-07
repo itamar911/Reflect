@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
+import CloseTrade from '@/components/journal/CloseTrade';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const GOLD   = '#00d2d2';
@@ -69,6 +70,7 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
   const [showActions,  setShowActions]  = useState(false);
   const [showFilter,   setShowFilter]   = useState(false);
   const [filterStatus, setFilterStatus] = useState<'all' | 'open' | 'closed'>('all');
+  const [closingTradeId, setClosingTradeId] = useState<string | null>(null);
   const router = useRouter();
 
   // ── Stats ──────────────────────────────────────────────────────────────────
@@ -246,12 +248,13 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
                 <TH>תוצאה</TH>
                 <TH>מחיר כניסה</TH>
                 <TH>אסטרטגיה</TH>
+                <TH>פעולות</TH>
               </tr>
             </thead>
             <tbody>
               {pageTrades.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="text-center py-14 text-sm" style={{ color: MUTED }}>
+                  <td colSpan={11} className="text-center py-14 text-sm" style={{ color: MUTED }}>
                     לא נמצאו עסקאות
                   </td>
                 </tr>
@@ -346,6 +349,41 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
                       <span className="text-xs truncate max-w-[120px] block" style={{ color: TEXT2 }}>
                         {t.strategy}
                       </span>
+                    </TD>
+
+                    {/* Actions */}
+                    <TD>
+                      {t.status === 'open' ? (
+                        closingTradeId === t.id ? (
+                          <div onClick={e => e.stopPropagation()} className="min-w-[260px] p-2">
+                            <CloseTrade
+                              tradeId={t.id}
+                              entryPrice={t.entry_price}
+                              stopLoss={t.stop_loss}
+                              takeProfit={t.take_profit}
+                              rrRatio={t.rr_ratio}
+                              emotionalState={t.emotional_state}
+                              strategy={t.strategy}
+                              tradeReason={t.trade_reason}
+                              onClosed={() => { setClosingTradeId(null); router.refresh(); }}
+                            />
+                          </div>
+                        ) : (
+                          <button
+                            onClick={e => { e.stopPropagation(); setClosingTradeId(t.id); }}
+                            className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                            style={{
+                              background: 'var(--color-tg-danger-muted)',
+                              color: 'var(--color-tg-danger)',
+                              border: '1px solid rgba(239,68,68,0.3)',
+                              whiteSpace: 'nowrap',
+                            }}>
+                            סגור עסקה
+                          </button>
+                        )
+                      ) : (
+                        <span style={{ color: MUTED, fontSize: 11 }}>—</span>
+                      )}
                     </TD>
                   </tr>
                 );
