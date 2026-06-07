@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
+import { Bot } from 'lucide-react';
 import CloseTrade, { AIDebriefView, type AIDebriefResult } from '@/components/journal/CloseTrade';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
@@ -270,7 +271,7 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
 
                 return (
                   <tr key={t.id}
-                    onClick={() => setViewTradeId(t.id)}
+                    onClick={() => { setClosingTradeId(null); setViewTradeId(t.id); }}
                     style={{
                       background: isChecked
                         ? 'rgba(0,210,210,0.06)'
@@ -359,7 +360,7 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
                       <div className="flex items-center gap-1.5 justify-end">
                         {t.status === 'open' && (
                           <button
-                            onClick={e => { e.stopPropagation(); setClosingTradeId(t.id); }}
+                            onClick={e => { e.stopPropagation(); setViewTradeId(null); setClosingTradeId(t.id); }}
                             className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
                             style={{
                               background: 'var(--color-tg-danger-muted)',
@@ -468,7 +469,14 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
       {viewTradeId && (() => {
         const t = trades.find(tr => tr.id === viewTradeId);
         if (!t) return null;
-        return <TradeDetailModal trade={t} onClose={() => setViewTradeId(null)} />;
+        return (
+          <TradeDetailModal
+            trade={t}
+            onClose={() => setViewTradeId(null)}
+            debriefResult={debriefResults[t.id]}
+            onDebrief={result => setDebriefResults(prev => ({ ...prev, [t.id]: result }))}
+          />
+        );
       })()}
     </div>
   );
@@ -585,11 +593,48 @@ function Modal({ onClose, children }: { onClose: () => void; children: React.Rea
   );
 }
 
-function TradeDetailModal({ trade, onClose }: { trade: any; onClose: () => void }) {
+function TradeDetailModal({ trade, onClose, debriefResult, onDebrief }: {
+  trade: any;
+  onClose: () => void;
+  debriefResult?: AIDebriefResult;
+  onDebrief?: (result: AIDebriefResult) => void;
+}) {
+  const [pnlMode, setPnlMode] = useState<'points' | 'percent'>('points');
+  const [analyzing, setAnalyzing] = useState(false);
+  const [localResult, setLocalResult] = useState<AIDebriefResult | null>(null);
+
   const dir = trade.take_profit >= trade.entry_price ? 'long' : 'short';
-  const pnl = trade.status === 'closed' && trade.exit_price != null
+  const pnlPoints = trade.status === 'closed' && trade.exit_price != null
     ? (dir === 'long' ? trade.exit_price - trade.entry_price : trade.entry_price - trade.exit_price)
     : null;
+  const pnlPercent = pnlPoints !== null ? (pnlPoints / trade.entry_price) * 100 : null;
+  const result = debriefResult ?? localResult;
+
+  async function runAnalysis() {
+    setAnalyzing(true);
+    try {
+      const fd = new FormData();
+      fd.append('trade', JSON.stringify({
+        id: trade.id, strategy: trade.strategy, entry_price: trade.entry_price,
+        stop_loss: trade.stop_loss, take_profit: trade.take_profit,
+        rr_ratio: trade.rr_ratio, emotional_state: trade.emotional_state,
+        trade_reason: trade.trade_reason, status: trade.status,
+        exit_price: trade.exit_price, exit_reason: trade.exit_reason,
+        post_trade_notes: trade.post_trade_notes,
+      }));
+      if (trade.post_trade_notes) fd.append('description', trade.post_trade_notes);
+      const res = await fetch('/api/ai-debrief', { method: 'POST', body: fd });
+      if (res.ok) {
+        const data = await res.json();
+        setLocalResult(data);
+        onDebrief?.(data);
+      }
+    } catch {
+      // analysis failed — button stays so the user can retry
+    } finally {
+      setAnalyzing(false);
+    }
+  }
 
   const rows: [string, string | number | null][] = [
     ['אסטרטגיה', trade.strategy],
@@ -605,7 +650,7 @@ function TradeDetailModal({ trade, onClose }: { trade: any; onClose: () => void 
     ['מחיר יציאה', trade.exit_price ?? '—'],
     ['סיבת יציאה', trade.exit_reason ?? '—'],
     ['הערות', trade.post_trade_notes ?? '—'],
-    ['ניתוח AI', trade.debrief_answer ?? '—'],
+    ['תחקיר עצמי', trade.debrief_answer ?? '—'],
   ];
 
   return (
@@ -620,11 +665,33 @@ function TradeDetailModal({ trade, onClose }: { trade: any; onClose: () => void 
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
-          <p className="text-base font-bold" style={{ color: 'var(--color-tg-text)' }}>
+          <p className="text-base font-bold flex items-center gap-2" style={{ color: 'var(--color-tg-text)' }}>
             {trade.symbol ?? trade.strategy}
-            {pnl !== null && (
-              <span className="mr-2 text-sm" style={{ color: pnl >= 0 ? '#22c55e' : '#ef4444' }}>
-                {pnl >= 0 ? '+' : ''}{pnl.toFixed(2)}
+            {pnlPoints !== null && (
+              <span className="flex items-center gap-1.5">
+                <span className="text-sm font-bold" style={{ color: pnlPoints >= 0 ? '#22c55e' : '#ef4444' }}>
+                  {pnlPoints >= 0 ? '+' : ''}{pnlMode === 'points' ? pnlPoints.toFixed(2) + ' נק׳' : pnlPercent!.toFixed(2) + '%'}
+                </span>
+                <span className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-tg-border)' }}>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setPnlMode('points'); }}
+                    className="px-1.5 py-0.5 text-[10px] font-semibold transition-all"
+                    style={{
+                      background: pnlMode === 'points' ? 'var(--color-tg-primary-muted)' : 'transparent',
+                      color: pnlMode === 'points' ? 'var(--color-tg-primary)' : 'var(--color-tg-muted)',
+                    }}>
+                    נק׳
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setPnlMode('percent'); }}
+                    className="px-1.5 py-0.5 text-[10px] font-semibold transition-all"
+                    style={{
+                      background: pnlMode === 'percent' ? 'var(--color-tg-primary-muted)' : 'transparent',
+                      color: pnlMode === 'percent' ? 'var(--color-tg-primary)' : 'var(--color-tg-muted)',
+                    }}>
+                    %
+                  </button>
+                </span>
               </span>
             )}
           </p>
@@ -641,6 +708,27 @@ function TradeDetailModal({ trade, onClose }: { trade: any; onClose: () => void 
             </div>
           ))}
         </div>
+
+        {trade.status === 'closed' && (
+          <div className="pt-1 border-t" style={{ borderColor: 'var(--color-tg-border)' }}>
+            {result ? (
+              <div className="pt-3"><AIDebriefView result={result} /></div>
+            ) : analyzing ? (
+              <div className="pt-4 flex flex-col items-center gap-3">
+                <div className="w-7 h-7 rounded-full border-2 border-t-transparent animate-spin"
+                  style={{ borderColor: 'var(--color-tg-primary)', borderTopColor: 'transparent' }} />
+                <p className="text-xs text-tg-text-2">מנתח את העסקה עם AI...</p>
+              </div>
+            ) : (
+              <button
+                onClick={(e) => { e.stopPropagation(); runAnalysis(); }}
+                className="w-full mt-3 py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-1.5"
+                style={{ background: 'var(--color-tg-primary-muted)', color: 'var(--color-tg-primary)', border: '1px solid rgba(0,210,210,0.3)' }}>
+                <Bot size={14} /> נתח עסקה עם AI
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
