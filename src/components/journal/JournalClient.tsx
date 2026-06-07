@@ -365,7 +365,7 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
                               emotionalState={t.emotional_state}
                               strategy={t.strategy}
                               tradeReason={t.trade_reason}
-                              onClosed={() => { setClosingTradeId(null); router.refresh(); }}
+                              onClosed={() => { router.refresh(); }}
                             />
                           </div>
                         ) : (

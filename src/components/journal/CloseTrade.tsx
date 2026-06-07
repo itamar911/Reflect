@@ -115,7 +115,7 @@ export default function CloseTrade({
       // debrief failed silently — trade was still closed
     } finally {
       setDebriefLoading(false);
-      onClosed();
+      // onClosed is called only after user dismisses the debrief
     }
   }
 
@@ -166,6 +166,17 @@ export default function CloseTrade({
             <p className="text-xs leading-relaxed text-tg-text">{value}</p>
           </div>
         ))}
+
+        <button
+          onClick={onClosed}
+          className="w-full py-2.5 rounded-xl text-sm font-semibold mt-2"
+          style={{
+            background: 'var(--color-tg-primary-muted)',
+            color: 'var(--color-tg-primary)',
+            border: '1px solid rgba(0,210,210,0.3)',
+          }}>
+          סגור וחזור לרשימה
+        </button>
       </div>
     );
   }
