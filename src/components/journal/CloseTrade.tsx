@@ -13,6 +13,8 @@ export interface AIDebriefResult {
   emotional?: string;
   lessons?: string;
   score?: number;
+  analysis?: string;
+  error?: string;
 }
 
 interface TradeForDebrief {
@@ -160,8 +162,8 @@ export default function CloseTrade({
             className="flex-1 h-10 px-3 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary"
             style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)' }}
           />
-          {pnlPoints !== null && (
-            <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1">
+            {pnlPoints !== null && (
               <div className="px-2.5 py-1.5 rounded-xl text-sm font-bold shrink-0"
                 style={{
                   background: isWin ? 'var(--color-tg-success-muted)' : 'var(--color-tg-danger-muted)',
@@ -169,28 +171,28 @@ export default function CloseTrade({
                 }}>
                 {isWin ? '+' : ''}{pnlMode === 'points' ? pnlPoints.toFixed(2) + ' נק׳' : pnlPercent!.toFixed(2) + '%'}
               </div>
-              <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-tg-border)' }}>
-                <button
-                  onClick={() => setPnlMode('points')}
-                  className="px-2 py-1 text-[10px] font-semibold transition-all"
-                  style={{
-                    background: pnlMode === 'points' ? 'var(--color-tg-primary-muted)' : 'transparent',
-                    color: pnlMode === 'points' ? 'var(--color-tg-primary)' : 'var(--color-tg-muted)',
-                  }}>
-                  נק׳
-                </button>
-                <button
-                  onClick={() => setPnlMode('percent')}
-                  className="px-2 py-1 text-[10px] font-semibold transition-all"
-                  style={{
-                    background: pnlMode === 'percent' ? 'var(--color-tg-primary-muted)' : 'transparent',
-                    color: pnlMode === 'percent' ? 'var(--color-tg-primary)' : 'var(--color-tg-muted)',
-                  }}>
-                  %
-                </button>
-              </div>
+            )}
+            <div className="flex rounded-lg overflow-hidden shrink-0" style={{ border: '1px solid var(--color-tg-border)' }}>
+              <button
+                onClick={() => setPnlMode('points')}
+                className="px-2 py-1 text-[10px] font-semibold transition-all"
+                style={{
+                  background: pnlMode === 'points' ? 'var(--color-tg-primary-muted)' : 'transparent',
+                  color: pnlMode === 'points' ? 'var(--color-tg-primary)' : 'var(--color-tg-muted)',
+                }}>
+                נק׳
+              </button>
+              <button
+                onClick={() => setPnlMode('percent')}
+                className="px-2 py-1 text-[10px] font-semibold transition-all"
+                style={{
+                  background: pnlMode === 'percent' ? 'var(--color-tg-primary-muted)' : 'transparent',
+                  color: pnlMode === 'percent' ? 'var(--color-tg-primary)' : 'var(--color-tg-muted)',
+                }}>
+                %
+              </button>
             </div>
-          )}
+          </div>
         </div>
       </div>
 
@@ -232,6 +234,16 @@ export default function CloseTrade({
 }
 
 export function AIDebriefView({ result }: { result: AIDebriefResult }) {
+  const rows = ([
+    ['סיכום', result.overall],
+    ['איכות כניסה', result.entry_quality],
+    ['ניהול סיכונים', result.risk_management],
+    ['ביצוע', result.execution],
+    ['מצב רגשי', result.emotional],
+    ['לקחים לפעם הבאה', result.lessons],
+    ['ניתוח', result.analysis],
+  ] as [string, string | undefined][]).filter(([, v]) => v);
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
@@ -244,20 +256,17 @@ export function AIDebriefView({ result }: { result: AIDebriefResult }) {
         )}
       </div>
 
-      {([
-        ['סיכום', result.overall],
-        ['איכות כניסה', result.entry_quality],
-        ['ניהול סיכונים', result.risk_management],
-        ['ביצוע', result.execution],
-        ['מצב רגשי', result.emotional],
-        ['לקחים לפעם הבאה', result.lessons],
-      ] as [string, string | undefined][]).filter(([, v]) => v).map(([label, value]) => (
+      {rows.length > 0 ? rows.map(([label, value]) => (
         <div key={label} className="rounded-xl p-3"
           style={{ background: 'var(--color-tg-surface-2)' }}>
           <p className="text-[10px] font-bold text-tg-muted mb-1 uppercase tracking-wide">{label}</p>
           <p className="text-xs leading-relaxed text-tg-text">{value}</p>
         </div>
-      ))}
+      )) : (
+        <p className="text-xs leading-relaxed" style={{ color: 'var(--color-tg-muted)' }}>
+          {result.error ?? 'לא התקבל ניתוח מפורט עבור עסקה זו — ייתכן שהשירות היה עמוס. נסה לסגור עסקה נוספת כדי לקבל ניתוח חדש.'}
+        </p>
+      )}
     </div>
   );
 }
