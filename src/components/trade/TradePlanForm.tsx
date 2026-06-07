@@ -57,8 +57,39 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
   const [submitLoading, setSubmitLoading] = useState(false);
   const [todayLossAmount, setTodayLossAmount] = useState(0);
   const [personalStrategies, setPersonalStrategies] = useState<string[]>([]);
+  const [pnlMode, setPnlMode] = useState<'points' | 'percent'>('points');
+  const [slInput, setSlInput] = useState('');
+  const [tpInput, setTpInput] = useState('');
 
   const supabase = createClient();
+
+  // Restore saved TP/SL input unit preference
+  useEffect(() => {
+    const saved = localStorage.getItem('trade-plan-pnl-mode');
+    if (saved === 'points' || saved === 'percent') setPnlMode(saved);
+  }, []);
+
+  function changePnlMode(mode: 'points' | 'percent') {
+    setPnlMode(mode);
+    localStorage.setItem('trade-plan-pnl-mode', mode);
+  }
+
+  const entryNum = parseFloat(form.entry_price);
+  const hasEntry = form.entry_price !== '' && !isNaN(entryNum);
+
+  function offsetToPrice(offsetStr: string): number | null {
+    if (!hasEntry || offsetStr.trim() === '') return null;
+    const offset = parseFloat(offsetStr);
+    if (isNaN(offset)) return null;
+    return pnlMode === 'points' ? entryNum + offset : entryNum * (1 + offset / 100);
+  }
+
+  const slPrice = offsetToPrice(slInput);
+  const tpPrice = offsetToPrice(tpInput);
+
+  function fmtOffsetPrice(n: number): string {
+    return parseFloat(n.toFixed(6)).toString();
+  }
 
   const loadContext = useCallback(async () => {
     setLoading(true);
@@ -118,42 +149,44 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
     if (isOpen) loadContext();
   }, [isOpen, loadContext]);
 
-  const rr = form.entry_price && form.stop_loss && form.take_profit
-    ? calcRR(parseFloat(form.entry_price), parseFloat(form.stop_loss), parseFloat(form.take_profit))
+  const rr = hasEntry && slPrice !== null && tpPrice !== null
+    ? calcRR(entryNum, slPrice, tpPrice)
     : null;
 
   const isFormFilled =
     form.strategy !== '' &&
-    form.entry_price !== '' &&
-    form.stop_loss !== '' &&
-    form.take_profit !== '' &&
+    hasEntry &&
+    slPrice !== null &&
+    tpPrice !== null &&
     form.trade_reason.trim() !== '';
 
   const activeStep = useMemo(() => {
     if (!form.strategy) return 1;
-    if (!form.entry_price || !form.stop_loss || !form.take_profit) return 2;
+    if (!hasEntry || slPrice === null || tpPrice === null) return 2;
     if (!form.trade_reason.trim()) return 3;
     return 4;
-  }, [form]);
+  }, [form, hasEntry, slPrice, tpPrice]);
 
   async function handleValidate() {
-    if (!isFormFilled) return;
+    if (!isFormFilled || slPrice === null || tpPrice === null) return;
     setFormState('validating');
 
     await new Promise((r) => setTimeout(r, 800)); // simulate validation delay
 
     const rules = presetRules ?? ({ ...DEFAULT_PRESET_RULES, id: '', user_id: userId, created_at: '', updated_at: '' } as PresetRules);
-    const result = validateTradePlan(form, rules, todayCount, lossCount, todayLossAmount);
+    const planForValidation: TradePlanInput = { ...form, stop_loss: fmtOffsetPrice(slPrice), take_profit: fmtOffsetPrice(tpPrice) };
+    const result = validateTradePlan(planForValidation, rules, todayCount, lossCount, todayLossAmount);
     setValidationResult(result);
     setFormState(result.status === 'valid' ? 'editing' : result.status);
   }
 
   async function handleSubmit() {
-    if (!isFormFilled) return;
+    if (!isFormFilled || slPrice === null || tpPrice === null) return;
 
     // Re-validate silently
     const rules = presetRules ?? ({ ...DEFAULT_PRESET_RULES, id: '', user_id: userId, created_at: '', updated_at: '' } as PresetRules);
-    const result = validateTradePlan(form, rules, todayCount, lossCount, todayLossAmount);
+    const planForValidation: TradePlanInput = { ...form, stop_loss: fmtOffsetPrice(slPrice), take_profit: fmtOffsetPrice(tpPrice) };
+    const result = validateTradePlan(planForValidation, rules, todayCount, lossCount, todayLossAmount);
     if (result.status === 'blocked') {
       setValidationResult(result);
       setFormState('blocked');
@@ -161,9 +194,9 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
     }
 
     setSubmitLoading(true);
-    const entry = parseFloat(form.entry_price);
-    const sl = parseFloat(form.stop_loss);
-    const tp = parseFloat(form.take_profit);
+    const entry = entryNum;
+    const sl = slPrice;
+    const tp = tpPrice;
 
     const { error } = await supabase.from('trade_plans').insert({
       user_id: userId,
@@ -184,6 +217,8 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
       setFormState('success');
       setTimeout(() => {
         setForm(EMPTY_FORM);
+        setSlInput('');
+        setTpInput('');
         setValidationResult(null);
         setFormState('empty');
         onSuccess();
@@ -315,6 +350,33 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
                 className="w-full h-10 px-3 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none focus:border-tg-primary transition-colors"
                 style={{ background: 'var(--color-tg-surface-2)' }}
               />
+              <div className="flex items-center justify-between">
+                <span className="text-xs" style={{ color: 'var(--color-tg-muted)' }}>
+                  הזן Stop Loss / Take Profit ב:
+                </span>
+                <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-tg-border)' }}>
+                  <button
+                    type="button"
+                    onClick={() => changePnlMode('points')}
+                    className="px-2.5 py-1 text-[10px] font-semibold transition-all"
+                    style={{
+                      background: pnlMode === 'points' ? 'var(--color-tg-primary-muted)' : 'transparent',
+                      color: pnlMode === 'points' ? 'var(--color-tg-primary)' : 'var(--color-tg-muted)',
+                    }}>
+                    נק׳
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => changePnlMode('percent')}
+                    className="px-2.5 py-1 text-[10px] font-semibold transition-all"
+                    style={{
+                      background: pnlMode === 'percent' ? 'var(--color-tg-primary-muted)' : 'transparent',
+                      color: pnlMode === 'percent' ? 'var(--color-tg-primary)' : 'var(--color-tg-muted)',
+                    }}>
+                    %
+                  </button>
+                </div>
+              </div>
               <div className="grid grid-cols-3 gap-2">
                 <PriceInput
                   label="כניסה"
@@ -322,16 +384,18 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
                   onChange={(v) => { setForm({ ...form, entry_price: v }); setValidationResult(null); }}
                 />
                 <PriceInput
-                  label="Stop Loss"
-                  value={form.stop_loss}
-                  onChange={(v) => { setForm({ ...form, stop_loss: v }); setValidationResult(null); }}
+                  label={`Stop Loss (${pnlMode === 'points' ? 'נק׳' : '%'})`}
+                  value={slInput}
+                  onChange={(v) => { setSlInput(v); setValidationResult(null); }}
                   danger
+                  hint={slPrice !== null ? `מחיר: ${fmtOffsetPrice(slPrice)}` : hasEntry ? undefined : 'הזן מחיר כניסה'}
                 />
                 <PriceInput
-                  label="Take Profit"
-                  value={form.take_profit}
-                  onChange={(v) => { setForm({ ...form, take_profit: v }); setValidationResult(null); }}
+                  label={`Take Profit (${pnlMode === 'points' ? 'נק׳' : '%'})`}
+                  value={tpInput}
+                  onChange={(v) => { setTpInput(v); setValidationResult(null); }}
                   success
+                  hint={tpPrice !== null ? `מחיר: ${fmtOffsetPrice(tpPrice)}` : hasEntry ? undefined : 'הזן מחיר כניסה'}
                 />
               </div>
               {rr !== null && rr > 0 && (
@@ -495,13 +559,14 @@ function FormSection({
 }
 
 function PriceInput({
-  label, value, onChange, danger, success,
+  label, value, onChange, danger, success, hint,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   danger?: boolean;
   success?: boolean;
+  hint?: string;
 }) {
   const borderColor = danger
     ? 'var(--color-tg-danger)'
@@ -526,6 +591,11 @@ function PriceInput({
           borderColor,
         }}
       />
+      {hint && (
+        <span className="text-[10px] text-center truncate" style={{ color: 'var(--color-tg-muted)' }}>
+          {hint}
+        </span>
+      )}
     </div>
   );
 }
