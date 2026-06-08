@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Bot } from 'lucide-react';
+import { Bot, DollarSign } from 'lucide-react';
 import CloseTrade, { AIDebriefView, type AIDebriefResult } from '@/components/journal/CloseTrade';
 import { formatPnlIls, formatPnlPoints } from '@/lib/utils';
 
@@ -95,6 +95,12 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
   const pfNum       = grossLoss > 0 ? grossProfit / grossLoss : null;
   const pfStr       = pfNum !== null ? pfNum.toFixed(2) : grossProfit > 0 ? '∞' : '—';
 
+  const closedWithAmount  = useMemo(() => closed.filter(t => t.pnl_amount != null), [closed]);
+  const pnlCurrencies     = useMemo(() => Array.from(new Set(closedWithAmount.map(t => t.pnl_currency ?? '₪'))), [closedWithAmount]);
+  const totalPnlAmount    = closedWithAmount.reduce((s, t) => s + (t.pnl_amount ?? 0), 0);
+  const pnlAmountCurrency = pnlCurrencies.length === 1 ? pnlCurrencies[0] : '₪';
+  const hasPnlAmount      = closedWithAmount.length > 0;
+
   // ── Filtered + sorted ─────────────────────────────────────────────────────
   const filtered = useMemo(() => {
     let r = trades;
@@ -146,9 +152,10 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
         <StatCard label="אחוז הצלחה"    value={`${winRate}%`}
           icon={<TrendUpIcon />}
           color={winRate >= 50 ? GREEN : RED} />
-        <StatCard label="רווח / הפסד"   value={fmtPnl(totalPnl)}
-          icon={<DollarIcon />}
-          color={totalPnl >= 0 ? GREEN : RED} />
+        <StatCard label="רווח / הפסד"
+          value={hasPnlAmount ? formatPnlIls(totalPnlAmount, pnlAmountCurrency) : fmtPnl(totalPnl)}
+          icon={<DollarSign size={14} color={GOLD} strokeWidth={2} />}
+          color={(hasPnlAmount ? totalPnlAmount : totalPnl) >= 0 ? GREEN : RED} />
         <StatCard label="פקטור רווח" value={pfStr}
           icon={<TargetIcon />}
           color={pfNum !== null ? (pfNum >= 1.5 ? GREEN : pfNum >= 1 ? GOLD : RED) : MUTED} />
@@ -513,7 +520,7 @@ function StatCard({ label, value, icon, color = TEXT }: {
           {icon}
         </div>
       </div>
-      <span className="text-xl font-bold" style={{ color }}>{value}</span>
+      <span className="text-2xl font-bold" style={{ color }}>{value}</span>
     </div>
   );
 }
@@ -752,16 +759,6 @@ function TrendUpIcon() {
       strokeLinecap="round" strokeLinejoin="round">
       <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
       <polyline points="17 6 23 6 23 12"/>
-    </svg>
-  );
-}
-
-function DollarIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={GOLD} strokeWidth="2"
-      strokeLinecap="round" strokeLinejoin="round">
-      <line x1="12" y1="1" x2="12" y2="23"/>
-      <path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/>
     </svg>
   );
 }
