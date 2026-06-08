@@ -4,7 +4,7 @@ import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Bot } from 'lucide-react';
 import CloseTrade, { AIDebriefView, type AIDebriefResult } from '@/components/journal/CloseTrade';
-import { formatPnlIls } from '@/lib/utils';
+import { formatPnlIls, formatPnlPoints } from '@/lib/utils';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const GOLD   = '#00d2d2';
@@ -338,12 +338,20 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
 
                     {/* P&L */}
                     <TD>
-                      {pnl !== null
-                        ? <span className="font-semibold" style={{ color: pnl >= 0 ? GREEN : RED }}>
+                      {pnl !== null ? (
+                        t.pnl_amount != null ? (
+                          <span style={{ color: t.pnl_amount >= 0 ? GREEN : RED }}>
+                            <span className="font-semibold">{formatPnlIls(t.pnl_amount, t.pnl_currency ?? '₪')}</span>
+                            <span className="text-xs" style={{ opacity: 0.6 }}> ({formatPnlPoints(pnl)})</span>
+                          </span>
+                        ) : (
+                          <span className="font-semibold" style={{ color: pnl >= 0 ? GREEN : RED }}>
                             {fmtPnl(pnl)}
                           </span>
-                        : <span style={{ color: MUTED }}>—</span>
-                      }
+                        )
+                      ) : (
+                        <span style={{ color: MUTED }}>—</span>
+                      )}
                     </TD>
 
                     {/* Entry price */}
@@ -607,7 +615,6 @@ function TradeDetailModal({ trade, onClose, debriefResult, onDebrief }: {
   debriefResult?: AIDebriefResult;
   onDebrief?: (result: AIDebriefResult) => void;
 }) {
-  const [pnlMode, setPnlMode] = useState<'points' | 'percent'>('points');
   const [analyzing, setAnalyzing] = useState(false);
   const [localResult, setLocalResult] = useState<AIDebriefResult | null>(null);
 
@@ -615,7 +622,6 @@ function TradeDetailModal({ trade, onClose, debriefResult, onDebrief }: {
   const pnlPoints = trade.status === 'closed' && trade.exit_price != null
     ? (dir === 'long' ? trade.exit_price - trade.entry_price : trade.entry_price - trade.exit_price)
     : null;
-  const pnlPercent = pnlPoints !== null ? (pnlPoints / trade.entry_price) * 100 : null;
   const result = debriefResult ?? localResult;
 
   async function runAnalysis() {
@@ -676,36 +682,16 @@ function TradeDetailModal({ trade, onClose, debriefResult, onDebrief }: {
           <p className="text-base font-bold flex items-center gap-2" style={{ color: 'var(--color-tg-text)' }}>
             {trade.symbol ?? trade.strategy}
             {pnlPoints !== null && (
-              <span className="flex items-center gap-1.5">
+              trade.pnl_amount != null ? (
+                <span className="text-sm font-bold" style={{ color: trade.pnl_amount >= 0 ? '#22c55e' : '#ef4444' }}>
+                  {formatPnlIls(trade.pnl_amount, trade.pnl_currency ?? '₪')}
+                  <span className="text-xs font-semibold" style={{ opacity: 0.6 }}> ({formatPnlPoints(pnlPoints)})</span>
+                </span>
+              ) : (
                 <span className="text-sm font-bold" style={{ color: pnlPoints >= 0 ? '#22c55e' : '#ef4444' }}>
-                  {pnlPoints >= 0 ? '+' : ''}{pnlMode === 'points' ? pnlPoints.toFixed(2) + ' נק׳' : pnlPercent!.toFixed(2) + '%'}
+                  {pnlPoints >= 0 ? '+' : ''}{pnlPoints.toFixed(2)} נק׳
                 </span>
-                <span className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-tg-border)' }}>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setPnlMode('points'); }}
-                    className="px-1.5 py-0.5 text-[10px] font-semibold transition-all"
-                    style={{
-                      background: pnlMode === 'points' ? 'var(--color-tg-primary-muted)' : 'transparent',
-                      color: pnlMode === 'points' ? 'var(--color-tg-primary)' : 'var(--color-tg-muted)',
-                    }}>
-                    נק׳
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setPnlMode('percent'); }}
-                    className="px-1.5 py-0.5 text-[10px] font-semibold transition-all"
-                    style={{
-                      background: pnlMode === 'percent' ? 'var(--color-tg-primary-muted)' : 'transparent',
-                      color: pnlMode === 'percent' ? 'var(--color-tg-primary)' : 'var(--color-tg-muted)',
-                    }}>
-                    %
-                  </button>
-                </span>
-              </span>
-            )}
-            {trade.pnl_amount != null && (
-              <span className="text-sm font-bold" style={{ color: trade.pnl_amount >= 0 ? '#22c55e' : '#ef4444' }}>
-                {formatPnlIls(trade.pnl_amount, trade.pnl_currency ?? '₪')}
-              </span>
+              )
             )}
           </p>
           <button onClick={onClose} style={{ color: 'var(--color-tg-muted)', fontSize: 20, lineHeight: 1 }}>×</button>

@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from 'react';
 import { Sparkles, TrendingUp } from 'lucide-react';
-import { formatPnlIls } from '@/lib/utils';
+import { formatPnlIls, formatPnlPoints } from '@/lib/utils';
 
 // ── Tokens ────────────────────────────────────────────────────────────────────
 const ACCENT  = '#00d2d2';
@@ -466,7 +466,12 @@ function TradeDetailPanel({ trade, onClose, aiReview, aiLoading, onAiReview }: {
             </div>
             {pnl !== null && (
               <p className="text-2xl font-bold" style={{ color: pnl >= 0 ? GREEN : RED }}>
-                {trade.pnl_amount != null ? formatPnlIls(trade.pnl_amount, trade.pnl_currency ?? '₪') : fmtPnl(pnl)}
+                {trade.pnl_amount != null ? (
+                  <>
+                    {formatPnlIls(trade.pnl_amount, trade.pnl_currency ?? '₪')}
+                    <span className="text-sm font-semibold" style={{ opacity: 0.6 }}> ({formatPnlPoints(pnl)})</span>
+                  </>
+                ) : fmtPnl(pnl)}
               </p>
             )}
           </div>
@@ -845,7 +850,12 @@ export default function DashboardClient({
                       <div className="flex items-center gap-2 shrink-0">
                         {pnl !== null ? (
                           <p className="text-sm font-bold" style={{ color: pnl >= 0 ? GREEN : RED }}>
-                            {t.pnl_amount != null ? formatPnlIls(t.pnl_amount, t.pnl_currency ?? '₪') : fmtPnl(pnl)}
+                            {t.pnl_amount != null ? (
+                              <>
+                                {formatPnlIls(t.pnl_amount, t.pnl_currency ?? '₪')}
+                                <span className="text-xs font-semibold" style={{ opacity: 0.6 }}> ({formatPnlPoints(pnl)})</span>
+                              </>
+                            ) : fmtPnl(pnl)}
                           </p>
                         ) : (
                           <p className="text-xs font-semibold" style={{ color: ACCENT }}>פתוח</p>
