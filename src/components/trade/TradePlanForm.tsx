@@ -93,17 +93,19 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
   const hasQuantity = form.quantity.trim() !== '' && !isNaN(quantityNum) && quantityNum > 0;
   const hasValuePerUnit = form.value_per_unit.trim() !== '' && !isNaN(valuePerUnitNum) && valuePerUnitNum > 0;
 
-  function offsetToPrice(offsetStr: string): number | null {
-    if (!hasEntry || offsetStr.trim() === '') return null;
-    const offset = parseFloat(offsetStr);
-    if (isNaN(offset)) return null;
-    return pnlMode === 'points' ? entryNum + offset : entryNum * (1 + offset / 100);
+  // נק׳ mode: the field holds the actual target price directly (no conversion).
+  // % mode: the field holds a percentage offset from the entry price.
+  function inputToPrice(inputStr: string): number | null {
+    if (!hasEntry || inputStr.trim() === '') return null;
+    const val = parseFloat(inputStr);
+    if (isNaN(val)) return null;
+    return pnlMode === 'points' ? val : entryNum * (1 + val / 100);
   }
 
-  const slPrice = offsetToPrice(slInput);
-  const tpPrice = offsetToPrice(tpInput);
+  const slPrice = inputToPrice(slInput);
+  const tpPrice = inputToPrice(tpInput);
 
-  function fmtOffsetPrice(n: number): string {
+  function fmtPrice(n: number): string {
     return parseFloat(n.toFixed(6)).toString();
   }
 
@@ -194,7 +196,7 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
     await new Promise((r) => setTimeout(r, 800)); // simulate validation delay
 
     const rules = presetRules ?? ({ ...DEFAULT_PRESET_RULES, id: '', user_id: userId, created_at: '', updated_at: '' } as PresetRules);
-    const planForValidation: TradePlanInput = { ...form, stop_loss: fmtOffsetPrice(slPrice), take_profit: fmtOffsetPrice(tpPrice) };
+    const planForValidation: TradePlanInput = { ...form, stop_loss: fmtPrice(slPrice), take_profit: fmtPrice(tpPrice) };
     const result = validateTradePlan(planForValidation, rules, todayCount, lossCount, todayLossAmount);
     setValidationResult(result);
     setFormState(result.status === 'valid' ? 'editing' : result.status);
@@ -207,7 +209,7 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
 
     // Re-validate silently
     const rules = presetRules ?? ({ ...DEFAULT_PRESET_RULES, id: '', user_id: userId, created_at: '', updated_at: '' } as PresetRules);
-    const planForValidation: TradePlanInput = { ...form, stop_loss: fmtOffsetPrice(slPrice), take_profit: fmtOffsetPrice(tpPrice) };
+    const planForValidation: TradePlanInput = { ...form, stop_loss: fmtPrice(slPrice), take_profit: fmtPrice(tpPrice) };
     const result = validateTradePlan(planForValidation, rules, todayCount, lossCount, todayLossAmount);
     if (result.status === 'blocked') {
       setValidationResult(result);
@@ -414,14 +416,22 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
                   value={slInput}
                   onChange={(v) => { setSlInput(v); setValidationResult(null); }}
                   danger
-                  hint={slPrice !== null ? `מחיר: ${fmtOffsetPrice(slPrice)}` : hasEntry ? undefined : 'הזן מחיר כניסה'}
+                  hint={
+                    !hasEntry ? 'הזן מחיר כניסה'
+                    : pnlMode === 'percent' && slPrice !== null ? `מחיר: ${fmtPrice(slPrice)}`
+                    : undefined
+                  }
                 />
                 <PriceInput
                   label={`Take Profit (${pnlMode === 'points' ? 'נק׳' : '%'})`}
                   value={tpInput}
                   onChange={(v) => { setTpInput(v); setValidationResult(null); }}
                   success
-                  hint={tpPrice !== null ? `מחיר: ${fmtOffsetPrice(tpPrice)}` : hasEntry ? undefined : 'הזן מחיר כניסה'}
+                  hint={
+                    !hasEntry ? 'הזן מחיר כניסה'
+                    : pnlMode === 'percent' && tpPrice !== null ? `מחיר: ${fmtPrice(tpPrice)}`
+                    : undefined
+                  }
                 />
               </div>
               <div className="grid grid-cols-2 gap-2">
