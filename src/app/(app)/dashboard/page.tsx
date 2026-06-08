@@ -12,7 +12,7 @@ export default async function DashboardPage() {
   const [profileRes, tradesRes] = await Promise.all([
     supabase.from('profiles').select('display_name').eq('id', user.id).single(),
     supabase.from('trade_plans')
-      .select('id,strategy,symbol,entry_price,exit_price,stop_loss,take_profit,rr_ratio,emotional_state,trade_reason,status,exit_reason,submitted_at,closed_at,quantity,value_per_unit,pnl_amount')
+      .select('id,strategy,symbol,entry_price,exit_price,stop_loss,take_profit,rr_ratio,emotional_state,trade_reason,status,exit_reason,submitted_at,closed_at,quantity,value_per_unit,pnl_amount,pnl_currency')
       .eq('user_id', user.id)
       .order('submitted_at', { ascending: false })
       .limit(500),
@@ -38,6 +38,7 @@ export default async function DashboardPage() {
     quantity:         t.quantity != null ? Number(t.quantity) : null,
     value_per_unit:   t.value_per_unit != null ? Number(t.value_per_unit) : null,
     pnl_amount:       t.pnl_amount != null ? Number(t.pnl_amount) : null,
+    pnl_currency:     (t.pnl_currency as string | null) ?? null,
   }));
 
   return <DashboardClient trades={trades} displayName={displayName} />;

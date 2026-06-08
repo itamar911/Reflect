@@ -23,9 +23,9 @@ function pnlIls(t: TradePlan): number {
   return t.pnl_amount != null ? Number(t.pnl_amount) : 0;
 }
 
-function fmt(v: number): string {
-  if (v === 0) return '₪0';
-  return `${v > 0 ? '+' : '−'}₪${Math.round(Math.abs(v)).toLocaleString('en-US')}`;
+function fmt(v: number, currency: string = '₪'): string {
+  if (v === 0) return `${currency}0`;
+  return `${v > 0 ? '+' : '−'}${currency}${Math.round(Math.abs(v)).toLocaleString('en-US')}`;
 }
 
 function pnlColor(v: number): string {
@@ -427,14 +427,14 @@ export default async function StatsPage() {
               {bestTrade && (
                 <div className="rounded-xl p-3" style={{ background: 'rgba(34,197,94,0.07)' }}>
                   <p className="text-[10px] mb-0.5" style={{ color: 'rgba(34,197,94,0.6)' }}>עסקה טובה ביותר</p>
-                  <p className="text-sm font-bold" style={{ color: '#22c55e' }}>{fmt(pnlIls(bestTrade))}</p>
+                  <p className="text-sm font-bold" style={{ color: '#22c55e' }}>{fmt(pnlIls(bestTrade), bestTrade.pnl_currency ?? '₪')}</p>
                   <p className="text-[10px]" style={{ color: 'var(--color-tg-muted)' }}>{bestTrade.strategy}</p>
                 </div>
               )}
               {worstTrade && (
                 <div className="rounded-xl p-3" style={{ background: 'rgba(239,68,68,0.07)' }}>
                   <p className="text-[10px] mb-0.5" style={{ color: 'rgba(239,68,68,0.6)' }}>עסקה גרועה ביותר</p>
-                  <p className="text-sm font-bold" style={{ color: '#ef4444' }}>{fmt(pnlIls(worstTrade))}</p>
+                  <p className="text-sm font-bold" style={{ color: '#ef4444' }}>{fmt(pnlIls(worstTrade), worstTrade.pnl_currency ?? '₪')}</p>
                   <p className="text-[10px]" style={{ color: 'var(--color-tg-muted)' }}>{worstTrade.strategy}</p>
                 </div>
               )}

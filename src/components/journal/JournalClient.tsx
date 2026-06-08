@@ -39,6 +39,7 @@ interface Trade {
   quantity: number | null;
   value_per_unit: number | null;
   pnl_amount: number | null;
+  pnl_currency: string | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -455,6 +456,7 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
               tradeReason={t.trade_reason}
               quantity={t.quantity}
               valuePerUnit={t.value_per_unit}
+              pnlCurrency={t.pnl_currency}
               onClosed={() => { setClosingTradeId(null); router.refresh(); }}
               onDebrief={result => setDebriefResults(prev => ({ ...prev, [t.id]: result }))}
             />
@@ -702,7 +704,7 @@ function TradeDetailModal({ trade, onClose, debriefResult, onDebrief }: {
             )}
             {trade.pnl_amount != null && (
               <span className="text-sm font-bold" style={{ color: trade.pnl_amount >= 0 ? '#22c55e' : '#ef4444' }}>
-                {formatPnlIls(trade.pnl_amount)}
+                {formatPnlIls(trade.pnl_amount, trade.pnl_currency ?? '₪')}
               </span>
             )}
           </p>

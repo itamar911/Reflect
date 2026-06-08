@@ -73,7 +73,10 @@ export interface TradePlan {
   quantity: number | null;
   value_per_unit: number | null;
   pnl_amount: number | null;
+  pnl_currency: PnlCurrency | null;
 }
+
+export type PnlCurrency = '₪' | '$';
 
 export interface TradePlanInput {
   strategy: TradeStrategy | string;

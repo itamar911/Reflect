@@ -8,7 +8,7 @@ import { calcRR } from '@/lib/utils';
 import ValidationResultBanner from './ValidationResultBanner';
 import EmotionalStateSlider from './EmotionalStateSlider';
 import Button from '@/components/ui/Button';
-import type { TradePlanInput, PresetRules, RulesetValidationResult, TradeStrategy } from '@/lib/types';
+import type { TradePlanInput, PresetRules, RulesetValidationResult, TradeStrategy, PnlCurrency } from '@/lib/types';
 
 const STRATEGIES: TradeStrategy[] = ['Breakout', 'Trend Follow', 'Reversal', 'Range', 'Custom'];
 
@@ -60,6 +60,8 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
   const [todayLossAmount, setTodayLossAmount] = useState(0);
   const [personalStrategies, setPersonalStrategies] = useState<string[]>([]);
   const [pnlMode, setPnlMode] = useState<'points' | 'percent'>('points');
+  const [currency, setCurrency] = useState<PnlCurrency>('₪');
+  const [pnlFieldsError, setPnlFieldsError] = useState(false);
   const [slInput, setSlInput] = useState('');
   const [tpInput, setTpInput] = useState('');
 
@@ -69,6 +71,8 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
   useEffect(() => {
     const saved = localStorage.getItem('trade-plan-pnl-mode');
     if (saved === 'points' || saved === 'percent') setPnlMode(saved);
+    const savedCurrency = localStorage.getItem('trade-plan-pnl-currency');
+    if (savedCurrency === '₪' || savedCurrency === '$') setCurrency(savedCurrency);
   }, []);
 
   function changePnlMode(mode: 'points' | 'percent') {
@@ -76,8 +80,18 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
     localStorage.setItem('trade-plan-pnl-mode', mode);
   }
 
+  function changeCurrency(c: PnlCurrency) {
+    setCurrency(c);
+    localStorage.setItem('trade-plan-pnl-currency', c);
+  }
+
   const entryNum = parseFloat(form.entry_price);
   const hasEntry = form.entry_price !== '' && !isNaN(entryNum);
+
+  const quantityNum = parseFloat(form.quantity);
+  const valuePerUnitNum = parseFloat(form.value_per_unit);
+  const hasQuantity = form.quantity.trim() !== '' && !isNaN(quantityNum) && quantityNum > 0;
+  const hasValuePerUnit = form.value_per_unit.trim() !== '' && !isNaN(valuePerUnitNum) && valuePerUnitNum > 0;
 
   function offsetToPrice(offsetStr: string): number | null {
     if (!hasEntry || offsetStr.trim() === '') return null;
@@ -160,6 +174,8 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
     hasEntry &&
     slPrice !== null &&
     tpPrice !== null &&
+    hasQuantity &&
+    hasValuePerUnit &&
     form.trade_reason.trim() !== '';
 
   const activeStep = useMemo(() => {
@@ -170,6 +186,8 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
   }, [form, hasEntry, slPrice, tpPrice]);
 
   async function handleValidate() {
+    if (!hasQuantity || !hasValuePerUnit) { setPnlFieldsError(true); return; }
+    setPnlFieldsError(false);
     if (!isFormFilled || slPrice === null || tpPrice === null) return;
     setFormState('validating');
 
@@ -183,6 +201,8 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
   }
 
   async function handleSubmit() {
+    if (!hasQuantity || !hasValuePerUnit) { setPnlFieldsError(true); return; }
+    setPnlFieldsError(false);
     if (!isFormFilled || slPrice === null || tpPrice === null) return;
 
     // Re-validate silently
@@ -200,9 +220,6 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
     const sl = slPrice;
     const tp = tpPrice;
 
-    const quantityNum = parseFloat(form.quantity);
-    const valuePerUnitNum = parseFloat(form.value_per_unit);
-
     const { error } = await supabase.from('trade_plans').insert({
       user_id: userId,
       strategy: form.strategy,
@@ -214,8 +231,9 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
       trade_reason: form.trade_reason.trim(),
       emotional_state: form.emotional_state,
       status: 'open',
-      quantity: form.quantity.trim() !== '' && !isNaN(quantityNum) ? quantityNum : null,
-      value_per_unit: form.value_per_unit.trim() !== '' && !isNaN(valuePerUnitNum) ? valuePerUnitNum : null,
+      quantity: quantityNum,
+      value_per_unit: valuePerUnitNum,
+      pnl_currency: currency,
     });
 
     if (error) {
@@ -227,6 +245,7 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
         setSlInput('');
         setTpInput('');
         setValidationResult(null);
+        setPnlFieldsError(false);
         setFormState('empty');
         onSuccess();
         onClose();
@@ -407,33 +426,69 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-medium text-tg-muted">כמות</label>
+                  <label className="text-xs font-medium text-tg-muted">כמות *</label>
                   <input
                     type="number"
                     step="any"
                     placeholder="0"
                     value={form.quantity}
-                    onChange={(e) => setForm({ ...form, quantity: e.target.value })}
-                    className="w-full h-10 px-2 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none focus:border-tg-primary transition-colors text-center"
-                    style={{ background: 'var(--color-tg-surface-2)' }}
+                    onChange={(e) => { setForm({ ...form, quantity: e.target.value }); setPnlFieldsError(false); }}
+                    className="w-full h-10 px-2 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors text-center"
+                    style={{
+                      background: 'var(--color-tg-surface-2)',
+                      borderColor: pnlFieldsError && !hasQuantity ? 'var(--color-tg-danger)' : 'var(--color-tg-border)',
+                    }}
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-medium text-tg-muted">ערך ליחידה (₪)</label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium text-tg-muted">ערך ליחידה *</label>
+                    <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-tg-border)' }}>
+                      <button
+                        type="button"
+                        onClick={() => changeCurrency('₪')}
+                        className="px-2 py-0.5 text-[10px] font-semibold transition-all"
+                        style={{
+                          background: currency === '₪' ? 'var(--color-tg-primary-muted)' : 'transparent',
+                          color: currency === '₪' ? 'var(--color-tg-primary)' : 'var(--color-tg-muted)',
+                        }}>
+                        ₪
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => changeCurrency('$')}
+                        className="px-2 py-0.5 text-[10px] font-semibold transition-all"
+                        style={{
+                          background: currency === '$' ? 'var(--color-tg-primary-muted)' : 'transparent',
+                          color: currency === '$' ? 'var(--color-tg-primary)' : 'var(--color-tg-muted)',
+                        }}>
+                        $
+                      </button>
+                    </div>
+                  </div>
                   <input
                     type="number"
                     step="any"
                     placeholder="0.00"
                     value={form.value_per_unit}
-                    onChange={(e) => setForm({ ...form, value_per_unit: e.target.value })}
-                    className="w-full h-10 px-2 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none focus:border-tg-primary transition-colors text-center"
-                    style={{ background: 'var(--color-tg-surface-2)' }}
+                    onChange={(e) => { setForm({ ...form, value_per_unit: e.target.value }); setPnlFieldsError(false); }}
+                    className="w-full h-10 px-2 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors text-center"
+                    style={{
+                      background: 'var(--color-tg-surface-2)',
+                      borderColor: pnlFieldsError && !hasValuePerUnit ? 'var(--color-tg-danger)' : 'var(--color-tg-border)',
+                    }}
                   />
                 </div>
               </div>
               <p className="text-[10px] text-tg-muted">
-                אופציונלי — מלא כדי שהמערכת תחשב עבורך רווח/הפסד בש״ח (₪) בסגירת העסקה
+                שדות חובה — נדרשים כדי שהמערכת תחשב עבורך רווח/הפסד ({currency}) בסגירת העסקה
               </p>
+              {pnlFieldsError && (
+                <div className="px-3 py-2 rounded-xl text-xs animate-fade-in"
+                  style={{ background: 'var(--color-tg-danger-muted)', color: 'var(--color-tg-danger)' }}>
+                  יש למלא כמות וערך ליחידה כדי להגיש את התוכנית
+                </div>
+              )}
               {rr !== null && rr > 0 && (
                 <div className="flex items-center justify-between px-4 py-2.5 rounded-xl animate-fade-in"
                   style={{

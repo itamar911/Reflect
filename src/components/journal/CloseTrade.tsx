@@ -42,6 +42,7 @@ interface CloseTradeProps {
   tradeReason: string;
   quantity: number | null;
   valuePerUnit: number | null;
+  pnlCurrency: string | null;
   onClosed: () => void;
   onDebrief?: (result: AIDebriefResult) => void;
 }
@@ -59,7 +60,7 @@ const EXIT_REASONS = [
 
 export default function CloseTrade({
   tradeId, entryPrice, stopLoss, takeProfit, rrRatio,
-  emotionalState, strategy, tradeReason, quantity, valuePerUnit, onClosed, onDebrief
+  emotionalState, strategy, tradeReason, quantity, valuePerUnit, pnlCurrency, onClosed, onDebrief
 }: CloseTradeProps) {
   const [exitPrice, setExitPrice] = useState('');
   const [exitReason, setExitReason] = useState('');
@@ -96,6 +97,7 @@ export default function CloseTrade({
       post_trade_notes: notes.trim() || null,
       closed_at: new Date().toISOString(),
       pnl_amount: pnlAmount,
+      pnl_currency: pnlAmount != null ? (pnlCurrency ?? '₪') : null,
     }).eq('id', tradeId);
 
     if (err) {

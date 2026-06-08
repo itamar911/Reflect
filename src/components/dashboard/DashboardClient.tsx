@@ -34,6 +34,7 @@ export interface DashTrade {
   quantity: number | null;
   value_per_unit: number | null;
   pnl_amount: number | null;
+  pnl_currency: string | null;
 }
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────
@@ -465,7 +466,7 @@ function TradeDetailPanel({ trade, onClose, aiReview, aiLoading, onAiReview }: {
             </div>
             {pnl !== null && (
               <p className="text-2xl font-bold" style={{ color: pnl >= 0 ? GREEN : RED }}>
-                {trade.pnl_amount != null ? formatPnlIls(trade.pnl_amount) : fmtPnl(pnl)}
+                {trade.pnl_amount != null ? formatPnlIls(trade.pnl_amount, trade.pnl_currency ?? '₪') : fmtPnl(pnl)}
               </p>
             )}
           </div>
@@ -844,7 +845,7 @@ export default function DashboardClient({
                       <div className="flex items-center gap-2 shrink-0">
                         {pnl !== null ? (
                           <p className="text-sm font-bold" style={{ color: pnl >= 0 ? GREEN : RED }}>
-                            {t.pnl_amount != null ? formatPnlIls(t.pnl_amount) : fmtPnl(pnl)}
+                            {t.pnl_amount != null ? formatPnlIls(t.pnl_amount, t.pnl_currency ?? '₪') : fmtPnl(pnl)}
                           </p>
                         ) : (
                           <p className="text-xs font-semibold" style={{ color: ACCENT }}>פתוח</p>

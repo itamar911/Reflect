@@ -37,6 +37,7 @@ export default async function TradesPage() {
     quantity:         t.quantity != null ? Number(t.quantity) : null,
     value_per_unit:   t.value_per_unit != null ? Number(t.value_per_unit) : null,
     pnl_amount:       t.pnl_amount != null ? Number(t.pnl_amount) : null,
+    pnl_currency:     (t.pnl_currency as string | null) ?? null,
   }));
 
   const exportTrades = allTrades.map((t) => ({
