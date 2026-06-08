@@ -15,3 +15,8 @@ export function calcRR(entry: number, stopLoss: number, takeProfit: number): num
 export function formatCurrency(value: number): string {
   return new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
 }
+
+export function formatPnlIls(value: number): string {
+  const sign = value > 0 ? '+' : value < 0 ? '-' : '';
+  return `${sign}₪${Math.round(Math.abs(value)).toLocaleString('en-US')}`;
+}

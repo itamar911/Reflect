@@ -40,6 +40,8 @@ interface CloseTradeProps {
   emotionalState: number;
   strategy: string;
   tradeReason: string;
+  quantity: number | null;
+  valuePerUnit: number | null;
   onClosed: () => void;
   onDebrief?: (result: AIDebriefResult) => void;
 }
@@ -57,7 +59,7 @@ const EXIT_REASONS = [
 
 export default function CloseTrade({
   tradeId, entryPrice, stopLoss, takeProfit, rrRatio,
-  emotionalState, strategy, tradeReason, onClosed, onDebrief
+  emotionalState, strategy, tradeReason, quantity, valuePerUnit, onClosed, onDebrief
 }: CloseTradeProps) {
   const [exitPrice, setExitPrice] = useState('');
   const [exitReason, setExitReason] = useState('');
@@ -71,7 +73,10 @@ export default function CloseTrade({
   const supabase = createClient();
 
   const exit = parseFloat(exitPrice);
-  const pnlPoints = exitPrice && !isNaN(exit) ? (exit - entryPrice) : null;
+  const direction: 'long' | 'short' = takeProfit >= entryPrice ? 'long' : 'short';
+  const pnlPoints = exitPrice && !isNaN(exit)
+    ? (direction === 'long' ? exit - entryPrice : entryPrice - exit)
+    : null;
   const pnlPercent = pnlPoints !== null ? ((pnlPoints / entryPrice) * 100) : null;
   const isWin = pnlPoints !== null ? pnlPoints > 0 : null;
 
@@ -80,12 +85,17 @@ export default function CloseTrade({
     setLoading(true);
     setError('');
 
+    const pnlAmount = quantity != null && valuePerUnit != null
+      ? (direction === 'long' ? exit - entryPrice : entryPrice - exit) * quantity * valuePerUnit
+      : null;
+
     const { error: err } = await supabase.from('trade_plans').update({
       status: 'closed',
       exit_price: exit,
       exit_reason: exitReason,
       post_trade_notes: notes.trim() || null,
       closed_at: new Date().toISOString(),
+      pnl_amount: pnlAmount,
     }).eq('id', tradeId);
 
     if (err) {

@@ -70,6 +70,9 @@ export interface TradePlan {
   debrief_submitted_at: string | null;
   submitted_at: string;
   closed_at: string | null;
+  quantity: number | null;
+  value_per_unit: number | null;
+  pnl_amount: number | null;
 }
 
 export interface TradePlanInput {
@@ -81,6 +84,8 @@ export interface TradePlanInput {
   trade_reason: string;
   emotional_state: number;
   direction: 'long' | 'short' | null;
+  quantity: string;
+  value_per_unit: string;
 }
 
 export interface RulesetValidationResult {

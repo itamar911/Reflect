@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from 'react';
 import { Sparkles, TrendingUp } from 'lucide-react';
+import { formatPnlIls } from '@/lib/utils';
 
 // ── Tokens ────────────────────────────────────────────────────────────────────
 const ACCENT  = '#00d2d2';
@@ -30,6 +31,9 @@ export interface DashTrade {
   exit_reason: string | null;
   submitted_at: string;
   closed_at: string | null;
+  quantity: number | null;
+  value_per_unit: number | null;
+  pnl_amount: number | null;
 }
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────
@@ -94,22 +98,25 @@ function buildCumulativeSeries(dm: Record<string, number>, n: number): BarItem[]
 function computeAll(trades: DashTrade[]) {
   const closed = trades.filter(t => t.status === 'closed' && t.exit_price != null);
   const pnls   = closed.map(t => calcPnl(t)!);
-  const wins   = pnls.filter(p => p > 0);
-  const losses = pnls.filter(p => p < 0);
+  // Win/loss classification is sign-based, so it's identical whether derived from
+  // points or from ₪ — keep it on points since that's always available.
+  const winTrades  = closed.filter(t => calcPnl(t)! > 0);
+  const lossTrades = closed.filter(t => calcPnl(t)! < 0);
 
-  const winTrades     = wins.length;
-  const lossTrades    = losses.length;
+  const winCount      = winTrades.length;
+  const lossCount     = lossTrades.length;
   const neutralTrades = pnls.filter(p => p === 0).length;
-  const grossProfit   = wins.reduce((s, p) => s + p, 0);
-  const grossLoss     = losses.reduce((s, p) => s + p, 0);
-  const totalPnl      = pnls.reduce((s, p) => s + p, 0);
-  const avgWin        = winTrades  > 0 ? grossProfit / winTrades  : 0;
-  const avgLoss       = lossTrades > 0 ? grossLoss   / lossTrades : 0;
+  // Monetary (₪) aggregates — driven by pnl_amount, missing values count as 0
+  const grossProfit   = winTrades.reduce((s, t) => s + (t.pnl_amount ?? 0), 0);
+  const grossLoss     = lossTrades.reduce((s, t) => s + (t.pnl_amount ?? 0), 0);
+  const totalPnl      = closed.reduce((s, t) => s + (t.pnl_amount ?? 0), 0);
+  const avgWin        = winCount  > 0 ? grossProfit / winCount  : 0;
+  const avgLoss       = lossCount > 0 ? grossLoss   / lossCount : 0;
 
   const dayMap: Record<string, number> = {};
   for (const t of closed) {
     const k = dayKey(t.closed_at ?? t.submitted_at);
-    dayMap[k] = (dayMap[k] ?? 0) + calcPnl(t)!;
+    dayMap[k] = (dayMap[k] ?? 0) + (t.pnl_amount ?? 0);
   }
 
   let profitDays = 0, lossDays = 0, neutralDays = 0;
@@ -125,7 +132,7 @@ function computeAll(trades: DashTrade[]) {
   }
 
   const totalDays = profitDays + lossDays + neutralDays;
-  const winRate   = (winTrades + lossTrades) > 0 ? winTrades / (winTrades + lossTrades) * 100 : 0;
+  const winRate   = (winCount + lossCount) > 0 ? winCount / (winCount + lossCount) * 100 : 0;
   const pf        = Math.abs(grossLoss) > 0.001 ? grossProfit / Math.abs(grossLoss) : grossProfit > 0 ? 3 : 0;
   const consist   = totalDays > 0 ? profitDays / totalDays * 100 : 0;
   const wlRatio   = Math.abs(avgLoss) > 0.001 ? avgWin / Math.abs(avgLoss) : avgWin > 0 ? 2 : 0;
@@ -142,14 +149,14 @@ function computeAll(trades: DashTrade[]) {
   ];
 
   const profitDayPct = totalDays > 0 ? Math.round(profitDays / totalDays * 100) : 0;
-  const winPct       = (winTrades + lossTrades) > 0 ? Math.round(winTrades / (winTrades + lossTrades) * 100) : 0;
+  const winPct       = (winCount + lossCount) > 0 ? Math.round(winCount / (winCount + lossCount) * 100) : 0;
   const wlGaugePct   = Math.round(Math.min(wlRatio / 2 * 100, 100));
   const balGaugePct  = (grossProfit + Math.abs(grossLoss)) > 0
     ? Math.round(grossProfit / (grossProfit + Math.abs(grossLoss)) * 100) : 0;
 
   return {
     profitDays, lossDays, neutralDays, profitDayPct,
-    winTrades, lossTrades, neutralTrades, winPct,
+    winTrades: winCount, lossTrades: lossCount, neutralTrades, winPct,
     avgWin, avgLoss, grossProfit, grossLoss, totalPnl,
     wlGaugePct, balGaugePct,
     radarScores,
@@ -401,7 +408,7 @@ function MonthCalendar({
       {/* Monthly summary */}
       <div className="grid grid-cols-3 gap-2 mt-1">
         {[
-          { label: 'P&L חודשי', value: fmtPnl(monthPnl), color: monthPnl >= 0 ? GREEN : RED },
+          { label: 'P&L חודשי', value: formatPnlIls(monthPnl), color: monthPnl >= 0 ? GREEN : RED },
           { label: 'ימי מסחר', value: String(tradeDays), color: TEXT },
           { label: 'ימים רווחיים', value: tradeDays > 0 ? `${Math.round(profitDs / tradeDays * 100)}%` : '—', color: GREEN },
         ].map(({ label, value, color }) => (
@@ -458,7 +465,7 @@ function TradeDetailPanel({ trade, onClose, aiReview, aiLoading, onAiReview }: {
             </div>
             {pnl !== null && (
               <p className="text-2xl font-bold" style={{ color: pnl >= 0 ? GREEN : RED }}>
-                {fmtPnl(pnl)}
+                {trade.pnl_amount != null ? formatPnlIls(trade.pnl_amount) : fmtPnl(pnl)}
               </p>
             )}
           </div>
@@ -688,10 +695,10 @@ export default function DashboardClient({
                   color={stats.wlGaugePct >= 60 ? GREEN : stats.wlGaugePct >= 35 ? ACCENT : RED} />
                 <div className="flex flex-col gap-1">
                   <p style={{ fontSize: 13, color: GREEN }}>
-                    ממוצע רווח {stats.avgWin > 0 ? `+${stats.avgWin.toFixed(1)}` : '—'}
+                    ממוצע רווח {stats.avgWin > 0 ? formatPnlIls(stats.avgWin) : '—'}
                   </p>
                   <p style={{ fontSize: 13, color: RED }}>
-                    ממוצע הפסד {stats.avgLoss < 0 ? stats.avgLoss.toFixed(1) : '—'}
+                    ממוצע הפסד {stats.avgLoss < 0 ? formatPnlIls(stats.avgLoss) : '—'}
                   </p>
                 </div>
               </div>
@@ -701,14 +708,14 @@ export default function DashboardClient({
             <Card>
               <p style={{ fontSize: 11, fontWeight: 500, letterSpacing: '0.07em', textTransform: 'uppercase', color: MUTED, marginBottom: 6 }}>P&L + מאזן</p>
               <p style={{ fontSize: 36, fontWeight: 800, lineHeight: 1, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums', color: stats.totalPnl >= 0 ? GREEN : RED }}>
-                {stats.totalPnl >= 0 ? '+' : ''}{stats.totalPnl.toFixed(0)}
+                {formatPnlIls(stats.totalPnl)}
               </p>
               <div className="flex items-center gap-3 mt-3">
                 <CircleGauge size={52} pct={stats.balGaugePct}
                   color={stats.totalPnl >= 0 ? GREEN : RED} />
                 <div className="flex flex-col gap-1">
-                  <p style={{ fontSize: 13, color: GREEN }}>רווח +{stats.grossProfit.toFixed(1)}</p>
-                  <p style={{ fontSize: 13, color: RED }}>הפסד ({Math.abs(stats.grossLoss).toFixed(1)})</p>
+                  <p style={{ fontSize: 13, color: GREEN }}>רווח {formatPnlIls(stats.grossProfit)}</p>
+                  <p style={{ fontSize: 13, color: RED }}>הפסד {formatPnlIls(stats.grossLoss)}</p>
                   <p style={{ fontSize: 13, color: MUTED }}>{totalClosed} עסקאות</p>
                 </div>
               </div>
@@ -786,7 +793,7 @@ export default function DashboardClient({
               {lineData.length > 0 && (
                 <p className="text-xs font-bold mt-2"
                   style={{ color: lineData[lineData.length - 1].value >= 0 ? GREEN : RED }}>
-                  {fmtPnl(lineData[lineData.length - 1].value)}
+                  {formatPnlIls(lineData[lineData.length - 1].value)}
                 </p>
               )}
             </Card>
@@ -837,7 +844,7 @@ export default function DashboardClient({
                       <div className="flex items-center gap-2 shrink-0">
                         {pnl !== null ? (
                           <p className="text-sm font-bold" style={{ color: pnl >= 0 ? GREEN : RED }}>
-                            {fmtPnl(pnl)}
+                            {t.pnl_amount != null ? formatPnlIls(t.pnl_amount) : fmtPnl(pnl)}
                           </p>
                         ) : (
                           <p className="text-xs font-semibold" style={{ color: ACCENT }}>פתוח</p>

@@ -20,8 +20,8 @@ interface Props {
 const GOLD = '#00d2d2';
 
 function fmt(v: number) {
-  if (v === 0) return '$0';
-  return `${v > 0 ? '+' : '−'}$${Math.abs(v).toFixed(1)}`;
+  if (v === 0) return '₪0';
+  return `${v > 0 ? '+' : '−'}₪${Math.round(Math.abs(v)).toLocaleString('en-US')}`;
 }
 
 export default function PnlChart({ daily, weekly, monthly }: Props) {

@@ -17,9 +17,15 @@ function pnlOf(t: TradePlan): number | null {
   return Number(t.exit_price) - Number(t.entry_price);
 }
 
-function fmt(v: number, d = 1): string {
-  if (v === 0) return '$0';
-  return `${v > 0 ? '+' : '−'}$${Math.abs(v).toFixed(d)}`;
+// ₪ P&L — stored on close when the trade has quantity + value-per-unit
+function pnlIls(t: TradePlan): number {
+  if (t.status !== 'closed' || t.exit_price == null) return 0;
+  return t.pnl_amount != null ? Number(t.pnl_amount) : 0;
+}
+
+function fmt(v: number): string {
+  if (v === 0) return '₪0';
+  return `${v > 0 ? '+' : '−'}₪${Math.round(Math.abs(v)).toLocaleString('en-US')}`;
 }
 
 function pnlColor(v: number): string {
@@ -125,18 +131,18 @@ export default async function StatsPage() {
   // ── Core stats ──────────────────────────────────────────────────────────────
   const totalTrades  = trades.length;
   const closedCount  = closed.length;
-  const totalPnl     = closed.reduce((s, t) => s + pnlOf(t)!, 0);
+  const totalPnl     = closed.reduce((s, t) => s + pnlIls(t), 0);
   const wins         = closed.filter(t => pnlOf(t)! > 0);
   const losses       = closed.filter(t => pnlOf(t)! <= 0);
   const winRate      = closedCount > 0 ? Math.round(wins.length / closedCount * 100) : 0;
   const avgRR        = trades.length > 0
     ? trades.reduce((s, t) => s + Number(t.rr_ratio), 0) / trades.length : 0;
   const avgWin       = wins.length > 0
-    ? wins.reduce((s, t) => s + pnlOf(t)!, 0) / wins.length : 0;
+    ? wins.reduce((s, t) => s + pnlIls(t), 0) / wins.length : 0;
   const avgLoss      = losses.length > 0
-    ? losses.reduce((s, t) => s + pnlOf(t)!, 0) / losses.length : 0;
+    ? losses.reduce((s, t) => s + pnlIls(t), 0) / losses.length : 0;
   const profitFactor = Math.abs(avgLoss) > 0
-    ? Math.abs(wins.reduce((s, t) => s + pnlOf(t)!, 0) / losses.reduce((s, t) => s + pnlOf(t)!, 1)) : 0;
+    ? Math.abs(wins.reduce((s, t) => s + pnlIls(t), 0) / losses.reduce((s, t) => s + pnlIls(t), 1)) : 0;
 
   // ── P&L chart data ──────────────────────────────────────────────────────────
   const dailyMap   = new Map<string, PeriodPoint>();
@@ -144,8 +150,8 @@ export default async function StatsPage() {
   const monthlyMap = new Map<string, PeriodPoint>();
 
   for (const t of closed) {
-    const p    = pnlOf(t)!;
-    const win  = p > 0 ? 1 : 0;
+    const p    = pnlIls(t);
+    const win  = pnlOf(t)! > 0 ? 1 : 0;
     const date = new Date(t.submitted_at);
 
     const dKey = t.submitted_at.slice(0, 10);
@@ -180,7 +186,7 @@ export default async function StatsPage() {
       trades:  prev.trades + 1,
       closedN: prev.closedN + (p != null ? 1 : 0),
       wins:    prev.wins + (p != null && p > 0 ? 1 : 0),
-      pnl:     prev.pnl + (p ?? 0),
+      pnl:     prev.pnl + pnlIls(t),
       rr:      prev.rr + Number(t.rr_ratio),
     });
   }
@@ -192,7 +198,7 @@ export default async function StatsPage() {
   // ── Day of week ─────────────────────────────────────────────────────────────
   const dowBars: Bar[] = HE_DAYS_S.map((lbl, i) => {
     const dayT = closed.filter(t => new Date(t.submitted_at).getDay() === i);
-    return { label: lbl, value: dayT.reduce((s, t) => s + pnlOf(t)!, 0), count: dayT.length };
+    return { label: lbl, value: dayT.reduce((s, t) => s + pnlIls(t), 0), count: dayT.length };
   });
   const bestDow  = dowBars.reduce((b, d) => d.value > b.value ? d : b, dowBars[0]);
   const worstDow = dowBars.reduce((b, d) => d.value < b.value ? d : b, dowBars[0]);
@@ -202,7 +208,7 @@ export default async function StatsPage() {
   for (const t of closed) {
     const h    = new Date(t.submitted_at).getHours();
     const prev = hourRaw.get(h) ?? { pnl: 0, count: 0 };
-    hourRaw.set(h, { pnl: prev.pnl + pnlOf(t)!, count: prev.count + 1 });
+    hourRaw.set(h, { pnl: prev.pnl + pnlIls(t), count: prev.count + 1 });
   }
   const hourBars: Bar[] = [...hourRaw.entries()]
     .sort(([a], [b]) => a - b)
@@ -220,7 +226,7 @@ export default async function StatsPage() {
       trades:  prev.trades + 1,
       closedN: prev.closedN + (p != null ? 1 : 0),
       wins:    prev.wins + (p != null && p > 0 ? 1 : 0),
-      pnl:     prev.pnl + (p ?? 0),
+      pnl:     prev.pnl + pnlIls(t),
     });
   }
   const symbols = [...symbolMap.entries()]
@@ -237,8 +243,8 @@ export default async function StatsPage() {
     : curL > 0 ? { type: 'loss' as const, count: curL }
     : null;
 
-  const bestTrade  = closed.length ? closed.reduce((b, t) => pnlOf(t)! > pnlOf(b)! ? t : b) : null;
-  const worstTrade = closed.length ? closed.reduce((w, t) => pnlOf(t)! < pnlOf(w)! ? t : w) : null;
+  const bestTrade  = closed.length ? closed.reduce((b, t) => pnlIls(t) > pnlIls(b) ? t : b) : null;
+  const worstTrade = closed.length ? closed.reduce((w, t) => pnlIls(t) < pnlIls(w) ? t : w) : null;
   const bestDay    = daily.length  ? daily.reduce((b, d)  => d.pnl > b.pnl ? d : b) : null;
   const worstDay   = daily.length  ? daily.reduce((b, d)  => d.pnl < b.pnl ? d : b) : null;
 
@@ -421,14 +427,14 @@ export default async function StatsPage() {
               {bestTrade && (
                 <div className="rounded-xl p-3" style={{ background: 'rgba(34,197,94,0.07)' }}>
                   <p className="text-[10px] mb-0.5" style={{ color: 'rgba(34,197,94,0.6)' }}>עסקה טובה ביותר</p>
-                  <p className="text-sm font-bold" style={{ color: '#22c55e' }}>{fmt(pnlOf(bestTrade)!)}</p>
+                  <p className="text-sm font-bold" style={{ color: '#22c55e' }}>{fmt(pnlIls(bestTrade))}</p>
                   <p className="text-[10px]" style={{ color: 'var(--color-tg-muted)' }}>{bestTrade.strategy}</p>
                 </div>
               )}
               {worstTrade && (
                 <div className="rounded-xl p-3" style={{ background: 'rgba(239,68,68,0.07)' }}>
                   <p className="text-[10px] mb-0.5" style={{ color: 'rgba(239,68,68,0.6)' }}>עסקה גרועה ביותר</p>
-                  <p className="text-sm font-bold" style={{ color: '#ef4444' }}>{fmt(pnlOf(worstTrade)!)}</p>
+                  <p className="text-sm font-bold" style={{ color: '#ef4444' }}>{fmt(pnlIls(worstTrade))}</p>
                   <p className="text-[10px]" style={{ color: 'var(--color-tg-muted)' }}>{worstTrade.strategy}</p>
                 </div>
               )}

@@ -35,6 +35,8 @@ const EMPTY_FORM: TradePlanInput = {
   trade_reason: '',
   emotional_state: 3,
   direction: null,
+  quantity: '',
+  value_per_unit: '',
 };
 
 type FormState = 'empty' | 'editing' | 'validating' | 'warning' | 'blocked' | 'success' | 'error';
@@ -198,6 +200,9 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
     const sl = slPrice;
     const tp = tpPrice;
 
+    const quantityNum = parseFloat(form.quantity);
+    const valuePerUnitNum = parseFloat(form.value_per_unit);
+
     const { error } = await supabase.from('trade_plans').insert({
       user_id: userId,
       strategy: form.strategy,
@@ -209,6 +214,8 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
       trade_reason: form.trade_reason.trim(),
       emotional_state: form.emotional_state,
       status: 'open',
+      quantity: form.quantity.trim() !== '' && !isNaN(quantityNum) ? quantityNum : null,
+      value_per_unit: form.value_per_unit.trim() !== '' && !isNaN(valuePerUnitNum) ? valuePerUnitNum : null,
     });
 
     if (error) {
@@ -398,6 +405,35 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
                   hint={tpPrice !== null ? `מחיר: ${fmtOffsetPrice(tpPrice)}` : hasEntry ? undefined : 'הזן מחיר כניסה'}
                 />
               </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-medium text-tg-muted">כמות</label>
+                  <input
+                    type="number"
+                    step="any"
+                    placeholder="0"
+                    value={form.quantity}
+                    onChange={(e) => setForm({ ...form, quantity: e.target.value })}
+                    className="w-full h-10 px-2 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none focus:border-tg-primary transition-colors text-center"
+                    style={{ background: 'var(--color-tg-surface-2)' }}
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-medium text-tg-muted">ערך ליחידה (₪)</label>
+                  <input
+                    type="number"
+                    step="any"
+                    placeholder="0.00"
+                    value={form.value_per_unit}
+                    onChange={(e) => setForm({ ...form, value_per_unit: e.target.value })}
+                    className="w-full h-10 px-2 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none focus:border-tg-primary transition-colors text-center"
+                    style={{ background: 'var(--color-tg-surface-2)' }}
+                  />
+                </div>
+              </div>
+              <p className="text-[10px] text-tg-muted">
+                אופציונלי — מלא כדי שהמערכת תחשב עבורך רווח/הפסד בש״ח (₪) בסגירת העסקה
+              </p>
               {rr !== null && rr > 0 && (
                 <div className="flex items-center justify-between px-4 py-2.5 rounded-xl animate-fade-in"
                   style={{

@@ -4,6 +4,7 @@ import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Bot } from 'lucide-react';
 import CloseTrade, { AIDebriefView, type AIDebriefResult } from '@/components/journal/CloseTrade';
+import { formatPnlIls } from '@/lib/utils';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const GOLD   = '#00d2d2';
@@ -35,6 +36,9 @@ interface Trade {
   submitted_at: string;
   closed_at: string | null;
   plan_score: number | null;
+  quantity: number | null;
+  value_per_unit: number | null;
+  pnl_amount: number | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -449,6 +453,8 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
               emotionalState={t.emotional_state}
               strategy={t.strategy}
               tradeReason={t.trade_reason}
+              quantity={t.quantity}
+              valuePerUnit={t.value_per_unit}
               onClosed={() => { setClosingTradeId(null); router.refresh(); }}
               onDebrief={result => setDebriefResults(prev => ({ ...prev, [t.id]: result }))}
             />
@@ -692,6 +698,11 @@ function TradeDetailModal({ trade, onClose, debriefResult, onDebrief }: {
                     %
                   </button>
                 </span>
+              </span>
+            )}
+            {trade.pnl_amount != null && (
+              <span className="text-sm font-bold" style={{ color: trade.pnl_amount >= 0 ? '#22c55e' : '#ef4444' }}>
+                {formatPnlIls(trade.pnl_amount)}
               </span>
             )}
           </p>
