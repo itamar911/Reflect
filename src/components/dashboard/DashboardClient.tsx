@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { Sparkles, TrendingUp } from 'lucide-react';
+import { Sparkles, TrendingUp, Percent, DollarSign } from 'lucide-react';
 import { formatPnlIls, formatPnlPoints } from '@/lib/utils';
 
 // ── Tokens ────────────────────────────────────────────────────────────────────
@@ -107,12 +107,26 @@ function computeAll(trades: DashTrade[]) {
   const winCount      = winTrades.length;
   const lossCount     = lossTrades.length;
   const neutralTrades = pnls.filter(p => p === 0).length;
-  // Monetary (₪) aggregates — driven by pnl_amount, missing values count as 0
+  // Monetary (₪/$) aggregates — driven by pnl_amount, missing values count as 0
   const grossProfit   = winTrades.reduce((s, t) => s + (t.pnl_amount ?? 0), 0);
   const grossLoss     = lossTrades.reduce((s, t) => s + (t.pnl_amount ?? 0), 0);
   const totalPnl      = closed.reduce((s, t) => s + (t.pnl_amount ?? 0), 0);
   const avgWin        = winCount  > 0 ? grossProfit / winCount  : 0;
   const avgLoss       = lossCount > 0 ? grossLoss   / lossCount : 0;
+  const totalPnlPoints = pnls.reduce((s, p) => s + p, 0);
+
+  const closedWithAmount = closed.filter(t => t.pnl_amount != null);
+  const hasPnlAmount     = closedWithAmount.length > 0;
+  const pnlCurrencies    = Array.from(new Set(closedWithAmount.map(t => t.pnl_currency ?? '₪')));
+  const pnlCurrency      = pnlCurrencies.length === 1 ? pnlCurrencies[0] : '₪';
+
+  // Period P&L = current calendar month
+  const now = new Date();
+  const periodPnl = closed.reduce((s, t) => {
+    const d = new Date(t.closed_at ?? t.submitted_at);
+    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
+      ? s + (t.pnl_amount ?? 0) : s;
+  }, 0);
 
   const dayMap: Record<string, number> = {};
   for (const t of closed) {
@@ -151,15 +165,12 @@ function computeAll(trades: DashTrade[]) {
 
   const profitDayPct = totalDays > 0 ? Math.round(profitDays / totalDays * 100) : 0;
   const winPct       = (winCount + lossCount) > 0 ? Math.round(winCount / (winCount + lossCount) * 100) : 0;
-  const wlGaugePct   = Math.round(Math.min(wlRatio / 2 * 100, 100));
-  const balGaugePct  = (grossProfit + Math.abs(grossLoss)) > 0
-    ? Math.round(grossProfit / (grossProfit + Math.abs(grossLoss)) * 100) : 0;
 
   return {
     profitDays, lossDays, neutralDays, profitDayPct,
     winTrades: winCount, lossTrades: lossCount, neutralTrades, winPct,
-    avgWin, avgLoss, grossProfit, grossLoss, totalPnl,
-    wlGaugePct, balGaugePct,
+    avgWin, avgLoss, grossProfit, grossLoss, totalPnl, totalPnlPoints,
+    hasPnlAmount, pnlCurrency, periodPnl,
     radarScores,
     dayMap,
     dailySeries:      buildDailySeries(dayMap, 30),
@@ -169,18 +180,60 @@ function computeAll(trades: DashTrade[]) {
   };
 }
 
-// ── CircleGauge ───────────────────────────────────────────────────────────────
-function CircleGauge({ pct, size = 72, color }: { pct: number; size?: number; color: string }) {
-  const r    = (size - 10) / 2;
-  const circ = 2 * Math.PI * r;
-  const off  = circ * (1 - Math.min(Math.max(pct, 0), 100) / 100);
+// ── SemiGauge (semicircle, multi-segment) ────────────────────────────────────
+function semiArcPoint(cx: number, cy: number, r: number, angleDeg: number): [number, number] {
+  const rad = (angleDeg * Math.PI) / 180;
+  return [cx + r * Math.cos(rad), cy - r * Math.sin(rad)];
+}
+function semiArcPath(cx: number, cy: number, r: number, a0: number, a1: number): string {
+  const [x0, y0] = semiArcPoint(cx, cy, r, a0);
+  const [x1, y1] = semiArcPoint(cx, cy, r, a1);
+  const largeArc = Math.abs(a0 - a1) > 180 ? 1 : 0;
+  return `M ${x0} ${y0} A ${r} ${r} 0 ${largeArc} 1 ${x1} ${y1}`;
+}
+function SemiGauge({ segments, width = 140, strokeWidth = 12 }: {
+  segments: { value: number; color: string }[]; width?: number; strokeWidth?: number;
+}) {
+  const r      = (width - strokeWidth) / 2;
+  const cx     = width / 2;
+  const cy     = r + strokeWidth / 2;
+  const height = cy + strokeWidth / 2;
+  const total  = segments.reduce((s, sg) => s + Math.max(sg.value, 0), 0);
+
+  let cursor = 180;
+  const arcs: { d: string; color: string }[] = [];
+  segments.forEach(sg => {
+    const span = total > 0 ? (Math.max(sg.value, 0) / total) * 180 : 0;
+    if (span <= 0) return;
+    const start = cursor;
+    const end   = cursor - span;
+    cursor = end;
+    arcs.push({ d: semiArcPath(cx, cy, r, start, end), color: sg.color });
+  });
+
   return (
-    <svg width={size} height={size} style={{ transform: 'rotate(-90deg)', flexShrink: 0 }}>
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={7} />
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color}
-        strokeWidth={7} strokeLinecap="round"
-        strokeDasharray={`${circ} ${circ}`} strokeDashoffset={off} />
+    <svg width={width} height={height} style={{ flexShrink: 0 }}>
+      <path d={semiArcPath(cx, cy, r, 180, 0)} fill="none"
+        stroke="rgba(255,255,255,0.06)" strokeWidth={strokeWidth} strokeLinecap="round" />
+      {arcs.map((a, i) => (
+        <path key={i} d={a.d} fill="none" stroke={a.color}
+          strokeWidth={strokeWidth} strokeLinecap="round" />
+      ))}
     </svg>
+  );
+}
+
+// ── SplitBar (horizontal, two-tone) ───────────────────────────────────────────
+function SplitBar({ left, right, leftColor, rightColor, height = 10 }: {
+  left: number; right: number; leftColor: string; rightColor: string; height?: number;
+}) {
+  const total    = left + right;
+  const leftPct  = total > 0.001 ? (left / total) * 100 : 50;
+  return (
+    <div className="flex w-full overflow-hidden" style={{ height, borderRadius: 999 }}>
+      <div style={{ width: `${leftPct}%`, background: leftColor }} />
+      <div style={{ width: `${100 - leftPct}%`, background: rightColor }} />
+    </div>
   );
 }
 
@@ -621,9 +674,6 @@ export default function DashboardClient({
   const hour     = new Date().getHours();
   const greeting = hour < 5 ? 'לילה טוב' : hour < 12 ? 'בוקר טוב' : hour < 17 ? 'צהריים טובים' : 'ערב טוב';
 
-  const totalClosed = stats.winTrades + stats.lossTrades + stats.neutralTrades;
-  const totalDays   = stats.profitDays + stats.lossDays + stats.neutralDays;
-
   function prevMonth() { setCalDate(d => new Date(d.getFullYear(), d.getMonth() - 1, 1)); }
   function nextMonth() { setCalDate(d => new Date(d.getFullYear(), d.getMonth() + 1, 1)); }
 
@@ -656,74 +706,73 @@ export default function DashboardClient({
 
             {/* Card 1: Profitable Days */}
             <Card>
-              <p style={{ fontSize: 11, fontWeight: 500, letterSpacing: '0.07em', textTransform: 'uppercase', color: MUTED, marginBottom: 6 }}>ימים רווחיים</p>
-              <p style={{ fontSize: 36, fontWeight: 800, lineHeight: 1, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums', color: stats.profitDayPct >= 50 ? GREEN : stats.profitDayPct >= 35 ? ACCENT : RED }}>
-                {stats.profitDayPct}%
-              </p>
-              <div className="flex items-center gap-3 mt-3">
-                <CircleGauge size={52} pct={stats.profitDayPct}
-                  color={stats.profitDayPct >= 50 ? GREEN : stats.profitDayPct >= 35 ? ACCENT : RED} />
-                <div className="flex flex-col gap-1">
-                  <p style={{ fontSize: 13, color: GREEN }}>▲ {stats.profitDays} רווח</p>
-                  <p style={{ fontSize: 13, color: RED }}>▼ {stats.lossDays} הפסד</p>
-                  <p style={{ fontSize: 13, color: MUTED }}>— {stats.neutralDays} ניטרלי</p>
+              <div className="flex items-center gap-1.5" style={{ marginBottom: 10 }}>
+                <Percent size={12} color={MUTED} />
+                <p style={{ fontSize: 11, fontWeight: 500, letterSpacing: '0.07em', textTransform: 'uppercase', color: MUTED }}>ימים רווחיים</p>
+              </div>
+              <div className="flex flex-col items-center">
+                <SemiGauge width={140} strokeWidth={12} segments={[
+                  { value: stats.profitDays,  color: GREEN },
+                  { value: stats.neutralDays, color: TEXT },
+                  { value: stats.lossDays,    color: RED },
+                ]} />
+                <div className="flex items-center gap-4 mt-1">
+                  <span style={{ fontSize: 18, fontWeight: 800, color: GREEN, fontVariantNumeric: 'tabular-nums' }}>{stats.profitDays}</span>
+                  <span style={{ fontSize: 18, fontWeight: 800, color: TEXT, fontVariantNumeric: 'tabular-nums' }}>{stats.neutralDays}</span>
+                  <span style={{ fontSize: 18, fontWeight: 800, color: RED, fontVariantNumeric: 'tabular-nums' }}>{stats.lossDays}</span>
                 </div>
               </div>
             </Card>
 
             {/* Card 2: Win Rate */}
             <Card>
-              <p style={{ fontSize: 11, fontWeight: 500, letterSpacing: '0.07em', textTransform: 'uppercase', color: MUTED, marginBottom: 6 }}>אחוז הצלחה</p>
-              <p style={{ fontSize: 36, fontWeight: 800, lineHeight: 1, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums', color: stats.winPct >= 55 ? GREEN : stats.winPct >= 40 ? ACCENT : RED }}>
-                {stats.winPct}%
-              </p>
-              <div className="flex items-center gap-3 mt-3">
-                <CircleGauge size={52} pct={stats.winPct}
-                  color={stats.winPct >= 55 ? GREEN : stats.winPct >= 40 ? ACCENT : RED} />
-                <div className="flex flex-col gap-1">
-                  <p style={{ fontSize: 13, color: GREEN }}>▲ {stats.winTrades} רווח</p>
-                  <p style={{ fontSize: 13, color: RED }}>▼ {stats.lossTrades} הפסד</p>
-                  <p style={{ fontSize: 13, color: MUTED }}>— {stats.neutralTrades} ניטרלי</p>
-                </div>
+              <p style={{ fontSize: 11, fontWeight: 500, letterSpacing: '0.07em', textTransform: 'uppercase', color: MUTED, marginBottom: 10 }}>אחוזי הצלחה</p>
+              <div className="flex flex-col items-center" style={{ position: 'relative' }}>
+                <SemiGauge width={150} strokeWidth={14} segments={[
+                  { value: stats.winPct,       color: GREEN },
+                  { value: 100 - stats.winPct, color: RED },
+                ]} />
+                <span style={{
+                  position: 'absolute', bottom: 6, left: 0, right: 0, textAlign: 'center',
+                  fontSize: 28, fontWeight: 800, color: TEXT, fontVariantNumeric: 'tabular-nums',
+                }}>{stats.winPct}%</span>
               </div>
             </Card>
 
-            {/* Card 3: Avg P/L ratio */}
+            {/* Card 3: Avg Win/Loss ratio */}
             <Card>
-              <p style={{ fontSize: 11, fontWeight: 500, letterSpacing: '0.07em', textTransform: 'uppercase', color: MUTED, marginBottom: 6 }}>יחס רווח/הפסד</p>
-              <p style={{ fontSize: 36, fontWeight: 800, lineHeight: 1, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums', color: stats.wlGaugePct >= 60 ? GREEN : stats.wlGaugePct >= 35 ? ACCENT : RED }}>
-                {stats.avgWin > 0 && stats.avgLoss < 0
-                  ? `${(stats.avgWin / Math.abs(stats.avgLoss)).toFixed(1)}x`
-                  : '—'}
-              </p>
-              <div className="flex items-center gap-3 mt-3">
-                <CircleGauge size={52} pct={stats.wlGaugePct}
-                  color={stats.wlGaugePct >= 60 ? GREEN : stats.wlGaugePct >= 35 ? ACCENT : RED} />
-                <div className="flex flex-col gap-1">
-                  <p style={{ fontSize: 13, color: GREEN }}>
-                    ממוצע רווח {stats.avgWin > 0 ? formatPnlIls(stats.avgWin) : '—'}
-                  </p>
-                  <p style={{ fontSize: 13, color: RED }}>
-                    ממוצע הפסד {stats.avgLoss < 0 ? formatPnlIls(stats.avgLoss) : '—'}
-                  </p>
+              <p style={{ fontSize: 11, fontWeight: 500, letterSpacing: '0.07em', textTransform: 'uppercase', color: MUTED, marginBottom: 14 }}>יחס רווח/הפסד ממוצע</p>
+              <div className="flex items-center gap-4">
+                <span style={{ fontSize: 26, fontWeight: 800, color: ACCENT, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+                  {stats.avgLoss < -0.001 ? (stats.avgWin / Math.abs(stats.avgLoss)).toFixed(2) : '—'}
+                </span>
+                <div className="flex flex-col gap-1.5 flex-1">
+                  <SplitBar left={stats.avgWin} right={Math.abs(stats.avgLoss)} leftColor={GREEN} rightColor={RED} />
+                  <div className="flex items-center justify-between">
+                    <span style={{ fontSize: 12, fontWeight: 700, color: GREEN, fontVariantNumeric: 'tabular-nums' }}>{formatPnlIls(stats.avgWin, stats.pnlCurrency)}</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: RED, fontVariantNumeric: 'tabular-nums' }}>{formatPnlIls(stats.avgLoss, stats.pnlCurrency)}</span>
+                  </div>
                 </div>
               </div>
             </Card>
 
             {/* Card 4: P&L Balance */}
             <Card>
-              <p style={{ fontSize: 11, fontWeight: 500, letterSpacing: '0.07em', textTransform: 'uppercase', color: MUTED, marginBottom: 6 }}>P&L + מאזן</p>
-              <p style={{ fontSize: 36, fontWeight: 800, lineHeight: 1, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums', color: stats.totalPnl >= 0 ? GREEN : RED }}>
-                {formatPnlIls(stats.totalPnl)}
-              </p>
-              <div className="flex items-center gap-3 mt-3">
-                <CircleGauge size={52} pct={stats.balGaugePct}
-                  color={stats.totalPnl >= 0 ? GREEN : RED} />
-                <div className="flex flex-col gap-1">
-                  <p style={{ fontSize: 13, color: GREEN }}>רווח {formatPnlIls(stats.grossProfit)}</p>
-                  <p style={{ fontSize: 13, color: RED }}>הפסד {formatPnlIls(stats.grossLoss)}</p>
-                  <p style={{ fontSize: 13, color: MUTED }}>{totalClosed} עסקאות</p>
+              <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: 'rgba(0,210,210,0.1)' }}>
+                  <DollarSign size={14} color={ACCENT} strokeWidth={2} />
                 </div>
+                <p style={{ fontSize: 11, fontWeight: 500, letterSpacing: '0.07em', textTransform: 'uppercase', color: MUTED }}>מאזן + P&L</p>
+              </div>
+              <div className="flex items-baseline gap-2">
+                <span style={{ fontSize: 30, fontWeight: 800, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums', color: stats.totalPnl >= 0 ? GREEN : RED }}>
+                  {stats.hasPnlAmount ? formatPnlIls(stats.totalPnl, stats.pnlCurrency) : fmtPnl(stats.totalPnlPoints)}
+                </span>
+                {stats.hasPnlAmount && (
+                  <span style={{ fontSize: 14, fontWeight: 600, color: MUTED, fontVariantNumeric: 'tabular-nums' }}>
+                    ({formatPnlIls(stats.periodPnl, stats.pnlCurrency)})
+                  </span>
+                )}
               </div>
             </Card>
           </div>
