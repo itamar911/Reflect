@@ -10,8 +10,8 @@ const SURF    = '#141420';
 const SURF2   = '#1c1c2c';
 const BORDER  = '#32324a';
 const TEXT    = '#f1f5f9';
-const TEXT2   = '#c8d4e0';
-const MUTED   = '#8899aa';
+const TEXT2   = '#ffffff';
+const MUTED   = '#ffffff';
 const GREEN   = '#22c55e';
 const RED     = '#ef4444';
 

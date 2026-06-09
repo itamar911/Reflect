@@ -61,7 +61,7 @@ function BarChart({ bars, height = 72 }: { bars: Bar[]; height?: number }) {
             <rect x={x.toFixed(1)} y={y.toFixed(1)} width={bw.toFixed(1)} height={bh.toFixed(1)}
               fill={col} rx="2" />
             <text x={(x + bw / 2).toFixed(1)} y={height - 2} textAnchor="middle"
-              fontSize="7.5" fill="rgba(255,255,255,0.35)">{b.label}</text>
+              fontSize="7.5" fill="#ffffff">{b.label}</text>
           </g>
         );
       })}

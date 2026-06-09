@@ -126,7 +126,7 @@ export default function PnlChart({ daily, weekly, monthly }: Props) {
             <div className="flex" style={{ marginTop: -6 }}>
               {data.map((d, i) => (
                 <div key={i} style={{ flex: 1, textAlign: 'center' }}>
-                  <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.28)' }}>{d.label}</span>
+                  <span style={{ fontSize: 9, color: '#ffffff' }}>{d.label}</span>
                 </div>
               ))}
             </div>

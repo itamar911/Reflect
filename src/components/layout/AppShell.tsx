@@ -72,7 +72,7 @@ function NavLink({ item, expanded, active }: { item: NavItem; expanded: boolean;
         expanded ? 'gap-3 px-3 py-2.5' : 'justify-center py-3',
       )}
       style={{
-        color:      active ? ACCENT : 'rgba(255,255,255,0.45)',
+        color:      active ? ACCENT : '#ffffff',
         background: active ? 'rgba(0,210,210,0.12)' : 'transparent',
         boxShadow:  active ? `inset 0 0 0 1px rgba(0,210,210,0.22)` : undefined,
       }}
@@ -244,7 +244,7 @@ export default function AppShell({
               'flex items-center rounded-xl transition-colors hover:bg-white/5 cursor-pointer',
               expanded ? 'gap-3 px-3 py-2.5' : 'justify-center py-3',
             )}
-            style={{ color: 'rgba(255,255,255,0.35)' }}
+            style={{ color: '#ffffff' }}
           >
             <IconLogout />
             {expanded && <span className="text-sm font-medium">התנתק</span>}
@@ -263,7 +263,7 @@ export default function AppShell({
               >
                 {(displayName || '?').charAt(0).toUpperCase()}
               </div>
-              <p className="flex-1 text-xs font-medium truncate min-w-0" style={{ color: 'rgba(255,255,255,0.65)' }}>
+              <p className="flex-1 text-xs font-medium truncate min-w-0" style={{ color: '#ffffff' }}>
                 {displayName}
               </p>
               <ThemeToggle className="p-1 rounded-md transition-opacity hover:opacity-70 shrink-0" />
