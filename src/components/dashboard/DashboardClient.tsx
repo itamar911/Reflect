@@ -315,11 +315,11 @@ function RadarChart({ scores }: { scores: number[] }) {
         <text x={cx} y={cy + 10} textAnchor="middle" fontSize={56} fontWeight="bold" fill={ACCENT}>
           {avgScore}
         </text>
-        <text x={cx} y={cy + 34} textAnchor="middle" fontSize={13} fill={MUTED}>ציון כולל</text>
+        <text x={cx} y={cy + 34} textAnchor="middle" fontSize={13} fontWeight={600} fill={MUTED}>ציון כולל</text>
       </svg>
       {hov !== null && (
         <div className="text-center text-xs px-3 py-1.5 rounded-xl mx-4"
-          style={{ background: SURF2, color: TEXT2 }}>
+          style={{ background: SURF2, color: TEXT2, fontWeight: 600 }}>
           <span style={{ color: ACCENT, fontWeight: 600 }}>{R_LABELS[hov]}</span>
           {' '}— {scores[hov]}% — {R_DESCS[hov]}
         </div>
@@ -445,9 +445,9 @@ function MonthCalendar({
       {/* Day headers */}
       <div className="grid gap-0.5" style={{ gridTemplateColumns: 'repeat(8, 1fr)' }}>
         {DAYS_SH.map(d => (
-          <div key={d} className="text-center text-[9px] font-semibold" style={{ color: MUTED }}>{d}</div>
+          <div key={d} className="text-center text-[9px] font-semibold" style={{ color: MUTED, fontWeight: 600 }}>{d}</div>
         ))}
-        <div className="text-center text-[9px] font-semibold" style={{ color: MUTED }}>שבוע</div>
+        <div className="text-center text-[9px] font-semibold" style={{ color: MUTED, fontWeight: 600 }}>שבוע</div>
       </div>
 
       {/* Weeks */}
@@ -464,7 +464,7 @@ function MonthCalendar({
                   {day && (
                     <>
                       <span className="text-[10px] font-medium leading-none"
-                        style={{ color: has ? (pnl >= 0 ? GREEN : RED) : MUTED }}>{day}</span>
+                        style={{ color: has ? (pnl >= 0 ? GREEN : RED) : MUTED, fontWeight: 600 }}>{day}</span>
                       {has && (
                         <span className="text-[8px] font-semibold leading-none mt-0.5"
                           style={{ color: pnl >= 0 ? GREEN : RED }}>
@@ -495,7 +495,7 @@ function MonthCalendar({
           { label: 'ימים רווחיים', value: tradeDays > 0 ? `${Math.round(profitDs / tradeDays * 100)}%` : '—', color: GREEN },
         ].map(({ label, value, color }) => (
           <div key={label} className="rounded-xl p-2 text-center" style={{ background: SURF2 }}>
-            <p className="text-[9px]" style={{ color: MUTED }}>{label}</p>
+            <p className="text-[9px]" style={{ color: MUTED, fontWeight: 600 }}>{label}</p>
             <p className="text-xs font-bold" style={{ color }}>{value}</p>
           </div>
         ))}
@@ -542,7 +542,7 @@ function TradeDetailPanel({ trade, onClose, aiReview, aiLoading, onAiReview }: {
                   }}>
                   {dir === 'long' ? 'לונג ↑' : 'שורט ↓'}
                 </span>
-                <span className="text-[10px]" style={{ color: MUTED }}>{fmtDateTime(trade.submitted_at)}</span>
+                <span className="text-[10px]" style={{ color: MUTED, fontWeight: 600 }}>{fmtDateTime(trade.submitted_at)}</span>
               </div>
             </div>
             {pnl !== null && (
@@ -563,7 +563,7 @@ function TradeDetailPanel({ trade, onClose, aiReview, aiLoading, onAiReview }: {
                ['Stop Loss', trade.stop_loss.toFixed(2), RED],
                ['Take Profit', trade.take_profit.toFixed(2), GREEN]] as [string,string,string][]).map(([l,v,c]) => (
               <div key={l} className="rounded-xl p-2.5 text-center" style={{ background: SURF2 }}>
-                <p className="text-[10px]" style={{ color: MUTED }}>{l}</p>
+                <p className="text-[10px]" style={{ color: MUTED, fontWeight: 600 }}>{l}</p>
                 <p className="text-sm font-bold font-mono" style={{ color: c }}>{v}</p>
               </div>
             ))}
@@ -573,20 +573,20 @@ function TradeDetailPanel({ trade, onClose, aiReview, aiLoading, onAiReview }: {
             <div className="rounded-xl px-3 py-2.5 flex items-center justify-between"
               style={{ background: pnl != null && pnl >= 0 ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)' }}>
               <div>
-                <p className="text-[10px]" style={{ color: MUTED }}>מחיר יציאה</p>
+                <p className="text-[10px]" style={{ color: MUTED, fontWeight: 600 }}>מחיר יציאה</p>
                 <p className="text-sm font-bold font-mono"
                   style={{ color: pnl != null && pnl >= 0 ? GREEN : RED }}>
                   {Number(trade.exit_price).toFixed(2)}
                 </p>
               </div>
               <div className="text-left">
-                <p className="text-[10px]" style={{ color: MUTED }}>R:R</p>
+                <p className="text-[10px]" style={{ color: MUTED, fontWeight: 600 }}>R:R</p>
                 <p className="text-sm font-bold" style={{ color: ACCENT }}>1:{trade.rr_ratio.toFixed(1)}</p>
               </div>
               {trade.closed_at && (
                 <div className="text-left">
-                  <p className="text-[10px]" style={{ color: MUTED }}>נסגרה</p>
-                  <p className="text-xs" style={{ color: TEXT2 }}>{fmtDate(trade.closed_at)}</p>
+                  <p className="text-[10px]" style={{ color: MUTED, fontWeight: 600 }}>נסגרה</p>
+                  <p className="text-xs" style={{ color: TEXT2, fontWeight: 600 }}>{fmtDate(trade.closed_at)}</p>
                 </div>
               )}
             </div>
@@ -594,15 +594,15 @@ function TradeDetailPanel({ trade, onClose, aiReview, aiLoading, onAiReview }: {
 
           {trade.trade_reason && (
             <div className="rounded-xl p-3" style={{ background: SURF2, borderRight: `2px solid ${ACCENT}` }}>
-              <p className="text-[10px] font-semibold mb-1" style={{ color: MUTED }}>סיבת כניסה</p>
-              <p className="text-xs leading-relaxed" style={{ color: TEXT2 }}>{trade.trade_reason}</p>
+              <p className="text-[10px] font-semibold mb-1" style={{ color: MUTED, fontWeight: 600 }}>סיבת כניסה</p>
+              <p className="text-xs leading-relaxed" style={{ color: TEXT2, fontWeight: 600 }}>{trade.trade_reason}</p>
             </div>
           )}
 
           {trade.exit_reason && (
             <div className="rounded-xl p-3" style={{ background: SURF2, borderRight: `2px solid ${BORDER}` }}>
-              <p className="text-[10px] font-semibold mb-1" style={{ color: MUTED }}>סיבת יציאה</p>
-              <p className="text-xs leading-relaxed" style={{ color: TEXT2 }}>{trade.exit_reason}</p>
+              <p className="text-[10px] font-semibold mb-1" style={{ color: MUTED, fontWeight: 600 }}>סיבת יציאה</p>
+              <p className="text-xs leading-relaxed" style={{ color: TEXT2, fontWeight: 600 }}>{trade.exit_reason}</p>
             </div>
           )}
 
@@ -623,13 +623,13 @@ function TradeDetailPanel({ trade, onClose, aiReview, aiLoading, onAiReview }: {
           )}
           {aiReview && (
             <div>
-              <p className="text-xs font-semibold mb-2" style={{ color: MUTED }}>ניתוח AI</p>
-              <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: TEXT2 }}>{aiReview}</p>
+              <p className="text-xs font-semibold mb-2" style={{ color: MUTED, fontWeight: 600 }}>ניתוח AI</p>
+              <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: TEXT2, fontWeight: 600 }}>{aiReview}</p>
             </div>
           )}
 
           <button onClick={onClose} className="py-2.5 rounded-xl text-sm font-medium"
-            style={{ background: SURF2, color: TEXT2 }}>סגור</button>
+            style={{ background: SURF2, color: TEXT2, fontWeight: 600 }}>סגור</button>
         </div>
       </div>
     </div>
@@ -722,7 +722,7 @@ export default function DashboardClient({
 
       {/* ── Greeting ──────────────────────────────────────────────────────── */}
       <div style={{ marginBottom: 4 }}>
-        <p style={{ fontSize: 11, fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase', color: MUTED, marginBottom: 4 }}>
+        <p style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: MUTED, marginBottom: 4 }}>
           {dateStr}
         </p>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: TEXT, letterSpacing: '-0.02em', lineHeight: 1 }}>
@@ -735,7 +735,7 @@ export default function DashboardClient({
         <Card className="text-center py-12 flex flex-col items-center gap-3">
           <TrendingUp size={48} />
           <p className="text-base font-semibold" style={{ color: TEXT }}>ברוך הבא ל-Reflect</p>
-          <p className="text-sm" style={{ color: TEXT2 }}>תעד עסקה ראשונה כדי להתחיל</p>
+          <p className="text-sm" style={{ color: TEXT2, fontWeight: 600 }}>תעד עסקה ראשונה כדי להתחיל</p>
         </Card>
       )}
 
@@ -755,9 +755,9 @@ export default function DashboardClient({
                   </p>
                   <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                     <span style={{ fontSize: 14, fontWeight: 800, color: GREEN, fontVariantNumeric: 'tabular-nums' }}>{stats.profitDays}</span>
-                    <span style={{ fontSize: 10, color: MUTED }}>|</span>
+                    <span style={{ fontSize: 10, color: MUTED, fontWeight: 600 }}>|</span>
                     <span style={{ fontSize: 14, fontWeight: 700, color: '#ffffff', fontVariantNumeric: 'tabular-nums' }}>{stats.neutralDays}</span>
-                    <span style={{ fontSize: 10, color: MUTED }}>|</span>
+                    <span style={{ fontSize: 10, color: MUTED, fontWeight: 600 }}>|</span>
                     <span style={{ fontSize: 14, fontWeight: 800, color: RED, fontVariantNumeric: 'tabular-nums' }}>{stats.lossDays}</span>
                   </div>
                 </div>
@@ -782,7 +782,7 @@ export default function DashboardClient({
                   </p>
                   <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                     <span style={{ fontSize: 14, fontWeight: 800, color: GREEN, fontVariantNumeric: 'tabular-nums' }}>{stats.winTrades}</span>
-                    <span style={{ fontSize: 10, color: MUTED }}>|</span>
+                    <span style={{ fontSize: 10, color: MUTED, fontWeight: 600 }}>|</span>
                     <span style={{ fontSize: 14, fontWeight: 800, color: RED, fontVariantNumeric: 'tabular-nums' }}>{stats.lossTrades}</span>
                   </div>
                 </div>
@@ -855,7 +855,7 @@ export default function DashboardClient({
                 {R_LABELS.map((l, i) => (
                   <div key={l} className="text-center rounded-lg py-1.5"
                     style={{ background: SURF2, border: `1px solid ${BORDER}`, borderRadius: 8, padding: '6px 4px' }}>
-                    <p style={{ fontSize: 11, color: MUTED }}>{l}</p>
+                    <p style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>{l}</p>
                     <p style={{ fontSize: 15, fontWeight: 700, color: stats.radarScores[i] >= 60 ? GREEN : stats.radarScores[i] >= 35 ? ACCENT : RED }}>
                       {stats.radarScores[i]}
                     </p>
@@ -936,7 +936,7 @@ export default function DashboardClient({
               <SectionTitle>עסקאות אחרונות</SectionTitle>
               <div className="flex flex-col gap-0">
                 {recent.length === 0 ? (
-                  <p className="text-sm text-center py-6" style={{ color: MUTED }}>אין עסקאות</p>
+                  <p className="text-sm text-center py-6" style={{ color: MUTED, fontWeight: 600 }}>אין עסקאות</p>
                 ) : recent.map((t, i) => {
                   const pnl  = calcPnl(t);
                   const dir  = tradeDir(t);
@@ -957,7 +957,7 @@ export default function DashboardClient({
                             {dir === 'long' ? '↑ לונג' : '↓ שורט'}
                           </span>
                         </div>
-                        <p className="text-[10px] mt-0.5" style={{ color: MUTED }}>
+                        <p className="text-[10px] mt-0.5" style={{ color: MUTED, fontWeight: 600 }}>
                           {fmtDateTime(t.submitted_at)} · כניסה {t.entry_price.toFixed(2)}
                           {t.exit_price != null ? ` · יציאה ${t.exit_price.toFixed(2)}` : ''}
                         </p>
@@ -978,7 +978,7 @@ export default function DashboardClient({
                         )}
                         <button onClick={() => setSelTrade(t)}
                           className="text-[10px] px-2 py-1 rounded-lg font-medium transition-opacity hover:opacity-80"
-                          style={{ background: SURF2, color: TEXT2, whiteSpace: 'nowrap' }}>
+                          style={{ background: SURF2, color: TEXT2, fontWeight: 600, whiteSpace: 'nowrap' }}>
                           פרטים
                         </button>
                       </div>

@@ -78,7 +78,7 @@ function NavLink({ item, expanded, active }: { item: NavItem; expanded: boolean;
       }}
     >
       {item.icon}
-      {expanded && <span className="font-medium truncate" style={{ fontSize: 16 }}>{item.label}</span>}
+      {expanded && <span className="font-semibold truncate" style={{ fontSize: 16 }}>{item.label}</span>}
     </Link>
   );
 }
@@ -247,7 +247,7 @@ export default function AppShell({
             style={{ color: '#ffffff' }}
           >
             <IconLogout />
-            {expanded && <span className="text-sm font-medium">התנתק</span>}
+            {expanded && <span className="text-sm font-semibold">התנתק</span>}
           </button>
         </nav>
 
@@ -263,7 +263,7 @@ export default function AppShell({
               >
                 {(displayName || '?').charAt(0).toUpperCase()}
               </div>
-              <p className="flex-1 text-xs font-medium truncate min-w-0" style={{ color: '#ffffff' }}>
+              <p className="flex-1 text-xs font-semibold truncate min-w-0" style={{ color: '#ffffff' }}>
                 {displayName}
               </p>
               <ThemeToggle className="p-1 rounded-md transition-opacity hover:opacity-70 shrink-0" />

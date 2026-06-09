@@ -170,7 +170,7 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
             <button
               onClick={() => { setShowFilter(v => !v); setShowActions(false); }}
               className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium"
-              style={{ background: SURF, border: `1px solid ${BORDER}`, color: TEXT2 }}>
+              style={{ background: SURF, border: `1px solid ${BORDER}`, color: TEXT2, fontWeight: 600 }}>
               <FilterIcon />
               סינון
               {filterStatus !== 'all' && (
@@ -187,6 +187,7 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
                     style={{
                       background: filterStatus === s ? 'rgba(0,210,210,0.12)' : 'transparent',
                       color: filterStatus === s ? GOLD : TEXT2,
+                      fontWeight: 600,
                     }}>
                     {s === 'all' ? 'הכל' : s === 'open' ? 'פתוחות' : 'סגורות'}
                   </button>
@@ -200,7 +201,7 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
             <button
               onClick={() => { setShowActions(v => !v); setShowFilter(false); }}
               className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium"
-              style={{ background: SURF, border: `1px solid ${BORDER}`, color: TEXT2 }}>
+              style={{ background: SURF, border: `1px solid ${BORDER}`, color: TEXT2, fontWeight: 600 }}>
               פעולות
               <ChevronIcon />
             </button>
@@ -210,7 +211,7 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
                 <button
                   onClick={() => { router.refresh(); setShowActions(false); }}
                   className="px-3 py-1.5 rounded-lg text-sm text-right transition-all hover:opacity-80"
-                  style={{ color: TEXT2 }}>
+                  style={{ color: TEXT2, fontWeight: 600 }}>
                   רענן נתונים
                 </button>
                 {selected.size > 0 && (
@@ -270,7 +271,7 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
             <tbody>
               {pageTrades.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="text-center py-14 text-sm" style={{ color: MUTED }}>
+                  <td colSpan={11} className="text-center py-14 text-sm" style={{ color: MUTED, fontWeight: 600 }}>
                     לא נמצאו עסקאות
                   </td>
                 </tr>
@@ -303,7 +304,7 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
 
                     {/* Close date */}
                     <TD>
-                      <span style={{ color: TEXT2 }}>
+                      <span style={{ color: TEXT2, fontWeight: 600 }}>
                         {isClosed && t.closed_at ? fmtDate(t.closed_at) : '—'}
                       </span>
                     </TD>
@@ -337,11 +338,11 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
 
                     {/* Open date */}
                     <TD>
-                      <span style={{ color: TEXT2 }}>{fmtDate(t.submitted_at)}</span>
+                      <span style={{ color: TEXT2, fontWeight: 600 }}>{fmtDate(t.submitted_at)}</span>
                     </TD>
 
                     {/* Quantity — not in schema */}
-                    <TD><span style={{ color: MUTED }}>—</span></TD>
+                    <TD><span style={{ color: MUTED, fontWeight: 600 }}>—</span></TD>
 
                     {/* P&L */}
                     <TD>
@@ -357,7 +358,7 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
                           </span>
                         )
                       ) : (
-                        <span style={{ color: MUTED }}>—</span>
+                        <span style={{ color: MUTED, fontWeight: 600 }}>—</span>
                       )}
                     </TD>
 
@@ -370,7 +371,7 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
 
                     {/* Strategy */}
                     <TD>
-                      <span className="text-xs truncate max-w-[120px] block" style={{ color: TEXT2 }}>
+                      <span className="text-xs truncate max-w-[120px] block" style={{ color: TEXT2, fontWeight: 600 }}>
                         {t.strategy}
                       </span>
                     </TD>
@@ -405,7 +406,7 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
                           </button>
                         )}
                         {t.status !== 'open' && !debriefResults[t.id] && (
-                          <span style={{ color: MUTED, fontSize: 11 }}>—</span>
+                          <span style={{ color: MUTED, fontSize: 11, fontWeight: 600 }}>—</span>
                         )}
                       </div>
                     </TD>
@@ -422,17 +423,17 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
 
           {/* Rows per page */}
           <div className="flex items-center gap-2">
-            <span className="text-xs" style={{ color: MUTED }}>שורות בעמוד:</span>
+            <span className="text-xs" style={{ color: MUTED, fontWeight: 600 }}>שורות בעמוד:</span>
             <select value={pageSize}
               onChange={e => { setPageSize(Number(e.target.value)); setPage(1); }}
               className="text-xs rounded-lg px-2 py-1 outline-none"
-              style={{ background: SURF2, border: `1px solid ${BORDER}`, color: TEXT2 }}>
+              style={{ background: SURF2, border: `1px solid ${BORDER}`, color: TEXT2, fontWeight: 600 }}>
               {PAGE_SIZES.map(n => <option key={n} value={n}>{n}</option>)}
             </select>
           </div>
 
           {/* Count */}
-          <span className="text-xs" style={{ color: MUTED }}>
+          <span className="text-xs" style={{ color: MUTED, fontWeight: 600 }}>
             {filtered.length === 0
               ? 'אין עסקאות'
               : `מציג ${pageStart + 1}–${Math.min(pageStart + pageSize, filtered.length)} מתוך ${filtered.length} עסקאות`}
@@ -458,7 +459,7 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
           <Modal onClose={() => setClosingTradeId(null)}>
             <div className="flex items-center justify-between mb-1">
               <p className="text-base font-bold" style={{ color: TEXT }}>סגירת עסקה — {t.strategy}</p>
-              <button onClick={() => setClosingTradeId(null)} style={{ color: MUTED, fontSize: 18, lineHeight: 1 }}>×</button>
+              <button onClick={() => setClosingTradeId(null)} style={{ color: MUTED, fontSize: 18, lineHeight: 1, fontWeight: 600 }}>×</button>
             </div>
             <CloseTrade
               tradeId={t.id}
@@ -483,7 +484,7 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
         <Modal onClose={() => setViewDebriefId(null)}>
           <div className="flex items-center justify-between mb-1">
             <p className="text-base font-bold" style={{ color: TEXT }}>ניתוח AI על העסקה</p>
-            <button onClick={() => setViewDebriefId(null)} style={{ color: MUTED, fontSize: 18, lineHeight: 1 }}>×</button>
+            <button onClick={() => setViewDebriefId(null)} style={{ color: MUTED, fontSize: 18, lineHeight: 1, fontWeight: 600 }}>×</button>
           </div>
           <AIDebriefView result={debriefResults[viewDebriefId]} />
         </Modal>
@@ -514,7 +515,7 @@ function StatCard({ label, value, icon, color = TEXT }: {
     <div className="rounded-2xl p-4 flex flex-col gap-2"
       style={{ background: SURF, border: `1px solid ${BORDER}` }}>
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium" style={{ color: MUTED }}>{label}</span>
+        <span className="text-xs font-semibold" style={{ color: MUTED, fontWeight: 600 }}>{label}</span>
         <div className="w-7 h-7 rounded-lg flex items-center justify-center"
           style={{ background: 'rgba(0,210,210,0.1)' }}>
           {icon}
@@ -534,14 +535,14 @@ function TH({ children, sortable, onSort, sortDir }: {
   const inner = sortable ? (
     <button onClick={onSort}
       className="flex items-center gap-1 hover:opacity-80 transition-opacity"
-      style={{ color: MUTED }}>
+      style={{ color: MUTED, fontWeight: 600 }}>
       {children}
       <span style={{ color: GOLD, fontSize: 11 }}>{sortDir === 'desc' ? '↓' : '↑'}</span>
     </button>
   ) : children;
   return (
     <th className="px-3 py-3 text-right text-xs font-semibold whitespace-nowrap"
-      style={{ color: MUTED }}>
+      style={{ color: MUTED, fontWeight: 600 }}>
       {inner}
     </th>
   );
@@ -585,7 +586,7 @@ function PgBtn({ children, onClick, disabled, active }: {
 }) {
   return (
     <button onClick={onClick} disabled={disabled}
-      className="w-7 h-7 rounded-lg text-xs font-medium flex items-center justify-center transition-all disabled:opacity-30"
+      className="w-7 h-7 rounded-lg text-xs font-semibold flex items-center justify-center transition-all disabled:opacity-30"
       style={{
         background: active ? GOLD : SURF2,
         color:      active ? '#0a0a0f' : TEXT2,
@@ -701,7 +702,7 @@ function TradeDetailModal({ trade, onClose, debriefResult, onDebrief }: {
               )
             )}
           </p>
-          <button onClick={onClose} style={{ color: 'var(--color-tg-muted)', fontSize: 20, lineHeight: 1 }}>×</button>
+          <button onClick={onClose} style={{ color: 'var(--color-tg-muted)', fontSize: 20, lineHeight: 1, fontWeight: 600 }}>×</button>
         </div>
 
         <div className="flex flex-col gap-0">
@@ -709,7 +710,7 @@ function TradeDetailModal({ trade, onClose, debriefResult, onDebrief }: {
             <div key={label}
               className="flex items-start justify-between gap-4 py-2.5"
               style={{ borderBottom: i < rows.length - 1 ? '1px solid var(--color-tg-border)' : 'none' }}>
-              <span className="text-xs shrink-0" style={{ color: 'var(--color-tg-muted)', minWidth: 90 }}>{label}</span>
+              <span className="text-xs font-semibold shrink-0" style={{ color: 'var(--color-tg-muted)', minWidth: 90 }}>{label}</span>
               <span className="text-xs text-right" style={{ color: 'var(--color-tg-text)', wordBreak: 'break-word' }}>{String(value ?? '—')}</span>
             </div>
           ))}

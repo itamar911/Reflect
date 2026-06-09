@@ -270,8 +270,8 @@ input[type="button"] {
 /* ── Text hierarchy utilities ────────────────────────────────── */
 
 .text-primary   { color: var(--text-primary); }
-.text-secondary { color: var(--text-secondary); }
-.text-muted-var { color: var(--text-muted); }
+.text-secondary { color: var(--text-secondary); font-weight: 600; }
+.text-muted-var { color: var(--text-muted); font-weight: 600; }
 
 /* ── Global font-size scale — every class bumped up one step ─────
    text-xs  12→14  text-sm  14→16  text-base 16→18

@@ -71,6 +71,7 @@ export default function PnlChart({ daily, weekly, monthly }: Props) {
             style={{
               background: period === key ? 'rgba(0,210,210,0.15)' : 'var(--color-tg-surface-2)',
               color:      period === key ? '#00d2d2' : 'var(--color-tg-text-2)',
+              fontWeight: 600,
               border:     period === key ? '1px solid rgba(0,210,210,0.3)' : '1px solid transparent',
             }}
           >
@@ -133,7 +134,7 @@ export default function PnlChart({ daily, weekly, monthly }: Props) {
           )}
 
           {/* Footer summary */}
-          <div className="flex gap-4 text-xs" style={{ color: 'var(--color-tg-muted)' }}>
+          <div className="flex gap-4 text-xs" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>
             <span>{totalTrades} עסקאות</span>
             {totalTrades > 0 && (
               <span style={{ color: totalWins / totalTrades >= 0.5 ? '#22c55e' : 'var(--color-tg-muted)' }}>
@@ -147,7 +148,7 @@ export default function PnlChart({ daily, weekly, monthly }: Props) {
           className="flex items-center justify-center py-8 rounded-xl"
           style={{ background: 'var(--color-tg-surface-2)' }}
         >
-          <p className="text-sm" style={{ color: 'var(--color-tg-muted)' }}>אין עסקאות סגורות להצגה</p>
+          <p className="text-sm" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>אין עסקאות סגורות להצגה</p>
         </div>
       )}
     </div>

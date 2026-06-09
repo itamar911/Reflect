@@ -37,7 +37,7 @@ interface Bar { label: string; value: number; count: number }
 
 function BarChart({ bars, height = 72 }: { bars: Bar[]; height?: number }) {
   if (!bars.length || bars.every(b => b.count === 0)) return (
-    <p className="text-xs text-center py-4" style={{ color: 'var(--color-tg-muted)' }}>אין נתונים</p>
+    <p className="text-xs text-center py-4" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>אין נתונים</p>
   );
 
   const W = 300;
@@ -90,9 +90,9 @@ function SumCard({ label, value, sub, color }: { label: string; value: string; s
   return (
     <div className="rounded-xl p-4 flex flex-col gap-1"
       style={{ background: '#1a1a28', border: '1px solid #35355a', boxShadow: '0 1px 3px rgba(0,0,0,0.5)' }}>
-      <p className="text-[11px] font-medium" style={{ color: 'var(--color-tg-muted)' }}>{label}</p>
+      <p className="text-[11px] font-semibold" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>{label}</p>
       <p className="text-2xl font-bold leading-none" style={{ color }}>{value}</p>
-      {sub && <p className="text-[10px]" style={{ color: 'var(--color-tg-muted)' }}>{sub}</p>}
+      {sub && <p className="text-[10px]" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>{sub}</p>}
     </div>
   );
 }
@@ -121,7 +121,7 @@ export default async function StatsPage() {
           <div className="text-center py-16">
             <div className="mb-4"><BarChart2 size={48} /></div>
             <p className="text-base font-semibold" style={{ color: 'var(--color-tg-text)' }}>אין עדיין נתונים</p>
-            <p className="text-sm mt-1" style={{ color: 'var(--color-tg-muted)' }}>תעד עסקאות כדי לראות סטטיסטיקות</p>
+            <p className="text-sm mt-1" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>תעד עסקאות כדי לראות סטטיסטיקות</p>
           </div>
         </div>
       </div>
@@ -318,7 +318,7 @@ export default async function StatsPage() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-sm font-medium" style={{ color: 'var(--color-tg-text)' }}>{s.name}</span>
-                      <span className="text-xs" style={{ color: 'var(--color-tg-muted)' }}>{s.trades} עסקאות</span>
+                      <span className="text-xs" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>{s.trades} עסקאות</span>
                     </div>
                     {/* Usage bar */}
                     <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--color-tg-surface-2)' }}>
@@ -328,7 +328,7 @@ export default async function StatsPage() {
                   {/* Stats */}
                   <div className="flex flex-col items-end shrink-0 gap-0.5">
                     <span className="text-sm font-bold" style={{ color: pnlColor(s.pnl) }}>{fmt(s.pnl)}</span>
-                    <div className="flex gap-2 text-[10px]" style={{ color: 'var(--color-tg-muted)' }}>
+                    <div className="flex gap-2 text-[10px]" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>
                       {wr !== null && (
                         <span style={{ color: wr >= 60 ? '#22c55e' : wr >= 40 ? '#00d2d2' : '#ef4444' }}>{wr}%</span>
                       )}
@@ -382,7 +382,7 @@ export default async function StatsPage() {
                 >
                   <div>
                     <p className="text-sm font-bold" style={{ color: 'var(--color-tg-text)' }}>{s.name}</p>
-                    <p className="text-xs" style={{ color: 'var(--color-tg-muted)' }}>
+                    <p className="text-xs" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>
                       {s.trades} עסקאות
                       {wr !== null && <span style={{ color: wr >= 50 ? '#22c55e' : '#ef4444' }}> · {wr}%</span>}
                     </p>
@@ -412,7 +412,7 @@ export default async function StatsPage() {
                 }}>
                 <span>{currentStreak.type === 'win' ? <TrendingUp size={20} /> : <AlertTriangle size={20} />}</span>
                 <div>
-                  <p className="text-xs" style={{ color: 'var(--color-tg-muted)' }}>רצף נוכחי</p>
+                  <p className="text-xs" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>רצף נוכחי</p>
                   <p className="text-sm font-bold" style={{ color: currentStreak.type === 'win' ? '#22c55e' : '#ef4444' }}>
                     {currentStreak.count} {currentStreak.type === 'win' ? 'רווחים' : 'הפסדים'} ברצף
                   </p>
@@ -428,14 +428,14 @@ export default async function StatsPage() {
                 <div className="rounded-xl p-3" style={{ background: 'rgba(34,197,94,0.07)' }}>
                   <p className="text-[10px] mb-0.5" style={{ color: 'rgba(34,197,94,0.6)' }}>עסקה טובה ביותר</p>
                   <p className="text-sm font-bold" style={{ color: '#22c55e' }}>{fmt(pnlIls(bestTrade), bestTrade.pnl_currency ?? '₪')}</p>
-                  <p className="text-[10px]" style={{ color: 'var(--color-tg-muted)' }}>{bestTrade.strategy}</p>
+                  <p className="text-[10px]" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>{bestTrade.strategy}</p>
                 </div>
               )}
               {worstTrade && (
                 <div className="rounded-xl p-3" style={{ background: 'rgba(239,68,68,0.07)' }}>
                   <p className="text-[10px] mb-0.5" style={{ color: 'rgba(239,68,68,0.6)' }}>עסקה גרועה ביותר</p>
                   <p className="text-sm font-bold" style={{ color: '#ef4444' }}>{fmt(pnlIls(worstTrade), worstTrade.pnl_currency ?? '₪')}</p>
-                  <p className="text-[10px]" style={{ color: 'var(--color-tg-muted)' }}>{worstTrade.strategy}</p>
+                  <p className="text-[10px]" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>{worstTrade.strategy}</p>
                 </div>
               )}
             </div>
@@ -448,14 +448,14 @@ export default async function StatsPage() {
                 <div className="rounded-xl p-3" style={{ background: 'rgba(34,197,94,0.07)' }}>
                   <p className="text-[10px] mb-0.5" style={{ color: 'rgba(34,197,94,0.6)' }}>יום טוב ביותר</p>
                   <p className="text-sm font-bold" style={{ color: '#22c55e' }}>{fmt(bestDay.pnl)}</p>
-                  <p className="text-[10px]" style={{ color: 'var(--color-tg-muted)' }}>{bestDay.label}</p>
+                  <p className="text-[10px]" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>{bestDay.label}</p>
                 </div>
               )}
               {worstDay && worstDay.pnl < 0 && (
                 <div className="rounded-xl p-3" style={{ background: 'rgba(239,68,68,0.07)' }}>
                   <p className="text-[10px] mb-0.5" style={{ color: 'rgba(239,68,68,0.6)' }}>יום גרוע ביותר</p>
                   <p className="text-sm font-bold" style={{ color: '#ef4444' }}>{fmt(worstDay.pnl)}</p>
-                  <p className="text-[10px]" style={{ color: 'var(--color-tg-muted)' }}>{worstDay.label}</p>
+                  <p className="text-[10px]" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>{worstDay.label}</p>
                 </div>
               )}
             </div>
@@ -481,7 +481,7 @@ function PageHeader() {
       </div>
       <div>
         <h1 className="text-xl font-bold" style={{ color: 'var(--color-tg-text)' }}>סטטיסטיקה</h1>
-        <p className="text-xs" style={{ color: 'var(--color-tg-muted)' }}>ניתוח מלא של ביצועי המסחר שלך</p>
+        <p className="text-xs" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>ניתוח מלא של ביצועי המסחר שלך</p>
       </div>
     </div>
   );
@@ -490,7 +490,7 @@ function PageHeader() {
 function InfoPill({ label, value, color }: { label: string; value: string; color: string }) {
   return (
     <div className="rounded-xl p-3" style={{ background: 'var(--color-tg-surface-2)' }}>
-      <p className="text-[10px] mb-0.5" style={{ color: 'var(--color-tg-muted)' }}>{label}</p>
+      <p className="text-[10px] mb-0.5" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>{label}</p>
       <p className="text-xs font-semibold" style={{ color }}>{value}</p>
     </div>
   );
@@ -501,7 +501,7 @@ function StreakCard({ label, value, color, icon }: { label: string; value: numbe
     <div className="rounded-xl p-3 flex flex-col gap-1" style={{ background: 'var(--color-tg-surface-2)' }}>
       <div className="flex items-center gap-1.5">
         <span>{icon}</span>
-        <p className="text-[10px]" style={{ color: 'var(--color-tg-muted)' }}>{label}</p>
+        <p className="text-[10px]" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>{label}</p>
       </div>
       <p className="text-2xl font-bold" style={{ color: value > 0 ? color : 'var(--color-tg-muted)' }}>{value}</p>
     </div>
