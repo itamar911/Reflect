@@ -219,23 +219,32 @@ function SemiGauge({ segments, width = 140, strokeWidth = 12 }: {
   const height = cy + strokeWidth / 2;
   const total  = segments.reduce((s, sg) => s + Math.max(sg.value, 0), 0);
 
-  // Only keep segments with a positive value; snap the last one to exactly 0
-  // so floating-point drift never leaves a visible gap.
-  const validSegs = total > 0 ? segments.filter(sg => Math.max(sg.value, 0) > 0) : [];
+  if (total <= 0) {
+    return <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ flexShrink: 0, display: 'block' }} />;
+  }
+
+  const validSegs = segments.filter(sg => Math.max(sg.value, 0) > 0);
   let cursor = 180;
-  const arcs: { d: string; color: string }[] = [];
-  validSegs.forEach((sg, idx) => {
-    const span  = (Math.max(sg.value, 0) / total) * 180;
-    const start = cursor;
-    const end   = idx === validSegs.length - 1 ? 0 : cursor - span;
+  const segsWithEnd = validSegs.map((sg, idx) => {
+    const span = (Math.max(sg.value, 0) / total) * 180;
+    const end  = idx === validSegs.length - 1 ? 0 : cursor - span;
     cursor = end;
-    arcs.push({ d: semiArcPath(cx, cy, r, start, end), color: sg.color });
+    return { color: sg.color, end };
   });
 
+  // Painter's algorithm: draw last segment first as a full 180°→0° arc, then each
+  // preceding segment paints over from 180° to its own end angle. Any sub-pixel gap
+  // at a junction shows the correct underlying color, never the card background.
+  const layers = [...segsWithEnd].reverse().map(sg => ({
+    d: semiArcPath(cx, cy, r, 180, sg.end),
+    color: sg.color,
+  }));
+
   return (
-    <svg width={width} height={height} style={{ flexShrink: 0, display: 'block' }}>
-      {arcs.map((a, i) => (
-        <path key={i} d={a.d} fill="none" stroke={a.color}
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}
+      style={{ flexShrink: 0, display: 'block' }}>
+      {layers.map((l, i) => (
+        <path key={i} d={l.d} fill="none" stroke={l.color}
           strokeWidth={strokeWidth} strokeLinecap="butt" />
       ))}
     </svg>
@@ -754,7 +763,7 @@ export default function DashboardClient({
                 </div>
                 {/* Gauge — second in RTL flex → physical LEFT */}
                 <div style={{ flexShrink: 0 }}>
-                  <SemiGauge width={120} strokeWidth={11} segments={[
+                  <SemiGauge width={140} strokeWidth={12} segments={[
                     { value: stats.profitDays, color: GREEN },
                     { value: stats.lossDays,   color: RED },
                   ]} />
@@ -779,7 +788,7 @@ export default function DashboardClient({
                 </div>
                 {/* Gauge — second in RTL flex → physical LEFT */}
                 <div style={{ flexShrink: 0 }}>
-                  <SemiGauge width={120} strokeWidth={11} segments={[
+                  <SemiGauge width={140} strokeWidth={12} segments={[
                     { value: stats.winPct,       color: GREEN },
                     { value: 100 - stats.winPct, color: RED },
                   ]} />
