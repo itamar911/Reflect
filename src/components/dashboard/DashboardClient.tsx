@@ -754,7 +754,7 @@ export default function DashboardClient({
                 </div>
                 {/* Gauge — second in RTL flex → physical LEFT */}
                 <div style={{ flexShrink: 0 }}>
-                  <SemiGauge width={82} strokeWidth={9} segments={[
+                  <SemiGauge width={120} strokeWidth={11} segments={[
                     { value: stats.profitDays, color: GREEN },
                     { value: stats.lossDays,   color: RED },
                   ]} />
@@ -779,7 +779,7 @@ export default function DashboardClient({
                 </div>
                 {/* Gauge — second in RTL flex → physical LEFT */}
                 <div style={{ flexShrink: 0 }}>
-                  <SemiGauge width={82} strokeWidth={9} segments={[
+                  <SemiGauge width={120} strokeWidth={11} segments={[
                     { value: stats.winPct,       color: GREEN },
                     { value: 100 - stats.winPct, color: RED },
                   ]} />
@@ -790,13 +790,13 @@ export default function DashboardClient({
             {/* Card 3: Avg Win/Loss ratio */}
             <Card>
               <p style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: '#ffffff', marginBottom: 14 }}>יחס רווח/הפסד ממוצע</p>
-              <div className="flex items-center gap-4">
-                <span style={{ fontSize: 20, fontWeight: 700, color: TEXT, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+              <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+                <span style={{ fontSize: 18, fontWeight: 700, color: '#ffffff', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
                   {stats.avgLoss < -0.001 ? (stats.avgWin / Math.abs(stats.avgLoss)).toFixed(2) : '—'}
                 </span>
-                <div className="flex flex-col gap-1.5 flex-1">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
                   <SplitBar left={stats.avgWin} right={Math.abs(stats.avgLoss)} leftColor={GREEN} rightColor={RED} />
-                  <div className="flex items-center justify-between">
+                  <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                     <span style={{ fontSize: 12, fontWeight: 700, color: GREEN, fontVariantNumeric: 'tabular-nums' }}>{formatPnlIls(stats.avgWin, stats.pnlCurrency)}</span>
                     <span style={{ fontSize: 12, fontWeight: 700, color: RED, fontVariantNumeric: 'tabular-nums' }}>{formatPnlIls(stats.avgLoss, stats.pnlCurrency)}</span>
                   </div>
@@ -815,8 +815,8 @@ export default function DashboardClient({
                       color: pnlPeriod === p ? ACCENT : TEXT2,
                       border: pnlPeriod === p ? `1px solid rgba(0,210,210,0.3)` : `1px solid ${BORDER}`,
                       borderRadius: 6,
-                      padding: '3px 7px',
-                      fontSize: 10,
+                      padding: '5px 10px',
+                      fontSize: 11,
                       fontWeight: 600,
                       cursor: 'pointer',
                     }}>
@@ -825,10 +825,10 @@ export default function DashboardClient({
                 ))}
               </div>
               <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums', color: selPeriodPnl >= 0 ? GREEN : RED }}>
+                <span style={{ fontSize: 36, fontWeight: 800, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums', color: selPeriodPnl >= 0 ? GREEN : RED }}>
                   {selPeriodDisplay}
                 </span>
-                <span style={{ fontSize: 12, fontWeight: 600, color: TEXT2 }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: '#ffffff' }}>
                   ({selPeriodCount} עסקאות)
                 </span>
               </div>
