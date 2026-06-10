@@ -95,16 +95,18 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
   const hasValidMultiplier = !isNaN(multiplierNum) && multiplierNum > 0;
 
   // נק׳ mode: the field holds the actual target price directly (no conversion).
-  // % mode: the field holds a percentage offset from the entry price.
-  function inputToPrice(inputStr: string): number | null {
+  // % mode: the field holds a percentage offset from the entry price —
+  // SL = entry × (1 − pct/100), TP = entry × (1 + pct/100).
+  function inputToPrice(inputStr: string, kind: 'sl' | 'tp'): number | null {
     if (!hasEntry || inputStr.trim() === '') return null;
     const val = parseFloat(inputStr);
     if (isNaN(val)) return null;
-    return pnlMode === 'points' ? val : entryNum * (1 + val / 100);
+    if (pnlMode === 'points') return val;
+    return kind === 'sl' ? entryNum * (1 - val / 100) : entryNum * (1 + val / 100);
   }
 
-  const slPrice = inputToPrice(slInput);
-  const tpPrice = inputToPrice(tpInput);
+  const slPrice = inputToPrice(slInput, 'sl');
+  const tpPrice = inputToPrice(tpInput, 'tp');
 
   function fmtPrice(n: number): string {
     return parseFloat(n.toFixed(6)).toString();
@@ -419,7 +421,7 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
                   danger
                   hint={
                     !hasEntry ? 'הזן מחיר כניסה'
-                    : pnlMode === 'percent' && slPrice !== null ? `מחיר: ${fmtPrice(slPrice)}`
+                    : slPrice !== null ? `מחיר: ${fmtPrice(slPrice)}`
                     : undefined
                   }
                 />
@@ -430,7 +432,7 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
                   success
                   hint={
                     !hasEntry ? 'הזן מחיר כניסה'
-                    : pnlMode === 'percent' && tpPrice !== null ? `מחיר: ${fmtPrice(tpPrice)}`
+                    : tpPrice !== null ? `מחיר: ${fmtPrice(tpPrice)}`
                     : undefined
                   }
                 />
@@ -476,7 +478,7 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-medium text-tg-muted">מכפיל</label>
+                  <label className="text-xs font-medium text-tg-muted">שווי נקודה ($)</label>
                   <input
                     type="number"
                     step="any"
@@ -492,7 +494,7 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
                 </div>
               </div>
               <p className="text-[10px] text-tg-muted">
-                לחוזים עתידיים בלבד (למשל NQ1 = 20)
+                למניות — השאר 1. לחוזים עתידיים — הזן שווי נקודה (למשל NQ1 = 20)
               </p>
               <p className="text-[10px] text-tg-muted">
                 שדה חובה — נדרש כדי שהמערכת תחשב עבורך רווח/הפסד ({currency}) בסגירת העסקה
@@ -500,7 +502,7 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
               {pnlFieldsError && (
                 <div className="px-3 py-2 rounded-xl text-xs animate-fade-in"
                   style={{ background: 'var(--color-tg-danger-muted)', color: 'var(--color-tg-danger)' }}>
-                  יש למלא כמות תקינה (ומכפיל תקין) כדי להגיש את התוכנית
+                  יש למלא כמות תקינה (ושווי נקודה תקין) כדי להגיש את התוכנית
                 </div>
               )}
               {rr !== null && rr > 0 && (
