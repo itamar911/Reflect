@@ -4,6 +4,10 @@ import { useState, useMemo, useEffect, useCallback } from 'react';
 import { Sparkles, TrendingUp } from 'lucide-react';
 import { formatPnlIls, formatPnlPoints } from '@/lib/utils';
 import { createClient } from '@/lib/supabase/client';
+import { DASH_TRADE_SELECT, mapDashTrade } from '@/lib/dashboard/trades';
+import type { DashTrade } from '@/lib/dashboard/trades';
+
+export type { DashTrade } from '@/lib/dashboard/trades';
 
 // ── Tokens ────────────────────────────────────────────────────────────────────
 const ACCENT  = '#00d2d2';
@@ -15,73 +19,6 @@ const TEXT2   = '#ffffff';
 const MUTED   = '#ffffff';
 const GREEN   = '#22c55e';
 const RED     = '#ef4444';
-
-// ── Types ─────────────────────────────────────────────────────────────────────
-export interface DashTrade {
-  id: string;
-  strategy: string;
-  symbol: string | null;
-  entry_price: number;
-  exit_price: number | null;
-  stop_loss: number;
-  take_profit: number;
-  rr_ratio: number;
-  emotional_state: number;
-  trade_reason: string;
-  status: string;
-  exit_reason: string | null;
-  submitted_at: string;
-  closed_at: string | null;
-  quantity: number | null;
-  pnl_amount: number | null;
-  pnl_currency: string | null;
-}
-
-// ── Trade fetch — shared between server-side initial load and client refetch ──
-export const DASH_TRADE_SELECT =
-  'id,strategy,symbol,entry_price,exit_price,stop_loss,take_profit,rr_ratio,emotional_state,trade_reason,status,exit_reason,submitted_at,closed_at,quantity,pnl_amount,pnl_currency';
-
-interface RawTradeRow {
-  id: string;
-  strategy: string;
-  symbol: string | null;
-  entry_price: number | string;
-  exit_price: number | string | null;
-  stop_loss: number | string;
-  take_profit: number | string;
-  rr_ratio: number | string;
-  emotional_state: number | string;
-  trade_reason: string;
-  status: string;
-  exit_reason: string | null;
-  submitted_at: string;
-  closed_at: string | null;
-  quantity: number | string | null;
-  pnl_amount: number | string | null;
-  pnl_currency: string | null;
-}
-
-export function mapDashTrade(t: RawTradeRow): DashTrade {
-  return {
-    id:               t.id,
-    strategy:         t.strategy,
-    symbol:           t.symbol ?? null,
-    entry_price:      Number(t.entry_price),
-    exit_price:       t.exit_price != null ? Number(t.exit_price) : null,
-    stop_loss:        Number(t.stop_loss),
-    take_profit:      Number(t.take_profit),
-    rr_ratio:         Number(t.rr_ratio),
-    emotional_state:  Number(t.emotional_state),
-    trade_reason:     t.trade_reason,
-    status:           t.status,
-    exit_reason:      t.exit_reason ?? null,
-    submitted_at:     t.submitted_at,
-    closed_at:        t.closed_at ?? null,
-    quantity:         t.quantity != null ? Number(t.quantity) : null,
-    pnl_amount:       t.pnl_amount != null ? Number(t.pnl_amount) : null,
-    pnl_currency:     t.pnl_currency ?? null,
-  };
-}
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────
 function tradeDir(t: DashTrade): 'long' | 'short' {

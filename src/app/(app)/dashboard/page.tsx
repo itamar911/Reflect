@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
-import DashboardClient, { DASH_TRADE_SELECT, mapDashTrade } from '@/components/dashboard/DashboardClient';
-import type { DashTrade } from '@/components/dashboard/DashboardClient';
+import DashboardClient from '@/components/dashboard/DashboardClient';
+import { DASH_TRADE_SELECT, mapDashTrade } from '@/lib/dashboard/trades';
+import type { DashTrade } from '@/lib/dashboard/trades';
 
 export const metadata = { title: 'דשבורד — Reflect' };
 
