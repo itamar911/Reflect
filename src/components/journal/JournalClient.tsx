@@ -166,11 +166,13 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
     });
     setDeleteLoading(false);
     setDeletingTradeId(null);
+    router.refresh();
   }
 
   function handleTradeUpdated(updated: Trade) {
     setTrades(prev => prev.map(t => t.id === updated.id ? updated : t));
     setEditingTradeId(null);
+    router.refresh();
   }
 
   // ── Page numbers ──────────────────────────────────────────────────────────

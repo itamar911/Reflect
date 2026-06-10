@@ -179,3 +179,6 @@ CREATE INDEX IF NOT EXISTS idx_trade_plans_debrief
 -- v3: Add multiplier for futures contracts P&L calculation
 ALTER TABLE trade_plans
   ADD COLUMN IF NOT EXISTS multiplier NUMERIC DEFAULT 1;
+
+-- v4: Enable Realtime so the dashboard can subscribe to trade_plans changes
+ALTER PUBLICATION supabase_realtime ADD TABLE trade_plans;
