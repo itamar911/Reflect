@@ -36,7 +36,6 @@ const EMPTY_FORM: TradePlanInput = {
   emotional_state: 3,
   direction: null,
   quantity: '',
-  multiplier: '1',
 };
 
 type FormState = 'empty' | 'editing' | 'validating' | 'warning' | 'blocked' | 'success' | 'error';
@@ -90,9 +89,6 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
 
   const quantityNum = parseFloat(form.quantity);
   const hasQuantity = form.quantity.trim() !== '' && !isNaN(quantityNum) && quantityNum > 0;
-
-  const multiplierNum = form.multiplier.trim() === '' ? 1 : parseFloat(form.multiplier);
-  const hasValidMultiplier = !isNaN(multiplierNum) && multiplierNum > 0;
 
   // נק׳ mode: the field holds the actual target price directly (no conversion).
   // % mode: the field holds a percentage offset from the entry price —
@@ -180,7 +176,6 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
     slPrice !== null &&
     tpPrice !== null &&
     hasQuantity &&
-    hasValidMultiplier &&
     form.trade_reason.trim() !== '';
 
   const activeStep = useMemo(() => {
@@ -191,7 +186,7 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
   }, [form, hasEntry, slPrice, tpPrice]);
 
   async function handleValidate() {
-    if (!hasQuantity || !hasValidMultiplier) { setPnlFieldsError(true); return; }
+    if (!hasQuantity) { setPnlFieldsError(true); return; }
     setPnlFieldsError(false);
     if (!isFormFilled || slPrice === null || tpPrice === null) return;
     setFormState('validating');
@@ -206,7 +201,7 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
   }
 
   async function handleSubmit() {
-    if (!hasQuantity || !hasValidMultiplier) { setPnlFieldsError(true); return; }
+    if (!hasQuantity) { setPnlFieldsError(true); return; }
     setPnlFieldsError(false);
     if (!isFormFilled || slPrice === null || tpPrice === null) return;
 
@@ -237,7 +232,6 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
       emotional_state: form.emotional_state,
       status: 'open',
       quantity: quantityNum,
-      multiplier: multiplierNum,
       pnl_currency: currency,
     });
 
@@ -437,72 +431,52 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
                   }
                 />
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="flex flex-col gap-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-medium text-tg-muted">כמות *</label>
-                    <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-tg-border)' }}>
-                      <button
-                        type="button"
-                        onClick={() => changeCurrency('₪')}
-                        className="px-2 py-0.5 text-[10px] font-semibold transition-all"
-                        style={{
-                          background: currency === '₪' ? 'var(--color-tg-primary-muted)' : 'transparent',
-                          color: currency === '₪' ? 'var(--color-tg-primary)' : 'var(--color-tg-muted)',
-                        }}>
-                        ₪
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => changeCurrency('$')}
-                        className="px-2 py-0.5 text-[10px] font-semibold transition-all"
-                        style={{
-                          background: currency === '$' ? 'var(--color-tg-primary-muted)' : 'transparent',
-                          color: currency === '$' ? 'var(--color-tg-primary)' : 'var(--color-tg-muted)',
-                        }}>
-                        $
-                      </button>
-                    </div>
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium text-tg-muted">כמות *</label>
+                  <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-tg-border)' }}>
+                    <button
+                      type="button"
+                      onClick={() => changeCurrency('₪')}
+                      className="px-2 py-0.5 text-[10px] font-semibold transition-all"
+                      style={{
+                        background: currency === '₪' ? 'var(--color-tg-primary-muted)' : 'transparent',
+                        color: currency === '₪' ? 'var(--color-tg-primary)' : 'var(--color-tg-muted)',
+                      }}>
+                      ₪
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => changeCurrency('$')}
+                      className="px-2 py-0.5 text-[10px] font-semibold transition-all"
+                      style={{
+                        background: currency === '$' ? 'var(--color-tg-primary-muted)' : 'transparent',
+                        color: currency === '$' ? 'var(--color-tg-primary)' : 'var(--color-tg-muted)',
+                      }}>
+                      $
+                    </button>
                   </div>
-                  <input
-                    type="number"
-                    step="any"
-                    placeholder="0"
-                    value={form.quantity}
-                    onChange={(e) => { setForm({ ...form, quantity: e.target.value }); setPnlFieldsError(false); }}
-                    className="w-full h-10 px-2 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors text-center"
-                    style={{
-                      background: 'var(--color-tg-surface-2)',
-                      borderColor: pnlFieldsError && !hasQuantity ? 'var(--color-tg-danger)' : 'var(--color-tg-border)',
-                    }}
-                  />
                 </div>
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-medium text-tg-muted">שווי נקודה ($)</label>
-                  <input
-                    type="number"
-                    step="any"
-                    placeholder="1"
-                    value={form.multiplier}
-                    onChange={(e) => { setForm({ ...form, multiplier: e.target.value }); setPnlFieldsError(false); }}
-                    className="w-full h-10 px-2 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors text-center"
-                    style={{
-                      background: 'var(--color-tg-surface-2)',
-                      borderColor: pnlFieldsError && !hasValidMultiplier ? 'var(--color-tg-danger)' : 'var(--color-tg-border)',
-                    }}
-                  />
-                </div>
+                <input
+                  type="number"
+                  step="any"
+                  placeholder="0"
+                  value={form.quantity}
+                  onChange={(e) => { setForm({ ...form, quantity: e.target.value }); setPnlFieldsError(false); }}
+                  className="w-full h-10 px-2 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors text-center"
+                  style={{
+                    background: 'var(--color-tg-surface-2)',
+                    borderColor: pnlFieldsError && !hasQuantity ? 'var(--color-tg-danger)' : 'var(--color-tg-border)',
+                  }}
+                />
               </div>
-              <p className="text-[10px] text-tg-muted">
-                למניות — השאר 1. לחוזים עתידיים — הזן שווי נקודה (למשל NQ1 = 20)
-              </p>
               <p className="text-[10px] text-tg-muted">
                 שדה חובה — נדרש כדי שהמערכת תחשב עבורך רווח/הפסד ({currency}) בסגירת העסקה
               </p>
               {pnlFieldsError && (
                 <div className="px-3 py-2 rounded-xl text-xs animate-fade-in"
                   style={{ background: 'var(--color-tg-danger-muted)', color: 'var(--color-tg-danger)' }}>
-                  יש למלא כמות תקינה (ושווי נקודה תקין) כדי להגיש את התוכנית
+                  יש למלא כמות תקינה כדי להגיש את התוכנית
                 </div>
               )}
               {rr !== null && rr > 0 && (

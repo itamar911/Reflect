@@ -44,7 +44,6 @@ interface Trade {
   closed_at: string | null;
   plan_score: number | null;
   quantity: number | null;
-  multiplier: number | null;
   pnl_amount: number | null;
   pnl_currency: string | null;
 }
@@ -521,7 +520,6 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
               strategy={t.strategy}
               tradeReason={t.trade_reason}
               quantity={t.quantity}
-              multiplier={t.multiplier}
               pnlCurrency={t.pnl_currency}
               onClosed={() => { setClosingTradeId(null); router.refresh(); }}
               onDebrief={result => setDebriefResults(prev => ({ ...prev, [t.id]: result }))}
@@ -858,7 +856,6 @@ function EditTradeModal({ trade, onClose, onSaved }: {
   const [stopLoss, setStopLoss] = useState(String(trade.stop_loss));
   const [takeProfit, setTakeProfit] = useState(String(trade.take_profit));
   const [quantity, setQuantity] = useState(trade.quantity != null ? String(trade.quantity) : '');
-  const [multiplier, setMultiplier] = useState(trade.multiplier != null ? String(trade.multiplier) : '1');
   const [currency, setCurrency] = useState<PnlCurrency>((trade.pnl_currency as PnlCurrency) ?? '₪');
   const [tradeReason, setTradeReason] = useState(trade.trade_reason);
   const [notes, setNotes] = useState(trade.post_trade_notes ?? '');
@@ -882,9 +879,8 @@ function EditTradeModal({ trade, onClose, onSaved }: {
       return;
     }
     const qty = quantity.trim() === '' ? null : parseFloat(quantity);
-    const mult = multiplier.trim() === '' ? 1 : parseFloat(multiplier);
-    if ((qty !== null && isNaN(qty)) || isNaN(mult)) {
-      setError('כמות ומכפיל חייבים להיות מספרים');
+    if (qty !== null && isNaN(qty)) {
+      setError('כמות חייבת להיות מספר');
       return;
     }
 
@@ -899,7 +895,6 @@ function EditTradeModal({ trade, onClose, onSaved }: {
       take_profit: tp,
       rr_ratio: calcRR(entry, sl, tp),
       quantity: qty,
-      multiplier: mult,
       pnl_currency: currency,
       trade_reason: tradeReason.trim(),
       post_trade_notes: notes.trim() || null,
@@ -971,33 +966,24 @@ function EditTradeModal({ trade, onClose, onSaved }: {
         </Field>
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
-        <Field label="כמות ומטבע">
-          <div className="flex items-center gap-1.5">
-            <input type="number" step="any" value={quantity} onChange={e => setQuantity(e.target.value)}
-              className={`${FIELD_CLASS} text-center flex-1`} style={fieldStyle} />
-            <div className="flex rounded-lg overflow-hidden shrink-0 h-[38px]" style={{ border: `1px solid ${BORDER}` }}>
-              <button type="button" onClick={() => setCurrency('₪')}
-                className="px-2.5 text-xs font-semibold transition-all"
-                style={{ background: currency === '₪' ? 'rgba(0,210,210,0.12)' : 'transparent', color: currency === '₪' ? GOLD : MUTED }}>
-                ₪
-              </button>
-              <button type="button" onClick={() => setCurrency('$')}
-                className="px-2.5 text-xs font-semibold transition-all"
-                style={{ background: currency === '$' ? 'rgba(0,210,210,0.12)' : 'transparent', color: currency === '$' ? GOLD : MUTED }}>
-                $
-              </button>
-            </div>
+      <Field label="כמות ומטבע">
+        <div className="flex items-center gap-1.5">
+          <input type="number" step="any" value={quantity} onChange={e => setQuantity(e.target.value)}
+            className={`${FIELD_CLASS} text-center flex-1`} style={fieldStyle} />
+          <div className="flex rounded-lg overflow-hidden shrink-0 h-[38px]" style={{ border: `1px solid ${BORDER}` }}>
+            <button type="button" onClick={() => setCurrency('₪')}
+              className="px-2.5 text-xs font-semibold transition-all"
+              style={{ background: currency === '₪' ? 'rgba(0,210,210,0.12)' : 'transparent', color: currency === '₪' ? GOLD : MUTED }}>
+              ₪
+            </button>
+            <button type="button" onClick={() => setCurrency('$')}
+              className="px-2.5 text-xs font-semibold transition-all"
+              style={{ background: currency === '$' ? 'rgba(0,210,210,0.12)' : 'transparent', color: currency === '$' ? GOLD : MUTED }}>
+              $
+            </button>
           </div>
-        </Field>
-        <Field label="מכפיל">
-          <input type="number" step="any" value={multiplier} onChange={e => setMultiplier(e.target.value)}
-            placeholder="1" className={`${FIELD_CLASS} text-center`} style={fieldStyle} />
-        </Field>
-      </div>
-      <p className="text-[10px] -mt-1" style={{ color: MUTED }}>
-        לחוזים עתידיים בלבד (למשל NQ1 = 20)
-      </p>
+        </div>
+      </Field>
 
       <Field label="סיבת כניסה">
         <textarea rows={2} value={tradeReason} onChange={e => setTradeReason(e.target.value)}

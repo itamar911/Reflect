@@ -32,7 +32,6 @@ export interface DashTrade {
   submitted_at: string;
   closed_at: string | null;
   quantity: number | null;
-  multiplier: number | null;
   pnl_amount: number | null;
   pnl_currency: string | null;
 }
