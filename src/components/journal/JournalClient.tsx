@@ -2,9 +2,12 @@
 
 import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Bot, DollarSign } from 'lucide-react';
+import { Bot, DollarSign, Pencil, Trash2 } from 'lucide-react';
 import CloseTrade, { AIDebriefView, type AIDebriefResult } from '@/components/journal/CloseTrade';
-import { formatPnlIls, formatPnlPoints } from '@/lib/utils';
+import EmotionalStateSlider from '@/components/trade/EmotionalStateSlider';
+import { createClient } from '@/lib/supabase/client';
+import { formatPnlIls, formatPnlPoints, calcRR } from '@/lib/utils';
+import type { PnlCurrency } from '@/lib/types';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const GOLD   = '#00d2d2';
@@ -16,6 +19,10 @@ const TEXT2  = 'var(--color-tg-text-2)';
 const MUTED  = 'var(--color-tg-muted)';
 const GREEN  = '#4ade80';
 const RED    = '#f87171';
+
+// ── Shared form field styling (edit modal) ─────────────────────────────────────
+const FIELD_CLASS = 'w-full px-3 py-2 rounded-xl text-sm border outline-none focus:border-tg-primary transition-colors';
+const fieldStyle = { background: SURF2, borderColor: BORDER, color: TEXT };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface Trade {
@@ -67,7 +74,8 @@ function fmtPnl(v: number) {
 const PAGE_SIZES = [15, 30, 50, 100];
 
 // ── Root ──────────────────────────────────────────────────────────────────────
-export default function JournalClient({ trades }: { trades: Trade[] }) {
+export default function JournalClient({ trades: initialTrades }: { trades: Trade[] }) {
+  const [trades,       setTrades]       = useState<Trade[]>(initialTrades);
   const [search,       setSearch]       = useState('');
   const [selected,     setSelected]     = useState<Set<string>>(new Set());
   const [sortDir,      setSortDir]      = useState<'asc' | 'desc'>('desc');
@@ -80,7 +88,12 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
   const [viewTradeId, setViewTradeId] = useState<string | null>(null);
   const [debriefResults, setDebriefResults] = useState<Record<string, AIDebriefResult>>({});
   const [viewDebriefId, setViewDebriefId] = useState<string | null>(null);
+  const [editingTradeId, setEditingTradeId] = useState<string | null>(null);
+  const [deletingTradeId, setDeletingTradeId] = useState<string | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
   const router = useRouter();
+  const supabase = createClient();
 
   // ── Stats ──────────────────────────────────────────────────────────────────
   const closed = useMemo(() =>
@@ -133,6 +146,32 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
   }
   function toggleOne(id: string) {
     setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  }
+
+  // ── Delete / edit ─────────────────────────────────────────────────────────
+  async function handleDeleteTrade(id: string) {
+    setDeleteLoading(true);
+    setDeleteError('');
+    const { error } = await supabase.from('trade_plans').delete().eq('id', id);
+    if (error) {
+      setDeleteError('שגיאה במחיקה — נסה שוב');
+      setDeleteLoading(false);
+      return;
+    }
+    setTrades(prev => prev.filter(t => t.id !== id));
+    setSelected(prev => {
+      if (!prev.has(id)) return prev;
+      const n = new Set(prev);
+      n.delete(id);
+      return n;
+    });
+    setDeleteLoading(false);
+    setDeletingTradeId(null);
+  }
+
+  function handleTradeUpdated(updated: Trade) {
+    setTrades(prev => prev.map(t => t.id === updated.id ? updated : t));
+    setEditingTradeId(null);
   }
 
   // ── Page numbers ──────────────────────────────────────────────────────────
@@ -379,6 +418,20 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
                     {/* Actions */}
                     <TD>
                       <div className="flex items-center gap-1.5 justify-end">
+                        <button
+                          onClick={e => { e.stopPropagation(); setEditingTradeId(t.id); }}
+                          className="p-1.5 rounded-lg transition-colors hover:opacity-80"
+                          style={{ background: SURF2, color: MUTED }}
+                          title="ערוך עסקה">
+                          <Pencil size={14} />
+                        </button>
+                        <button
+                          onClick={e => { e.stopPropagation(); setDeletingTradeId(t.id); setDeleteError(''); }}
+                          className="p-1.5 rounded-lg transition-colors hover:opacity-80"
+                          style={{ background: 'rgba(248,113,113,0.1)', color: RED }}
+                          title="מחק עסקה">
+                          <Trash2 size={14} />
+                        </button>
                         {t.status === 'open' && (
                           <button
                             onClick={e => { e.stopPropagation(); setViewTradeId(null); setClosingTradeId(t.id); }}
@@ -404,9 +457,6 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
                             }}>
                             ניתוח AI
                           </button>
-                        )}
-                        {t.status !== 'open' && !debriefResults[t.id] && (
-                          <span style={{ color: MUTED, fontSize: 11, fontWeight: 600 }}>—</span>
                         )}
                       </div>
                     </TD>
@@ -502,6 +552,51 @@ export default function JournalClient({ trades }: { trades: Trade[] }) {
           />
         );
       })()}
+
+      {deletingTradeId && (() => {
+        const t = trades.find(tr => tr.id === deletingTradeId);
+        if (!t) return null;
+        return (
+          <Modal onClose={() => { setDeletingTradeId(null); setDeleteError(''); }}>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-base font-bold" style={{ color: TEXT }}>מחיקת עסקה</p>
+              <button onClick={() => { setDeletingTradeId(null); setDeleteError(''); }}
+                style={{ color: MUTED, fontSize: 18, lineHeight: 1, fontWeight: 600 }}>×</button>
+            </div>
+            <p className="text-sm" style={{ color: TEXT2 }}>
+              האם אתה בטוח שברצונך למחוק עסקה זו?
+            </p>
+            {deleteError && <p className="text-xs" style={{ color: RED }}>{deleteError}</p>}
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => { setDeletingTradeId(null); setDeleteError(''); }}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all hover:opacity-80"
+                style={{ background: SURF2, color: TEXT2 }}>
+                ביטול
+              </button>
+              <button
+                onClick={() => handleDeleteTrade(t.id)}
+                disabled={deleteLoading}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all hover:opacity-80 disabled:opacity-50"
+                style={{ background: RED, color: '#fff' }}>
+                {deleteLoading ? 'מוחק...' : 'מחק עסקה'}
+              </button>
+            </div>
+          </Modal>
+        );
+      })()}
+
+      {editingTradeId && (() => {
+        const t = trades.find(tr => tr.id === editingTradeId);
+        if (!t) return null;
+        return (
+          <EditTradeModal
+            trade={t}
+            onClose={() => setEditingTradeId(null)}
+            onSaved={handleTradeUpdated}
+          />
+        );
+      })()}
     </div>
   );
 }
@@ -550,6 +645,15 @@ function TH({ children, sortable, onSort, sortDir }: {
 
 function TD({ children }: { children: React.ReactNode }) {
   return <td className="px-3 py-3 text-right whitespace-nowrap">{children}</td>;
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-xs font-semibold" style={{ color: MUTED }}>{label}</label>
+      {children}
+    </div>
+  );
 }
 
 function Chip({ children, bg, color }: { children: React.ReactNode; bg: string; color: string }) {
@@ -738,6 +842,187 @@ function TradeDetailModal({ trade, onClose, debriefResult, onDebrief }: {
         )}
       </div>
     </div>
+  );
+}
+
+function EditTradeModal({ trade, onClose, onSaved }: {
+  trade: Trade;
+  onClose: () => void;
+  onSaved: (updated: Trade) => void;
+}) {
+  const supabase = createClient();
+  const [symbol, setSymbol] = useState(trade.symbol ?? '');
+  const [direction, setDirection] = useState<'long' | 'short'>(inferDirection(trade));
+  const [strategy, setStrategy] = useState(trade.strategy);
+  const [entryPrice, setEntryPrice] = useState(String(trade.entry_price));
+  const [stopLoss, setStopLoss] = useState(String(trade.stop_loss));
+  const [takeProfit, setTakeProfit] = useState(String(trade.take_profit));
+  const [quantity, setQuantity] = useState(trade.quantity != null ? String(trade.quantity) : '');
+  const [valuePerUnit, setValuePerUnit] = useState(trade.value_per_unit != null ? String(trade.value_per_unit) : '');
+  const [currency, setCurrency] = useState<PnlCurrency>((trade.pnl_currency as PnlCurrency) ?? '₪');
+  const [tradeReason, setTradeReason] = useState(trade.trade_reason);
+  const [notes, setNotes] = useState(trade.post_trade_notes ?? '');
+  const [emotionalState, setEmotionalState] = useState(trade.emotional_state);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  function toggleDirection(next: 'long' | 'short') {
+    if (next === direction) return;
+    setDirection(next);
+    setStopLoss(takeProfit);
+    setTakeProfit(stopLoss);
+  }
+
+  async function handleSave() {
+    const entry = parseFloat(entryPrice);
+    const sl = parseFloat(stopLoss);
+    const tp = parseFloat(takeProfit);
+    if (!strategy.trim() || !tradeReason.trim() || isNaN(entry) || isNaN(sl) || isNaN(tp)) {
+      setError('יש למלא אסטרטגיה, סיבת כניסה, מחיר כניסה, SL ו-TP');
+      return;
+    }
+    const qty = quantity.trim() === '' ? null : parseFloat(quantity);
+    const vpu = valuePerUnit.trim() === '' ? null : parseFloat(valuePerUnit);
+    if ((qty !== null && isNaN(qty)) || (vpu !== null && isNaN(vpu))) {
+      setError('כמות וערך ליחידה חייבים להיות מספרים');
+      return;
+    }
+
+    setSaving(true);
+    setError('');
+
+    const updates = {
+      symbol: symbol.trim() || null,
+      strategy: strategy.trim(),
+      entry_price: entry,
+      stop_loss: sl,
+      take_profit: tp,
+      rr_ratio: calcRR(entry, sl, tp),
+      quantity: qty,
+      value_per_unit: vpu,
+      pnl_currency: currency,
+      trade_reason: tradeReason.trim(),
+      post_trade_notes: notes.trim() || null,
+      emotional_state: emotionalState,
+    };
+
+    const { error: err } = await supabase.from('trade_plans').update(updates).eq('id', trade.id);
+
+    if (err) {
+      setError('שגיאה בשמירה — נסה שוב');
+      setSaving(false);
+      return;
+    }
+
+    onSaved({ ...trade, ...updates });
+  }
+
+  return (
+    <Modal onClose={onClose}>
+      <div className="flex items-center justify-between mb-1">
+        <p className="text-base font-bold" style={{ color: TEXT }}>עריכת עסקה</p>
+        <button onClick={onClose} style={{ color: MUTED, fontSize: 18, lineHeight: 1, fontWeight: 600 }}>×</button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="נכס">
+          <input value={symbol} onChange={e => setSymbol(e.target.value.toUpperCase())}
+            className={FIELD_CLASS} style={fieldStyle} />
+        </Field>
+        <Field label="כיוון">
+          <div className="flex rounded-xl overflow-hidden h-[38px]" style={{ border: `1px solid ${BORDER}` }}>
+            <button type="button" onClick={() => toggleDirection('long')}
+              className="flex-1 text-sm font-semibold transition-all"
+              style={{
+                background: direction === 'long' ? 'rgba(74,222,128,0.12)' : 'transparent',
+                color: direction === 'long' ? GREEN : TEXT2,
+              }}>
+              לונג
+            </button>
+            <button type="button" onClick={() => toggleDirection('short')}
+              className="flex-1 text-sm font-semibold transition-all"
+              style={{
+                background: direction === 'short' ? 'rgba(248,113,113,0.12)' : 'transparent',
+                color: direction === 'short' ? RED : TEXT2,
+              }}>
+              שורט
+            </button>
+          </div>
+        </Field>
+      </div>
+
+      <Field label="אסטרטגיה">
+        <input value={strategy} onChange={e => setStrategy(e.target.value)}
+          className={FIELD_CLASS} style={fieldStyle} />
+      </Field>
+
+      <div className="grid grid-cols-3 gap-2">
+        <Field label="מחיר כניסה">
+          <input type="number" step="any" value={entryPrice} onChange={e => setEntryPrice(e.target.value)}
+            className={`${FIELD_CLASS} text-center`} style={fieldStyle} />
+        </Field>
+        <Field label="Stop Loss">
+          <input type="number" step="any" value={stopLoss} onChange={e => setStopLoss(e.target.value)}
+            className={`${FIELD_CLASS} text-center`} style={{ ...fieldStyle, borderColor: 'var(--color-tg-danger)' }} />
+        </Field>
+        <Field label="Take Profit">
+          <input type="number" step="any" value={takeProfit} onChange={e => setTakeProfit(e.target.value)}
+            className={`${FIELD_CLASS} text-center`} style={{ ...fieldStyle, borderColor: 'var(--color-tg-success)' }} />
+        </Field>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="כמות">
+          <input type="number" step="any" value={quantity} onChange={e => setQuantity(e.target.value)}
+            className={`${FIELD_CLASS} text-center`} style={fieldStyle} />
+        </Field>
+        <Field label="ערך ליחידה ומטבע">
+          <div className="flex items-center gap-1.5">
+            <input type="number" step="any" value={valuePerUnit} onChange={e => setValuePerUnit(e.target.value)}
+              className={`${FIELD_CLASS} text-center flex-1`} style={fieldStyle} />
+            <div className="flex rounded-lg overflow-hidden shrink-0 h-[38px]" style={{ border: `1px solid ${BORDER}` }}>
+              <button type="button" onClick={() => setCurrency('₪')}
+                className="px-2.5 text-xs font-semibold transition-all"
+                style={{ background: currency === '₪' ? 'rgba(0,210,210,0.12)' : 'transparent', color: currency === '₪' ? GOLD : MUTED }}>
+                ₪
+              </button>
+              <button type="button" onClick={() => setCurrency('$')}
+                className="px-2.5 text-xs font-semibold transition-all"
+                style={{ background: currency === '$' ? 'rgba(0,210,210,0.12)' : 'transparent', color: currency === '$' ? GOLD : MUTED }}>
+                $
+              </button>
+            </div>
+          </div>
+        </Field>
+      </div>
+
+      <Field label="סיבת כניסה">
+        <textarea rows={2} value={tradeReason} onChange={e => setTradeReason(e.target.value)}
+          className={`${FIELD_CLASS} resize-none`} style={fieldStyle} />
+      </Field>
+
+      <Field label="הערות">
+        <textarea rows={2} value={notes} onChange={e => setNotes(e.target.value)}
+          className={`${FIELD_CLASS} resize-none`} style={fieldStyle} />
+      </Field>
+
+      <EmotionalStateSlider value={emotionalState} onChange={setEmotionalState} />
+
+      {error && <p className="text-xs" style={{ color: RED }}>{error}</p>}
+
+      <div className="flex gap-2 pt-1">
+        <button onClick={onClose}
+          className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all hover:opacity-80"
+          style={{ background: SURF2, color: TEXT2 }}>
+          ביטול
+        </button>
+        <button onClick={handleSave} disabled={saving}
+          className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all hover:opacity-80 disabled:opacity-50"
+          style={{ background: GOLD, color: '#0a0a0f' }}>
+          {saving ? 'שומר...' : 'שמור שינויים'}
+        </button>
+      </div>
+    </Modal>
   );
 }
 
