@@ -41,7 +41,7 @@ interface CloseTradeProps {
   strategy: string;
   tradeReason: string;
   quantity: number | null;
-  valuePerUnit: number | null;
+  multiplier: number | null;
   pnlCurrency: string | null;
   onClosed: () => void;
   onDebrief?: (result: AIDebriefResult) => void;
@@ -60,7 +60,7 @@ const EXIT_REASONS = [
 
 export default function CloseTrade({
   tradeId, entryPrice, stopLoss, takeProfit, rrRatio,
-  emotionalState, strategy, tradeReason, quantity, valuePerUnit, pnlCurrency, onClosed, onDebrief
+  emotionalState, strategy, tradeReason, quantity, multiplier, pnlCurrency, onClosed, onDebrief
 }: CloseTradeProps) {
   const [exitPrice, setExitPrice] = useState('');
   const [exitReason, setExitReason] = useState('');
@@ -86,8 +86,8 @@ export default function CloseTrade({
     setLoading(true);
     setError('');
 
-    const pnlAmount = quantity != null && valuePerUnit != null
-      ? (direction === 'long' ? exit - entryPrice : entryPrice - exit) * quantity * valuePerUnit
+    const pnlAmount = quantity != null
+      ? Math.round((direction === 'long' ? exit - entryPrice : entryPrice - exit) * quantity * (multiplier ?? 1) * 100) / 100
       : null;
 
     const { error: err } = await supabase.from('trade_plans').update({

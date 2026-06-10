@@ -44,7 +44,7 @@ interface Trade {
   closed_at: string | null;
   plan_score: number | null;
   quantity: number | null;
-  value_per_unit: number | null;
+  multiplier: number | null;
   pnl_amount: number | null;
   pnl_currency: string | null;
 }
@@ -521,7 +521,7 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
               strategy={t.strategy}
               tradeReason={t.trade_reason}
               quantity={t.quantity}
-              valuePerUnit={t.value_per_unit}
+              multiplier={t.multiplier}
               pnlCurrency={t.pnl_currency}
               onClosed={() => { setClosingTradeId(null); router.refresh(); }}
               onDebrief={result => setDebriefResults(prev => ({ ...prev, [t.id]: result }))}
@@ -766,14 +766,14 @@ function TradeDetailModal({ trade, onClose, debriefResult, onDebrief }: {
     ['אסטרטגיה', trade.strategy],
     ['נכס', trade.symbol ?? '—'],
     ['כיוון', dir === 'long' ? 'לונג ↑' : 'שורט ↓'],
-    ['מחיר כניסה', trade.entry_price],
-    ['Stop Loss', trade.stop_loss],
-    ['Take Profit', trade.take_profit],
+    ['מחיר כניסה', trade.entry_price.toFixed(2)],
+    ['Stop Loss', trade.stop_loss.toFixed(2)],
+    ['Take Profit', trade.take_profit.toFixed(2)],
     ['יחס R:R', trade.rr_ratio],
     ['מצב רגשי', `${trade.emotional_state}/5`],
     ['סיבת כניסה', trade.trade_reason],
     ['סטטוס', trade.status === 'open' ? 'פתוח' : 'סגור'],
-    ['מחיר יציאה', trade.exit_price ?? '—'],
+    ['מחיר יציאה', trade.exit_price != null ? trade.exit_price.toFixed(2) : '—'],
     ['סיבת יציאה', trade.exit_reason ?? '—'],
     ['הערות', trade.post_trade_notes ?? '—'],
     ['תחקיר עצמי', trade.debrief_answer ?? '—'],
@@ -858,7 +858,7 @@ function EditTradeModal({ trade, onClose, onSaved }: {
   const [stopLoss, setStopLoss] = useState(String(trade.stop_loss));
   const [takeProfit, setTakeProfit] = useState(String(trade.take_profit));
   const [quantity, setQuantity] = useState(trade.quantity != null ? String(trade.quantity) : '');
-  const [valuePerUnit, setValuePerUnit] = useState(trade.value_per_unit != null ? String(trade.value_per_unit) : '');
+  const [multiplier, setMultiplier] = useState(trade.multiplier != null ? String(trade.multiplier) : '1');
   const [currency, setCurrency] = useState<PnlCurrency>((trade.pnl_currency as PnlCurrency) ?? '₪');
   const [tradeReason, setTradeReason] = useState(trade.trade_reason);
   const [notes, setNotes] = useState(trade.post_trade_notes ?? '');
@@ -882,9 +882,9 @@ function EditTradeModal({ trade, onClose, onSaved }: {
       return;
     }
     const qty = quantity.trim() === '' ? null : parseFloat(quantity);
-    const vpu = valuePerUnit.trim() === '' ? null : parseFloat(valuePerUnit);
-    if ((qty !== null && isNaN(qty)) || (vpu !== null && isNaN(vpu))) {
-      setError('כמות וערך ליחידה חייבים להיות מספרים');
+    const mult = multiplier.trim() === '' ? 1 : parseFloat(multiplier);
+    if ((qty !== null && isNaN(qty)) || isNaN(mult)) {
+      setError('כמות ומכפיל חייבים להיות מספרים');
       return;
     }
 
@@ -899,7 +899,7 @@ function EditTradeModal({ trade, onClose, onSaved }: {
       take_profit: tp,
       rr_ratio: calcRR(entry, sl, tp),
       quantity: qty,
-      value_per_unit: vpu,
+      multiplier: mult,
       pnl_currency: currency,
       trade_reason: tradeReason.trim(),
       post_trade_notes: notes.trim() || null,
@@ -972,13 +972,9 @@ function EditTradeModal({ trade, onClose, onSaved }: {
       </div>
 
       <div className="grid grid-cols-2 gap-2">
-        <Field label="כמות">
-          <input type="number" step="any" value={quantity} onChange={e => setQuantity(e.target.value)}
-            className={`${FIELD_CLASS} text-center`} style={fieldStyle} />
-        </Field>
-        <Field label="ערך ליחידה ומטבע">
+        <Field label="כמות ומטבע">
           <div className="flex items-center gap-1.5">
-            <input type="number" step="any" value={valuePerUnit} onChange={e => setValuePerUnit(e.target.value)}
+            <input type="number" step="any" value={quantity} onChange={e => setQuantity(e.target.value)}
               className={`${FIELD_CLASS} text-center flex-1`} style={fieldStyle} />
             <div className="flex rounded-lg overflow-hidden shrink-0 h-[38px]" style={{ border: `1px solid ${BORDER}` }}>
               <button type="button" onClick={() => setCurrency('₪')}
@@ -994,7 +990,14 @@ function EditTradeModal({ trade, onClose, onSaved }: {
             </div>
           </div>
         </Field>
+        <Field label="מכפיל">
+          <input type="number" step="any" value={multiplier} onChange={e => setMultiplier(e.target.value)}
+            placeholder="1" className={`${FIELD_CLASS} text-center`} style={fieldStyle} />
+        </Field>
       </div>
+      <p className="text-[10px] -mt-1" style={{ color: MUTED }}>
+        לחוזים עתידיים בלבד (למשל NQ1 = 20)
+      </p>
 
       <Field label="סיבת כניסה">
         <textarea rows={2} value={tradeReason} onChange={e => setTradeReason(e.target.value)}

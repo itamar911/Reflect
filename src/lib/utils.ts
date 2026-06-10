@@ -18,7 +18,7 @@ export function formatCurrency(value: number): string {
 
 export function formatPnlIls(value: number, currency: string = '₪'): string {
   const sign = value > 0 ? '+' : value < 0 ? '-' : '';
-  return `${sign}${currency}${Math.round(Math.abs(value)).toLocaleString('en-US')}`;
+  return `${sign}${currency}${Math.abs(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 export function formatPnlPoints(points: number): string {

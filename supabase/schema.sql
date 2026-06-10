@@ -175,3 +175,7 @@ ALTER TABLE trade_plans
 CREATE INDEX IF NOT EXISTS idx_trade_plans_debrief
   ON trade_plans (user_id, status, debrief_submitted_at)
   WHERE status = 'closed';
+
+-- v3: Add multiplier for futures contracts P&L calculation
+ALTER TABLE trade_plans
+  ADD COLUMN IF NOT EXISTS multiplier NUMERIC DEFAULT 1;

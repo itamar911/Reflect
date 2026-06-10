@@ -36,7 +36,7 @@ const EMPTY_FORM: TradePlanInput = {
   emotional_state: 3,
   direction: null,
   quantity: '',
-  value_per_unit: '',
+  multiplier: '1',
 };
 
 type FormState = 'empty' | 'editing' | 'validating' | 'warning' | 'blocked' | 'success' | 'error';
@@ -89,9 +89,10 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
   const hasEntry = form.entry_price !== '' && !isNaN(entryNum);
 
   const quantityNum = parseFloat(form.quantity);
-  const valuePerUnitNum = parseFloat(form.value_per_unit);
   const hasQuantity = form.quantity.trim() !== '' && !isNaN(quantityNum) && quantityNum > 0;
-  const hasValuePerUnit = form.value_per_unit.trim() !== '' && !isNaN(valuePerUnitNum) && valuePerUnitNum > 0;
+
+  const multiplierNum = form.multiplier.trim() === '' ? 1 : parseFloat(form.multiplier);
+  const hasValidMultiplier = !isNaN(multiplierNum) && multiplierNum > 0;
 
   // נק׳ mode: the field holds the actual target price directly (no conversion).
   // % mode: the field holds a percentage offset from the entry price.
@@ -177,7 +178,7 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
     slPrice !== null &&
     tpPrice !== null &&
     hasQuantity &&
-    hasValuePerUnit &&
+    hasValidMultiplier &&
     form.trade_reason.trim() !== '';
 
   const activeStep = useMemo(() => {
@@ -188,7 +189,7 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
   }, [form, hasEntry, slPrice, tpPrice]);
 
   async function handleValidate() {
-    if (!hasQuantity || !hasValuePerUnit) { setPnlFieldsError(true); return; }
+    if (!hasQuantity || !hasValidMultiplier) { setPnlFieldsError(true); return; }
     setPnlFieldsError(false);
     if (!isFormFilled || slPrice === null || tpPrice === null) return;
     setFormState('validating');
@@ -203,7 +204,7 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
   }
 
   async function handleSubmit() {
-    if (!hasQuantity || !hasValuePerUnit) { setPnlFieldsError(true); return; }
+    if (!hasQuantity || !hasValidMultiplier) { setPnlFieldsError(true); return; }
     setPnlFieldsError(false);
     if (!isFormFilled || slPrice === null || tpPrice === null) return;
 
@@ -234,7 +235,7 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
       emotional_state: form.emotional_state,
       status: 'open',
       quantity: quantityNum,
-      value_per_unit: valuePerUnitNum,
+      multiplier: multiplierNum,
       pnl_currency: currency,
     });
 
@@ -436,23 +437,8 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-medium text-tg-muted">כמות *</label>
-                  <input
-                    type="number"
-                    step="any"
-                    placeholder="0"
-                    value={form.quantity}
-                    onChange={(e) => { setForm({ ...form, quantity: e.target.value }); setPnlFieldsError(false); }}
-                    className="w-full h-10 px-2 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors text-center"
-                    style={{
-                      background: 'var(--color-tg-surface-2)',
-                      borderColor: pnlFieldsError && !hasQuantity ? 'var(--color-tg-danger)' : 'var(--color-tg-border)',
-                    }}
-                  />
-                </div>
-                <div className="flex flex-col gap-1.5">
                   <div className="flex items-center justify-between">
-                    <label className="text-xs font-medium text-tg-muted">ערך ליחידה *</label>
+                    <label className="text-xs font-medium text-tg-muted">כמות *</label>
                     <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-tg-border)' }}>
                       <button
                         type="button"
@@ -479,24 +465,42 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
                   <input
                     type="number"
                     step="any"
-                    placeholder="0.00"
-                    value={form.value_per_unit}
-                    onChange={(e) => { setForm({ ...form, value_per_unit: e.target.value }); setPnlFieldsError(false); }}
+                    placeholder="0"
+                    value={form.quantity}
+                    onChange={(e) => { setForm({ ...form, quantity: e.target.value }); setPnlFieldsError(false); }}
                     className="w-full h-10 px-2 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors text-center"
                     style={{
                       background: 'var(--color-tg-surface-2)',
-                      borderColor: pnlFieldsError && !hasValuePerUnit ? 'var(--color-tg-danger)' : 'var(--color-tg-border)',
+                      borderColor: pnlFieldsError && !hasQuantity ? 'var(--color-tg-danger)' : 'var(--color-tg-border)',
+                    }}
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-medium text-tg-muted">מכפיל</label>
+                  <input
+                    type="number"
+                    step="any"
+                    placeholder="1"
+                    value={form.multiplier}
+                    onChange={(e) => { setForm({ ...form, multiplier: e.target.value }); setPnlFieldsError(false); }}
+                    className="w-full h-10 px-2 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors text-center"
+                    style={{
+                      background: 'var(--color-tg-surface-2)',
+                      borderColor: pnlFieldsError && !hasValidMultiplier ? 'var(--color-tg-danger)' : 'var(--color-tg-border)',
                     }}
                   />
                 </div>
               </div>
               <p className="text-[10px] text-tg-muted">
-                שדות חובה — נדרשים כדי שהמערכת תחשב עבורך רווח/הפסד ({currency}) בסגירת העסקה
+                לחוזים עתידיים בלבד (למשל NQ1 = 20)
+              </p>
+              <p className="text-[10px] text-tg-muted">
+                שדה חובה — נדרש כדי שהמערכת תחשב עבורך רווח/הפסד ({currency}) בסגירת העסקה
               </p>
               {pnlFieldsError && (
                 <div className="px-3 py-2 rounded-xl text-xs animate-fade-in"
                   style={{ background: 'var(--color-tg-danger-muted)', color: 'var(--color-tg-danger)' }}>
-                  יש למלא כמות וערך ליחידה כדי להגיש את התוכנית
+                  יש למלא כמות תקינה (ומכפיל תקין) כדי להגיש את התוכנית
                 </div>
               )}
               {rr !== null && rr > 0 && (

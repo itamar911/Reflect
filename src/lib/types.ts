@@ -71,7 +71,7 @@ export interface TradePlan {
   submitted_at: string;
   closed_at: string | null;
   quantity: number | null;
-  value_per_unit: number | null;
+  multiplier: number | null;
   pnl_amount: number | null;
   pnl_currency: PnlCurrency | null;
 }
@@ -88,7 +88,7 @@ export interface TradePlanInput {
   emotional_state: number;
   direction: 'long' | 'short' | null;
   quantity: string;
-  value_per_unit: string;
+  multiplier: string;
 }
 
 export interface RulesetValidationResult {
