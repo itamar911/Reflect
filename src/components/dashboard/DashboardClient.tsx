@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback, useSyncExternalStore } from 'react';
 import { Sparkles, TrendingUp, TrendingDown, RefreshCw, CheckCircle, AlertCircle, Heart, ArrowRight, ChevronRight, ChevronLeft, Quote } from 'lucide-react';
 import { formatPnlIls, formatPnlPoints } from '@/lib/utils';
 import { createClient } from '@/lib/supabase/client';
@@ -20,6 +20,18 @@ const MUTED   = '#ffffff';
 const GREEN   = '#22c55e';
 const RED     = '#ef4444';
 const YELLOW  = '#eab308';
+
+// Fixed, deterministic stand-in for "now" used before the client has mounted,
+// so the server render and the first client render produce identical output.
+const EPOCH = new Date(0);
+
+// Reports false during SSR and the first client render, then true after
+// hydration — the recommended way to gate "now"-dependent output without
+// causing a hydration mismatch.
+function subscribeNoop() { return () => {}; }
+function useMounted(): boolean {
+  return useSyncExternalStore(subscribeNoop, () => true, () => false);
+}
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────
 function tradeDir(t: DashTrade): 'long' | 'short' {
@@ -43,16 +55,16 @@ function fmtDateTime(iso: string) {
 // ── Series builders ───────────────────────────────────────────────────────────
 type BarItem = { label: string; value: number };
 
-function buildDailySeries(dm: Record<string, number>, n: number): BarItem[] {
+function buildDailySeries(dm: Record<string, number>, n: number, now: Date): BarItem[] {
   return Array.from({ length: n }, (_, i) => {
-    const d = new Date(); d.setDate(d.getDate() - (n - 1 - i));
+    const d = new Date(now); d.setDate(d.getDate() - (n - 1 - i));
     const k = d.toISOString().slice(0, 10);
     return { label: k.slice(5).replace('-', '/'), value: dm[k] ?? 0 };
   });
 }
-function buildWeeklySeries(dm: Record<string, number>, n: number): BarItem[] {
+function buildWeeklySeries(dm: Record<string, number>, n: number, now: Date): BarItem[] {
   return Array.from({ length: n }, (_, i) => {
-    const start = new Date();
+    const start = new Date(now);
     start.setDate(start.getDate() - start.getDay() - (n - 1 - i) * 7);
     let sum = 0;
     for (let d = 0; d < 7; d++) {
@@ -62,8 +74,7 @@ function buildWeeklySeries(dm: Record<string, number>, n: number): BarItem[] {
     return { label: `W${i + 1}`, value: sum };
   });
 }
-function buildMonthlySeries(dm: Record<string, number>, n: number): BarItem[] {
-  const now = new Date();
+function buildMonthlySeries(dm: Record<string, number>, n: number, now: Date): BarItem[] {
   return Array.from({ length: n }, (_, i) => {
     const d = new Date(now.getFullYear(), now.getMonth() - (n - 1 - i), 1);
     const yr = d.getFullYear(), mo = d.getMonth();
@@ -74,13 +85,13 @@ function buildMonthlySeries(dm: Record<string, number>, n: number): BarItem[] {
     return { label: `${mo + 1}/${String(yr).slice(2)}`, value: sum };
   });
 }
-function buildCumulativeSeries(dm: Record<string, number>, n: number): BarItem[] {
+function buildCumulativeSeries(dm: Record<string, number>, n: number, now: Date): BarItem[] {
   let cum = 0;
-  return buildDailySeries(dm, n).map(d => { cum += d.value; return { label: d.label, value: cum }; });
+  return buildDailySeries(dm, n, now).map(d => { cum += d.value; return { label: d.label, value: cum }; });
 }
 
 // ── Compute all stats ─────────────────────────────────────────────────────────
-function computeAll(trades: DashTrade[]) {
+function computeAll(trades: DashTrade[], now: Date) {
   const closed = trades.filter(t => t.status === 'closed' && t.exit_price != null);
   const pnls   = closed.map(t => calcPnl(t)!);
   // Win/loss classification is sign-based, so it's identical whether derived from
@@ -105,7 +116,6 @@ function computeAll(trades: DashTrade[]) {
   const pnlCurrency      = pnlCurrencies.length === 1 ? pnlCurrencies[0] : '₪';
 
   // Period P&L = current calendar month
-  const now = new Date();
   const periodPnl = closed.reduce((s, t) => {
     const d = new Date(t.closed_at ?? t.submitted_at);
     return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
@@ -176,10 +186,10 @@ function computeAll(trades: DashTrade[]) {
     dailyPnl, dailyCount, weeklyPnl, weeklyCount, monthlyPnl, monthlyCount, totalCount,
     radarScores,
     dayMap,
-    dailySeries:      buildDailySeries(dayMap, 30),
-    weeklySeries:     buildWeeklySeries(dayMap, 12),
-    monthlySeries:    buildMonthlySeries(dayMap, 12),
-    cumulativeSeries: buildCumulativeSeries(dayMap, 60),
+    dailySeries:      buildDailySeries(dayMap, 30, now),
+    weeklySeries:     buildWeeklySeries(dayMap, 12, now),
+    monthlySeries:    buildMonthlySeries(dayMap, 12, now),
+    cumulativeSeries: buildCumulativeSeries(dayMap, 60, now),
   };
 }
 
@@ -875,18 +885,26 @@ export default function DashboardClient({
   const [barMode,  setBarMode]  = useState<'daily' | 'weekly' | 'monthly'>('daily');
   const [pnlPeriod, setPnlPeriod] = useState<'daily' | 'weekly' | 'monthly' | 'total'>('total');
   const [lineMode, setLineMode] = useState<'cumulative' | 'daily'>('cumulative');
-  const [calDate,  setCalDate]  = useState(new Date());
+  const [calDate,  setCalDate]  = useState<Date | null>(null);
   const [selTrade, setSelTrade] = useState<DashTrade | null>(null);
   const [tradeAi,  setTradeAi]  = useState<Record<string, string>>({});
   const [tradeAiL, setTradeAiL] = useState<Record<string, boolean>>({});
   const [weeklySummary, setWeeklySummary] = useState<WeeklySummary | null>(null);
   const [weeklyLoading, setWeeklyLoading] = useState(false);
+  const [weeklyError, setWeeklyError] = useState<string | null>(null);
   const [viewedWeekStart, setViewedWeekStart] = useState<string | null>(null);
   const [viewedWeekEnd, setViewedWeekEnd] = useState<string | null>(null);
   const [isLatestWeek, setIsLatestWeek] = useState(true);
   const [previousStats, setPreviousStats] = useState<WeeklyStats | null>(null);
 
-  const stats = useMemo(() => computeAll(trades), [trades]);
+  // "Now" is null during SSR and the first client render (matching), then
+  // becomes a real Date once mounted — avoids hydration mismatches from
+  // anything date-dependent (greeting, calendar, date-based series).
+  const mounted = useMounted();
+  const now = useMemo(() => mounted ? new Date() : null, [mounted]);
+
+  const stats = useMemo(() => computeAll(trades, now ?? EPOCH), [trades, now]);
+  const effectiveCalDate = calDate ?? now;
 
   // Re-fetch trades from Supabase (used by the real-time subscription below)
   const fetchTrades = useCallback(async () => {
@@ -928,15 +946,22 @@ export default function DashboardClient({
     try {
       const url = weekStart ? `/api/weekly-summary?week_start=${weekStart}` : '/api/weekly-summary';
       const res = await fetch(url);
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data) {
+        console.error('[weekly-summary] GET failed', res.status, data);
+        setWeeklyError(data?.error ?? `שגיאה בטעינת הסיכום (קוד ${res.status})`);
+        return null;
+      }
+      setWeeklyError(null);
       setWeeklySummary(data.summary ?? null);
       setViewedWeekStart(data.week_start ?? null);
       setViewedWeekEnd(data.week_end ?? null);
       setIsLatestWeek(data.is_latest ?? true);
       setPreviousStats(data.previous_stats ?? null);
       return data;
-    } catch {
-      // weekly summary is non-critical — fail silently
+    } catch (err) {
+      console.error('[weekly-summary] GET request failed', err);
+      setWeeklyError('שגיאה בטעינת הסיכום השבועי.');
       return null;
     } finally {
       setWeeklyLoading(false);
@@ -952,10 +977,19 @@ export default function DashboardClient({
       setWeeklyLoading(true);
       try {
         const genRes = await fetch('/api/weekly-summary', { method: 'POST' });
-        const genData = await genRes.json();
-        if (!cancelled && genData.summary) setWeeklySummary(genData.summary);
-      } catch {
-        // weekly summary is non-critical — fail silently
+        const genData = await genRes.json().catch(() => null);
+        if (!genRes.ok || !genData?.summary) {
+          console.error('[weekly-summary] auto-generate failed', genRes.status, genData);
+          if (!cancelled) setWeeklyError(genData?.error ?? `שגיאה ביצירת הסיכום (קוד ${genRes.status})`);
+          return;
+        }
+        if (!cancelled) {
+          setWeeklyError(null);
+          setWeeklySummary(genData.summary);
+        }
+      } catch (err) {
+        console.error('[weekly-summary] auto-generate request failed', err);
+        if (!cancelled) setWeeklyError('שגיאה ביצירת הסיכום השבועי.');
       } finally {
         if (!cancelled) setWeeklyLoading(false);
       }
@@ -965,12 +999,19 @@ export default function DashboardClient({
 
   async function refreshWeeklySummary() {
     setWeeklyLoading(true);
+    setWeeklyError(null);
     try {
       const res = await fetch('/api/weekly-summary', { method: 'POST' });
-      const data = await res.json();
-      if (data.summary) await loadWeek(data.summary.week_start);
-    } catch {
-      // weekly summary is non-critical — fail silently
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.summary) {
+        console.error('[weekly-summary] POST failed', res.status, data);
+        setWeeklyError(data?.error ?? `שגיאה ביצירת הסיכום (קוד ${res.status})`);
+        return;
+      }
+      await loadWeek(data.summary.week_start);
+    } catch (err) {
+      console.error('[weekly-summary] POST request failed', err);
+      setWeeklyError('שגיאה ביצירת הסיכום. נסה שוב.');
     } finally {
       setWeeklyLoading(false);
     }
@@ -1021,12 +1062,18 @@ export default function DashboardClient({
   const lineData = lineMode === 'cumulative' ? stats.cumulativeSeries : stats.dailySeries;
   const recent   = trades.slice(0, 10);
 
-  const dateStr  = new Date().toLocaleDateString('he-IL', { weekday: 'long', day: 'numeric', month: 'long' });
-  const hour     = new Date().getHours();
-  const greeting = hour < 5 ? 'לילה טוב' : hour < 12 ? 'בוקר טוב' : hour < 17 ? 'צהריים טובים' : 'ערב טוב';
+  const dateStr  = now ? now.toLocaleDateString('he-IL', { weekday: 'long', day: 'numeric', month: 'long' }) : '';
+  const hour     = now ? now.getHours() : null;
+  const greeting = hour === null ? '' : hour < 5 ? 'לילה טוב' : hour < 12 ? 'בוקר טוב' : hour < 17 ? 'צהריים טובים' : 'ערב טוב';
 
-  function prevMonth() { setCalDate(d => new Date(d.getFullYear(), d.getMonth() - 1, 1)); }
-  function nextMonth() { setCalDate(d => new Date(d.getFullYear(), d.getMonth() + 1, 1)); }
+  function prevMonth() {
+    const base = calDate ?? now ?? new Date();
+    setCalDate(new Date(base.getFullYear(), base.getMonth() - 1, 1));
+  }
+  function nextMonth() {
+    const base = calDate ?? now ?? new Date();
+    setCalDate(new Date(base.getFullYear(), base.getMonth() + 1, 1));
+  }
 
   return (
     <div dir="rtl" className="min-h-screen px-5 py-6 flex flex-col gap-4">
@@ -1037,7 +1084,7 @@ export default function DashboardClient({
           {dateStr}
         </p>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: TEXT, letterSpacing: '-0.02em', lineHeight: 1 }}>
-          {greeting}, <span style={{ color: ACCENT }}>{displayName}</span>
+          {greeting && `${greeting}, `}<span style={{ color: ACCENT }}>{displayName}</span>
         </h1>
       </div>
 
@@ -1238,8 +1285,12 @@ export default function DashboardClient({
             {/* Calendar */}
             <Card>
               <SectionTitle>לוח שנה חודשי</SectionTitle>
-              <MonthCalendar dayMap={stats.dayMap} calDate={calDate}
-                onPrev={prevMonth} onNext={nextMonth} />
+              {effectiveCalDate ? (
+                <MonthCalendar dayMap={stats.dayMap} calDate={effectiveCalDate}
+                  onPrev={prevMonth} onNext={nextMonth} />
+              ) : (
+                <div style={{ minHeight: 260 }} />
+              )}
             </Card>
 
             {/* Recent trades */}
@@ -1322,6 +1373,14 @@ export default function DashboardClient({
             </span>
           </button>
         </div>
+
+        {weeklyError && (
+          <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-lg"
+            style={{ background: 'rgba(239,68,68,0.1)', border: `1px solid rgba(239,68,68,0.3)` }}>
+            <AlertCircle size={14} style={{ color: RED, flexShrink: 0 }} />
+            <p style={{ fontSize: 12, color: TEXT2, fontWeight: 600 }}>{weeklyError}</p>
+          </div>
+        )}
 
         <div className="flex items-center justify-between mb-3">
           <button onClick={goToPrevWeek} disabled={weeklyLoading}

@@ -177,19 +177,30 @@ export async function GET(request: Request) {
   const weekEndStr = dateStr(addDays(weekStart, 6));
   const prevWeekStartStr = dateStr(addDays(weekStart, -7));
 
-  const { data } = await supabase
+  console.log(`[weekly-summary] GET user=${user.id} week=${weekStartStr}`);
+
+  const { data, error } = await supabase
     .from('weekly_summaries')
     .select('week_start,week_end,summary_text,stats,created_at')
     .eq('user_id', user.id)
     .eq('week_start', weekStartStr)
     .maybeSingle();
 
-  const { data: previous } = await supabase
+  if (error) {
+    console.error('[weekly-summary] GET: weekly_summaries query failed:', error);
+    return NextResponse.json({ error: `שגיאה בטעינת הסיכום: ${error.message}` }, { status: 500 });
+  }
+
+  const { data: previous, error: prevError } = await supabase
     .from('weekly_summaries')
     .select('stats')
     .eq('user_id', user.id)
     .eq('week_start', prevWeekStartStr)
     .maybeSingle();
+
+  if (prevError) {
+    console.error('[weekly-summary] GET: previous-week query failed:', prevError);
+  }
 
   return NextResponse.json({
     summary: data ?? null,
@@ -209,51 +220,91 @@ export async function POST() {
   const weekStartStr = dateStr(weekStart);
   const weekEndStr = dateStr(weekEnd);
 
-  const { data: trades } = await supabase
-    .from('trade_plans')
-    .select('strategy,entry_price,exit_price,take_profit,stop_loss,emotional_state,plan_score,pnl_amount,pnl_currency,closed_at,submitted_at,exit_reason,post_trade_notes')
-    .eq('user_id', user.id)
-    .eq('status', 'closed')
-    .gte('closed_at', `${weekStartStr}T00:00:00.000Z`)
-    .lte('closed_at', `${weekEndStr}T23:59:59.999Z`);
+  console.log(`[weekly-summary] POST start user=${user.id} week=${weekStartStr}..${weekEndStr}`);
 
-  const stats = computeWeeklyStats(trades ?? [], weekStart);
+  try {
+    const { data: trades, error: tradesError } = await supabase
+      .from('trade_plans')
+      .select('strategy,entry_price,exit_price,take_profit,stop_loss,emotional_state,plan_score,pnl_amount,pnl_currency,closed_at,submitted_at,exit_reason,post_trade_notes')
+      .eq('user_id', user.id)
+      .eq('status', 'closed')
+      .gte('closed_at', `${weekStartStr}T00:00:00.000Z`)
+      .lte('closed_at', `${weekEndStr}T23:59:59.999Z`);
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('display_name')
-    .eq('id', user.id)
-    .maybeSingle();
-  const firstName = profile?.display_name?.split(' ')[0] ?? 'סוחר';
+    if (tradesError) {
+      console.error('[weekly-summary] POST: trade_plans query failed:', tradesError);
+      return NextResponse.json({ error: `שגיאה בטעינת עסקאות: ${tradesError.message}` }, { status: 500 });
+    }
+    console.log(`[weekly-summary] POST: loaded ${trades?.length ?? 0} closed trades for the week`);
 
-  const insightfulNotes = collectInsightfulNotes(trades ?? []);
+    const stats = computeWeeklyStats(trades ?? [], weekStart);
 
-  const message = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 1000,
-    messages: [{ role: 'user', content: buildPrompt(stats, firstName, insightfulNotes) }],
-  });
-  const summaryText = message.content[0].type === 'text' ? message.content[0].text : '';
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('display_name')
+      .eq('id', user.id)
+      .maybeSingle();
+    if (profileError) {
+      console.error('[weekly-summary] POST: profile query failed:', profileError);
+    }
+    const firstName = profile?.display_name?.split(' ')[0] ?? 'סוחר';
 
-  const { data: existing } = await supabase
-    .from('weekly_summaries')
-    .select('id')
-    .eq('user_id', user.id)
-    .eq('week_start', weekStartStr)
-    .maybeSingle();
+    const insightfulNotes = collectInsightfulNotes(trades ?? []);
 
-  const createdAt = new Date().toISOString();
+    let summaryText: string;
+    try {
+      const message = await client.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1000,
+        messages: [{ role: 'user', content: buildPrompt(stats, firstName, insightfulNotes) }],
+      });
+      summaryText = message.content[0].type === 'text' ? message.content[0].text : '';
+      console.log(`[weekly-summary] POST: Claude returned ${summaryText.length} chars`);
+    } catch (err) {
+      console.error('[weekly-summary] POST: Claude API call failed:', err);
+      const detail = err instanceof Error ? err.message : String(err);
+      return NextResponse.json({ error: `קריאה ל-AI נכשלה: ${detail}` }, { status: 502 });
+    }
 
-  if (existing) {
-    await supabase.from('weekly_summaries')
-      .update({ week_end: weekEndStr, summary_text: summaryText, stats, created_at: createdAt })
-      .eq('id', existing.id);
-  } else {
-    await supabase.from('weekly_summaries')
-      .insert({ user_id: user.id, week_start: weekStartStr, week_end: weekEndStr, summary_text: summaryText, stats });
+    const { data: existing, error: existingError } = await supabase
+      .from('weekly_summaries')
+      .select('id')
+      .eq('user_id', user.id)
+      .eq('week_start', weekStartStr)
+      .maybeSingle();
+
+    if (existingError) {
+      console.error('[weekly-summary] POST: existing-summary lookup failed:', existingError);
+      return NextResponse.json({ error: `שגיאה בבדיקת סיכום קיים: ${existingError.message}` }, { status: 500 });
+    }
+
+    const createdAt = new Date().toISOString();
+
+    if (existing) {
+      const { error: updateError } = await supabase.from('weekly_summaries')
+        .update({ week_end: weekEndStr, summary_text: summaryText, stats, created_at: createdAt })
+        .eq('id', existing.id);
+      if (updateError) {
+        console.error('[weekly-summary] POST: update failed:', updateError);
+        return NextResponse.json({ error: `שגיאה בשמירת הסיכום: ${updateError.message}` }, { status: 500 });
+      }
+    } else {
+      const { error: insertError } = await supabase.from('weekly_summaries')
+        .insert({ user_id: user.id, week_start: weekStartStr, week_end: weekEndStr, summary_text: summaryText, stats });
+      if (insertError) {
+        console.error('[weekly-summary] POST: insert failed:', insertError);
+        return NextResponse.json({ error: `שגיאה בשמירת הסיכום: ${insertError.message}` }, { status: 500 });
+      }
+    }
+
+    console.log('[weekly-summary] POST: summary saved successfully');
+
+    return NextResponse.json({
+      summary: { week_start: weekStartStr, week_end: weekEndStr, summary_text: summaryText, stats, created_at: createdAt },
+    });
+  } catch (err) {
+    console.error('[weekly-summary] POST: unexpected error:', err);
+    const detail = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: `שגיאה לא צפויה: ${detail}` }, { status: 500 });
   }
-
-  return NextResponse.json({
-    summary: { week_start: weekStartStr, week_end: weekEndStr, summary_text: summaryText, stats, created_at: createdAt },
-  });
 }
