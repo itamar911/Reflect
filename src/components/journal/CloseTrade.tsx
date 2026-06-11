@@ -4,13 +4,20 @@ import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
 import { Bot } from 'lucide-react';
+import { formatPnlIls, formatPnlPoints } from '@/lib/utils';
 
 export interface ScoreBreakdown {
-  potential: number;
-  riskReward: number;
-  discipline: number;
-  emotional: number;
-  documentation: number;
+  planning: number;
+  followedPlan: number;
+  keptSl: number;
+  properSize: number;
+  learning: number;
+}
+
+export interface ScoreOutcome {
+  points: number;
+  amount: number | null;
+  currency: string | null;
 }
 
 export interface AIDebriefResult {
@@ -22,6 +29,7 @@ export interface AIDebriefResult {
   lessons?: string;
   score?: number;
   breakdown?: ScoreBreakdown;
+  outcome?: ScoreOutcome;
   analysis?: string;
   error?: string;
 }
@@ -38,6 +46,11 @@ interface TradeForDebrief {
   exit_price: number;
   exit_reason: string;
   post_trade_notes: string;
+  followed_plan: boolean;
+  kept_sl: boolean;
+  proper_size: boolean;
+  pnl_amount: number | null;
+  pnl_currency: string | null;
 }
 
 interface CloseTradeProps {
@@ -73,6 +86,9 @@ export default function CloseTrade({
   const [exitPrice, setExitPrice] = useState('');
   const [exitReason, setExitReason] = useState('');
   const [notes, setNotes] = useState('');
+  const [followedPlan, setFollowedPlan] = useState<boolean | null>(null);
+  const [keptSl, setKeptSl] = useState<boolean | null>(null);
+  const [properSize, setProperSize] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [debriefResult, setDebriefResult] = useState<AIDebriefResult | null>(null);
@@ -91,12 +107,17 @@ export default function CloseTrade({
 
   async function handleClose() {
     if (!exitPrice || !exitReason) { setError('מלא מחיר יציאה וסיבה'); return; }
+    if (followedPlan === null || keptSl === null || properSize === null) {
+      setError('ענה על שלוש שאלות בדיקת התהליך');
+      return;
+    }
     setLoading(true);
     setError('');
 
     const pnlAmount = quantity != null
       ? Math.round((direction === 'long' ? exit - entryPrice : entryPrice - exit) * quantity * 100) / 100
       : null;
+    const pnlCurrencyValue = pnlAmount != null ? (pnlCurrency ?? '₪') : null;
 
     const { error: err } = await supabase.from('trade_plans').update({
       status: 'closed',
@@ -105,7 +126,10 @@ export default function CloseTrade({
       post_trade_notes: notes.trim() || null,
       closed_at: new Date().toISOString(),
       pnl_amount: pnlAmount,
-      pnl_currency: pnlAmount != null ? (pnlCurrency ?? '₪') : null,
+      pnl_currency: pnlCurrencyValue,
+      followed_plan: followedPlan,
+      kept_sl: keptSl,
+      proper_size: properSize,
     }).eq('id', tradeId);
 
     if (err) {
@@ -126,6 +150,11 @@ export default function CloseTrade({
         trade_reason: tradeReason,
         exit_price: exit, exit_reason: exitReason,
         post_trade_notes: notes.trim(),
+        followed_plan: followedPlan,
+        kept_sl: keptSl,
+        proper_size: properSize,
+        pnl_amount: pnlAmount,
+        pnl_currency: pnlCurrencyValue,
       };
       const fd = new FormData();
       fd.append('trade', JSON.stringify({ ...tradeData, status: 'closed', exit_price: exit }));
@@ -243,12 +272,49 @@ export default function CloseTrade({
         />
       </div>
 
+      <div className="flex flex-col gap-2 pt-2 border-t border-tg-border">
+        <p className="text-xs font-semibold text-tg-text">בדיקת תהליך *</p>
+        <ProcessQuestion label="האם נכנסת בדיוק לפי התוכנית?" value={followedPlan} onChange={setFollowedPlan} />
+        <ProcessQuestion label="האם שמרת על ה-SL המקורי ולא הזזת אותו?" value={keptSl} onChange={setKeptSl} />
+        <ProcessQuestion label="האם גודל הפוזיציה תאם את חוקי הסיכון שלך?" value={properSize} onChange={setProperSize} />
+      </div>
+
       {error && <p className="text-xs" style={{ color: 'var(--color-tg-danger)' }}>{error}</p>}
 
       <Button fullWidth onClick={handleClose} loading={loading}
         variant={isWin === false ? 'danger' : 'primary'}>
         סגור עסקה + קבל ניתוח AI
       </Button>
+    </div>
+  );
+}
+
+function ProcessQuestion({ label, value, onChange }: {
+  label: string;
+  value: boolean | null;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <p className="text-xs text-tg-text-2 flex-1">{label}</p>
+      <div className="flex rounded-lg overflow-hidden shrink-0" style={{ border: '1px solid var(--color-tg-border)' }}>
+        <button type="button" onClick={() => onChange(true)}
+          className="px-3 py-1 text-xs font-semibold transition-all"
+          style={{
+            background: value === true ? 'var(--color-tg-success-muted)' : 'transparent',
+            color: value === true ? 'var(--color-tg-success)' : 'var(--color-tg-muted)',
+          }}>
+          כן
+        </button>
+        <button type="button" onClick={() => onChange(false)}
+          className="px-3 py-1 text-xs font-semibold transition-all"
+          style={{
+            background: value === false ? 'var(--color-tg-danger-muted)' : 'transparent',
+            color: value === false ? 'var(--color-tg-danger)' : 'var(--color-tg-muted)',
+          }}>
+          לא
+        </button>
+      </div>
     </div>
   );
 }
@@ -265,30 +331,39 @@ export function AIDebriefView({ result }: { result: AIDebriefResult }) {
   ] as [string, string | undefined][]).filter(([, v]) => v);
 
   const scoreColor = result.score === undefined
-    ? undefined
+    ? 'var(--color-tg-muted)'
     : result.score >= 70 ? 'var(--color-tg-success)'
     : result.score >= 50 ? 'var(--color-tg-warning)'
     : 'var(--color-tg-danger)';
 
+  const outcome = result.outcome;
+  const outcomePoints = outcome
+    ? `${outcome.points >= 0 ? '+' : '-'}${formatPnlPoints(outcome.points)}`
+    : null;
+  const outcomeAmount = outcome?.amount != null
+    ? formatPnlIls(outcome.amount, outcome.currency ?? '₪')
+    : null;
+
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-bold text-tg-text flex items-center gap-1.5"><Bot size={14} /> משוב AI על העסקה</p>
-        {result.score !== undefined && (
-          <span className="text-lg font-bold" style={{ color: scoreColor }}>
-            {result.score}/100
-          </span>
-        )}
-      </div>
+      <p className="text-sm font-bold text-tg-text flex items-center gap-1.5"><Bot size={14} /> משוב AI על העסקה</p>
+
+      {result.score !== undefined && (
+        <div className="flex items-center justify-between rounded-xl p-3"
+          style={{ background: 'var(--color-tg-surface-2)', border: `1px solid ${scoreColor}` }}>
+          <span className="text-sm font-semibold" style={{ color: scoreColor }}>🎯 ציון תהליך</span>
+          <span className="text-2xl font-bold" style={{ color: scoreColor }}>{result.score}/100</span>
+        </div>
+      )}
 
       {result.breakdown && (
         <div className="grid grid-cols-2 gap-1.5">
           {([
-            ['מימוש פוטנציאל', result.breakdown.potential, 30],
-            ['יחס סיכוי/סיכון', result.breakdown.riskReward, 25],
-            ['משמעת', result.breakdown.discipline, 20],
-            ['מצב רגשי', result.breakdown.emotional, 15],
-            ['תיעוד', result.breakdown.documentation, 10],
+            ['תכנון', result.breakdown.planning, 20],
+            ['כניסה לפי תוכנית', result.breakdown.followedPlan, 25],
+            ['שמירה על SL', result.breakdown.keptSl, 25],
+            ['גודל פוזיציה', result.breakdown.properSize, 15],
+            ['למידה', result.breakdown.learning, 15],
           ] as [string, number, number][]).map(([label, value, max]) => (
             <div key={label} className="flex items-center justify-between rounded-lg px-2.5 py-1.5"
               style={{ background: 'var(--color-tg-surface-2)' }}>
@@ -296,6 +371,15 @@ export function AIDebriefView({ result }: { result: AIDebriefResult }) {
               <span className="text-xs font-bold text-tg-text">{value}/{max}</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {outcomePoints && (
+        <div className="flex items-center justify-between px-1">
+          <span className="text-xs text-tg-muted">📊 תוצאה</span>
+          <span className="text-xs font-semibold text-tg-text-2">
+            {outcomePoints}{outcomeAmount ? ` (${outcomeAmount})` : ''}
+          </span>
         </div>
       )}
 

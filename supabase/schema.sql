@@ -182,3 +182,9 @@ ALTER TABLE trade_plans
 
 -- v4: Enable Realtime so the dashboard can subscribe to trade_plans changes
 ALTER PUBLICATION supabase_realtime ADD TABLE trade_plans;
+
+-- v5: Process-quality checklist, answered when closing a trade
+ALTER TABLE trade_plans
+  ADD COLUMN IF NOT EXISTS followed_plan BOOLEAN,
+  ADD COLUMN IF NOT EXISTS kept_sl BOOLEAN,
+  ADD COLUMN IF NOT EXISTS proper_size BOOLEAN;

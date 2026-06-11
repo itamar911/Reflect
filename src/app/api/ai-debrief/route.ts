@@ -5,11 +5,17 @@ import { createClient } from '@/lib/supabase/server';
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 interface ScoreBreakdown {
-  potential: number;
-  riskReward: number;
-  discipline: number;
-  emotional: number;
-  documentation: number;
+  planning: number;
+  followedPlan: number;
+  keptSl: number;
+  properSize: number;
+  learning: number;
+}
+
+interface Outcome {
+  points: number;
+  amount: number | null;
+  currency: string | null;
 }
 
 function clamp(n: number, min: number, max: number): number {
@@ -17,52 +23,32 @@ function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n));
 }
 
-const EMOTIONAL_POINTS: Record<number, number> = { 1: 0, 2: 5, 3: 9, 4: 12, 5: 15 };
-const DOCUMENTATION_POINTS = [0, 3, 6, 10];
-
-function computeQuantScores(trade: Record<string, unknown>, description: string | null) {
-  const entry = Number(trade.entry_price);
-  const sl = Number(trade.stop_loss);
-  const tp = Number(trade.take_profit);
-  const exit = trade.exit_price != null ? Number(trade.exit_price) : null;
-  const direction: 'long' | 'short' = tp >= entry ? 'long' : 'short';
-
-  let potential = 0;
-  let riskReward = 0;
-  if (exit != null) {
-    const rewardSpan = direction === 'long' ? tp - entry : entry - tp;
-    const moveAchieved = direction === 'long' ? exit - entry : entry - exit;
-    if (rewardSpan > 0) potential = clamp((moveAchieved / rewardSpan) * 30, 0, 30);
-
-    const risk = Math.abs(entry - sl);
-    if (risk > 0 && rewardSpan > 0) {
-      const actualRR = moveAchieved / risk;
-      const plannedRR = rewardSpan / risk;
-      riskReward = clamp((actualRR / plannedRR) * 25, 0, 25);
-    }
-  }
-
-  const emotional = EMOTIONAL_POINTS[Number(trade.emotional_state)] ?? 0;
-
-  const filledFields = [trade.trade_reason, description, trade.exit_reason]
-    .filter((v) => typeof v === 'string' && v.trim().length > 0).length;
-  const documentation = DOCUMENTATION_POINTS[filledFields];
-
-  return {
-    direction,
-    potential: Math.round(potential),
-    riskReward: Math.round(riskReward),
-    emotional,
-    documentation,
-  };
+function isFilled(v: unknown): boolean {
+  if (v == null) return false;
+  if (typeof v === 'string') return v.trim().length > 0;
+  if (typeof v === 'number') return Number.isFinite(v);
+  return true;
 }
 
-function disciplineSuggestion(exitReason: unknown): number {
-  const r = typeof exitReason === 'string' ? exitReason : '';
-  if (/take profit/i.test(r)) return 20;
-  if (/הפסד|סגירה מוקדמת/.test(r)) return 5;
-  if (/רווח/.test(r)) return 10;
-  return 12;
+function planningScore(trade: Record<string, unknown>): number {
+  const fields = [trade.entry_price, trade.stop_loss, trade.take_profit, trade.trade_reason, trade.strategy];
+  return Math.round((fields.filter(isFilled).length / fields.length) * 20);
+}
+
+function computeOutcome(trade: Record<string, unknown>): Outcome | null {
+  const entry = Number(trade.entry_price);
+  const tp = Number(trade.take_profit);
+  const exit = trade.exit_price != null ? Number(trade.exit_price) : null;
+  if (exit == null || !Number.isFinite(entry) || !Number.isFinite(tp)) return null;
+
+  const direction: 'long' | 'short' = tp >= entry ? 'long' : 'short';
+  const points = direction === 'long' ? exit - entry : entry - exit;
+
+  return {
+    points: Math.round(points * 100) / 100,
+    amount: trade.pnl_amount != null ? Number(trade.pnl_amount) : null,
+    currency: typeof trade.pnl_currency === 'string' ? trade.pnl_currency : null,
+  };
 }
 
 export async function POST(request: Request) {
@@ -85,10 +71,15 @@ export async function POST(request: Request) {
     content.push({ type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } });
   }
 
-  const quant = computeQuantScores(trade, description);
-  const suggestedDiscipline = disciplineSuggestion(trade.exit_reason);
+  const fixed = {
+    planning: planningScore(trade),
+    followedPlan: trade.followed_plan === true ? 25 : 0,
+    keptSl: trade.kept_sl === true ? 25 : 0,
+    properSize: trade.proper_size === true ? 15 : 0,
+  };
+  const outcome = computeOutcome(trade);
 
-  content.push({ type: 'text', text: buildDebriefPrompt(trade, description, quant, suggestedDiscipline) });
+  content.push({ type: 'text', text: buildDebriefPrompt(trade, description, fixed) });
 
   const message = await client.messages.create({
     model: 'claude-sonnet-4-6',
@@ -100,102 +91,74 @@ export async function POST(request: Request) {
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : { analysis: 'Unable to analyze' };
 
-  // The score is recomputed here from the deterministic categories plus Claude's
-  // (clamped) discipline judgement, so the returned score can never drift from
-  // the breakdown shown to the user.
-  const discipline = clamp(Math.round(Number(parsed?.breakdown?.discipline ?? suggestedDiscipline)), 0, 20);
-  const breakdown: ScoreBreakdown = {
-    potential: quant.potential,
-    riskReward: quant.riskReward,
-    discipline,
-    emotional: quant.emotional,
-    documentation: quant.documentation,
-  };
-  const score = breakdown.potential + breakdown.riskReward + breakdown.discipline
-    + breakdown.emotional + breakdown.documentation;
+  // The score is recomputed here from the fixed process categories plus Claude's
+  // (clamped) learning judgement, so the returned score can never drift from the
+  // breakdown shown to the user.
+  const learning = clamp(Math.round(Number(parsed?.breakdown?.learning ?? 0)), 0, 15);
+  const breakdown: ScoreBreakdown = { ...fixed, learning };
+  const score = breakdown.planning + breakdown.followedPlan + breakdown.keptSl
+    + breakdown.properSize + breakdown.learning;
 
-  return NextResponse.json({ ...parsed, score, breakdown });
+  return NextResponse.json({ ...parsed, score, breakdown, outcome });
 }
 
 function buildDebriefPrompt(
   trade: Record<string, unknown>,
   description: string | null,
-  quant: ReturnType<typeof computeQuantScores>,
-  suggestedDiscipline: number,
+  fixed: { planning: number; followedPlan: number; keptSl: number; properSize: number },
 ): string {
-  const entry = Number(trade.entry_price);
-  const sl = Number(trade.stop_loss);
-  const tp = Number(trade.take_profit);
-  const exit = trade.exit_price != null ? Number(trade.exit_price) : null;
+  const fixedTotal = fixed.planning + fixed.followedPlan + fixed.keptSl + fixed.properSize;
 
-  const exitContext = (() => {
-    if (exit == null) return null;
-    const potentialRisk = Math.abs(entry - sl);
-    const potentialReward = Math.abs(tp - entry);
-    const actualMove = Math.abs(exit - entry);
-    const capturedPct = potentialReward > 0 ? Math.round((actualMove / potentialReward) * 100) : 0;
-    const hitSL = Math.abs(exit - sl) < Math.abs(entry - sl) * 0.05;
-    const hitTP = Math.abs(exit - tp) < Math.abs(tp - entry) * 0.05;
-    const exitedEarly = !hitTP && !hitSL && exit > entry;
-    return { capturedPct, hitSL, hitTP, exitedEarly, potentialRisk, potentialReward };
-  })();
+  return `You are a professional trading-process coach. Analyze the following completed trade and respond entirely in Hebrew.
 
-  const fixedTotal = quant.potential + quant.riskReward + quant.emotional + quant.documentation;
-
-  return `You are a professional trade analyst. Analyze the following completed trade and respond entirely in Hebrew.
+This review evaluates the trader's PROCESS and discipline ONLY — NOT the outcome. Do not discuss profit/loss, points gained or lost, or whether the trade was a win or a loss anywhere in your analysis.
 
 Trade data:
 - Strategy: ${trade.strategy}
-- Direction: ${quant.direction === 'long' ? 'LONG' : 'SHORT'}
-- Entry: ${entry}
-- Stop Loss: ${sl}
-- Take Profit: ${tp}
-- R:R ratio: ${trade.rr_ratio}
-- Entry reason: ${trade.trade_reason}
-- Status: ${trade.status}
-${exit != null ? `- Exit price: ${exit}` : ''}
-${exitContext ? `- Hit stop loss: ${exitContext.hitSL}` : ''}
-${exitContext ? `- Hit take profit: ${exitContext.hitTP}` : ''}
-${exitContext ? `- Exited early (before TP, in profit): ${exitContext.exitedEarly}` : ''}
-${exitContext ? `- Captured ~${exitContext.capturedPct}% of potential reward` : ''}
+- Entry: ${trade.entry_price}
+- Stop Loss: ${trade.stop_loss}
+- Take Profit: ${trade.take_profit}
+- Entry reason (the plan): ${trade.trade_reason}
 - Exit reason: ${trade.exit_reason ?? '—'}
-- Emotional state (self-reported, 1-5): ${trade.emotional_state}
-${description ? `- Trader notes: ${description}` : '- Trader notes: (none)'}
+${description ? `- Trader notes on the exit: ${description}` : '- Trader notes on the exit: (none)'}
+- Followed the entry plan exactly: ${trade.followed_plan === true ? 'כן' : 'לא'}
+- Kept the original stop loss without moving it: ${trade.kept_sl === true ? 'כן' : 'לא'}
+- Position size matched the trader's risk rules: ${trade.proper_size === true ? 'כן' : 'לא'}
 
-A quantitative score has already been calculated for this trade out of 100. You may ONLY adjust category 3 (discipline) — categories 1, 2, 4 and 5 are fixed and must be used exactly as given:
-1. Potential realization (out of 30): ${quant.potential} — how much of the planned move to TP was captured
-2. R:R actual vs. planned (out of 25): ${quant.riskReward} — actual reward/risk achieved vs. the planned R:R
-3. Discipline / followed plan (out of 20): suggested ${suggestedDiscipline}, based on the exit reason. Review the exit reason and trader notes and confirm or adjust this value (0-20):
-   - Exited at Take Profit as planned → 20
-   - Manual exit while in profit, reasonable management → ~10
-   - Impulsive / fear-based exit (panic, premature close, loss-driven override of the plan) → ~5
-   - Use the trader notes to move up or down within this scale
-4. Emotional state (out of 15): ${quant.emotional} — derived from the self-reported emotional state ${trade.emotional_state}/5
-5. Documentation quality (out of 10): ${quant.documentation} — based on whether entry reason, notes and exit reason were filled in
+A quantitative process score out of 100 has already been calculated. You may ONLY determine category 5 (learning) — categories 1-4 are fixed and MUST be used exactly as given:
+1. תכנון מוקדם — planning (out of 20): ${fixed.planning} — based on whether entry price, stop loss, take profit, entry reason and strategy were all documented
+2. כניסה לפי תוכנית — followed the plan (out of 25): ${fixed.followedPlan} — from the trader's yes/no answer above
+3. שמירה על SL — kept the stop loss (out of 25): ${fixed.keptSl} — from the trader's yes/no answer above
+4. גודל פוזיציה — proper position size (out of 15): ${fixed.properSize} — from the trader's yes/no answer above
+5. למידה — learning (out of 15): judge the depth and insight of the exit reason and trader notes:
+   - Detailed, specific, insightful reflection → 15
+   - Basic / generic reflection → 8
+   - Empty or superficial → 0
 
-Categories 1, 2, 4 and 5 sum to ${fixedTotal}/90. The final score = ${fixedTotal} + your discipline score (0-20), out of 100.
+Categories 1-4 sum to ${fixedTotal}/85. The final score = ${fixedTotal} + your learning score (0-15), out of 100.
 
 Instructions:
-1. Analyze each field honestly based on the actual trade data above.
-2. In "execution", explain and justify the discipline score (item 3) — whether the trade was closed according to the plan or impulsively, citing the exit reason and trader notes.
-3. For "emotional", evaluate behavioral/emotional quality from the trade execution itself (not just the self-reported number): did they exit early and leave gains on the table, override their stop, etc.
-4. Your written analysis (overall, entry_quality, risk_management, execution, emotional, lessons) MUST be consistent with and explain the final numeric score — do not write a critical analysis alongside a high score, or a glowing analysis alongside a low score. Reference the actual point values from the breakdown where relevant.
+1. Write analysis that explains and is fully consistent with this PROCESS score. Reference the actual breakdown values where relevant (e.g. "שמרת על ה-SL ולכן קיבלת 25/25 בקטגוריה זו").
+2. Do NOT mention profitability, P&L amounts, points gained/lost, or whether the take-profit was reached — that information is shown to the trader separately and is out of scope here.
+3. In "execution", focus on whether the trader followed their plan, kept their stop, and sized the position correctly.
+4. In "emotional", focus on discipline/behavioral signals from the exit reason and notes (impulsiveness vs. composure) — not on emotional reaction to profit or loss.
+5. In "lessons", give concrete process improvements for next time.
 
 Return JSON exactly in this format (no additional text):
 {
-  "overall": "2-3 sentence overall assessment, mentioning the final score",
-  "entry_quality": "Entry quality and timing analysis",
-  "risk_management": "SL, TP, and R:R evaluation — reference the potential realization and R:R scores",
-  "execution": "Execution and trade management quality — reference and justify the discipline score",
-  "emotional": "Behavioral/emotional quality inferred from trade execution",
-  "lessons": "Key takeaways from this trade",
-  "score": <integer, ${fixedTotal} + your discipline score>,
+  "overall": "2-3 sentence overall assessment of the PROCESS, mentioning the final process score",
+  "entry_quality": "Was the entry planned and documented well?",
+  "risk_management": "Risk-management process — stop-loss handling and position sizing",
+  "execution": "Execution discipline — followed the plan, kept the stop, sized correctly",
+  "emotional": "Discipline/behavioral signals from the exit reason and notes",
+  "lessons": "Concrete process improvements for next time",
+  "score": <integer, ${fixedTotal} + your learning score>,
   "breakdown": {
-    "potential": ${quant.potential},
-    "riskReward": ${quant.riskReward},
-    "discipline": <integer 0-20>,
-    "emotional": ${quant.emotional},
-    "documentation": ${quant.documentation}
+    "planning": ${fixed.planning},
+    "followedPlan": ${fixed.followedPlan},
+    "keptSl": ${fixed.keptSl},
+    "properSize": ${fixed.properSize},
+    "learning": <integer 0-15>
   }
 }
 
