@@ -5,6 +5,14 @@ import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
 import { Bot } from 'lucide-react';
 
+export interface ScoreBreakdown {
+  potential: number;
+  riskReward: number;
+  discipline: number;
+  emotional: number;
+  documentation: number;
+}
+
 export interface AIDebriefResult {
   overall?: string;
   entry_quality?: string;
@@ -13,6 +21,7 @@ export interface AIDebriefResult {
   emotional?: string;
   lessons?: string;
   score?: number;
+  breakdown?: ScoreBreakdown;
   analysis?: string;
   error?: string;
 }
@@ -255,17 +264,40 @@ export function AIDebriefView({ result }: { result: AIDebriefResult }) {
     ['ניתוח', result.analysis],
   ] as [string, string | undefined][]).filter(([, v]) => v);
 
+  const scoreColor = result.score === undefined
+    ? undefined
+    : result.score >= 70 ? 'var(--color-tg-success)'
+    : result.score >= 50 ? 'var(--color-tg-warning)'
+    : 'var(--color-tg-danger)';
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
         <p className="text-sm font-bold text-tg-text flex items-center gap-1.5"><Bot size={14} /> משוב AI על העסקה</p>
         {result.score !== undefined && (
-          <span className="text-lg font-bold"
-            style={{ color: result.score >= 70 ? 'var(--color-tg-success)' : result.score >= 40 ? 'var(--color-tg-warning)' : 'var(--color-tg-danger)' }}>
+          <span className="text-lg font-bold" style={{ color: scoreColor }}>
             {result.score}/100
           </span>
         )}
       </div>
+
+      {result.breakdown && (
+        <div className="grid grid-cols-2 gap-1.5">
+          {([
+            ['מימוש פוטנציאל', result.breakdown.potential, 30],
+            ['יחס סיכוי/סיכון', result.breakdown.riskReward, 25],
+            ['משמעת', result.breakdown.discipline, 20],
+            ['מצב רגשי', result.breakdown.emotional, 15],
+            ['תיעוד', result.breakdown.documentation, 10],
+          ] as [string, number, number][]).map(([label, value, max]) => (
+            <div key={label} className="flex items-center justify-between rounded-lg px-2.5 py-1.5"
+              style={{ background: 'var(--color-tg-surface-2)' }}>
+              <span className="text-[11px] text-tg-text-2">{label}</span>
+              <span className="text-xs font-bold text-tg-text">{value}/{max}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {rows.length > 0 ? rows.map(([label, value]) => (
         <div key={label} className="rounded-xl p-3"
