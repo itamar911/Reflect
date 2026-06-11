@@ -46,6 +46,8 @@ interface TradeRow {
   post_trade_notes: string | null;
 }
 
+const TRADE_SELECT_FIELDS = 'strategy,entry_price,exit_price,take_profit,stop_loss,emotional_state,plan_score,pnl_amount,pnl_currency,closed_at,submitted_at,exit_reason,post_trade_notes';
+
 function tradePoints(t: TradeRow): number {
   const entry = Number(t.entry_price);
   const exit = Number(t.exit_price);
@@ -72,6 +74,14 @@ function getLastCompletedWeek(now: Date = new Date()): { weekStart: Date; weekEn
   const weekStart = new Date(weekEnd);
   weekStart.setDate(weekEnd.getDate() - 6);
   return { weekStart, weekEnd };
+}
+
+// The Sunday that begins the current, still-in-progress week.
+function getCurrentWeekStart(now: Date = new Date()): Date {
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - start.getDay());
+  return start;
 }
 
 function computeWeeklyStats(trades: TradeRow[], weekStart: Date): WeeklyStats {
@@ -165,8 +175,9 @@ export async function GET(request: Request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { weekStart: latestWeekStart } = getLastCompletedWeek();
-  const latestWeekStartStr = dateStr(latestWeekStart);
+  const now = new Date();
+  const { weekStart: latestWeekStart } = getLastCompletedWeek(now);
+  const currentWeekStartStr = dateStr(getCurrentWeekStart(now));
 
   const requestedWeekStart = new URL(request.url).searchParams.get('week_start');
   const weekStart = requestedWeekStart && /^\d{4}-\d{2}-\d{2}$/.test(requestedWeekStart)
@@ -174,10 +185,55 @@ export async function GET(request: Request) {
     : latestWeekStart;
 
   const weekStartStr = dateStr(weekStart);
-  const weekEndStr = dateStr(addDays(weekStart, 6));
+  const isCurrentWeek = weekStartStr === currentWeekStartStr;
+  // The current week isn't over yet, so it only spans Sunday through today.
+  const weekEndStr = isCurrentWeek ? dateStr(now) : dateStr(addDays(weekStart, 6));
   const prevWeekStartStr = dateStr(addDays(weekStart, -7));
 
-  console.log(`[weekly-summary] GET user=${user.id} week=${weekStartStr}`);
+  console.log(`[weekly-summary] GET user=${user.id} week=${weekStartStr}${isCurrentWeek ? ' (current week)' : ''}`);
+
+  const { data: previous, error: prevError } = await supabase
+    .from('weekly_summaries')
+    .select('stats')
+    .eq('user_id', user.id)
+    .eq('week_start', prevWeekStartStr)
+    .maybeSingle();
+
+  if (prevError) {
+    console.error('[weekly-summary] GET: previous-week query failed:', prevError);
+  }
+  const previousStats = (previous?.stats as WeeklyStats | null | undefined) ?? null;
+
+  if (isCurrentWeek) {
+    // No stored AI summary exists for an in-progress week — compute live
+    // stats from Sunday through today instead.
+    const { data: trades, error: tradesError } = await supabase
+      .from('trade_plans')
+      .select(TRADE_SELECT_FIELDS)
+      .eq('user_id', user.id)
+      .eq('status', 'closed')
+      .gte('closed_at', `${weekStartStr}T00:00:00.000Z`)
+      .lte('closed_at', `${weekEndStr}T23:59:59.999Z`);
+
+    if (tradesError) {
+      console.error('[weekly-summary] GET: current-week trade_plans query failed:', tradesError);
+      return NextResponse.json({ error: `שגיאה בטעינת עסקאות: ${tradesError.message}` }, { status: 500 });
+    }
+
+    return NextResponse.json({
+      summary: {
+        week_start: weekStartStr,
+        week_end: weekEndStr,
+        summary_text: null,
+        stats: computeWeeklyStats((trades ?? []) as TradeRow[], weekStart),
+        created_at: now.toISOString(),
+      },
+      week_start: weekStartStr,
+      week_end: weekEndStr,
+      is_current_week: true,
+      previous_stats: previousStats,
+    });
+  }
 
   const { data, error } = await supabase
     .from('weekly_summaries')
@@ -191,23 +247,12 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: `שגיאה בטעינת הסיכום: ${error.message}` }, { status: 500 });
   }
 
-  const { data: previous, error: prevError } = await supabase
-    .from('weekly_summaries')
-    .select('stats')
-    .eq('user_id', user.id)
-    .eq('week_start', prevWeekStartStr)
-    .maybeSingle();
-
-  if (prevError) {
-    console.error('[weekly-summary] GET: previous-week query failed:', prevError);
-  }
-
   return NextResponse.json({
     summary: data ?? null,
     week_start: weekStartStr,
     week_end: weekEndStr,
-    is_latest: weekStartStr === latestWeekStartStr,
-    previous_stats: (previous?.stats as WeeklyStats | null | undefined) ?? null,
+    is_current_week: false,
+    previous_stats: previousStats,
   });
 }
 
@@ -225,7 +270,7 @@ export async function POST() {
   try {
     const { data: trades, error: tradesError } = await supabase
       .from('trade_plans')
-      .select('strategy,entry_price,exit_price,take_profit,stop_loss,emotional_state,plan_score,pnl_amount,pnl_currency,closed_at,submitted_at,exit_reason,post_trade_notes')
+      .select(TRADE_SELECT_FIELDS)
       .eq('user_id', user.id)
       .eq('status', 'closed')
       .gte('closed_at', `${weekStartStr}T00:00:00.000Z`)
@@ -237,7 +282,7 @@ export async function POST() {
     }
     console.log(`[weekly-summary] POST: loaded ${trades?.length ?? 0} closed trades for the week`);
 
-    const stats = computeWeeklyStats(trades ?? [], weekStart);
+    const stats = computeWeeklyStats((trades ?? []) as TradeRow[], weekStart);
 
     const { data: profile, error: profileError } = await supabase
       .from('profiles')

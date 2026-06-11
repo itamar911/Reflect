@@ -894,7 +894,7 @@ export default function DashboardClient({
   const [weeklyError, setWeeklyError] = useState<string | null>(null);
   const [viewedWeekStart, setViewedWeekStart] = useState<string | null>(null);
   const [viewedWeekEnd, setViewedWeekEnd] = useState<string | null>(null);
-  const [isLatestWeek, setIsLatestWeek] = useState(true);
+  const [isCurrentWeek, setIsCurrentWeek] = useState(false);
   const [previousStats, setPreviousStats] = useState<WeeklyStats | null>(null);
 
   // "Now" is null during SSR and the first client render (matching), then
@@ -956,7 +956,7 @@ export default function DashboardClient({
       setWeeklySummary(data.summary ?? null);
       setViewedWeekStart(data.week_start ?? null);
       setViewedWeekEnd(data.week_end ?? null);
-      setIsLatestWeek(data.is_latest ?? true);
+      setIsCurrentWeek(data.is_current_week ?? false);
       setPreviousStats(data.previous_stats ?? null);
       return data;
     } catch (err) {
@@ -1025,7 +1025,7 @@ export default function DashboardClient({
   }
 
   function goToNextWeek() {
-    if (!viewedWeekStart || isLatestWeek) return;
+    if (!viewedWeekStart || isCurrentWeek) return;
     const d = new Date(`${viewedWeekStart}T00:00:00.000Z`);
     d.setUTCDate(d.getUTCDate() + 7);
     loadWeek(d.toISOString().slice(0, 10));
@@ -1390,17 +1390,19 @@ export default function DashboardClient({
           </button>
           <div className="text-center">
             <p style={{ fontSize: 14, fontWeight: 700, color: TEXT }}>
-              {viewedWeekStart && viewedWeekEnd
-                ? `סיכום שבוע ${fmtDate(viewedWeekStart)} - ${fmtDate(viewedWeekEnd)}`
-                : 'סיכום שבועי'}
+              {isCurrentWeek
+                ? 'השבוע הנוכחי'
+                : viewedWeekStart && viewedWeekEnd
+                  ? `סיכום שבוע ${fmtDate(viewedWeekStart)} - ${fmtDate(viewedWeekEnd)}`
+                  : 'סיכום שבועי'}
             </p>
-            {weeklySummary && (
+            {weeklySummary && !isCurrentWeek && (
               <p style={{ fontSize: 11, color: MUTED, fontWeight: 600, marginTop: 2 }}>
                 נוצר ב-{fmtDate(weeklySummary.created_at)}
               </p>
             )}
           </div>
-          <button onClick={goToNextWeek} disabled={weeklyLoading || isLatestWeek}
+          <button onClick={goToNextWeek} disabled={weeklyLoading || isCurrentWeek}
             className="p-1.5 rounded-lg transition-opacity disabled:opacity-40"
             style={{ background: SURF2, color: TEXT2 }}>
             <ChevronLeft size={16} />
