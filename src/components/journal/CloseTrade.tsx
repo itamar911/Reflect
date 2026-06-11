@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
-import { Bot } from 'lucide-react';
+import { Bot, Target, BarChart3 } from 'lucide-react';
 import { formatPnlIls, formatPnlPoints } from '@/lib/utils';
 
 export interface ScoreBreakdown {
@@ -351,7 +351,9 @@ export function AIDebriefView({ result }: { result: AIDebriefResult }) {
       {result.score !== undefined && (
         <div className="flex items-center justify-between rounded-xl p-3"
           style={{ background: 'var(--color-tg-surface-2)', border: `1px solid ${scoreColor}` }}>
-          <span className="text-sm font-semibold" style={{ color: scoreColor }}>🎯 ציון תהליך</span>
+          <span className="text-sm font-semibold flex items-center gap-1.5" style={{ color: scoreColor }}>
+            <Target size={14} /> ציון תהליך
+          </span>
           <span className="text-2xl font-bold" style={{ color: scoreColor }}>{result.score}/100</span>
         </div>
       )}
@@ -376,7 +378,9 @@ export function AIDebriefView({ result }: { result: AIDebriefResult }) {
 
       {outcomePoints && (
         <div className="flex items-center justify-between px-1">
-          <span className="text-xs text-tg-muted">📊 תוצאה</span>
+          <span className="text-xs text-tg-muted flex items-center gap-1">
+            <BarChart3 size={12} /> תוצאה
+          </span>
           <span className="text-xs font-semibold text-tg-text-2">
             {outcomePoints}{outcomeAmount ? ` (${outcomeAmount})` : ''}
           </span>
