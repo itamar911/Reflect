@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect, useCallback, useSyncExternalStore } from 'react';
-import { Sparkles, TrendingUp, TrendingDown, RefreshCw, CheckCircle, AlertCircle, Heart, ArrowRight, ChevronRight, ChevronLeft, Quote } from 'lucide-react';
+import { Sparkles, TrendingUp, TrendingDown, RefreshCw, CheckCircle, AlertCircle, AlertTriangle, Heart, Target, ChevronRight, ChevronLeft, Quote } from 'lucide-react';
 import { formatPnlIls, formatPnlPoints } from '@/lib/utils';
 import { createClient } from '@/lib/supabase/client';
 import { DASH_TRADE_SELECT, mapDashTrade } from '@/lib/dashboard/trades';
@@ -20,6 +20,7 @@ const MUTED   = '#ffffff';
 const GREEN   = '#22c55e';
 const RED     = '#ef4444';
 const YELLOW  = '#eab308';
+const PURPLE  = '#a855f7';
 
 // Fixed, deterministic stand-in for "now" used before the client has mounted,
 // so the server render and the first client render produce identical output.
@@ -694,10 +695,10 @@ interface WeeklySummary {
 // ── Weekly summary markdown rendering ──────────────────────────────────────────
 const SECTION_ICONS: { match: string; icon: typeof CheckCircle; color: string }[] = [
   { match: 'מה עבד טוב', icon: CheckCircle, color: GREEN },
-  { match: 'דפוסים', icon: AlertCircle, color: RED },
+  { match: 'דפוסים', icon: AlertTriangle, color: RED },
   { match: 'מצב רגשי', icon: Heart, color: YELLOW },
-  { match: 'המלצה', icon: ArrowRight, color: ACCENT },
-  { match: 'מה שאמרת', icon: Quote, color: ACCENT },
+  { match: 'המלצה', icon: Target, color: ACCENT },
+  { match: 'מה שאמרת', icon: Quote, color: PURPLE },
 ];
 
 // Checkmark/cross-mark and other emoji code points the AI might still produce.
@@ -725,8 +726,8 @@ function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
   }).filter(part => part !== null && part !== '');
 }
 
-// Minimal markdown renderer for the AI weekly summary: headings, bold, hr, lists, paragraphs.
-function renderSummaryMarkdown(text: string): React.ReactNode[] {
+// Render a run of markdown lines (no heading handling) into paragraph/list/hr blocks.
+function renderBlockLines(lines: string[], keyPrefix: string, pStyle?: React.CSSProperties): React.ReactNode[] {
   const blocks: React.ReactNode[] = [];
   let paragraph: string[] = [];
   let listItems: string[] = [];
@@ -736,8 +737,8 @@ function renderSummaryMarkdown(text: string): React.ReactNode[] {
     const content = paragraph.join(' ').trim();
     if (content) {
       blocks.push(
-        <p key={`p-${blocks.length}`} style={{ fontSize: 13, lineHeight: 1.7, color: TEXT2, fontWeight: 500, marginBottom: 10 }}>
-          {renderInline(content, `p-${blocks.length}`)}
+        <p key={`${keyPrefix}-p-${blocks.length}`} style={{ fontSize: 13, lineHeight: 1.7, color: TEXT2, fontWeight: 500, marginBottom: 10, ...pStyle }}>
+          {renderInline(content, `${keyPrefix}-p-${blocks.length}`)}
         </p>
       );
     }
@@ -749,10 +750,10 @@ function renderSummaryMarkdown(text: string): React.ReactNode[] {
     const items = listItems;
     if (listType === 'ol') {
       blocks.push(
-        <ol key={`l-${blocks.length}`} style={{ margin: '8px 0 14px', paddingInlineStart: 22, display: 'flex', flexDirection: 'column', gap: 6, listStyleType: 'decimal' }}>
+        <ol key={`${keyPrefix}-l-${blocks.length}`} style={{ margin: '8px 0 14px', paddingInlineStart: 22, display: 'flex', flexDirection: 'column', gap: 6, listStyleType: 'decimal' }}>
           {items.map((item, i) => (
             <li key={i} style={{ fontSize: 13, lineHeight: 1.7, color: TEXT2, fontWeight: 500 }}>
-              {renderInline(item, `li-${blocks.length}-${i}`)}
+              {renderInline(item, `${keyPrefix}-li-${blocks.length}-${i}`)}
             </li>
           ))}
         </ol>
@@ -761,21 +762,21 @@ function renderSummaryMarkdown(text: string): React.ReactNode[] {
       const Icon = listType === 'check' ? CheckCircle : AlertCircle;
       const color = listType === 'check' ? GREEN : RED;
       blocks.push(
-        <ul key={`l-${blocks.length}`} style={{ margin: '8px 0 14px', paddingInlineStart: 0, display: 'flex', flexDirection: 'column', gap: 6, listStyleType: 'none' }}>
+        <ul key={`${keyPrefix}-l-${blocks.length}`} style={{ margin: '8px 0 14px', paddingInlineStart: 0, display: 'flex', flexDirection: 'column', gap: 6, listStyleType: 'none' }}>
           {items.map((item, i) => (
             <li key={i} style={{ fontSize: 13, lineHeight: 1.7, color: TEXT2, fontWeight: 500, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
               <Icon size={15} style={{ color, flexShrink: 0, marginTop: 2 }} />
-              <span>{renderInline(item, `li-${blocks.length}-${i}`)}</span>
+              <span>{renderInline(item, `${keyPrefix}-li-${blocks.length}-${i}`)}</span>
             </li>
           ))}
         </ul>
       );
     } else {
       blocks.push(
-        <ul key={`l-${blocks.length}`} style={{ margin: '8px 0 14px', paddingInlineStart: 22, display: 'flex', flexDirection: 'column', gap: 6, listStyleType: 'disc' }}>
+        <ul key={`${keyPrefix}-l-${blocks.length}`} style={{ margin: '8px 0 14px', paddingInlineStart: 22, display: 'flex', flexDirection: 'column', gap: 6, listStyleType: 'disc' }}>
           {items.map((item, i) => (
             <li key={i} style={{ fontSize: 13, lineHeight: 1.7, color: TEXT2, fontWeight: 500 }}>
-              {renderInline(item, `li-${blocks.length}-${i}`)}
+              {renderInline(item, `${keyPrefix}-li-${blocks.length}-${i}`)}
             </li>
           ))}
         </ul>
@@ -785,32 +786,12 @@ function renderSummaryMarkdown(text: string): React.ReactNode[] {
     listType = null;
   };
 
-  for (const rawLine of text.split('\n')) {
+  for (const rawLine of lines) {
     const line = rawLine.trim();
 
     if (/^(-{3,}|\*{3,})\s*$/.test(line)) {
       flushParagraph(); flushList();
-      blocks.push(<hr key={`hr-${blocks.length}`} style={{ border: 'none', borderTop: `1px solid ${BORDER}`, margin: '16px 0' }} />);
-      continue;
-    }
-
-    const headingMatch = line.match(/^#{1,6}\s+(.*)/);
-    if (headingMatch) {
-      flushParagraph(); flushList();
-      const headingText = headingMatch[1].trim();
-      const section = SECTION_ICONS.find(s => headingText.includes(s.match));
-      const Icon = section?.icon;
-      blocks.push(
-        <h3 key={`h-${blocks.length}`} style={{
-          display: 'flex', alignItems: 'center', gap: 8,
-          borderLeft: `3px solid ${ACCENT}`, paddingLeft: 10,
-          marginTop: blocks.length === 0 ? 0 : 18, marginBottom: 8,
-          fontSize: 14, fontWeight: 700, color: TEXT,
-        }}>
-          {Icon && <Icon size={16} style={{ color: section!.color, flexShrink: 0 }} />}
-          <span>{renderInline(headingText, `h-${blocks.length}`)}</span>
-        </h3>
-      );
+      blocks.push(<hr key={`${keyPrefix}-hr-${blocks.length}`} style={{ border: 'none', borderTop: `1px solid ${BORDER}`, margin: '16px 0' }} />);
       continue;
     }
 
@@ -858,6 +839,58 @@ function renderSummaryMarkdown(text: string): React.ReactNode[] {
   return blocks;
 }
 
+// Splits the AI weekly summary into per-##-heading segments and renders each as
+// its own styled card (color/icon from SECTION_ICONS). Text before the first
+// heading — or an entire legacy summary with no headings — renders inline with
+// no card wrapper, for backward compatibility with older stored summaries.
+function renderSummaryMarkdown(text: string): React.ReactNode[] {
+  type Segment = { heading: string | null; lines: string[] };
+  const segments: Segment[] = [];
+  let current: Segment = { heading: null, lines: [] };
+
+  for (const rawLine of text.split('\n')) {
+    const headingMatch = rawLine.trim().match(/^#{1,6}\s+(.*)/);
+    if (headingMatch) {
+      segments.push(current);
+      current = { heading: headingMatch[1].trim(), lines: [] };
+      continue;
+    }
+    current.lines.push(rawLine);
+  }
+  segments.push(current);
+
+  return segments.map((segment, segIndex) => {
+    const heading = segment.heading;
+    if (heading === null) {
+      return <div key={`seg-${segIndex}`}>{renderBlockLines(segment.lines, `intro-${segIndex}`)}</div>;
+    }
+
+    const section = SECTION_ICONS.find(s => heading.includes(s.match));
+    const Icon = section?.icon;
+    const color = section?.color ?? ACCENT;
+    const isQuote = section?.match === 'מה שאמרת';
+
+    return (
+      <div key={`seg-${segIndex}`} style={{
+        background: '#1a1a28',
+        border: `1px solid ${BORDER}`,
+        borderLeft: `3px solid ${color}`,
+        borderRadius: 10,
+        padding: '14px 16px',
+        marginBottom: 12,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          {Icon && <Icon size={18} style={{ color, flexShrink: 0 }} />}
+          <p style={{ fontSize: 13, fontWeight: 700, color: TEXT }}>
+            {renderInline(heading, `seg-${segIndex}-h`)}
+          </p>
+        </div>
+        {renderBlockLines(segment.lines, `seg-${segIndex}`, isQuote ? { fontSize: 14, fontStyle: 'italic' } : undefined)}
+      </div>
+    );
+  });
+}
+
 // Small "vs last week" delta badge for the weekly summary stat pills.
 function WeekDelta({ diff, format }: { diff: number; format: (d: number) => string }) {
   if (diff === 0) return null;
@@ -868,6 +901,25 @@ function WeekDelta({ diff, format }: { diff: number; format: (d: number) => stri
       <Icon size={10} />
       {format(diff)} vs שבוע קודם
     </span>
+  );
+}
+
+// Color thresholds for the weekly process score: discipline/process quality, not P&L.
+function processScoreColor(score: number | null): string {
+  if (score == null) return TEXT;
+  if (score >= 70) return GREEN;
+  if (score >= 50) return YELLOW;
+  return RED;
+}
+
+// Stat pill for the weekly summary: label on top, large value below, border matching value color.
+function StatPill({ label, value, color, delta }: { label: string; value: React.ReactNode; color?: string; delta?: React.ReactNode }) {
+  return (
+    <div className="text-center" style={{ background: SURF2, border: `1px solid ${color ?? BORDER}`, borderRadius: 10, padding: '12px 8px' }}>
+      <p style={{ fontSize: 11, color: MUTED, fontWeight: 600, marginBottom: 4 }}>{label}</p>
+      <p style={{ fontSize: 20, fontWeight: 700, color: color ?? TEXT }}>{value}</p>
+      {delta}
+    </div>
   );
 }
 
@@ -1355,9 +1407,20 @@ export default function DashboardClient({
       )}
 
       {/* ── Weekly summary ───────────────────────────────────────────────── */}
-      <Card style={{ background: `linear-gradient(135deg, ${SURF} 0%, rgba(0,210,210,0.06) 100%)` }}>
-        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-          <SectionTitle>סיכום שבועי</SectionTitle>
+      <Card>
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-2 -mx-5 -mt-5 px-5 py-3 rounded-t-xl"
+          style={{ background: `linear-gradient(135deg, rgba(0,210,210,0.16) 0%, rgba(0,210,210,0.03) 100%)`, borderBottom: `1px solid ${BORDER}` }}>
+          <p style={{ fontSize: 13, fontWeight: 700, color: TEXT }}>
+            סיכום שבועי
+            {(() => {
+              const weekLabel = isCurrentWeek
+                ? 'השבוע הנוכחי'
+                : viewedWeekStart && viewedWeekEnd
+                  ? `${fmtDate(viewedWeekStart)} - ${fmtDate(viewedWeekEnd)}`
+                  : '';
+              return weekLabel ? <span style={{ color: MUTED, fontWeight: 600 }}> | {weekLabel}</span> : null;
+            })()}
+          </p>
           <button onClick={refreshWeeklySummary} disabled={weeklyLoading}
             className="flex items-center gap-1.5 transition-all active:scale-95 disabled:opacity-50">
             <RefreshCw size={12} className={weeklyLoading ? 'animate-spin' : ''} />
@@ -1389,20 +1452,11 @@ export default function DashboardClient({
             style={{ background: SURF2, color: TEXT2 }}>
             <ChevronRight size={16} />
           </button>
-          <div className="text-center">
-            <p style={{ fontSize: 14, fontWeight: 700, color: TEXT }}>
-              {isCurrentWeek
-                ? 'השבוע הנוכחי'
-                : viewedWeekStart && viewedWeekEnd
-                  ? `סיכום שבוע ${fmtDate(viewedWeekStart)} - ${fmtDate(viewedWeekEnd)}`
-                  : 'סיכום שבועי'}
+          {weeklySummary && !isCurrentWeek ? (
+            <p style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>
+              נוצר ב-{fmtDate(weeklySummary.created_at)}
             </p>
-            {weeklySummary && !isCurrentWeek && (
-              <p style={{ fontSize: 11, color: MUTED, fontWeight: 600, marginTop: 2 }}>
-                נוצר ב-{fmtDate(weeklySummary.created_at)}
-              </p>
-            )}
-          </div>
+          ) : <span />}
           <button onClick={goToNextWeek} disabled={weeklyLoading || isCurrentWeek}
             className="p-1.5 rounded-lg transition-opacity disabled:opacity-40"
             style={{ background: SURF2, color: TEXT2 }}>
@@ -1413,40 +1467,34 @@ export default function DashboardClient({
         {weeklySummary && (
           <>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
-              <div className="text-center py-2" style={{ background: SURF2, border: `1px solid ${BORDER}`, borderRadius: 8 }}>
-                <p style={{ fontSize: 10, color: MUTED, fontWeight: 600 }}>עסקאות</p>
-                <p style={{ fontSize: 16, fontWeight: 700, color: TEXT }}>{weeklySummary.stats.total_trades}</p>
-              </div>
-              <div className="text-center py-2" style={{ background: SURF2, border: `1px solid ${BORDER}`, borderRadius: 8 }}>
-                <p style={{ fontSize: 10, color: MUTED, fontWeight: 600 }}>ציון ממוצע</p>
-                <p style={{ fontSize: 16, fontWeight: 700, color: TEXT }}>
-                  {weeklySummary.stats.avg_process_score ?? '—'}
-                </p>
-                {previousStats?.avg_process_score != null && weeklySummary.stats.avg_process_score != null && (
+              <StatPill label="עסקאות" value={weeklySummary.stats.total_trades} />
+              <StatPill
+                label="ציון תהליך שבועי"
+                value={weeklySummary.stats.avg_process_score ?? '—'}
+                color={processScoreColor(weeklySummary.stats.avg_process_score)}
+                delta={previousStats?.avg_process_score != null && weeklySummary.stats.avg_process_score != null && (
                   <WeekDelta diff={weeklySummary.stats.avg_process_score - previousStats.avg_process_score}
                     format={d => `${d > 0 ? '+' : ''}${d}`} />
                 )}
-              </div>
-              <div className="text-center py-2" style={{ background: SURF2, border: `1px solid ${BORDER}`, borderRadius: 8 }}>
-                <p style={{ fontSize: 10, color: MUTED, fontWeight: 600 }}>P&L</p>
-                <p style={{ fontSize: 16, fontWeight: 700, color: weeklySummary.stats.total_pnl >= 0 ? GREEN : RED }}>
-                  {formatPnlIls(weeklySummary.stats.total_pnl, weeklySummary.stats.pnl_currency)}
-                </p>
-                {previousStats && (
+              />
+              <StatPill
+                label="P&L"
+                value={formatPnlIls(weeklySummary.stats.total_pnl, weeklySummary.stats.pnl_currency)}
+                color={weeklySummary.stats.total_pnl >= 0 ? GREEN : RED}
+                delta={previousStats && (
                   <WeekDelta diff={weeklySummary.stats.total_pnl - previousStats.total_pnl}
                     format={d => formatPnlIls(d, weeklySummary.stats.pnl_currency)} />
                 )}
-              </div>
-              <div className="text-center py-2" style={{ background: SURF2, border: `1px solid ${BORDER}`, borderRadius: 8 }}>
-                <p style={{ fontSize: 10, color: MUTED, fontWeight: 600 }}>אחוז הצלחה</p>
-                <p style={{ fontSize: 16, fontWeight: 700, color: TEXT }}>
-                  {weeklySummary.stats.win_rate != null ? `${weeklySummary.stats.win_rate}%` : '—'}
-                </p>
-                {previousStats?.win_rate != null && weeklySummary.stats.win_rate != null && (
+              />
+              <StatPill
+                label="אחוז הצלחה"
+                value={weeklySummary.stats.win_rate != null ? `${weeklySummary.stats.win_rate}%` : '—'}
+                color={weeklySummary.stats.win_rate != null ? (weeklySummary.stats.win_rate >= 50 ? GREEN : RED) : undefined}
+                delta={previousStats?.win_rate != null && weeklySummary.stats.win_rate != null && (
                   <WeekDelta diff={weeklySummary.stats.win_rate - previousStats.win_rate}
                     format={d => `${d > 0 ? '+' : ''}${d}%`} />
                 )}
-              </div>
+              />
             </div>
 
             <div style={{ marginBottom: 14 }}>

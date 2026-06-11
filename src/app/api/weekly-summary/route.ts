@@ -162,13 +162,35 @@ function collectInsightfulNotes(trades: TradeRow[]): string[] {
 
 function buildPrompt(stats: WeeklyStats, firstName: string, insightfulNotes: string[], isCurrentWeek: boolean): string {
   const period = isCurrentWeek ? 'מתחילת השבוע הנוכחי ועד היום' : 'לשבוע שעבר';
-  const whatWorked = isCurrentWeek ? 'מה עבד טוב עד כה השבוע' : 'מה עבד טוב השבוע';
-  const recommendation = isCurrentWeek ? 'להמשך השבוע' : 'לשבוע הבא';
+  const whatWorked = isCurrentWeek ? 'עד כה השבוע' : 'השבוע';
+  const nextPeriod = isCurrentWeek ? 'בהמשך השבוע' : 'השבוע הבא';
 
-  let prompt = `אתה מאמן מסחר מקצועי. להלן נתוני המסחר של ${firstName} ${period}: ${JSON.stringify(stats)}. כתוב סיכום שבועי מקצועי הכולל: 1) ${whatWorked}, 2) דפוסים שחוזרים לרעה, 3) ניתוח מצב רגשי, 4) המלצה אחת קונקרטית ${recommendation}. פנה אל המשתמש בשם ${firstName}. התחל את הסיכום עם 'שלום ${firstName},' וכתוב בגוף שני ישיר. אל תשתמש באימוג'ים. היה ישיר, תמציתי ומעשי.`;
+  let prompt = `אתה מאמן מסחר מקצועי. להלן נתוני המסחר של ${firstName} ${period}: ${JSON.stringify(stats)}.
+
+כתוב סיכום שבועי בעברית שממוקד אך ורק בתהליך ובמשמעת — לא בתוצאות הכספיות. אסור להזכיר בטקסט סכומי כסף, רווח/הפסד, P&L או אחוזי הצלחה בשום מקום — נתונים אלה כבר מוצגים למשתמש בנפרד בכרטיסים ובגרף. התמקד אך ורק במשמעת, באיכות הכניסות לעסקאות, במצב הרגשי ובדפוסי התנהגות חוזרים.
+
+מבנה הסיכום: כתוב 'שלום ${firstName},' כפתיחה, ולאחריה ארבע כותרות ברמה ## בדיוק כפי שמופיעות כאן (אל תשנה את הניסוח שלהן):
+
+## מה עבד טוב
+תאר 2-3 דברים חיוביים מבחינת תהליך ומשמעת ${whatWorked} (למשל: עמידה בתוכנית, ניהול סיכונים נכון, סבלנות בכניסה לעסקה).
+
+## דפוסים שחוזרים לרעה
+זהה דפוס התנהגות אחד או שניים שחוזרים על עצמם ופוגעים בתהליך (למשל: כניסה מוקדמת מדי, סטייה מהתוכנית, מסחר יתר).
+
+## מצב רגשי
+נתח את המצב הרגשי של ${firstName} ${whatWorked} ואת ההשפעה שלו על קבלת ההחלטות.
+
+## המלצה
+כתוב המלצה אחת ל${nextPeriod} שהיא פעולה קונקרטית, ספציפית וניתנת למעקב — לא עצה כללית.
+דוגמה לא טובה: "כדאי לבדוק את האסטרטגיה."
+דוגמה טובה: "${nextPeriod}: אל תכנס ל-Asia Range Breakout אלא אם כן יש confirmation של 3 נרות."
+
+כתוב בגוף שני ישיר, אל תשתמש באימוג'ים, היה ישיר, תמציתי ומעשי.`;
 
   if (insightfulNotes.length > 0) {
-    prompt += ` הנה ציטוטים מתוך ההערות שהמשתמש כתב על העסקאות שלו ${isCurrentWeek ? 'השבוע עד כה' : 'השבוע'}: ${JSON.stringify(insightfulNotes)}. אם מצאת בהן משפט מעניין, צטט אותו בסיכום תחת כותרת 'מה שאמרת לעצמך השבוע:'.`;
+    prompt += `
+
+הנה ציטוטים מתוך ההערות שכתב ${firstName} על העסקאות שלו ${isCurrentWeek ? 'השבוע עד כה' : 'השבוע'}: ${JSON.stringify(insightfulNotes)}. אם מצאת ביניהם משפט מעניין ומשמעותי, הוסף בסוף הסיכום כותרת חמישית ברמה ## בנוסח 'מה שאמרת לעצמך השבוע' וצטט אותו שם.`;
   }
 
   return prompt;
@@ -262,8 +284,33 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: `שגיאה בטעינת הסיכום: ${error.message}` }, { status: 500 });
   }
 
+  let summary = data ?? null;
+  if (summary) {
+    // The stored stats are a snapshot from when the summary was generated —
+    // debriefs (and thus plan_score) may have been filled in afterwards, so
+    // recompute the process score live from trade_plans.
+    const { data: scoreRows, error: scoreError } = await supabase
+      .from('trade_plans')
+      .select('plan_score')
+      .eq('user_id', user.id)
+      .eq('status', 'closed')
+      .gte('closed_at', `${weekStartStr}T00:00:00.000Z`)
+      .lte('closed_at', `${weekEndStr}T23:59:59.999Z`)
+      .not('plan_score', 'is', null);
+
+    if (scoreError) {
+      console.error('[weekly-summary] GET: plan_score query failed:', scoreError);
+    } else {
+      const rows = scoreRows ?? [];
+      const avgProcessScore = rows.length > 0
+        ? Math.round(rows.reduce((s, r) => s + Number(r.plan_score), 0) / rows.length)
+        : null;
+      summary = { ...summary, stats: { ...(summary.stats as WeeklyStats), avg_process_score: avgProcessScore } };
+    }
+  }
+
   return NextResponse.json({
-    summary: data ?? null,
+    summary,
     week_start: weekStartStr,
     week_end: weekEndStr,
     is_current_week: false,
