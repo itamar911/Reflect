@@ -2,12 +2,14 @@
 
 import { useState, useRef, useEffect } from 'react';
 import Button from '@/components/ui/Button';
-import { Bot } from 'lucide-react';
+import { Bot, ArrowDown } from 'lucide-react';
 
 interface Message {
   role: 'user' | 'assistant';
   content: string;
 }
+
+const SCROLL_BOTTOM_THRESHOLD = 40;
 
 const QUICK_QUESTIONS = [
   'איך הייתי השבוע?',
@@ -23,12 +25,42 @@ export default function TradingBot() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const [scrollToBottomSignal, setScrollToBottomSignal] = useState(0);
+  const [scrollToReplySignal, setScrollToReplySignal] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const lastAssistantRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  // User sent a new message — jump to the bottom to show it
   useEffect(() => {
+    if (scrollToBottomSignal === 0) return;
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [scrollToBottomSignal]);
+
+  // AI finished responding — scroll to the start of its reply, not the bottom
+  useEffect(() => {
+    if (scrollToReplySignal === 0) return;
+    lastAssistantRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [scrollToReplySignal]);
+
+  // Re-check bottom proximity as new content streams in (without auto-scrolling)
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    setIsAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < SCROLL_BOTTOM_THRESHOLD);
   }, [messages]);
+
+  function handleScroll() {
+    const el = containerRef.current;
+    if (!el) return;
+    setIsAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < SCROLL_BOTTOM_THRESHOLD);
+  }
+
+  function scrollToBottom() {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }
 
   async function send(text?: string) {
     const content = (text ?? input).trim();
@@ -37,6 +69,7 @@ export default function TradingBot() {
     const userMsg: Message = { role: 'user', content };
     const newMessages = [...messages, userMsg];
     setMessages(newMessages);
+    setScrollToBottomSignal(s => s + 1);
     setInput('');
     setLoading(true);
 
@@ -74,6 +107,7 @@ export default function TradingBot() {
       });
     } finally {
       setLoading(false);
+      setScrollToReplySignal(s => s + 1);
       inputRef.current?.focus();
     }
   }
@@ -88,71 +122,83 @@ export default function TradingBot() {
   return (
     <div className="flex flex-col h-full">
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-1 pb-2" style={{ minHeight: 0 }}>
-        {messages.length === 0 ? (
-          <div className="flex flex-col gap-4 pt-2">
-            {/* Welcome */}
-            <div className="rounded-2xl p-4"
-              style={{ background: 'var(--color-tg-surface-2)' }}>
-              <div className="flex items-center gap-2 mb-2">
-                <Bot size={18} />
-                <p className="text-sm font-bold text-tg-text">יועץ המסחר שלי</p>
+      <div className="relative flex-1" style={{ minHeight: 0 }}>
+        <div ref={containerRef} onScroll={handleScroll} className="h-full overflow-y-auto px-1 pb-2">
+          {messages.length === 0 ? (
+            <div className="flex flex-col gap-4 pt-2">
+              {/* Welcome */}
+              <div className="rounded-2xl p-4"
+                style={{ background: 'var(--color-tg-surface-2)' }}>
+                <div className="flex items-center gap-2 mb-2">
+                  <Bot size={18} />
+                  <p className="text-sm font-bold text-tg-text">יועץ המסחר שלי</p>
+                </div>
+                <p className="text-xs text-tg-text-2 leading-relaxed">
+                  אני מכיר את כל ההיסטוריה שלך, החוקים שלך, ואת כל אסטרטגיות המסחר לעומק.
+                  שאל אותי כל שאלה על המסחר שלך.
+                </p>
               </div>
-              <p className="text-xs text-tg-text-2 leading-relaxed">
-                אני מכיר את כל ההיסטוריה שלך, החוקים שלך, ואת כל אסטרטגיות המסחר לעומק.
-                שאל אותי כל שאלה על המסחר שלך.
-              </p>
-            </div>
 
-            {/* Quick questions */}
-            <div>
-              <p className="text-xs text-tg-muted mb-2 px-1">שאלות מהירות:</p>
-              <div className="flex flex-wrap gap-1.5">
-                {QUICK_QUESTIONS.map((q) => (
-                  <button key={q} onClick={() => send(q)}
-                    className="px-3 py-1.5 rounded-full text-xs border transition-all active:scale-95"
-                    style={{
-                      background: 'var(--color-tg-surface)',
-                      borderColor: 'var(--color-tg-border)',
-                      color: 'var(--color-tg-text-2)',
-                    }}>
-                    {q}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-3 pt-2">
-            {messages.map((msg, i) => (
-              <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                {msg.role === 'assistant' && (
-                  <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-0.5 mr-2"
-                    style={{ background: 'var(--color-tg-primary-muted)' }}>
-                    <Bot size={13} />
-                  </div>
-                )}
-                <div className="max-w-[85%] rounded-2xl px-3 py-2.5"
-                  style={{
-                    background: msg.role === 'user' ? 'var(--color-tg-primary)' : 'var(--color-tg-surface-2)',
-                    color: msg.role === 'user' ? '#000' : 'var(--color-tg-text)',
-                    borderRadius: msg.role === 'user' ? '18px 18px 4px 18px' : '4px 18px 18px 18px',
-                  }}>
-                  {msg.content ? (
-                    <p className="text-xs leading-relaxed whitespace-pre-wrap">{msg.content}</p>
-                  ) : (
-                    <div className="flex gap-1 py-1">
-                      {[0, 1, 2].map(j => (
-                        <div key={j} className="w-1.5 h-1.5 rounded-full animate-bounce"
-                          style={{ background: 'var(--color-tg-muted)', animationDelay: `${j * 0.15}s` }} />
-                      ))}
-                    </div>
-                  )}
+              {/* Quick questions */}
+              <div>
+                <p className="text-xs text-tg-muted mb-2 px-1">שאלות מהירות:</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {QUICK_QUESTIONS.map((q) => (
+                    <button key={q} onClick={() => send(q)}
+                      className="px-3 py-1.5 rounded-full text-xs border transition-all active:scale-95"
+                      style={{
+                        background: 'var(--color-tg-surface)',
+                        borderColor: 'var(--color-tg-border)',
+                        color: 'var(--color-tg-text-2)',
+                      }}>
+                      {q}
+                    </button>
+                  ))}
                 </div>
               </div>
-            ))}
-            <div ref={bottomRef} />
-          </div>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3 pt-2">
+              {messages.map((msg, i) => (
+                <div key={i}
+                  ref={i === messages.length - 1 && msg.role === 'assistant' ? lastAssistantRef : undefined}
+                  className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  {msg.role === 'assistant' && (
+                    <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-0.5 mr-2"
+                      style={{ background: 'var(--color-tg-primary-muted)' }}>
+                      <Bot size={13} />
+                    </div>
+                  )}
+                  <div className="max-w-[85%] rounded-2xl px-3 py-2.5"
+                    style={{
+                      background: msg.role === 'user' ? 'var(--color-tg-primary)' : 'var(--color-tg-surface-2)',
+                      color: msg.role === 'user' ? '#000' : 'var(--color-tg-text)',
+                      borderRadius: msg.role === 'user' ? '18px 18px 4px 18px' : '4px 18px 18px 18px',
+                    }}>
+                    {msg.content ? (
+                      <p className="text-xs leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                    ) : (
+                      <div className="flex gap-1 py-1">
+                        {[0, 1, 2].map(j => (
+                          <div key={j} className="w-1.5 h-1.5 rounded-full animate-bounce"
+                            style={{ background: 'var(--color-tg-muted)', animationDelay: `${j * 0.15}s` }} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+              <div ref={bottomRef} />
+            </div>
+          )}
+        </div>
+
+        {messages.length > 0 && !isAtBottom && (
+          <button onClick={scrollToBottom} aria-label="גלול למטה"
+            className="absolute bottom-2 left-1/2 -translate-x-1/2 w-8 h-8 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95 z-10"
+            style={{ background: 'var(--color-tg-surface-2)', border: '1px solid var(--color-tg-border)' }}>
+            <ArrowDown size={16} />
+          </button>
         )}
       </div>
 
