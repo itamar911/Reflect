@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { Sparkles, TrendingUp, RefreshCw } from 'lucide-react';
+import { Sparkles, TrendingUp, RefreshCw, CheckCircle, AlertCircle, Heart, ArrowRight } from 'lucide-react';
 import { formatPnlIls, formatPnlPoints } from '@/lib/utils';
 import { createClient } from '@/lib/supabase/client';
 import { DASH_TRADE_SELECT, mapDashTrade } from '@/lib/dashboard/trades';
@@ -19,6 +19,7 @@ const TEXT2   = '#ffffff';
 const MUTED   = '#ffffff';
 const GREEN   = '#22c55e';
 const RED     = '#ef4444';
+const YELLOW  = '#eab308';
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────
 function tradeDir(t: DashTrade): 'long' | 'short' {
@@ -620,13 +621,14 @@ function TradeDetailPanel({ trade, onClose, aiReview, aiLoading, onAiReview }: {
 }
 
 // ── Card wrapper ──────────────────────────────────────────────────────────────
-function Card({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+function Card({ children, className = '', style }: { children: React.ReactNode; className?: string; style?: React.CSSProperties }) {
   return (
     <div className={`rounded-xl p-5 ${className}`}
       style={{
         background: SURF,
         border: `1px solid ${BORDER}`,
         boxShadow: '0 1px 3px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03)',
+        ...style,
       }}>
       {children}
     </div>
@@ -660,6 +662,7 @@ interface WeeklyStats {
   total_trades: number;
   winning_trades: number;
   losing_trades: number;
+  win_rate: number | null;
   total_pnl: number;
   pnl_currency: string;
   avg_process_score: number | null;
@@ -676,6 +679,127 @@ interface WeeklySummary {
   summary_text: string | null;
   stats: WeeklyStats;
   created_at: string;
+}
+
+// ── Weekly summary markdown rendering ──────────────────────────────────────────
+const SECTION_ICONS: { match: string; icon: typeof CheckCircle; color: string }[] = [
+  { match: 'מה עבד טוב', icon: CheckCircle, color: GREEN },
+  { match: 'דפוסים', icon: AlertCircle, color: RED },
+  { match: 'מצב רגשי', icon: Heart, color: YELLOW },
+  { match: 'המלצה', icon: ArrowRight, color: ACCENT },
+];
+
+// Render `**bold**` spans within a line of text.
+function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
+  return text.split(/(\*\*[^*]+\*\*)/g).map((part, i) => {
+    const m = part.match(/^\*\*([^*]+)\*\*$/);
+    if (m) return <strong key={`${keyPrefix}-${i}`} style={{ fontWeight: 700, color: TEXT }}>{m[1]}</strong>;
+    return part;
+  });
+}
+
+// Minimal markdown renderer for the AI weekly summary: headings, bold, hr, lists, paragraphs.
+function renderSummaryMarkdown(text: string): React.ReactNode[] {
+  const blocks: React.ReactNode[] = [];
+  let paragraph: string[] = [];
+  let listItems: string[] = [];
+  let listType: 'ol' | 'ul' | null = null;
+
+  const flushParagraph = () => {
+    const content = paragraph.join(' ').trim();
+    if (content) {
+      blocks.push(
+        <p key={`p-${blocks.length}`} style={{ fontSize: 13, lineHeight: 1.7, color: TEXT2, fontWeight: 500, marginBottom: 10 }}>
+          {renderInline(content, `p-${blocks.length}`)}
+        </p>
+      );
+    }
+    paragraph = [];
+  };
+
+  const flushList = () => {
+    if (listItems.length === 0) { listType = null; return; }
+    const items = listItems;
+    if (listType === 'ol') {
+      blocks.push(
+        <ol key={`l-${blocks.length}`} style={{ margin: '8px 0 14px', paddingInlineStart: 22, display: 'flex', flexDirection: 'column', gap: 6, listStyleType: 'decimal' }}>
+          {items.map((item, i) => (
+            <li key={i} style={{ fontSize: 13, lineHeight: 1.7, color: TEXT2, fontWeight: 500 }}>
+              {renderInline(item, `li-${blocks.length}-${i}`)}
+            </li>
+          ))}
+        </ol>
+      );
+    } else {
+      blocks.push(
+        <ul key={`l-${blocks.length}`} style={{ margin: '8px 0 14px', paddingInlineStart: 22, display: 'flex', flexDirection: 'column', gap: 6, listStyleType: 'disc' }}>
+          {items.map((item, i) => (
+            <li key={i} style={{ fontSize: 13, lineHeight: 1.7, color: TEXT2, fontWeight: 500 }}>
+              {renderInline(item, `li-${blocks.length}-${i}`)}
+            </li>
+          ))}
+        </ul>
+      );
+    }
+    listItems = [];
+    listType = null;
+  };
+
+  for (const rawLine of text.split('\n')) {
+    const line = rawLine.trim();
+
+    if (/^(-{3,}|\*{3,})\s*$/.test(line)) {
+      flushParagraph(); flushList();
+      blocks.push(<hr key={`hr-${blocks.length}`} style={{ border: 'none', borderTop: `1px solid ${BORDER}`, margin: '16px 0' }} />);
+      continue;
+    }
+
+    const headingMatch = line.match(/^#{1,6}\s+(.*)/);
+    if (headingMatch) {
+      flushParagraph(); flushList();
+      const headingText = headingMatch[1].trim();
+      const section = SECTION_ICONS.find(s => headingText.includes(s.match));
+      const Icon = section?.icon;
+      blocks.push(
+        <h3 key={`h-${blocks.length}`} style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          borderLeft: `3px solid ${ACCENT}`, paddingLeft: 10,
+          marginTop: blocks.length === 0 ? 0 : 18, marginBottom: 8,
+          fontSize: 14, fontWeight: 700, color: TEXT,
+        }}>
+          {Icon && <Icon size={16} style={{ color: section!.color, flexShrink: 0 }} />}
+          <span>{renderInline(headingText, `h-${blocks.length}`)}</span>
+        </h3>
+      );
+      continue;
+    }
+
+    const olMatch = line.match(/^\d+[.)]\s+(.*)/);
+    if (olMatch) {
+      flushParagraph();
+      if (listType !== 'ol') { flushList(); listType = 'ol'; }
+      listItems.push(olMatch[1].trim());
+      continue;
+    }
+
+    const ulMatch = line.match(/^[-*•]\s+(.*)/);
+    if (ulMatch) {
+      flushParagraph();
+      if (listType !== 'ul') { flushList(); listType = 'ul'; }
+      listItems.push(ulMatch[1].trim());
+      continue;
+    }
+
+    if (line === '') {
+      flushParagraph(); flushList();
+      continue;
+    }
+
+    paragraph.push(line);
+  }
+  flushParagraph();
+  flushList();
+  return blocks;
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -1086,7 +1210,7 @@ export default function DashboardClient({
       )}
 
       {/* ── Weekly summary ───────────────────────────────────────────────── */}
-      <Card>
+      <Card style={{ background: `linear-gradient(135deg, ${SURF} 0%, rgba(0,210,210,0.06) 100%)` }}>
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <SectionTitle>סיכום שבועי</SectionTitle>
           <button onClick={refreshWeeklySummary} disabled={weeklyLoading}
@@ -1137,21 +1261,25 @@ export default function DashboardClient({
               <div className="text-center py-2" style={{ background: SURF2, border: `1px solid ${BORDER}`, borderRadius: 8 }}>
                 <p style={{ fontSize: 10, color: MUTED, fontWeight: 600 }}>אחוז הצלחה</p>
                 <p style={{ fontSize: 16, fontWeight: 700, color: TEXT }}>
-                  {weeklySummary.stats.total_trades > 0
-                    ? `${Math.round((weeklySummary.stats.winning_trades / weeklySummary.stats.total_trades) * 100)}%`
-                    : '—'}
+                  {weeklySummary.stats.win_rate != null ? `${weeklySummary.stats.win_rate}%` : '—'}
                 </p>
               </div>
             </div>
 
             <div style={{ marginBottom: 14 }}>
-              <BarChart data={weeklySummary.stats.daily_pnl.map((d, i) => ({ label: DAYS_SH[i], value: d.pnl }))} />
+              {weeklySummary.stats.daily_pnl?.some(d => d.pnl !== 0) ? (
+                <BarChart data={weeklySummary.stats.daily_pnl.map((d, i) => ({ label: DAYS_SH[i], value: d.pnl }))} />
+              ) : (
+                <p className="text-center" style={{ fontSize: 12, color: MUTED, fontWeight: 600, padding: '12px 0' }}>
+                  אין נתוני מסחר השבוע
+                </p>
+              )}
             </div>
 
             {weeklySummary.summary_text && (
-              <p style={{ fontSize: 13, lineHeight: 1.7, color: TEXT2, whiteSpace: 'pre-wrap' }}>
-                {weeklySummary.summary_text}
-              </p>
+              <div>
+                {renderSummaryMarkdown(weeklySummary.summary_text)}
+              </div>
             )}
           </>
         ) : weeklyLoading ? (

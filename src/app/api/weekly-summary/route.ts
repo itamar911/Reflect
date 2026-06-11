@@ -19,6 +19,7 @@ export interface WeeklyStats {
   total_trades: number;
   winning_trades: number;
   losing_trades: number;
+  win_rate: number | null;
   total_pnl: number;
   pnl_currency: string;
   avg_process_score: number | null;
@@ -71,6 +72,7 @@ function computeWeeklyStats(trades: TradeRow[], weekStart: Date): WeeklyStats {
   const winning = rows.filter(r => r.points > 0);
   const losing = rows.filter(r => r.points < 0);
   const totalPnl = rows.reduce((s, r) => s + r.pnl, 0);
+  const winRate = trades.length > 0 ? Math.round((winning.length / trades.length) * 100) : null;
 
   const scored = trades.filter(t => t.plan_score != null);
   const avgProcessScore = scored.length > 0
@@ -116,6 +118,7 @@ function computeWeeklyStats(trades: TradeRow[], weekStart: Date): WeeklyStats {
     total_trades: trades.length,
     winning_trades: winning.length,
     losing_trades: losing.length,
+    win_rate: winRate,
     total_pnl: Math.round(totalPnl * 100) / 100,
     pnl_currency: withCurrency?.pnl_currency ?? '₪',
     avg_process_score: avgProcessScore,
