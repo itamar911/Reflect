@@ -7,6 +7,7 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 export interface DailyPnl {
   date: string;
   pnl: number;
+  trades: number;
 }
 
 export interface BestWorstTrade {
@@ -98,15 +99,17 @@ function computeWeeklyStats(trades: TradeRow[], weekStart: Date): WeeklyStats {
     : null;
 
   const dayMap: Record<string, number> = {};
+  const dayCountMap: Record<string, number> = {};
   for (const r of rows) {
     const day = (r.trade.closed_at ?? r.trade.submitted_at).slice(0, 10);
     dayMap[day] = (dayMap[day] ?? 0) + r.pnl;
+    dayCountMap[day] = (dayCountMap[day] ?? 0) + 1;
   }
   const dailyPnl: DailyPnl[] = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(weekStart);
     d.setDate(weekStart.getDate() + i);
     const key = dateStr(d);
-    return { date: key, pnl: Math.round((dayMap[key] ?? 0) * 100) / 100 };
+    return { date: key, pnl: Math.round((dayMap[key] ?? 0) * 100) / 100, trades: dayCountMap[key] ?? 0 };
   });
 
   const emoVals = trades.map(t => Number(t.emotional_state)).filter(Number.isFinite);

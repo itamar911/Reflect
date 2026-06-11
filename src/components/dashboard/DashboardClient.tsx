@@ -21,6 +21,8 @@ const GREEN   = '#22c55e';
 const RED     = '#ef4444';
 const YELLOW  = '#eab308';
 const PURPLE  = '#a855f7';
+const DEEP    = '#0d0d1a';
+const SUBTLE  = '#2a2a3d';
 
 // Fixed, deterministic stand-in for "now" used before the client has mounted,
 // so the server render and the first client render produce identical output.
@@ -661,6 +663,7 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 interface WeeklyDailyPnl {
   date: string;
   pnl: number;
+  trades: number;
 }
 
 interface WeeklyBestWorstTrade {
@@ -726,169 +729,110 @@ function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
   }).filter(part => part !== null && part !== '');
 }
 
-// Render a run of markdown lines (no heading handling) into paragraph/list/hr blocks.
-function renderBlockLines(lines: string[], keyPrefix: string, pStyle?: React.CSSProperties): React.ReactNode[] {
-  const blocks: React.ReactNode[] = [];
-  let paragraph: string[] = [];
-  let listItems: string[] = [];
-  let listType: 'ol' | 'ul' | 'check' | 'cross' | null = null;
-
-  const flushParagraph = () => {
-    const content = paragraph.join(' ').trim();
-    if (content) {
-      blocks.push(
-        <p key={`${keyPrefix}-p-${blocks.length}`} style={{ fontSize: 13, lineHeight: 1.7, color: TEXT2, fontWeight: 500, marginBottom: 10, ...pStyle }}>
-          {renderInline(content, `${keyPrefix}-p-${blocks.length}`)}
-        </p>
-      );
-    }
-    paragraph = [];
-  };
-
-  const flushList = () => {
-    if (listItems.length === 0) { listType = null; return; }
-    const items = listItems;
-    if (listType === 'ol') {
-      blocks.push(
-        <ol key={`${keyPrefix}-l-${blocks.length}`} style={{ margin: '8px 0 14px', paddingInlineStart: 22, display: 'flex', flexDirection: 'column', gap: 6, listStyleType: 'decimal' }}>
-          {items.map((item, i) => (
-            <li key={i} style={{ fontSize: 13, lineHeight: 1.7, color: TEXT2, fontWeight: 500 }}>
-              {renderInline(item, `${keyPrefix}-li-${blocks.length}-${i}`)}
-            </li>
-          ))}
-        </ol>
-      );
-    } else if (listType === 'check' || listType === 'cross') {
-      const Icon = listType === 'check' ? CheckCircle : AlertCircle;
-      const color = listType === 'check' ? GREEN : RED;
-      blocks.push(
-        <ul key={`${keyPrefix}-l-${blocks.length}`} style={{ margin: '8px 0 14px', paddingInlineStart: 0, display: 'flex', flexDirection: 'column', gap: 6, listStyleType: 'none' }}>
-          {items.map((item, i) => (
-            <li key={i} style={{ fontSize: 13, lineHeight: 1.7, color: TEXT2, fontWeight: 500, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-              <Icon size={15} style={{ color, flexShrink: 0, marginTop: 2 }} />
-              <span>{renderInline(item, `${keyPrefix}-li-${blocks.length}-${i}`)}</span>
-            </li>
-          ))}
-        </ul>
-      );
-    } else {
-      blocks.push(
-        <ul key={`${keyPrefix}-l-${blocks.length}`} style={{ margin: '8px 0 14px', paddingInlineStart: 22, display: 'flex', flexDirection: 'column', gap: 6, listStyleType: 'disc' }}>
-          {items.map((item, i) => (
-            <li key={i} style={{ fontSize: 13, lineHeight: 1.7, color: TEXT2, fontWeight: 500 }}>
-              {renderInline(item, `${keyPrefix}-li-${blocks.length}-${i}`)}
-            </li>
-          ))}
-        </ul>
-      );
-    }
-    listItems = [];
-    listType = null;
-  };
-
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-
-    if (/^(-{3,}|\*{3,})\s*$/.test(line)) {
-      flushParagraph(); flushList();
-      blocks.push(<hr key={`${keyPrefix}-hr-${blocks.length}`} style={{ border: 'none', borderTop: `1px solid ${BORDER}`, margin: '16px 0' }} />);
-      continue;
-    }
-
-    const checkMatch = line.match(new RegExp(`^[${CHECK_CHARS}]\\s*(.*)`, 'u'));
-    if (checkMatch) {
-      flushParagraph();
-      if (listType !== 'check') { flushList(); listType = 'check'; }
-      listItems.push(checkMatch[1].trim());
-      continue;
-    }
-
-    const crossMatch = line.match(new RegExp(`^[${CROSS_CHARS}]\\s*(.*)`, 'u'));
-    if (crossMatch) {
-      flushParagraph();
-      if (listType !== 'cross') { flushList(); listType = 'cross'; }
-      listItems.push(crossMatch[1].trim());
-      continue;
-    }
-
-    const olMatch = line.match(/^\d+[.)]\s+(.*)/);
-    if (olMatch) {
-      flushParagraph();
-      if (listType !== 'ol') { flushList(); listType = 'ol'; }
-      listItems.push(olMatch[1].trim());
-      continue;
-    }
-
-    const ulMatch = line.match(/^[-*•]\s+(.*)/);
-    if (ulMatch) {
-      flushParagraph();
-      if (listType !== 'ul') { flushList(); listType = 'ul'; }
-      listItems.push(ulMatch[1].trim());
-      continue;
-    }
-
-    if (line === '') {
-      flushParagraph(); flushList();
-      continue;
-    }
-
-    paragraph.push(line);
-  }
-  flushParagraph();
-  flushList();
-  return blocks;
-}
-
-// Splits the AI weekly summary into per-##-heading segments and renders each as
-// its own styled card (color/icon from SECTION_ICONS). Text before the first
-// heading — or an entire legacy summary with no headings — renders inline with
-// no card wrapper, for backward compatibility with older stored summaries.
-function renderSummaryMarkdown(text: string): React.ReactNode[] {
-  type Segment = { heading: string | null; lines: string[] };
-  const segments: Segment[] = [];
-  let current: Segment = { heading: null, lines: [] };
+// Splits the AI weekly summary into per-##-heading segments, dropping any
+// intro/greeting text that appears before the first heading.
+function segmentSummaryByHeading(text: string): { heading: string; lines: string[] }[] {
+  const segments: { heading: string; lines: string[] }[] = [];
+  let current: { heading: string; lines: string[] } | null = null;
 
   for (const rawLine of text.split('\n')) {
     const headingMatch = rawLine.trim().match(/^#{1,6}\s+(.*)/);
     if (headingMatch) {
-      segments.push(current);
       current = { heading: headingMatch[1].trim(), lines: [] };
+      segments.push(current);
       continue;
     }
-    current.lines.push(rawLine);
+    current?.lines.push(rawLine);
   }
-  segments.push(current);
+  return segments;
+}
 
-  return segments.map((segment, segIndex) => {
-    const heading = segment.heading;
-    if (heading === null) {
-      return <div key={`seg-${segIndex}`}>{renderBlockLines(segment.lines, `intro-${segIndex}`)}</div>;
-    }
+// Joins markdown lines into a single plain-text blob, stripping list/quote/hr markers,
+// for compact line-clamped rendering.
+function joinSummaryLines(lines: string[]): string {
+  return lines
+    .map(l => l.trim())
+    .filter(l => l && !/^(-{3,}|\*{3,})\s*$/.test(l))
+    .map(l => l
+      .replace(/^[-*•]\s+/, '')
+      .replace(/^\d+[.)]\s+/, '')
+      .replace(new RegExp(`^[${CHECK_CHARS}${CROSS_CHARS}]\\s*`, 'u'), ''))
+    .join(' ');
+}
 
-    const section = SECTION_ICONS.find(s => heading.includes(s.match));
-    const Icon = section?.icon;
-    const color = section?.color ?? ACCENT;
-    const isQuote = section?.match === 'מה שאמרת';
+// One compact card per AI-summary section: icon + bold heading + up to 3 lines of body text.
+function SummarySectionCard({ heading, lines }: { heading: string; lines: string[] }) {
+  const section = SECTION_ICONS.find(s => heading.includes(s.match));
+  if (section?.match === 'מה שאמרת') return null;
 
-    return (
-      <div key={`seg-${segIndex}`} style={{
-        background: '#1a1a28',
-        border: `1px solid ${BORDER}`,
-        borderLeft: `3px solid ${color}`,
-        borderRadius: 10,
-        padding: '14px 16px',
-        marginBottom: 12,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-          {Icon && <Icon size={18} style={{ color, flexShrink: 0 }} />}
-          <p style={{ fontSize: 13, fontWeight: 700, color: TEXT }}>
-            {renderInline(heading, `seg-${segIndex}-h`)}
-          </p>
-        </div>
-        {renderBlockLines(segment.lines, `seg-${segIndex}`, isQuote ? { fontSize: 14, fontStyle: 'italic' } : undefined)}
+  const Icon = section?.icon;
+  const color = section?.color ?? ACCENT;
+  const text = joinSummaryLines(lines);
+  if (!text) return null;
+
+  return (
+    <div style={{
+      background: DEEP,
+      border: `1px solid ${SUBTLE}`,
+      borderLeft: `3px solid ${color}`,
+      borderRadius: 8,
+      padding: '10px 12px',
+    }}>
+      <div className="flex items-center gap-1.5 mb-1">
+        {Icon && <Icon size={14} style={{ color, flexShrink: 0 }} />}
+        <p style={{ fontSize: 12, fontWeight: 700, color: TEXT }}>{heading}</p>
       </div>
-    );
-  });
+      <p style={{
+        fontSize: 12, lineHeight: 1.5, color: TEXT2, fontWeight: 500,
+        display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+      }}>
+        {renderInline(text, `sec-${heading}`)}
+      </p>
+    </div>
+  );
+}
+
+// Renders the optional "what you told yourself" quote in italic, if the AI included one.
+function SummaryQuote({ segments }: { segments: { heading: string; lines: string[] }[] }) {
+  const seg = segments.find(s => s.heading.includes('מה שאמרת'));
+  const text = seg ? joinSummaryLines(seg.lines) : '';
+  if (!text) return null;
+
+  return (
+    <p style={{ fontSize: 12, lineHeight: 1.6, color: MUTED, fontWeight: 600, fontStyle: 'italic', textAlign: 'center', padding: '2px 8px' }}>
+      <Quote size={12} style={{ display: 'inline-block', verticalAlign: 'middle', marginInlineEnd: 4, color: PURPLE }} />
+      {renderInline(text, 'quote')}
+    </p>
+  );
+}
+
+// One compact day card for the weekly daily-breakdown column: green if profitable,
+// red if a loss, gray if no trades, with a thin bar showing relative size vs other days.
+function WeeklyDayCard({ label, pnl, trades, currency, maxAbs }: { label: string; pnl: number; trades: number; currency: string; maxAbs: number }) {
+  const tone = trades === 0 || pnl === 0 ? 'neutral' : pnl > 0 ? 'pos' : 'neg';
+  const color = tone === 'pos' ? GREEN : tone === 'neg' ? RED : MUTED;
+  const bg = tone === 'pos' ? 'rgba(34,197,94,0.08)' : tone === 'neg' ? 'rgba(239,68,68,0.08)' : DEEP;
+  const border = tone === 'pos' ? 'rgba(34,197,94,0.25)' : tone === 'neg' ? 'rgba(239,68,68,0.25)' : SUBTLE;
+  const barPct = maxAbs > 0 ? (Math.abs(pnl) / maxAbs) * 100 : 0;
+
+  return (
+    <div style={{ background: bg, border: `1px solid ${border}`, borderRadius: 8, padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div className="flex items-center justify-between">
+        <span style={{ fontSize: 13, fontWeight: 700, color: TEXT2 }}>{label}</span>
+        <div className="flex items-baseline gap-2">
+          <span style={{ fontSize: 15, fontWeight: 700, color }}>
+            {trades === 0 ? '—' : formatPnlIls(pnl, currency)}
+          </span>
+          <span style={{ fontSize: 10, color: MUTED, fontWeight: 600 }}>
+            {trades} עסקאות
+          </span>
+        </div>
+      </div>
+      <div style={{ height: 3, borderRadius: 2, background: SUBTLE, overflow: 'hidden' }}>
+        <div style={{ height: '100%', width: `${barPct}%`, background: color, opacity: 0.6, borderRadius: 2 }} />
+      </div>
+    </div>
+  );
 }
 
 // Small "vs last week" delta badge for the weekly summary stat pills.
@@ -915,9 +859,9 @@ function processScoreColor(score: number | null): string {
 // Stat pill for the weekly summary: label on top, large value below, border matching value color.
 function StatPill({ label, value, color, delta }: { label: string; value: React.ReactNode; color?: string; delta?: React.ReactNode }) {
   return (
-    <div className="text-center" style={{ background: SURF2, border: `1px solid ${color ?? BORDER}`, borderRadius: 10, padding: '12px 8px' }}>
+    <div className="text-center" style={{ background: DEEP, border: `1px solid ${color ?? SUBTLE}`, borderRadius: 10, padding: '10px 8px' }}>
       <p style={{ fontSize: 11, color: MUTED, fontWeight: 600, marginBottom: 4 }}>{label}</p>
-      <p style={{ fontSize: 20, fontWeight: 700, color: color ?? TEXT }}>{value}</p>
+      <p style={{ fontSize: 18, fontWeight: 700, color: color ?? TEXT }}>{value}</p>
       {delta}
     </div>
   );
@@ -1114,6 +1058,13 @@ export default function DashboardClient({
   const barData  = barMode === 'daily' ? stats.dailySeries : barMode === 'weekly' ? stats.weeklySeries : stats.monthlySeries;
   const lineData = lineMode === 'cumulative' ? stats.cumulativeSeries : stats.dailySeries;
   const recent   = trades.slice(0, 10);
+
+  const summarySegments = weeklySummary?.summary_text ? segmentSummaryByHeading(weeklySummary.summary_text) : [];
+  const weeklyDayMaxAbs = weeklySummary
+    ? Math.max(...weeklySummary.stats.daily_pnl.map(d => Math.abs(d.pnl)), 0.001)
+    : 0.001;
+  const weeklyDaysReversed = weeklySummary ? [...weeklySummary.stats.daily_pnl].reverse() : [];
+  const weeklyLabelsReversed = [...DAYS_SH].reverse();
 
   const dateStr  = now ? now.toLocaleDateString('he-IL', { weekday: 'long', day: 'numeric', month: 'long' }) : '';
   const hour     = now ? now.getHours() : null;
@@ -1464,54 +1415,77 @@ export default function DashboardClient({
           </button>
         </div>
 
-        {weeklySummary && (
-          <>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
-              <StatPill label="עסקאות" value={weeklySummary.stats.total_trades} />
-              <StatPill
-                label="ציון תהליך שבועי"
-                value={weeklySummary.stats.avg_process_score ?? '—'}
-                color={processScoreColor(weeklySummary.stats.avg_process_score)}
-                delta={previousStats?.avg_process_score != null && weeklySummary.stats.avg_process_score != null && (
-                  <WeekDelta diff={weeklySummary.stats.avg_process_score - previousStats.avg_process_score}
-                    format={d => `${d > 0 ? '+' : ''}${d}`} />
-                )}
-              />
-              <StatPill
-                label="P&L"
-                value={formatPnlIls(weeklySummary.stats.total_pnl, weeklySummary.stats.pnl_currency)}
-                color={weeklySummary.stats.total_pnl >= 0 ? GREEN : RED}
-                delta={previousStats && (
-                  <WeekDelta diff={weeklySummary.stats.total_pnl - previousStats.total_pnl}
-                    format={d => formatPnlIls(d, weeklySummary.stats.pnl_currency)} />
-                )}
-              />
-              <StatPill
-                label="אחוז הצלחה"
-                value={weeklySummary.stats.win_rate != null ? `${weeklySummary.stats.win_rate}%` : '—'}
-                color={weeklySummary.stats.win_rate != null ? (weeklySummary.stats.win_rate >= 50 ? GREEN : RED) : undefined}
-                delta={previousStats?.win_rate != null && weeklySummary.stats.win_rate != null && (
-                  <WeekDelta diff={weeklySummary.stats.win_rate - previousStats.win_rate}
-                    format={d => `${d > 0 ? '+' : ''}${d}%`} />
-                )}
-              />
+        {weeklySummary ? (
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+            {/* LEFT — daily breakdown (40%) */}
+            <div className="md:col-span-2 flex flex-col gap-2">
+              <SectionTitle>ביצועים יומיים</SectionTitle>
+              {weeklyDaysReversed.map((d, i) => (
+                <WeeklyDayCard
+                  key={d.date}
+                  label={weeklyLabelsReversed[i]}
+                  pnl={d.pnl}
+                  trades={d.trades ?? 0}
+                  currency={weeklySummary.stats.pnl_currency}
+                  maxAbs={weeklyDayMaxAbs}
+                />
+              ))}
             </div>
 
-            <div style={{ marginBottom: 14 }}>
-              {weeklySummary.stats.daily_pnl?.some(d => d.pnl !== 0) ? (
-                <BarChart data={weeklySummary.stats.daily_pnl.map((d, i) => ({ label: DAYS_SH[i], value: d.pnl }))} />
+            {/* RIGHT — AI analysis (60%) */}
+            <div className="md:col-span-3 flex flex-col gap-2">
+              <SectionTitle>ניתוח AI שבועי</SectionTitle>
+
+              <div className="grid grid-cols-3 gap-2 mb-1">
+                <StatPill
+                  label="אחוז הצלחה"
+                  value={weeklySummary.stats.win_rate != null ? `${weeklySummary.stats.win_rate}%` : '—'}
+                  color={weeklySummary.stats.win_rate != null ? (weeklySummary.stats.win_rate >= 50 ? GREEN : RED) : undefined}
+                  delta={previousStats?.win_rate != null && weeklySummary.stats.win_rate != null && (
+                    <WeekDelta diff={weeklySummary.stats.win_rate - previousStats.win_rate}
+                      format={d => `${d > 0 ? '+' : ''}${d}%`} />
+                  )}
+                />
+                <StatPill
+                  label="ציון תהליך"
+                  value={weeklySummary.stats.avg_process_score ?? '—'}
+                  color={processScoreColor(weeklySummary.stats.avg_process_score)}
+                  delta={previousStats?.avg_process_score != null && weeklySummary.stats.avg_process_score != null && (
+                    <WeekDelta diff={weeklySummary.stats.avg_process_score - previousStats.avg_process_score}
+                      format={d => `${d > 0 ? '+' : ''}${d}`} />
+                  )}
+                />
+                <StatPill label="עסקאות" value={weeklySummary.stats.total_trades} />
+              </div>
+
+              {weeklySummary.summary_text ? (
+                <>
+                  {summarySegments.map((seg, i) => (
+                    <SummarySectionCard key={i} heading={seg.heading} lines={seg.lines} />
+                  ))}
+                  <SummaryQuote segments={summarySegments} />
+                </>
               ) : (
-                <p className="text-center" style={{ fontSize: 12, color: MUTED, fontWeight: 600, padding: '12px 0' }}>
-                  אין נתוני מסחר השבוע
-                </p>
+                <div className="text-center flex-1 flex flex-col items-center justify-center gap-3" style={{ minHeight: 120 }}>
+                  <p style={{ fontSize: 12, color: MUTED, fontWeight: 600 }}>
+                    {weeklyLoading ? 'טוען סיכום שבועי...' : 'אין סיכום שבועי עדיין'}
+                  </p>
+                  <button onClick={refreshWeeklySummary} disabled={weeklyLoading}
+                    className="transition-all active:scale-95 disabled:opacity-50"
+                    style={{
+                      background: 'rgba(0,210,210,0.12)',
+                      color: ACCENT,
+                      border: `1px solid rgba(0,210,210,0.3)`,
+                      borderRadius: 6,
+                      padding: '6px 16px',
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}>
+                    צור סיכום
+                  </button>
+                </div>
               )}
             </div>
-          </>
-        )}
-
-        {weeklySummary?.summary_text ? (
-          <div>
-            {renderSummaryMarkdown(weeklySummary.summary_text)}
           </div>
         ) : (
           <div className="text-center py-6 flex flex-col items-center gap-3">
