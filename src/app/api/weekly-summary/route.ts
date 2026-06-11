@@ -42,6 +42,8 @@ interface TradeRow {
   pnl_currency: string | null;
   closed_at: string | null;
   submitted_at: string;
+  exit_reason: string | null;
+  post_trade_notes: string | null;
 }
 
 function tradePoints(t: TradeRow): number {
@@ -54,6 +56,12 @@ function tradePoints(t: TradeRow): number {
 
 function dateStr(d: Date): string {
   return d.toISOString().slice(0, 10);
+}
+
+function addDays(d: Date, n: number): Date {
+  const r = new Date(d);
+  r.setDate(r.getDate() + n);
+  return r;
 }
 
 // The most recently completed Sunday→Saturday week.
@@ -130,18 +138,44 @@ function computeWeeklyStats(trades: TradeRow[], weekStart: Date): WeeklyStats {
   };
 }
 
-function buildPrompt(stats: WeeklyStats): string {
-  return `אתה מאמן מסחר מקצועי. להלן נתוני המסחר של המשתמש לשבוע שעבר: ${JSON.stringify(stats)}. כתוב סיכום שבועי מקצועי הכולל: 1) מה עבד טוב השבוע, 2) דפוסים שחוזרים לרעה, 3) ניתוח מצב רגשי, 4) המלצה אחת קונקרטית לשבוע הבא. היה ישיר, תמציתי ומעשי.`;
+// Trades with a long, reflective note are worth quoting back to the user.
+function collectInsightfulNotes(trades: TradeRow[]): string[] {
+  const notes: string[] = [];
+  for (const t of trades) {
+    for (const text of [t.post_trade_notes, t.exit_reason]) {
+      const trimmed = text?.trim();
+      if (trimmed && trimmed.split(/\s+/).length > 10) notes.push(trimmed);
+    }
+  }
+  return notes;
 }
 
-export async function GET() {
+function buildPrompt(stats: WeeklyStats, firstName: string, insightfulNotes: string[]): string {
+  let prompt = `אתה מאמן מסחר מקצועי. להלן נתוני המסחר של ${firstName} לשבוע שעבר: ${JSON.stringify(stats)}. כתוב סיכום שבועי מקצועי הכולל: 1) מה עבד טוב השבוע, 2) דפוסים שחוזרים לרעה, 3) ניתוח מצב רגשי, 4) המלצה אחת קונקרטית לשבוע הבא. פנה אל המשתמש בשם ${firstName}. התחל את הסיכום עם 'שלום ${firstName},' וכתוב בגוף שני ישיר. אל תשתמש באימוג'ים. היה ישיר, תמציתי ומעשי.`;
+
+  if (insightfulNotes.length > 0) {
+    prompt += ` הנה ציטוטים מתוך ההערות שהמשתמש כתב על העסקאות שלו השבוע: ${JSON.stringify(insightfulNotes)}. אם מצאת בהן משפט מעניין, צטט אותו בסיכום תחת כותרת 'מה שאמרת לעצמך השבוע:'.`;
+  }
+
+  return prompt;
+}
+
+export async function GET(request: Request) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { weekStart, weekEnd } = getLastCompletedWeek();
+  const { weekStart: latestWeekStart } = getLastCompletedWeek();
+  const latestWeekStartStr = dateStr(latestWeekStart);
+
+  const requestedWeekStart = new URL(request.url).searchParams.get('week_start');
+  const weekStart = requestedWeekStart && /^\d{4}-\d{2}-\d{2}$/.test(requestedWeekStart)
+    ? new Date(`${requestedWeekStart}T00:00:00.000Z`)
+    : latestWeekStart;
+
   const weekStartStr = dateStr(weekStart);
-  const weekEndStr = dateStr(weekEnd);
+  const weekEndStr = dateStr(addDays(weekStart, 6));
+  const prevWeekStartStr = dateStr(addDays(weekStart, -7));
 
   const { data } = await supabase
     .from('weekly_summaries')
@@ -150,7 +184,20 @@ export async function GET() {
     .eq('week_start', weekStartStr)
     .maybeSingle();
 
-  return NextResponse.json({ summary: data ?? null, week_start: weekStartStr, week_end: weekEndStr });
+  const { data: previous } = await supabase
+    .from('weekly_summaries')
+    .select('stats')
+    .eq('user_id', user.id)
+    .eq('week_start', prevWeekStartStr)
+    .maybeSingle();
+
+  return NextResponse.json({
+    summary: data ?? null,
+    week_start: weekStartStr,
+    week_end: weekEndStr,
+    is_latest: weekStartStr === latestWeekStartStr,
+    previous_stats: (previous?.stats as WeeklyStats | null | undefined) ?? null,
+  });
 }
 
 export async function POST() {
@@ -164,7 +211,7 @@ export async function POST() {
 
   const { data: trades } = await supabase
     .from('trade_plans')
-    .select('strategy,entry_price,exit_price,take_profit,stop_loss,emotional_state,plan_score,pnl_amount,pnl_currency,closed_at,submitted_at')
+    .select('strategy,entry_price,exit_price,take_profit,stop_loss,emotional_state,plan_score,pnl_amount,pnl_currency,closed_at,submitted_at,exit_reason,post_trade_notes')
     .eq('user_id', user.id)
     .eq('status', 'closed')
     .gte('closed_at', `${weekStartStr}T00:00:00.000Z`)
@@ -172,10 +219,19 @@ export async function POST() {
 
   const stats = computeWeeklyStats(trades ?? [], weekStart);
 
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('display_name')
+    .eq('id', user.id)
+    .maybeSingle();
+  const firstName = profile?.display_name?.split(' ')[0] ?? 'סוחר';
+
+  const insightfulNotes = collectInsightfulNotes(trades ?? []);
+
   const message = await client.messages.create({
     model: 'claude-sonnet-4-6',
     max_tokens: 1000,
-    messages: [{ role: 'user', content: buildPrompt(stats) }],
+    messages: [{ role: 'user', content: buildPrompt(stats, firstName, insightfulNotes) }],
   });
   const summaryText = message.content[0].type === 'text' ? message.content[0].text : '';
 

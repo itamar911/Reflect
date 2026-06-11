@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { Sparkles, TrendingUp, RefreshCw, CheckCircle, AlertCircle, Heart, ArrowRight } from 'lucide-react';
+import { Sparkles, TrendingUp, TrendingDown, RefreshCw, CheckCircle, AlertCircle, Heart, ArrowRight, ChevronRight, ChevronLeft, Quote } from 'lucide-react';
 import { formatPnlIls, formatPnlPoints } from '@/lib/utils';
 import { createClient } from '@/lib/supabase/client';
 import { DASH_TRADE_SELECT, mapDashTrade } from '@/lib/dashboard/trades';
@@ -687,15 +687,32 @@ const SECTION_ICONS: { match: string; icon: typeof CheckCircle; color: string }[
   { match: 'דפוסים', icon: AlertCircle, color: RED },
   { match: 'מצב רגשי', icon: Heart, color: YELLOW },
   { match: 'המלצה', icon: ArrowRight, color: ACCENT },
+  { match: 'מה שאמרת', icon: Quote, color: ACCENT },
 ];
 
-// Render `**bold**` spans within a line of text.
+// Checkmark/cross-mark and other emoji code points the AI might still produce.
+const CHECK_CHARS = '✅✔✓☑';
+const CROSS_CHARS = '✖✗✘❌❎';
+const INLINE_SPLIT_RE = new RegExp(`(\\*\\*[^*]+\\*\\*|[${CHECK_CHARS}${CROSS_CHARS}]|\\p{Extended_Pictographic}|\\uFE0F)`, 'gu');
+const CHECK_RE = new RegExp(`^[${CHECK_CHARS}]$`, 'u');
+const CROSS_RE = new RegExp(`^[${CROSS_CHARS}]$`, 'u');
+const EMOJI_RE = new RegExp('^(\\p{Extended_Pictographic}|\\uFE0F)$', 'u');
+
+// Render `**bold**` spans within a line of text, swapping ✓/✗ and other emoji for icons.
 function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
-  return text.split(/(\*\*[^*]+\*\*)/g).map((part, i) => {
+  return text.split(INLINE_SPLIT_RE).map((part, i) => {
+    if (!part) return null;
     const m = part.match(/^\*\*([^*]+)\*\*$/);
     if (m) return <strong key={`${keyPrefix}-${i}`} style={{ fontWeight: 700, color: TEXT }}>{m[1]}</strong>;
+    if (CHECK_RE.test(part)) {
+      return <CheckCircle key={`${keyPrefix}-${i}`} size={14} style={{ color: GREEN, display: 'inline-block', verticalAlign: 'middle', margin: '0 2px' }} />;
+    }
+    if (CROSS_RE.test(part)) {
+      return <AlertCircle key={`${keyPrefix}-${i}`} size={14} style={{ color: RED, display: 'inline-block', verticalAlign: 'middle', margin: '0 2px' }} />;
+    }
+    if (EMOJI_RE.test(part)) return null;
     return part;
-  });
+  }).filter(part => part !== null && part !== '');
 }
 
 // Minimal markdown renderer for the AI weekly summary: headings, bold, hr, lists, paragraphs.
@@ -703,7 +720,7 @@ function renderSummaryMarkdown(text: string): React.ReactNode[] {
   const blocks: React.ReactNode[] = [];
   let paragraph: string[] = [];
   let listItems: string[] = [];
-  let listType: 'ol' | 'ul' | null = null;
+  let listType: 'ol' | 'ul' | 'check' | 'cross' | null = null;
 
   const flushParagraph = () => {
     const content = paragraph.join(' ').trim();
@@ -729,6 +746,19 @@ function renderSummaryMarkdown(text: string): React.ReactNode[] {
             </li>
           ))}
         </ol>
+      );
+    } else if (listType === 'check' || listType === 'cross') {
+      const Icon = listType === 'check' ? CheckCircle : AlertCircle;
+      const color = listType === 'check' ? GREEN : RED;
+      blocks.push(
+        <ul key={`l-${blocks.length}`} style={{ margin: '8px 0 14px', paddingInlineStart: 0, display: 'flex', flexDirection: 'column', gap: 6, listStyleType: 'none' }}>
+          {items.map((item, i) => (
+            <li key={i} style={{ fontSize: 13, lineHeight: 1.7, color: TEXT2, fontWeight: 500, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+              <Icon size={15} style={{ color, flexShrink: 0, marginTop: 2 }} />
+              <span>{renderInline(item, `li-${blocks.length}-${i}`)}</span>
+            </li>
+          ))}
+        </ul>
       );
     } else {
       blocks.push(
@@ -774,6 +804,22 @@ function renderSummaryMarkdown(text: string): React.ReactNode[] {
       continue;
     }
 
+    const checkMatch = line.match(new RegExp(`^[${CHECK_CHARS}]\\s*(.*)`, 'u'));
+    if (checkMatch) {
+      flushParagraph();
+      if (listType !== 'check') { flushList(); listType = 'check'; }
+      listItems.push(checkMatch[1].trim());
+      continue;
+    }
+
+    const crossMatch = line.match(new RegExp(`^[${CROSS_CHARS}]\\s*(.*)`, 'u'));
+    if (crossMatch) {
+      flushParagraph();
+      if (listType !== 'cross') { flushList(); listType = 'cross'; }
+      listItems.push(crossMatch[1].trim());
+      continue;
+    }
+
     const olMatch = line.match(/^\d+[.)]\s+(.*)/);
     if (olMatch) {
       flushParagraph();
@@ -802,6 +848,19 @@ function renderSummaryMarkdown(text: string): React.ReactNode[] {
   return blocks;
 }
 
+// Small "vs last week" delta badge for the weekly summary stat pills.
+function WeekDelta({ diff, format }: { diff: number; format: (d: number) => string }) {
+  if (diff === 0) return null;
+  const Icon = diff > 0 ? TrendingUp : TrendingDown;
+  const color = diff > 0 ? GREEN : RED;
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, fontSize: 10, fontWeight: 600, color, marginTop: 2 }}>
+      <Icon size={10} />
+      {format(diff)} vs שבוע קודם
+    </span>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 export default function DashboardClient({
   trades: initialTrades,
@@ -822,6 +881,10 @@ export default function DashboardClient({
   const [tradeAiL, setTradeAiL] = useState<Record<string, boolean>>({});
   const [weeklySummary, setWeeklySummary] = useState<WeeklySummary | null>(null);
   const [weeklyLoading, setWeeklyLoading] = useState(false);
+  const [viewedWeekStart, setViewedWeekStart] = useState<string | null>(null);
+  const [viewedWeekEnd, setViewedWeekEnd] = useState<string | null>(null);
+  const [isLatestWeek, setIsLatestWeek] = useState(true);
+  const [previousStats, setPreviousStats] = useState<WeeklyStats | null>(null);
 
   const stats = useMemo(() => computeAll(trades), [trades]);
 
@@ -859,22 +922,38 @@ export default function DashboardClient({
     };
   }, [userId, fetchTrades]);
 
+  // Fetch a given week's summary (or the latest completed week if omitted).
+  const loadWeek = useCallback(async (weekStart?: string) => {
+    setWeeklyLoading(true);
+    try {
+      const url = weekStart ? `/api/weekly-summary?week_start=${weekStart}` : '/api/weekly-summary';
+      const res = await fetch(url);
+      const data = await res.json();
+      setWeeklySummary(data.summary ?? null);
+      setViewedWeekStart(data.week_start ?? null);
+      setViewedWeekEnd(data.week_end ?? null);
+      setIsLatestWeek(data.is_latest ?? true);
+      setPreviousStats(data.previous_stats ?? null);
+      return data;
+    } catch {
+      // weekly summary is non-critical — fail silently
+      return null;
+    } finally {
+      setWeeklyLoading(false);
+    }
+  }, []);
+
   // Load this week's AI summary; on Sundays, generate one if it doesn't exist yet.
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      const data = await loadWeek();
+      if (cancelled || !data || data.summary || new Date().getDay() !== 0) return;
       setWeeklyLoading(true);
       try {
-        const res = await fetch('/api/weekly-summary');
-        const data = await res.json();
-        if (cancelled) return;
-        if (data.summary) {
-          setWeeklySummary(data.summary);
-        } else if (new Date().getDay() === 0) {
-          const genRes = await fetch('/api/weekly-summary', { method: 'POST' });
-          const genData = await genRes.json();
-          if (!cancelled && genData.summary) setWeeklySummary(genData.summary);
-        }
+        const genRes = await fetch('/api/weekly-summary', { method: 'POST' });
+        const genData = await genRes.json();
+        if (!cancelled && genData.summary) setWeeklySummary(genData.summary);
       } catch {
         // weekly summary is non-critical — fail silently
       } finally {
@@ -882,19 +961,33 @@ export default function DashboardClient({
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [loadWeek]);
 
   async function refreshWeeklySummary() {
     setWeeklyLoading(true);
     try {
       const res = await fetch('/api/weekly-summary', { method: 'POST' });
       const data = await res.json();
-      if (data.summary) setWeeklySummary(data.summary);
+      if (data.summary) await loadWeek(data.summary.week_start);
     } catch {
       // weekly summary is non-critical — fail silently
     } finally {
       setWeeklyLoading(false);
     }
+  }
+
+  function goToPrevWeek() {
+    if (!viewedWeekStart) return;
+    const d = new Date(`${viewedWeekStart}T00:00:00.000Z`);
+    d.setUTCDate(d.getUTCDate() - 7);
+    loadWeek(d.toISOString().slice(0, 10));
+  }
+
+  function goToNextWeek() {
+    if (!viewedWeekStart || isLatestWeek) return;
+    const d = new Date(`${viewedWeekStart}T00:00:00.000Z`);
+    d.setUTCDate(d.getUTCDate() + 7);
+    loadWeek(d.toISOString().slice(0, 10));
   }
 
   async function fetchTradeAi(t: DashTrade) {
@@ -1230,17 +1323,33 @@ export default function DashboardClient({
           </button>
         </div>
 
-        {weeklySummary ? (
-          <>
-            <div style={{ marginBottom: 14 }}>
-              <p style={{ fontSize: 14, fontWeight: 700, color: TEXT }}>
-                סיכום שבוע {fmtDate(weeklySummary.week_start)} - {fmtDate(weeklySummary.week_end)}
-              </p>
+        <div className="flex items-center justify-between mb-3">
+          <button onClick={goToPrevWeek} disabled={weeklyLoading}
+            className="p-1.5 rounded-lg transition-opacity disabled:opacity-40"
+            style={{ background: SURF2, color: TEXT2 }}>
+            <ChevronRight size={16} />
+          </button>
+          <div className="text-center">
+            <p style={{ fontSize: 14, fontWeight: 700, color: TEXT }}>
+              {viewedWeekStart && viewedWeekEnd
+                ? `סיכום שבוע ${fmtDate(viewedWeekStart)} - ${fmtDate(viewedWeekEnd)}`
+                : 'סיכום שבועי'}
+            </p>
+            {weeklySummary && (
               <p style={{ fontSize: 11, color: MUTED, fontWeight: 600, marginTop: 2 }}>
                 נוצר ב-{fmtDate(weeklySummary.created_at)}
               </p>
-            </div>
+            )}
+          </div>
+          <button onClick={goToNextWeek} disabled={weeklyLoading || isLatestWeek}
+            className="p-1.5 rounded-lg transition-opacity disabled:opacity-40"
+            style={{ background: SURF2, color: TEXT2 }}>
+            <ChevronLeft size={16} />
+          </button>
+        </div>
 
+        {weeklySummary ? (
+          <>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
               <div className="text-center py-2" style={{ background: SURF2, border: `1px solid ${BORDER}`, borderRadius: 8 }}>
                 <p style={{ fontSize: 10, color: MUTED, fontWeight: 600 }}>עסקאות</p>
@@ -1251,18 +1360,30 @@ export default function DashboardClient({
                 <p style={{ fontSize: 16, fontWeight: 700, color: TEXT }}>
                   {weeklySummary.stats.avg_process_score ?? '—'}
                 </p>
+                {previousStats?.avg_process_score != null && weeklySummary.stats.avg_process_score != null && (
+                  <WeekDelta diff={weeklySummary.stats.avg_process_score - previousStats.avg_process_score}
+                    format={d => `${d > 0 ? '+' : ''}${d}`} />
+                )}
               </div>
               <div className="text-center py-2" style={{ background: SURF2, border: `1px solid ${BORDER}`, borderRadius: 8 }}>
                 <p style={{ fontSize: 10, color: MUTED, fontWeight: 600 }}>P&L</p>
                 <p style={{ fontSize: 16, fontWeight: 700, color: weeklySummary.stats.total_pnl >= 0 ? GREEN : RED }}>
                   {formatPnlIls(weeklySummary.stats.total_pnl, weeklySummary.stats.pnl_currency)}
                 </p>
+                {previousStats && (
+                  <WeekDelta diff={weeklySummary.stats.total_pnl - previousStats.total_pnl}
+                    format={d => formatPnlIls(d, weeklySummary.stats.pnl_currency)} />
+                )}
               </div>
               <div className="text-center py-2" style={{ background: SURF2, border: `1px solid ${BORDER}`, borderRadius: 8 }}>
                 <p style={{ fontSize: 10, color: MUTED, fontWeight: 600 }}>אחוז הצלחה</p>
                 <p style={{ fontSize: 16, fontWeight: 700, color: TEXT }}>
                   {weeklySummary.stats.win_rate != null ? `${weeklySummary.stats.win_rate}%` : '—'}
                 </p>
+                {previousStats?.win_rate != null && weeklySummary.stats.win_rate != null && (
+                  <WeekDelta diff={weeklySummary.stats.win_rate - previousStats.win_rate}
+                    format={d => `${d > 0 ? '+' : ''}${d}%`} />
+                )}
               </div>
             </div>
 
