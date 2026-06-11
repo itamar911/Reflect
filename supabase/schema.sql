@@ -188,3 +188,22 @@ ALTER TABLE trade_plans
   ADD COLUMN IF NOT EXISTS followed_plan BOOLEAN,
   ADD COLUMN IF NOT EXISTS kept_sl BOOLEAN,
   ADD COLUMN IF NOT EXISTS proper_size BOOLEAN;
+
+-- v6: Weekly AI summaries shown on the dashboard
+CREATE TABLE IF NOT EXISTS weekly_summaries (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id),
+  week_start DATE NOT NULL,
+  week_end DATE NOT NULL,
+  summary_text TEXT,
+  stats JSONB,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE weekly_summaries ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can manage own weekly summaries"
+  ON weekly_summaries FOR ALL USING (auth.uid() = user_id);
+
+CREATE INDEX IF NOT EXISTS idx_weekly_summaries_user_week
+  ON weekly_summaries (user_id, week_start DESC);

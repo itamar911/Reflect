@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { Sparkles, TrendingUp } from 'lucide-react';
+import { Sparkles, TrendingUp, RefreshCw } from 'lucide-react';
 import { formatPnlIls, formatPnlPoints } from '@/lib/utils';
 import { createClient } from '@/lib/supabase/client';
 import { DASH_TRADE_SELECT, mapDashTrade } from '@/lib/dashboard/trades';
@@ -644,6 +644,40 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   );
 }
 
+// ── Weekly summary types ──────────────────────────────────────────────────────
+interface WeeklyDailyPnl {
+  date: string;
+  pnl: number;
+}
+
+interface WeeklyBestWorstTrade {
+  strategy: string;
+  pnl: number;
+  date: string;
+}
+
+interface WeeklyStats {
+  total_trades: number;
+  winning_trades: number;
+  losing_trades: number;
+  total_pnl: number;
+  pnl_currency: string;
+  avg_process_score: number | null;
+  daily_pnl: WeeklyDailyPnl[];
+  avg_emotional_state: number | null;
+  best_trade: WeeklyBestWorstTrade | null;
+  worst_trade: WeeklyBestWorstTrade | null;
+  most_used_strategy: string | null;
+}
+
+interface WeeklySummary {
+  week_start: string;
+  week_end: string;
+  summary_text: string | null;
+  stats: WeeklyStats;
+  created_at: string;
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 export default function DashboardClient({
   trades: initialTrades,
@@ -662,6 +696,8 @@ export default function DashboardClient({
   const [selTrade, setSelTrade] = useState<DashTrade | null>(null);
   const [tradeAi,  setTradeAi]  = useState<Record<string, string>>({});
   const [tradeAiL, setTradeAiL] = useState<Record<string, boolean>>({});
+  const [weeklySummary, setWeeklySummary] = useState<WeeklySummary | null>(null);
+  const [weeklyLoading, setWeeklyLoading] = useState(false);
 
   const stats = useMemo(() => computeAll(trades), [trades]);
 
@@ -698,6 +734,44 @@ export default function DashboardClient({
       supabase.removeChannel(channel);
     };
   }, [userId, fetchTrades]);
+
+  // Load this week's AI summary; on Sundays, generate one if it doesn't exist yet.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setWeeklyLoading(true);
+      try {
+        const res = await fetch('/api/weekly-summary');
+        const data = await res.json();
+        if (cancelled) return;
+        if (data.summary) {
+          setWeeklySummary(data.summary);
+        } else if (new Date().getDay() === 0) {
+          const genRes = await fetch('/api/weekly-summary', { method: 'POST' });
+          const genData = await genRes.json();
+          if (!cancelled && genData.summary) setWeeklySummary(genData.summary);
+        }
+      } catch {
+        // weekly summary is non-critical — fail silently
+      } finally {
+        if (!cancelled) setWeeklyLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  async function refreshWeeklySummary() {
+    setWeeklyLoading(true);
+    try {
+      const res = await fetch('/api/weekly-summary', { method: 'POST' });
+      const data = await res.json();
+      if (data.summary) setWeeklySummary(data.summary);
+    } catch {
+      // weekly summary is non-critical — fail silently
+    } finally {
+      setWeeklyLoading(false);
+    }
+  }
 
   async function fetchTradeAi(t: DashTrade) {
     setTradeAiL(p => ({ ...p, [t.id]: true }));
@@ -863,6 +937,82 @@ export default function DashboardClient({
               </div>
             </Card>
           </div>
+
+          {/* ── Weekly summary ───────────────────────────────────────────── */}
+          {(weeklySummary || weeklyLoading) && (
+            <Card>
+              <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                <SectionTitle>סיכום שבועי</SectionTitle>
+                <button onClick={refreshWeeklySummary} disabled={weeklyLoading}
+                  className="flex items-center gap-1.5 transition-all active:scale-95 disabled:opacity-50">
+                  <RefreshCw size={12} className={weeklyLoading ? 'animate-spin' : ''} />
+                  <span style={{
+                    background: 'rgba(0,210,210,0.12)',
+                    color: ACCENT,
+                    border: `1px solid rgba(0,210,210,0.3)`,
+                    borderRadius: 6,
+                    padding: '3px 10px',
+                    fontSize: 11,
+                    fontWeight: 600,
+                  }}>
+                    רענן סיכום
+                  </span>
+                </button>
+              </div>
+
+              {weeklySummary ? (
+                <>
+                  <div style={{ marginBottom: 14 }}>
+                    <p style={{ fontSize: 14, fontWeight: 700, color: TEXT }}>
+                      סיכום שבוע {fmtDate(weeklySummary.week_start)} - {fmtDate(weeklySummary.week_end)}
+                    </p>
+                    <p style={{ fontSize: 11, color: MUTED, fontWeight: 600, marginTop: 2 }}>
+                      נוצר ב-{fmtDate(weeklySummary.created_at)}
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
+                    <div className="text-center py-2" style={{ background: SURF2, border: `1px solid ${BORDER}`, borderRadius: 8 }}>
+                      <p style={{ fontSize: 10, color: MUTED, fontWeight: 600 }}>עסקאות</p>
+                      <p style={{ fontSize: 16, fontWeight: 700, color: TEXT }}>{weeklySummary.stats.total_trades}</p>
+                    </div>
+                    <div className="text-center py-2" style={{ background: SURF2, border: `1px solid ${BORDER}`, borderRadius: 8 }}>
+                      <p style={{ fontSize: 10, color: MUTED, fontWeight: 600 }}>ציון ממוצע</p>
+                      <p style={{ fontSize: 16, fontWeight: 700, color: TEXT }}>
+                        {weeklySummary.stats.avg_process_score ?? '—'}
+                      </p>
+                    </div>
+                    <div className="text-center py-2" style={{ background: SURF2, border: `1px solid ${BORDER}`, borderRadius: 8 }}>
+                      <p style={{ fontSize: 10, color: MUTED, fontWeight: 600 }}>P&L</p>
+                      <p style={{ fontSize: 16, fontWeight: 700, color: weeklySummary.stats.total_pnl >= 0 ? GREEN : RED }}>
+                        {formatPnlIls(weeklySummary.stats.total_pnl, weeklySummary.stats.pnl_currency)}
+                      </p>
+                    </div>
+                    <div className="text-center py-2" style={{ background: SURF2, border: `1px solid ${BORDER}`, borderRadius: 8 }}>
+                      <p style={{ fontSize: 10, color: MUTED, fontWeight: 600 }}>אחוז הצלחה</p>
+                      <p style={{ fontSize: 16, fontWeight: 700, color: TEXT }}>
+                        {weeklySummary.stats.total_trades > 0
+                          ? `${Math.round((weeklySummary.stats.winning_trades / weeklySummary.stats.total_trades) * 100)}%`
+                          : '—'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div style={{ marginBottom: 14 }}>
+                    <BarChart data={weeklySummary.stats.daily_pnl.map((d, i) => ({ label: DAYS_SH[i], value: d.pnl }))} />
+                  </div>
+
+                  {weeklySummary.summary_text && (
+                    <p style={{ fontSize: 13, lineHeight: 1.7, color: TEXT2, whiteSpace: 'pre-wrap' }}>
+                      {weeklySummary.summary_text}
+                    </p>
+                  )}
+                </>
+              ) : (
+                <p style={{ fontSize: 12, color: MUTED, fontWeight: 600 }}>טוען סיכום שבועי...</p>
+              )}
+            </Card>
+          )}
 
           {/* ── Middle: Radar + Bar + Line ────────────────────────────────── */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">

@@ -164,6 +164,9 @@ export default function CloseTrade({
         const data = await res.json();
         setDebriefResult(data);
         onDebrief?.(data);
+        if (typeof data.score === 'number') {
+          await supabase.from('trade_plans').update({ plan_score: data.score }).eq('id', tradeId);
+        }
       }
     } catch {
       // debrief failed silently — trade was still closed
