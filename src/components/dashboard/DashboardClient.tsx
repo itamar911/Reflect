@@ -1001,7 +1001,8 @@ export default function DashboardClient({
     setWeeklyLoading(true);
     setWeeklyError(null);
     try {
-      const res = await fetch('/api/weekly-summary', { method: 'POST' });
+      const url = viewedWeekStart ? `/api/weekly-summary?week_start=${viewedWeekStart}` : '/api/weekly-summary';
+      const res = await fetch(url, { method: 'POST' });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.summary) {
         console.error('[weekly-summary] POST failed', res.status, data);
@@ -1409,7 +1410,7 @@ export default function DashboardClient({
           </button>
         </div>
 
-        {weeklySummary ? (
+        {weeklySummary && (
           <>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
               <div className="text-center py-2" style={{ background: SURF2, border: `1px solid ${BORDER}`, borderRadius: 8 }}>
@@ -1457,20 +1458,20 @@ export default function DashboardClient({
                 </p>
               )}
             </div>
-
-            {weeklySummary.summary_text && (
-              <div>
-                {renderSummaryMarkdown(weeklySummary.summary_text)}
-              </div>
-            )}
           </>
-        ) : weeklyLoading ? (
-          <p style={{ fontSize: 12, color: MUTED, fontWeight: 600 }}>טוען סיכום שבועי...</p>
+        )}
+
+        {weeklySummary?.summary_text ? (
+          <div>
+            {renderSummaryMarkdown(weeklySummary.summary_text)}
+          </div>
         ) : (
           <div className="text-center py-6 flex flex-col items-center gap-3">
-            <p style={{ fontSize: 12, color: MUTED, fontWeight: 600 }}>אין סיכום שבועי עדיין</p>
-            <button onClick={refreshWeeklySummary}
-              className="transition-all active:scale-95"
+            <p style={{ fontSize: 12, color: MUTED, fontWeight: 600 }}>
+              {weeklyLoading ? 'טוען סיכום שבועי...' : 'אין סיכום שבועי עדיין'}
+            </p>
+            <button onClick={refreshWeeklySummary} disabled={weeklyLoading}
+              className="transition-all active:scale-95 disabled:opacity-50"
               style={{
                 background: 'rgba(0,210,210,0.12)',
                 color: ACCENT,

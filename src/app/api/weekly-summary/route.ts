@@ -160,11 +160,15 @@ function collectInsightfulNotes(trades: TradeRow[]): string[] {
   return notes;
 }
 
-function buildPrompt(stats: WeeklyStats, firstName: string, insightfulNotes: string[]): string {
-  let prompt = `אתה מאמן מסחר מקצועי. להלן נתוני המסחר של ${firstName} לשבוע שעבר: ${JSON.stringify(stats)}. כתוב סיכום שבועי מקצועי הכולל: 1) מה עבד טוב השבוע, 2) דפוסים שחוזרים לרעה, 3) ניתוח מצב רגשי, 4) המלצה אחת קונקרטית לשבוע הבא. פנה אל המשתמש בשם ${firstName}. התחל את הסיכום עם 'שלום ${firstName},' וכתוב בגוף שני ישיר. אל תשתמש באימוג'ים. היה ישיר, תמציתי ומעשי.`;
+function buildPrompt(stats: WeeklyStats, firstName: string, insightfulNotes: string[], isCurrentWeek: boolean): string {
+  const period = isCurrentWeek ? 'מתחילת השבוע הנוכחי ועד היום' : 'לשבוע שעבר';
+  const whatWorked = isCurrentWeek ? 'מה עבד טוב עד כה השבוע' : 'מה עבד טוב השבוע';
+  const recommendation = isCurrentWeek ? 'להמשך השבוע' : 'לשבוע הבא';
+
+  let prompt = `אתה מאמן מסחר מקצועי. להלן נתוני המסחר של ${firstName} ${period}: ${JSON.stringify(stats)}. כתוב סיכום שבועי מקצועי הכולל: 1) ${whatWorked}, 2) דפוסים שחוזרים לרעה, 3) ניתוח מצב רגשי, 4) המלצה אחת קונקרטית ${recommendation}. פנה אל המשתמש בשם ${firstName}. התחל את הסיכום עם 'שלום ${firstName},' וכתוב בגוף שני ישיר. אל תשתמש באימוג'ים. היה ישיר, תמציתי ומעשי.`;
 
   if (insightfulNotes.length > 0) {
-    prompt += ` הנה ציטוטים מתוך ההערות שהמשתמש כתב על העסקאות שלו השבוע: ${JSON.stringify(insightfulNotes)}. אם מצאת בהן משפט מעניין, צטט אותו בסיכום תחת כותרת 'מה שאמרת לעצמך השבוע:'.`;
+    prompt += ` הנה ציטוטים מתוך ההערות שהמשתמש כתב על העסקאות שלו ${isCurrentWeek ? 'השבוע עד כה' : 'השבוע'}: ${JSON.stringify(insightfulNotes)}. אם מצאת בהן משפט מעניין, צטט אותו בסיכום תחת כותרת 'מה שאמרת לעצמך השבוע:'.`;
   }
 
   return prompt;
@@ -205,8 +209,19 @@ export async function GET(request: Request) {
   const previousStats = (previous?.stats as WeeklyStats | null | undefined) ?? null;
 
   if (isCurrentWeek) {
-    // No stored AI summary exists for an in-progress week — compute live
-    // stats from Sunday through today instead.
+    // Stats for an in-progress week are always computed live (Sunday through
+    // today), but an AI summary may already have been generated for it.
+    const { data: stored, error: storedError } = await supabase
+      .from('weekly_summaries')
+      .select('summary_text,created_at')
+      .eq('user_id', user.id)
+      .eq('week_start', weekStartStr)
+      .maybeSingle();
+
+    if (storedError) {
+      console.error('[weekly-summary] GET: current-week summary lookup failed:', storedError);
+    }
+
     const { data: trades, error: tradesError } = await supabase
       .from('trade_plans')
       .select(TRADE_SELECT_FIELDS)
@@ -224,9 +239,9 @@ export async function GET(request: Request) {
       summary: {
         week_start: weekStartStr,
         week_end: weekEndStr,
-        summary_text: null,
+        summary_text: stored?.summary_text ?? null,
         stats: computeWeeklyStats((trades ?? []) as TradeRow[], weekStart),
-        created_at: now.toISOString(),
+        created_at: stored?.created_at ?? now.toISOString(),
       },
       week_start: weekStartStr,
       week_end: weekEndStr,
@@ -256,16 +271,26 @@ export async function GET(request: Request) {
   });
 }
 
-export async function POST() {
+export async function POST(request: Request) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { weekStart, weekEnd } = getLastCompletedWeek();
-  const weekStartStr = dateStr(weekStart);
-  const weekEndStr = dateStr(weekEnd);
+  const now = new Date();
+  const { weekStart: latestWeekStart } = getLastCompletedWeek(now);
+  const currentWeekStartStr = dateStr(getCurrentWeekStart(now));
 
-  console.log(`[weekly-summary] POST start user=${user.id} week=${weekStartStr}..${weekEndStr}`);
+  const requestedWeekStart = new URL(request.url).searchParams.get('week_start');
+  const weekStart = requestedWeekStart && /^\d{4}-\d{2}-\d{2}$/.test(requestedWeekStart)
+    ? new Date(`${requestedWeekStart}T00:00:00.000Z`)
+    : latestWeekStart;
+
+  const weekStartStr = dateStr(weekStart);
+  const isCurrentWeek = weekStartStr === currentWeekStartStr;
+  // The current week isn't over yet, so it only spans Sunday through today.
+  const weekEndStr = isCurrentWeek ? dateStr(now) : dateStr(addDays(weekStart, 6));
+
+  console.log(`[weekly-summary] POST start user=${user.id} week=${weekStartStr}..${weekEndStr}${isCurrentWeek ? ' (current week)' : ''}`);
 
   try {
     const { data: trades, error: tradesError } = await supabase
@@ -301,7 +326,7 @@ export async function POST() {
       const message = await client.messages.create({
         model: 'claude-sonnet-4-6',
         max_tokens: 1000,
-        messages: [{ role: 'user', content: buildPrompt(stats, firstName, insightfulNotes) }],
+        messages: [{ role: 'user', content: buildPrompt(stats, firstName, insightfulNotes, isCurrentWeek) }],
       });
       summaryText = message.content[0].type === 'text' ? message.content[0].text : '';
       console.log(`[weekly-summary] POST: Claude returned ${summaryText.length} chars`);
@@ -323,7 +348,7 @@ export async function POST() {
       return NextResponse.json({ error: `שגיאה בבדיקת סיכום קיים: ${existingError.message}` }, { status: 500 });
     }
 
-    const createdAt = new Date().toISOString();
+    const createdAt = now.toISOString();
 
     if (existing) {
       const { error: updateError } = await supabase.from('weekly_summaries')
