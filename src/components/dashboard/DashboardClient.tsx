@@ -901,6 +901,7 @@ export default function DashboardClient({
   const [viewedWeekStart, setViewedWeekStart] = useState<string | null>(null);
   const [viewedWeekEnd, setViewedWeekEnd] = useState<string | null>(null);
   const [isCurrentWeek, setIsCurrentWeek] = useState(false);
+  const [latestWeekStart, setLatestWeekStart] = useState<string | null>(null);
   const [previousStats, setPreviousStats] = useState<WeeklyStats | null>(null);
 
   // "Now" is null during SSR and the first client render (matching), then
@@ -964,6 +965,7 @@ export default function DashboardClient({
       setViewedWeekEnd(data.week_end ?? null);
       setIsCurrentWeek(data.is_current_week ?? false);
       setPreviousStats(data.previous_stats ?? null);
+      setLatestWeekStart(data.latest_week_start ?? null);
       return data;
     } catch (err) {
       console.error('[weekly-summary] GET request failed', err);
@@ -1032,7 +1034,7 @@ export default function DashboardClient({
   }
 
   function goToNextWeek() {
-    if (!viewedWeekStart || isCurrentWeek) return;
+    if (!viewedWeekStart || viewedWeekStart === latestWeekStart) return;
     const d = new Date(`${viewedWeekStart}T00:00:00.000Z`);
     d.setUTCDate(d.getUTCDate() + 7);
     loadWeek(d.toISOString().slice(0, 10));
@@ -1371,17 +1373,17 @@ export default function DashboardClient({
       <Card>
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2 -mx-5 -mt-5 px-5 py-3 rounded-t-xl"
           style={{ background: `linear-gradient(135deg, rgba(0,210,210,0.16) 0%, rgba(0,210,210,0.03) 100%)`, borderBottom: `1px solid ${BORDER}` }}>
-          <p style={{ fontSize: 13, fontWeight: 700, color: TEXT }}>
-            סיכום שבועי
-            {(() => {
-              const weekLabel = isCurrentWeek
-                ? 'השבוע הנוכחי'
-                : viewedWeekStart && viewedWeekEnd
-                  ? `${fmtDate(viewedWeekStart)} - ${fmtDate(viewedWeekEnd)}`
-                  : '';
-              return weekLabel ? <span style={{ color: MUTED, fontWeight: 600 }}> | {weekLabel}</span> : null;
-            })()}
-          </p>
+          <div>
+            <p style={{ fontSize: 13, fontWeight: 700, color: TEXT }}>
+              סיכום שבועי
+              {isCurrentWeek && <span style={{ color: MUTED, fontWeight: 600 }}> | השבוע הנוכחי</span>}
+            </p>
+            {viewedWeekStart && viewedWeekEnd && (
+              <p style={{ fontSize: 11, color: MUTED, fontWeight: 600, marginTop: 2 }}>
+                {fmtDate(viewedWeekStart)} - {fmtDate(viewedWeekEnd)}
+              </p>
+            )}
+          </div>
           <button onClick={refreshWeeklySummary} disabled={weeklyLoading}
             className="flex items-center gap-1.5 transition-all active:scale-95 disabled:opacity-50">
             <RefreshCw size={12} className={weeklyLoading ? 'animate-spin' : ''} />
@@ -1418,7 +1420,7 @@ export default function DashboardClient({
               נוצר ב-{fmtDate(weeklySummary.created_at)}
             </p>
           ) : <span />}
-          <button onClick={goToNextWeek} disabled={weeklyLoading || isCurrentWeek}
+          <button onClick={goToNextWeek} disabled={weeklyLoading || viewedWeekStart === latestWeekStart}
             className="p-1.5 rounded-lg transition-opacity disabled:opacity-40"
             style={{ background: SURF2, color: TEXT2 }}>
             <ChevronLeft size={16} />

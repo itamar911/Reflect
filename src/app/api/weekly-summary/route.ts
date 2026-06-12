@@ -85,6 +85,25 @@ function getCurrentWeekStart(now: Date = new Date()): Date {
   return start;
 }
 
+// Resolves the requested week_start to a valid YYYY-MM-DD string. The current,
+// in-progress week is only navigable on Sundays — any other day, the most
+// recently navigable week is the last completed one, and requests for a later
+// week are clamped back to it.
+function resolveWeekStart(now: Date, requested: string | null): {
+  weekStartStr: string;
+  latestWeekStartStr: string;
+  currentWeekStartStr: string;
+} {
+  const lastCompletedWeekStartStr = dateStr(getLastCompletedWeek(now).weekStart);
+  const currentWeekStartStr = dateStr(getCurrentWeekStart(now));
+  const latestWeekStartStr = now.getDay() === 0 ? currentWeekStartStr : lastCompletedWeekStartStr;
+
+  let weekStartStr = requested && /^\d{4}-\d{2}-\d{2}$/.test(requested) ? requested : lastCompletedWeekStartStr;
+  if (weekStartStr > latestWeekStartStr) weekStartStr = latestWeekStartStr;
+
+  return { weekStartStr, latestWeekStartStr, currentWeekStartStr };
+}
+
 function computeWeeklyStats(trades: TradeRow[], weekStart: Date): WeeklyStats {
   const rows = trades.map(t => ({ trade: t, pnl: t.pnl_amount != null ? Number(t.pnl_amount) : 0, points: tradePoints(t) }));
 
@@ -207,15 +226,10 @@ export async function GET(request: Request) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const now = new Date();
-  const { weekStart: latestWeekStart } = getLastCompletedWeek(now);
-  const currentWeekStartStr = dateStr(getCurrentWeekStart(now));
-
   const requestedWeekStart = new URL(request.url).searchParams.get('week_start');
-  const weekStart = requestedWeekStart && /^\d{4}-\d{2}-\d{2}$/.test(requestedWeekStart)
-    ? new Date(`${requestedWeekStart}T00:00:00.000Z`)
-    : latestWeekStart;
+  const { weekStartStr, latestWeekStartStr, currentWeekStartStr } = resolveWeekStart(now, requestedWeekStart);
 
-  const weekStartStr = dateStr(weekStart);
+  const weekStart = new Date(`${weekStartStr}T00:00:00.000Z`);
   const isCurrentWeek = weekStartStr === currentWeekStartStr;
   // The current week isn't over yet, so it only spans Sunday through today.
   const weekEndStr = isCurrentWeek ? dateStr(now) : dateStr(addDays(weekStart, 6));
@@ -274,6 +288,7 @@ export async function GET(request: Request) {
       week_end: weekEndStr,
       is_current_week: true,
       previous_stats: previousStats,
+      latest_week_start: latestWeekStartStr,
     });
   }
 
@@ -318,6 +333,7 @@ export async function GET(request: Request) {
     week_end: weekEndStr,
     is_current_week: false,
     previous_stats: previousStats,
+    latest_week_start: latestWeekStartStr,
   });
 }
 
@@ -327,15 +343,10 @@ export async function POST(request: Request) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const now = new Date();
-  const { weekStart: latestWeekStart } = getLastCompletedWeek(now);
-  const currentWeekStartStr = dateStr(getCurrentWeekStart(now));
-
   const requestedWeekStart = new URL(request.url).searchParams.get('week_start');
-  const weekStart = requestedWeekStart && /^\d{4}-\d{2}-\d{2}$/.test(requestedWeekStart)
-    ? new Date(`${requestedWeekStart}T00:00:00.000Z`)
-    : latestWeekStart;
+  const { weekStartStr, currentWeekStartStr } = resolveWeekStart(now, requestedWeekStart);
 
-  const weekStartStr = dateStr(weekStart);
+  const weekStart = new Date(`${weekStartStr}T00:00:00.000Z`);
   const isCurrentWeek = weekStartStr === currentWeekStartStr;
   // The current week isn't over yet, so it only spans Sunday through today.
   const weekEndStr = isCurrentWeek ? dateStr(now) : dateStr(addDays(weekStart, 6));
