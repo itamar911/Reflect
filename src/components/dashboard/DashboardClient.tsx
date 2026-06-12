@@ -20,7 +20,6 @@ const MUTED   = '#ffffff';
 const GREEN   = '#22c55e';
 const RED     = '#ef4444';
 const YELLOW  = '#eab308';
-const PURPLE  = '#a855f7';
 const DEEP    = '#0d0d1a';
 const SUBTLE  = '#2a2a3d';
 const ICON_GRAY = '#6b7280';
@@ -649,11 +648,14 @@ function Card({ children, className = '', style }: { children: React.ReactNode; 
   );
 }
 
-function SectionTitle({ children }: { children: React.ReactNode }) {
+function SectionTitle({ children, large }: { children: React.ReactNode; large?: boolean }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
       <div style={{ width: 3, height: 14, background: ACCENT, borderRadius: 99, flexShrink: 0 }} />
-      <p style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: MUTED }}>
+      <p style={{
+        fontSize: large ? 16 : 12, fontWeight: 600, letterSpacing: '0.06em',
+        textTransform: 'uppercase', color: large ? '#ffffff' : MUTED,
+      }}>
         {children}
       </p>
     </div>
@@ -702,7 +704,7 @@ const SECTION_ICONS: { match: string; icon: typeof CheckCircle; color: string }[
   { match: 'דפוסים', icon: AlertTriangle, color: RED },
   { match: 'מצב רגשי', icon: Heart, color: YELLOW },
   { match: 'המלצה', icon: Target, color: ACCENT },
-  { match: 'מה שאמרת', icon: Quote, color: PURPLE },
+  { match: 'מה שאמרת', icon: Quote, color: ICON_GRAY },
 ];
 
 // Checkmark/cross-mark and other emoji code points the AI might still produce.
@@ -800,10 +802,18 @@ function SummaryQuote({ segments }: { segments: { heading: string; lines: string
   if (!text) return null;
 
   return (
-    <p style={{ fontSize: 12, lineHeight: 1.6, color: MUTED, fontWeight: 600, fontStyle: 'italic', textAlign: 'center', padding: '2px 8px' }}>
-      <Quote size={12} style={{ display: 'inline-block', verticalAlign: 'middle', marginInlineEnd: 4, color: ICON_GRAY }} />
-      {renderInline(text, 'quote')}
-    </p>
+    <div style={{
+      background: '#1a1a28',
+      border: `1px solid ${SUBTLE}`,
+      borderLeft: `3px solid ${ICON_GRAY}`,
+      borderRadius: 8,
+      padding: '10px 12px',
+    }}>
+      <p style={{ fontSize: 12, lineHeight: 1.6, color: MUTED, fontWeight: 600, fontStyle: 'italic', textAlign: 'center', padding: '2px 8px' }}>
+        <Quote size={12} style={{ display: 'inline-block', verticalAlign: 'middle', marginInlineEnd: 4, color: ICON_GRAY }} />
+        {renderInline(text, 'quote')}
+      </p>
+    </div>
   );
 }
 
@@ -1419,7 +1429,7 @@ export default function DashboardClient({
           <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
             {/* LEFT — daily breakdown (40%) */}
             <div className="md:col-span-2 flex flex-col gap-2">
-              <SectionTitle>ביצועים יומיים</SectionTitle>
+              <SectionTitle large>ביצועים יומיים</SectionTitle>
               {weeklyDaysReversed.map((d, i) => (
                 <WeeklyDayCard
                   key={d.date}
@@ -1434,7 +1444,7 @@ export default function DashboardClient({
 
             {/* RIGHT — AI analysis (60%) */}
             <div className="md:col-span-3 flex flex-col gap-2">
-              <SectionTitle>ניתוח AI שבועי</SectionTitle>
+              <SectionTitle large>ניתוח AI שבועי</SectionTitle>
 
               <div className="grid grid-cols-3 gap-2 mb-1">
                 <StatPill

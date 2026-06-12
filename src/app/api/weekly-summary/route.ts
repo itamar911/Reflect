@@ -305,11 +305,9 @@ export async function GET(request: Request) {
 
     if (scoreError) {
       console.error('[weekly-summary] GET: plan_score query failed:', scoreError);
-    } else {
+    } else if ((scoreRows ?? []).length > 0) {
       const rows = scoreRows ?? [];
-      const avgProcessScore = rows.length > 0
-        ? Math.round(rows.reduce((s, r) => s + Number(r.plan_score), 0) / rows.length)
-        : null;
+      const avgProcessScore = Math.round(rows.reduce((s, r) => s + Number(r.plan_score), 0) / rows.length);
       summary = { ...summary, stats: { ...(summary.stats as WeeklyStats), avg_process_score: avgProcessScore } };
     }
   }
