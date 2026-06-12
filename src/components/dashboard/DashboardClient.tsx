@@ -23,6 +23,7 @@ const YELLOW  = '#eab308';
 const PURPLE  = '#a855f7';
 const DEEP    = '#0d0d1a';
 const SUBTLE  = '#2a2a3d';
+const ICON_GRAY = '#6b7280';
 
 // Fixed, deterministic stand-in for "now" used before the client has mounted,
 // so the server render and the first client render produce identical output.
@@ -719,10 +720,10 @@ function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
     const m = part.match(/^\*\*([^*]+)\*\*$/);
     if (m) return <strong key={`${keyPrefix}-${i}`} style={{ fontWeight: 700, color: TEXT }}>{m[1]}</strong>;
     if (CHECK_RE.test(part)) {
-      return <CheckCircle key={`${keyPrefix}-${i}`} size={14} style={{ color: GREEN, display: 'inline-block', verticalAlign: 'middle', margin: '0 2px' }} />;
+      return <CheckCircle key={`${keyPrefix}-${i}`} size={14} style={{ color: ICON_GRAY, display: 'inline-block', verticalAlign: 'middle', margin: '0 2px' }} />;
     }
     if (CROSS_RE.test(part)) {
-      return <AlertCircle key={`${keyPrefix}-${i}`} size={14} style={{ color: RED, display: 'inline-block', verticalAlign: 'middle', margin: '0 2px' }} />;
+      return <AlertCircle key={`${keyPrefix}-${i}`} size={14} style={{ color: ICON_GRAY, display: 'inline-block', verticalAlign: 'middle', margin: '0 2px' }} />;
     }
     if (EMOJI_RE.test(part)) return null;
     return part;
@@ -772,14 +773,14 @@ function SummarySectionCard({ heading, lines }: { heading: string; lines: string
 
   return (
     <div style={{
-      background: DEEP,
+      background: '#1a1a28',
       border: `1px solid ${SUBTLE}`,
       borderLeft: `3px solid ${color}`,
       borderRadius: 8,
       padding: '10px 12px',
     }}>
       <div className="flex items-center gap-1.5 mb-1">
-        {Icon && <Icon size={14} style={{ color, flexShrink: 0 }} />}
+        {Icon && <Icon size={14} style={{ color: ICON_GRAY, flexShrink: 0 }} />}
         <p style={{ fontSize: 12, fontWeight: 700, color: TEXT }}>{heading}</p>
       </div>
       <p style={{
@@ -800,7 +801,7 @@ function SummaryQuote({ segments }: { segments: { heading: string; lines: string
 
   return (
     <p style={{ fontSize: 12, lineHeight: 1.6, color: MUTED, fontWeight: 600, fontStyle: 'italic', textAlign: 'center', padding: '2px 8px' }}>
-      <Quote size={12} style={{ display: 'inline-block', verticalAlign: 'middle', marginInlineEnd: 4, color: PURPLE }} />
+      <Quote size={12} style={{ display: 'inline-block', verticalAlign: 'middle', marginInlineEnd: 4, color: ICON_GRAY }} />
       {renderInline(text, 'quote')}
     </p>
   );
@@ -811,12 +812,11 @@ function SummaryQuote({ segments }: { segments: { heading: string; lines: string
 function WeeklyDayCard({ label, pnl, trades, currency, maxAbs }: { label: string; pnl: number; trades: number; currency: string; maxAbs: number }) {
   const tone = trades === 0 || pnl === 0 ? 'neutral' : pnl > 0 ? 'pos' : 'neg';
   const color = tone === 'pos' ? GREEN : tone === 'neg' ? RED : MUTED;
-  const bg = tone === 'pos' ? 'rgba(34,197,94,0.08)' : tone === 'neg' ? 'rgba(239,68,68,0.08)' : DEEP;
-  const border = tone === 'pos' ? 'rgba(34,197,94,0.25)' : tone === 'neg' ? 'rgba(239,68,68,0.25)' : SUBTLE;
+  const borderColor = tone === 'pos' ? GREEN : tone === 'neg' ? RED : SUBTLE;
   const barPct = maxAbs > 0 ? (Math.abs(pnl) / maxAbs) * 100 : 0;
 
   return (
-    <div style={{ background: bg, border: `1px solid ${border}`, borderRadius: 8, padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+    <div style={{ background: '#1a1a28', border: `1px solid ${SUBTLE}`, borderLeft: `3px solid ${borderColor}`, borderRadius: 8, padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
       <div className="flex items-center justify-between">
         <span style={{ fontSize: 13, fontWeight: 700, color: TEXT2 }}>{label}</span>
         <div className="flex items-baseline gap-2">
