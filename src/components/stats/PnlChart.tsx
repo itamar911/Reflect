@@ -17,7 +17,7 @@ interface Props {
   monthly: PeriodPoint[];
 }
 
-const GOLD = '#00d2d2';
+const GREEN = '#22c55e';
 
 function fmt(v: number) {
   if (v === 0) return '₪0';
@@ -33,7 +33,7 @@ export default function PnlChart({ daily, weekly, monthly }: Props) {
   const totalTrades = data.reduce((s, d) => s + d.trades, 0);
   const totalWins  = data.reduce((s, d) => s + d.wins, 0);
   const isUp       = totalPnl >= 0;
-  const pnlColor   = isUp ? GOLD : '#ef4444';
+  const pnlColor   = isUp ? GREEN : '#ef4444';
 
   const W = 300, H = 96;
   const MID = 56;              // zero-line y
@@ -85,59 +85,62 @@ export default function PnlChart({ daily, weekly, monthly }: Props) {
       {/* SVG chart */}
       {data.length > 0 ? (
         <>
-          <svg
-            viewBox={`0 0 ${W} ${H}`}
-            preserveAspectRatio="none"
-            style={{ width: '100%', height: H, display: 'block' }}
-          >
-            {/* Bars */}
-            {data.map((d, i) => {
-              const bh = Math.max((Math.abs(d.pnl) / maxBar) * (MID - 6), d.trades > 0 ? 2 : 0);
-              const x = i * step + (step - barW) / 2;
-              const y = d.pnl >= 0 ? MID - bh : MID;
-              return (
-                <rect
-                  key={i}
-                  x={x.toFixed(1)} y={y.toFixed(1)}
-                  width={barW.toFixed(1)} height={bh.toFixed(1)}
-                  fill={d.pnl > 0 ? 'rgba(0,210,210,0.6)' : d.pnl < 0 ? 'rgba(239,68,68,0.6)' : 'rgba(100,116,139,0.25)'}
-                  rx="1.5"
+          {/* LTR wrapper — keeps the oldest point on the left and the most recent on the right */}
+          <div dir="ltr">
+            <svg
+              viewBox={`0 0 ${W} ${H}`}
+              preserveAspectRatio="none"
+              style={{ width: '100%', height: H, display: 'block' }}
+            >
+              {/* Bars */}
+              {data.map((d, i) => {
+                const bh = Math.max((Math.abs(d.pnl) / maxBar) * (MID - 6), d.trades > 0 ? 2 : 0);
+                const x = i * step + (step - barW) / 2;
+                const y = d.pnl >= 0 ? MID - bh : MID;
+                return (
+                  <rect
+                    key={i}
+                    x={x.toFixed(1)} y={y.toFixed(1)}
+                    width={barW.toFixed(1)} height={bh.toFixed(1)}
+                    fill={d.pnl > 0 ? 'rgba(34,197,94,0.6)' : d.pnl < 0 ? 'rgba(239,68,68,0.6)' : 'rgba(100,116,139,0.25)'}
+                    rx="1.5"
+                  />
+                );
+              })}
+
+              {/* Zero line */}
+              <line x1="0" y1={MID} x2={W} y2={MID} stroke="rgba(255,255,255,0.08)" strokeWidth="0.8" />
+
+              {/* Equity line */}
+              {cum.length > 1 && (
+                <polyline
+                  points={linePoints}
+                  fill="none"
+                  stroke={pnlColor}
+                  strokeWidth="1.6"
+                  vectorEffect="non-scaling-stroke"
+                  strokeLinejoin="round"
                 />
-              );
-            })}
+              )}
+            </svg>
 
-            {/* Zero line */}
-            <line x1="0" y1={MID} x2={W} y2={MID} stroke="rgba(255,255,255,0.08)" strokeWidth="0.8" />
-
-            {/* Equity line */}
-            {cum.length > 1 && (
-              <polyline
-                points={linePoints}
-                fill="none"
-                stroke={pnlColor}
-                strokeWidth="1.6"
-                vectorEffect="non-scaling-stroke"
-                strokeLinejoin="round"
-              />
+            {/* X-axis labels */}
+            {showLabels && (
+              <div className="flex" style={{ marginTop: -6 }}>
+                {data.map((d, i) => (
+                  <div key={i} style={{ flex: 1, textAlign: 'center' }}>
+                    <span style={{ fontSize: 9, color: '#ffffff' }}>{d.label}</span>
+                  </div>
+                ))}
+              </div>
             )}
-          </svg>
-
-          {/* X-axis labels — LTR so the oldest point aligns left under its bar and the most recent sits on the right */}
-          {showLabels && (
-            <div className="flex" dir="ltr" style={{ marginTop: -6 }}>
-              {data.map((d, i) => (
-                <div key={i} style={{ flex: 1, textAlign: 'center' }}>
-                  <span style={{ fontSize: 9, color: '#ffffff' }}>{d.label}</span>
-                </div>
-              ))}
-            </div>
-          )}
+          </div>
 
           {/* Footer summary */}
           <div className="flex gap-4" style={{ fontSize: 11, color: '#6b7280' }}>
             <span>{totalTrades} עסקאות</span>
             {totalTrades > 0 && (
-              <span style={{ color: totalWins / totalTrades >= 0.5 ? GOLD : '#6b7280' }}>
+              <span style={{ color: totalWins / totalTrades >= 0.5 ? GREEN : '#6b7280' }}>
                 {Math.round((totalWins / totalTrades) * 100)}% הצלחה
               </span>
             )}
