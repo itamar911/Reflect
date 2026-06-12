@@ -3,9 +3,17 @@ import { createClient } from '@/lib/supabase/server';
 import PnlChart, { type PeriodPoint } from '@/components/stats/PnlChart';
 import type { TradePlan } from '@/lib/types';
 import type { ReactNode } from 'react';
-import { Zap, TrendingUp, AlertTriangle, BarChart2, Target, Calendar, Clock, CandlestickChart, Trophy, Flame } from 'lucide-react';
+import { Zap, TrendingUp, BarChart2, Target, Calendar, Clock, CandlestickChart, Trophy, Flame } from 'lucide-react';
 
 export const metadata = { title: 'סטטיסטיקה — Reflect' };
+
+// ── Design tokens ────────────────────────────────────────────────────────────
+const SURF   = '#1a1a28';
+const ACCENT = '#00d2d2';
+const RED    = '#ef4444';
+const MUTED  = '#6b7280';
+const TEXT   = '#ffffff';
+const TRACK  = 'var(--color-tg-surface-2)';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const HE_DAYS   = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
@@ -29,7 +37,7 @@ function fmt(v: number, currency: string = '₪'): string {
 }
 
 function pnlColor(v: number): string {
-  return v > 0 ? '#22c55e' : v < 0 ? '#ef4444' : 'var(--color-tg-text-2)';
+  return v < 0 ? RED : ACCENT;
 }
 
 // ── SVG bar chart (server) ────────────────────────────────────────────────────
@@ -37,7 +45,7 @@ interface Bar { label: string; value: number; count: number }
 
 function BarChart({ bars, height = 72 }: { bars: Bar[]; height?: number }) {
   if (!bars.length || bars.every(b => b.count === 0)) return (
-    <p className="text-xs text-center py-4" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>אין נתונים</p>
+    <p className="text-center py-4" style={{ fontSize: 12, color: MUTED }}>אין נתונים</p>
   );
 
   const W = 300;
@@ -53,9 +61,9 @@ function BarChart({ bars, height = 72 }: { bars: Bar[]; height?: number }) {
         const bh  = Math.max((Math.abs(b.value) / max) * maxH, b.count > 0 ? 3 : 0);
         const x   = i * step + (step - bw) / 2;
         const y   = height - 14 - bh;
-        const col = b.value > 0 ? 'rgba(34,197,94,0.65)'
+        const col = b.value > 0 ? 'rgba(0,210,210,0.65)'
           : b.value < 0 ? 'rgba(239,68,68,0.65)'
-          : 'rgba(100,116,139,0.28)';
+          : 'rgba(107,114,128,0.28)';
         return (
           <g key={i}>
             <rect x={x.toFixed(1)} y={y.toFixed(1)} width={bw.toFixed(1)} height={bh.toFixed(1)}
@@ -69,15 +77,15 @@ function BarChart({ bars, height = 72 }: { bars: Bar[]; height?: number }) {
   );
 }
 
-// ── Reusable section wrapper ──────────────────────────────────────────────────
+// ── Section title ────────────────────────────────────────────────────────────
 function Section({ title, icon, children }: {
   title: string; icon?: ReactNode; children: React.ReactNode
 }) {
   return (
-    <div className="rounded-xl p-5 flex flex-col gap-4"
-      style={{ background: '#1a1a28', border: '1px solid #35355a', boxShadow: '0 1px 3px rgba(0,0,0,0.5)' }}>
-      <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: 'var(--color-tg-text)' }}>
-        {icon && <span>{icon}</span>}
+    <div className="flex flex-col gap-4">
+      <h2 className="flex items-center gap-2"
+        style={{ fontSize: 13, fontWeight: 600, color: MUTED, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        {icon}
         {title}
       </h2>
       {children}
@@ -85,14 +93,46 @@ function Section({ title, icon, children }: {
   );
 }
 
-// ── Summary card ──────────────────────────────────────────────────────────────
-function SumCard({ label, value, sub, color }: { label: string; value: string; sub?: string; color: string }) {
+// ── Stat card ─────────────────────────────────────────────────────────────────
+function StatCard({ label, value, sub, positive, icon, fixedHeight }: {
+  label: string; value: string; sub?: string; positive: boolean; icon?: ReactNode; fixedHeight?: boolean;
+}) {
   return (
-    <div className="rounded-xl p-4 flex flex-col gap-1"
-      style={{ background: '#1a1a28', border: '1px solid #35355a', boxShadow: '0 1px 3px rgba(0,0,0,0.5)' }}>
-      <p className="text-[11px] font-semibold" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>{label}</p>
-      <p className="text-2xl font-bold leading-none" style={{ color }}>{value}</p>
-      {sub && <p className="text-[10px]" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>{sub}</p>}
+    <div className={`rounded-xl flex flex-col justify-center gap-1.5 ${fixedHeight ? 'h-28' : ''}`}
+      style={{ background: SURF, borderLeft: `4px solid ${positive ? ACCENT : RED}`, padding: 20, borderRadius: 12 }}>
+      <p className="flex items-center gap-1.5" style={{ fontSize: 12, color: MUTED }}>
+        {icon}
+        {label}
+      </p>
+      <p style={{ fontSize: 22, fontWeight: 700, color: TEXT, lineHeight: 1.2 }}>{value}</p>
+      {sub && <p style={{ fontSize: 11, color: MUTED }}>{sub}</p>}
+    </div>
+  );
+}
+
+// ── Breakdown row (strategy / symbol) ────────────────────────────────────────
+function BreakdownRow({ name, pnl, trades, winRate, rr, barPct }: {
+  name: string; pnl: number; trades: number; winRate: number | null; rr?: number; barPct: number;
+}) {
+  return (
+    <div className="rounded-xl flex items-center gap-4"
+      style={{ background: SURF, borderLeft: `4px solid ${pnlColor(pnl)}`, padding: 20, borderRadius: 12 }}>
+      <div className="flex-1 min-w-0 flex flex-col gap-2">
+        <div className="flex items-center justify-between">
+          <span style={{ fontSize: 14, fontWeight: 700, color: TEXT }}>{name}</span>
+          <span style={{ fontSize: 11, color: MUTED }}>{trades} עסקאות</span>
+        </div>
+        <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: TRACK }}>
+          <div className="h-full rounded-full" style={{ width: `${barPct}%`, background: ACCENT }} />
+        </div>
+      </div>
+      <div className="flex flex-col items-end shrink-0 gap-1">
+        <span style={{ fontSize: 22, fontWeight: 700, color: TEXT }}>{fmt(pnl)}</span>
+        <div className="flex gap-2" style={{ fontSize: 11, color: MUTED }}>
+          {winRate !== null && <span>{winRate}%</span>}
+          {rr !== undefined && <span>R:R {rr.toFixed(1)}</span>}
+        </div>
+      </div>
     </div>
   );
 }
@@ -115,13 +155,13 @@ export default async function StatsPage() {
   // ── Empty state ─────────────────────────────────────────────────────────────
   if (trades.length === 0) {
     return (
-      <div dir="rtl" className="min-h-screen px-4 py-6 flex flex-col gap-5">
+      <div dir="rtl" className="min-h-screen px-4 py-6 flex flex-col gap-8">
         <PageHeader />
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center py-16">
-            <div className="mb-4"><BarChart2 size={48} /></div>
-            <p className="text-base font-semibold" style={{ color: 'var(--color-tg-text)' }}>אין עדיין נתונים</p>
-            <p className="text-sm mt-1" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>תעד עסקאות כדי לראות סטטיסטיקות</p>
+            <div className="mb-4" style={{ color: MUTED }}><BarChart2 size={48} /></div>
+            <p style={{ fontSize: 14, fontWeight: 700, color: TEXT }}>אין עדיין נתונים</p>
+            <p style={{ fontSize: 12, color: MUTED, marginTop: 4 }}>תעד עסקאות כדי לראות סטטיסטיקות</p>
           </div>
         </div>
       </div>
@@ -129,7 +169,6 @@ export default async function StatsPage() {
   }
 
   // ── Core stats ──────────────────────────────────────────────────────────────
-  const totalTrades  = trades.length;
   const closedCount  = closed.length;
   const totalPnl     = closed.reduce((s, t) => s + pnlIls(t), 0);
   const wins         = closed.filter(t => pnlOf(t)! > 0);
@@ -232,6 +271,7 @@ export default async function StatsPage() {
   const symbols = [...symbolMap.entries()]
     .map(([name, v]) => ({ name, ...v }))
     .sort((a, b) => b.trades - a.trades);
+  const maxSymTrades = Math.max(...symbols.map(s => s.trades), 1);
 
   // ── Streaks ──────────────────────────────────────────────────────────────────
   let curW = 0, maxW = 0, curL = 0, maxL = 0;
@@ -249,93 +289,71 @@ export default async function StatsPage() {
   const worstDay   = daily.length  ? daily.reduce((b, d)  => d.pnl < b.pnl ? d : b) : null;
 
   return (
-    <div dir="rtl" className="min-h-screen px-4 py-6 flex flex-col gap-4">
+    <div dir="rtl" className="min-h-screen px-4 py-6 flex flex-col gap-8">
 
       {/* ── Header ─────────────────────────────────────────────── */}
       <PageHeader />
 
-      {/* ── Summary cards (2×2) ─────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-3">
-        <SumCard
+      {/* ── KPI grid (3×3) ───────────────────────────────────── */}
+      <div className="grid grid-cols-3 gap-4">
+        <StatCard fixedHeight
           label="רווח/הפסד כולל"
           value={closedCount > 0 ? fmt(totalPnl) : '—'}
-          color={pnlColor(totalPnl)}
           sub={`${closedCount} עסקאות סגורות`}
+          positive={closedCount === 0 || totalPnl >= 0}
         />
-        <SumCard
+        <StatCard fixedHeight
           label="אחוז הצלחה"
           value={closedCount > 0 ? `${winRate}%` : '—'}
-          color={winRate >= 50 ? '#22c55e' : winRate >= 35 ? '#00d2d2' : '#ef4444'}
           sub={`${wins.length} מתוך ${closedCount}`}
+          positive={closedCount === 0 || winRate >= 50}
         />
-        <SumCard
+        <StatCard fixedHeight
           label="ממוצע R:R"
           value={trades.length > 0 ? `1:${avgRR.toFixed(1)}` : '—'}
-          color="#00d2d2"
+          positive={true}
         />
-        <SumCard
+        <StatCard fixedHeight
           label="פקטור רווח"
           value={profitFactor > 0 ? profitFactor.toFixed(2) : '—'}
-          color={profitFactor >= 1.5 ? '#22c55e' : profitFactor >= 1 ? '#00d2d2' : '#ef4444'}
           sub="רווח ÷ הפסד"
+          positive={profitFactor === 0 || profitFactor >= 1}
+        />
+        <StatCard fixedHeight
+          label="ממוצע רווח"
+          value={fmt(avgWin)}
+          positive={true}
+        />
+        <StatCard fixedHeight
+          label="ממוצע הפסד"
+          value={fmt(avgLoss)}
+          positive={avgLoss === 0}
+        />
+        <StatCard fixedHeight
+          label="רצף נוכחי"
+          value={currentStreak ? `${currentStreak.count} ${currentStreak.type === 'win' ? 'רווחים' : 'הפסדים'}` : '—'}
+          positive={!currentStreak || currentStreak.type === 'win'}
         />
       </div>
 
-      {/* ── Avg win/loss row ────────────────────────────────── */}
-      {closedCount > 0 && (
-        <div className="grid grid-cols-2 gap-3">
-          <div className="rounded-2xl p-3 flex flex-col gap-0.5"
-            style={{ background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.18)' }}>
-            <p className="text-[11px]" style={{ color: 'rgba(34,197,94,0.7)' }}>ממוצע רווח</p>
-            <p className="text-lg font-bold" style={{ color: '#22c55e' }}>{fmt(avgWin)}</p>
-          </div>
-          <div className="rounded-2xl p-3 flex flex-col gap-0.5"
-            style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.18)' }}>
-            <p className="text-[11px]" style={{ color: 'rgba(239,68,68,0.7)' }}>ממוצע הפסד</p>
-            <p className="text-lg font-bold" style={{ color: '#ef4444' }}>{fmt(avgLoss)}</p>
-          </div>
-        </div>
-      )}
-
       {/* ── P&L Chart ───────────────────────────────────────── */}
       <Section title="רווח/הפסד לאורך זמן" icon={<TrendingUp size={14} />}>
-        <PnlChart daily={daily} weekly={weekly} monthly={monthly} />
+        <div className="rounded-xl" style={{ background: SURF, borderLeft: `4px solid ${ACCENT}`, padding: 20, borderRadius: 12 }}>
+          <PnlChart daily={daily} weekly={weekly} monthly={monthly} />
+        </div>
       </Section>
 
       {/* ── Strategy breakdown ──────────────────────────────── */}
       {strategies.length > 0 && (
         <Section title="ביצועים לפי אסטרטגיה" icon={<Target size={14} />}>
-          <div className="flex flex-col gap-0">
-            {strategies.map((s, i) => {
+          <div className="flex flex-col gap-4">
+            {strategies.map(s => {
               const wr = s.closedN > 0 ? Math.round(s.wins / s.closedN * 100) : null;
-              const barPct = (s.trades / maxStratTrades) * 100;
               return (
-                <div key={s.name}
-                  className="flex items-center gap-3 py-3"
-                  style={{ borderTop: i > 0 ? '1px solid var(--color-tg-border)' : undefined }}
-                >
-                  {/* Name + bar */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-sm font-medium" style={{ color: 'var(--color-tg-text)' }}>{s.name}</span>
-                      <span className="text-xs" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>{s.trades} עסקאות</span>
-                    </div>
-                    {/* Usage bar */}
-                    <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--color-tg-surface-2)' }}>
-                      <div className="h-full rounded-full" style={{ width: `${barPct}%`, background: '#00d2d2' }} />
-                    </div>
-                  </div>
-                  {/* Stats */}
-                  <div className="flex flex-col items-end shrink-0 gap-0.5">
-                    <span className="text-sm font-bold" style={{ color: pnlColor(s.pnl) }}>{fmt(s.pnl)}</span>
-                    <div className="flex gap-2 text-[10px]" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>
-                      {wr !== null && (
-                        <span style={{ color: wr >= 60 ? '#22c55e' : wr >= 40 ? '#00d2d2' : '#ef4444' }}>{wr}%</span>
-                      )}
-                      <span>R:R {s.avgRR.toFixed(1)}</span>
-                    </div>
-                  </div>
-                </div>
+                <BreakdownRow key={s.name}
+                  name={s.name} pnl={s.pnl} trades={s.trades}
+                  winRate={wr} rr={s.avgRR} barPct={(s.trades / maxStratTrades) * 100}
+                />
               );
             })}
           </div>
@@ -345,14 +363,16 @@ export default async function StatsPage() {
       {/* ── Day of week ─────────────────────────────────────── */}
       {closedCount > 0 && (
         <Section title="התפלגות לפי יום בשבוע" icon={<Calendar size={14} />}>
-          <BarChart bars={dowBars} height={80} />
-          <div className="grid grid-cols-2 gap-2">
-            <InfoPill label="יום רווחי ביותר"
+          <div className="rounded-xl" style={{ background: SURF, borderLeft: `4px solid ${ACCENT}`, padding: 20, borderRadius: 12 }}>
+            <BarChart bars={dowBars} height={80} />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <StatCard label="יום רווחי ביותר"
               value={bestDow.count > 0 ? `${HE_DAYS[HE_DAYS_S.indexOf(bestDow.label)]} (${fmt(bestDow.value)})` : '—'}
-              color="#22c55e" />
-            <InfoPill label="יום הפסד ביותר"
+              positive={true} />
+            <StatCard label="יום הפסד ביותר"
               value={worstDow.count > 0 && worstDow.value < 0 ? `${HE_DAYS[HE_DAYS_S.indexOf(worstDow.label)]} (${fmt(worstDow.value)})` : '—'}
-              color="#ef4444" />
+              positive={false} />
           </div>
         </Section>
       )}
@@ -360,11 +380,13 @@ export default async function StatsPage() {
       {/* ── Hour of day ────────────────────────────────────── */}
       {hourBars.length > 0 && (
         <Section title="התפלגות לפי שעה" icon={<Clock size={14} />}>
-          <BarChart bars={hourBars} height={80} />
+          <div className="rounded-xl" style={{ background: SURF, borderLeft: `4px solid ${ACCENT}`, padding: 20, borderRadius: 12 }}>
+            <BarChart bars={hourBars} height={80} />
+          </div>
           {bestHour && bestHour.count > 0 && (
-            <InfoPill label="שעה רווחית ביותר"
+            <StatCard label="שעה רווחית ביותר"
               value={`${bestHour.label}:00 (${fmt(bestHour.value)})`}
-              color="#00d2d2" />
+              positive={true} />
           )}
         </Section>
       )}
@@ -372,25 +394,14 @@ export default async function StatsPage() {
       {/* ── Symbol breakdown ─────────────────────────────── */}
       {symbols.length > 0 && (
         <Section title="התפלגות לפי סמל" icon={<CandlestickChart size={14} />}>
-          <div className="flex flex-col gap-0">
-            {symbols.map((s, i) => {
+          <div className="flex flex-col gap-4">
+            {symbols.map(s => {
               const wr = s.closedN > 0 ? Math.round(s.wins / s.closedN * 100) : null;
               return (
-                <div key={s.name}
-                  className="flex items-center justify-between py-3"
-                  style={{ borderTop: i > 0 ? '1px solid var(--color-tg-border)' : undefined }}
-                >
-                  <div>
-                    <p className="text-sm font-bold" style={{ color: 'var(--color-tg-text)' }}>{s.name}</p>
-                    <p className="text-xs" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>
-                      {s.trades} עסקאות
-                      {wr !== null && <span style={{ color: wr >= 50 ? '#22c55e' : '#ef4444' }}> · {wr}%</span>}
-                    </p>
-                  </div>
-                  <span className="text-sm font-bold" style={{ color: pnlColor(s.pnl) }}>
-                    {fmt(s.pnl)}
-                  </span>
-                </div>
+                <BreakdownRow key={s.name}
+                  name={s.name} pnl={s.pnl} trades={s.trades}
+                  winRate={wr} barPct={(s.trades / maxSymTrades) * 100}
+                />
               );
             })}
           </div>
@@ -400,63 +411,35 @@ export default async function StatsPage() {
       {/* ── Streaks & records ────────────────────────────────── */}
       {closedCount > 0 && (
         <Section title="רצפים ושיאים" icon={<Trophy size={14} />}>
-          <div className="grid grid-cols-2 gap-3">
-            <StreakCard label="רצף רווחים ארוך ביותר" value={maxW} color="#22c55e" icon={<Flame size={14} />} />
-            <StreakCard label="רצף הפסדים ארוך ביותר" value={maxL} color="#ef4444" icon={<Zap size={14} />} />
-
-            {currentStreak && (
-              <div className="col-span-2 rounded-xl p-3 flex items-center gap-3"
-                style={{
-                  background: currentStreak.type === 'win' ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)',
-                  border: `1px solid ${currentStreak.type === 'win' ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)'}`,
-                }}>
-                <span>{currentStreak.type === 'win' ? <TrendingUp size={20} /> : <AlertTriangle size={20} />}</span>
-                <div>
-                  <p className="text-xs" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>רצף נוכחי</p>
-                  <p className="text-sm font-bold" style={{ color: currentStreak.type === 'win' ? '#22c55e' : '#ef4444' }}>
-                    {currentStreak.count} {currentStreak.type === 'win' ? 'רווחים' : 'הפסדים'} ברצף
-                  </p>
-                </div>
-              </div>
-            )}
+          <div className="grid grid-cols-2 gap-4">
+            <StatCard label="רצף רווחים ארוך ביותר" value={String(maxW)} positive={true} icon={<Flame size={14} />} />
+            <StatCard label="רצף הפסדים ארוך ביותר" value={String(maxL)} positive={false} icon={<Zap size={14} />} />
           </div>
 
           {/* Best / worst single trade */}
           {(bestTrade || worstTrade) && (
-            <div className="grid grid-cols-2 gap-3 pt-1">
+            <div className="grid grid-cols-2 gap-4">
               {bestTrade && (
-                <div className="rounded-xl p-3" style={{ background: 'rgba(34,197,94,0.07)' }}>
-                  <p className="text-[10px] mb-0.5" style={{ color: 'rgba(34,197,94,0.6)' }}>עסקה טובה ביותר</p>
-                  <p className="text-sm font-bold" style={{ color: '#22c55e' }}>{fmt(pnlIls(bestTrade), bestTrade.pnl_currency ?? '₪')}</p>
-                  <p className="text-[10px]" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>{bestTrade.strategy}</p>
-                </div>
+                <StatCard label="עסקה טובה ביותר"
+                  value={fmt(pnlIls(bestTrade), bestTrade.pnl_currency ?? '₪')}
+                  sub={bestTrade.strategy} positive={true} />
               )}
               {worstTrade && (
-                <div className="rounded-xl p-3" style={{ background: 'rgba(239,68,68,0.07)' }}>
-                  <p className="text-[10px] mb-0.5" style={{ color: 'rgba(239,68,68,0.6)' }}>עסקה גרועה ביותר</p>
-                  <p className="text-sm font-bold" style={{ color: '#ef4444' }}>{fmt(pnlIls(worstTrade), worstTrade.pnl_currency ?? '₪')}</p>
-                  <p className="text-[10px]" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>{worstTrade.strategy}</p>
-                </div>
+                <StatCard label="עסקה גרועה ביותר"
+                  value={fmt(pnlIls(worstTrade), worstTrade.pnl_currency ?? '₪')}
+                  sub={worstTrade.strategy} positive={false} />
               )}
             </div>
           )}
 
           {/* Best / worst day */}
           {(bestDay || worstDay) && (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-4">
               {bestDay && bestDay.pnl > 0 && (
-                <div className="rounded-xl p-3" style={{ background: 'rgba(34,197,94,0.07)' }}>
-                  <p className="text-[10px] mb-0.5" style={{ color: 'rgba(34,197,94,0.6)' }}>יום טוב ביותר</p>
-                  <p className="text-sm font-bold" style={{ color: '#22c55e' }}>{fmt(bestDay.pnl)}</p>
-                  <p className="text-[10px]" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>{bestDay.label}</p>
-                </div>
+                <StatCard label="יום טוב ביותר" value={fmt(bestDay.pnl)} sub={bestDay.label} positive={true} />
               )}
               {worstDay && worstDay.pnl < 0 && (
-                <div className="rounded-xl p-3" style={{ background: 'rgba(239,68,68,0.07)' }}>
-                  <p className="text-[10px] mb-0.5" style={{ color: 'rgba(239,68,68,0.6)' }}>יום גרוע ביותר</p>
-                  <p className="text-sm font-bold" style={{ color: '#ef4444' }}>{fmt(worstDay.pnl)}</p>
-                  <p className="text-[10px]" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>{worstDay.label}</p>
-                </div>
+                <StatCard label="יום גרוע ביותר" value={fmt(worstDay.pnl)} sub={worstDay.label} positive={false} />
               )}
             </div>
           )}
@@ -483,27 +466,6 @@ function PageHeader() {
         <h1 className="text-xl font-bold" style={{ color: 'var(--color-tg-text)' }}>סטטיסטיקה</h1>
         <p className="text-xs" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>ניתוח מלא של ביצועי המסחר שלך</p>
       </div>
-    </div>
-  );
-}
-
-function InfoPill({ label, value, color }: { label: string; value: string; color: string }) {
-  return (
-    <div className="rounded-xl p-3" style={{ background: 'var(--color-tg-surface-2)' }}>
-      <p className="text-[10px] mb-0.5" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>{label}</p>
-      <p className="text-xs font-semibold" style={{ color }}>{value}</p>
-    </div>
-  );
-}
-
-function StreakCard({ label, value, color, icon }: { label: string; value: number; color: string; icon: ReactNode }) {
-  return (
-    <div className="rounded-xl p-3 flex flex-col gap-1" style={{ background: 'var(--color-tg-surface-2)' }}>
-      <div className="flex items-center gap-1.5">
-        <span>{icon}</span>
-        <p className="text-[10px]" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>{label}</p>
-      </div>
-      <p className="text-2xl font-bold" style={{ color: value > 0 ? color : 'var(--color-tg-muted)' }}>{value}</p>
     </div>
   );
 }

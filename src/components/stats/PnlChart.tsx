@@ -33,7 +33,7 @@ export default function PnlChart({ daily, weekly, monthly }: Props) {
   const totalTrades = data.reduce((s, d) => s + d.trades, 0);
   const totalWins  = data.reduce((s, d) => s + d.wins, 0);
   const isUp       = totalPnl >= 0;
-  const pnlColor   = isUp ? '#22c55e' : '#ef4444';
+  const pnlColor   = isUp ? GOLD : '#ef4444';
 
   const W = 300, H = 96;
   const MID = 56;              // zero-line y
@@ -100,7 +100,7 @@ export default function PnlChart({ daily, weekly, monthly }: Props) {
                   key={i}
                   x={x.toFixed(1)} y={y.toFixed(1)}
                   width={barW.toFixed(1)} height={bh.toFixed(1)}
-                  fill={d.pnl > 0 ? 'rgba(34,197,94,0.6)' : d.pnl < 0 ? 'rgba(239,68,68,0.6)' : 'rgba(100,116,139,0.25)'}
+                  fill={d.pnl > 0 ? 'rgba(0,210,210,0.6)' : d.pnl < 0 ? 'rgba(239,68,68,0.6)' : 'rgba(100,116,139,0.25)'}
                   rx="1.5"
                 />
               );
@@ -122,9 +122,9 @@ export default function PnlChart({ daily, weekly, monthly }: Props) {
             )}
           </svg>
 
-          {/* X-axis labels */}
+          {/* X-axis labels — LTR so the oldest point aligns left under its bar and the most recent sits on the right */}
           {showLabels && (
-            <div className="flex" style={{ marginTop: -6 }}>
+            <div className="flex" dir="ltr" style={{ marginTop: -6 }}>
               {data.map((d, i) => (
                 <div key={i} style={{ flex: 1, textAlign: 'center' }}>
                   <span style={{ fontSize: 9, color: '#ffffff' }}>{d.label}</span>
@@ -134,10 +134,10 @@ export default function PnlChart({ daily, weekly, monthly }: Props) {
           )}
 
           {/* Footer summary */}
-          <div className="flex gap-4 text-xs" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>
+          <div className="flex gap-4" style={{ fontSize: 11, color: '#6b7280' }}>
             <span>{totalTrades} עסקאות</span>
             {totalTrades > 0 && (
-              <span style={{ color: totalWins / totalTrades >= 0.5 ? '#22c55e' : 'var(--color-tg-muted)' }}>
+              <span style={{ color: totalWins / totalTrades >= 0.5 ? GOLD : '#6b7280' }}>
                 {Math.round((totalWins / totalTrades) * 100)}% הצלחה
               </span>
             )}
@@ -148,7 +148,7 @@ export default function PnlChart({ daily, weekly, monthly }: Props) {
           className="flex items-center justify-center py-8 rounded-xl"
           style={{ background: 'var(--color-tg-surface-2)' }}
         >
-          <p className="text-sm" style={{ color: 'var(--color-tg-muted)', fontWeight: 600 }}>אין עסקאות סגורות להצגה</p>
+          <p style={{ fontSize: 12, color: '#6b7280' }}>אין עסקאות סגורות להצגה</p>
         </div>
       )}
     </div>
