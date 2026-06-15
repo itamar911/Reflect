@@ -11,8 +11,8 @@ import { ReflectLogo } from '@/components/brand/ReflectLogo';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const ACCENT = '#00d2d2';
-const NAV_BG = '#06101E';
-const SEP    = 'rgba(0,210,210,0.12)';
+const NAV_BG = 'var(--shell-nav-bg)';
+const SEP    = 'var(--shell-border)';
 const W_OPEN = 240;
 const W_SHUT = 64;
 
@@ -72,7 +72,7 @@ function NavLink({ item, expanded, active }: { item: NavItem; expanded: boolean;
         expanded ? 'gap-3 px-3 py-2.5' : 'justify-center py-3',
       )}
       style={{
-        color:      active ? ACCENT : '#ffffff',
+        color:      active ? ACCENT : 'var(--text-primary)',
         background: active ? 'rgba(0,210,210,0.12)' : 'transparent',
         boxShadow:  active ? `inset 0 0 0 1px rgba(0,210,210,0.22)` : undefined,
       }}
@@ -244,7 +244,7 @@ export default function AppShell({
               'flex items-center rounded-xl transition-colors hover:bg-white/5 cursor-pointer',
               expanded ? 'gap-3 px-3 py-2.5' : 'justify-center py-3',
             )}
-            style={{ color: '#ffffff' }}
+            style={{ color: 'var(--text-primary)' }}
           >
             <IconLogout />
             {expanded && <span className="text-sm font-semibold">התנתק</span>}
@@ -263,7 +263,7 @@ export default function AppShell({
               >
                 {(displayName || '?').charAt(0).toUpperCase()}
               </div>
-              <p className="flex-1 text-xs font-semibold truncate min-w-0" style={{ color: '#ffffff' }}>
+              <p className="flex-1 text-xs font-semibold truncate min-w-0" style={{ color: 'var(--text-primary)' }}>
                 {displayName}
               </p>
               <ThemeToggle className="p-1 rounded-md transition-opacity hover:opacity-70 shrink-0" />

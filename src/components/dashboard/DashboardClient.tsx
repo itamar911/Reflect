@@ -11,12 +11,12 @@ export type { DashTrade } from '@/lib/dashboard/trades';
 
 // ── Tokens ────────────────────────────────────────────────────────────────────
 const ACCENT  = '#00d2d2';
-const SURF    = '#141420';
-const SURF2   = '#1c1c2c';
-const BORDER  = '#32324a';
-const TEXT    = '#f1f5f9';
-const TEXT2   = '#ffffff';
-const MUTED   = '#ffffff';
+const SURF    = 'var(--color-tg-surface)';
+const SURF2   = 'var(--color-tg-surface-2)';
+const BORDER  = 'var(--color-tg-border)';
+const TEXT    = 'var(--color-tg-text)';
+const TEXT2   = 'var(--color-tg-text-2)';
+const MUTED   = 'var(--color-tg-muted)';
 const GREEN   = '#22c55e';
 const RED     = '#ef4444';
 const YELLOW  = '#eab308';
