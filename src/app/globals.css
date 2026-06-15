@@ -86,7 +86,7 @@ html.light {
 
 html,
 body {
-  background: #080810;
+  background: var(--color-tg-bg);
   color: var(--text-primary);
   min-height: 100dvh;
   transition: background 0.2s ease, color 0.2s ease;
