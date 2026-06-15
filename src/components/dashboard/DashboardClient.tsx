@@ -654,7 +654,7 @@ function SectionTitle({ children, large }: { children: React.ReactNode; large?: 
       <div style={{ width: 3, height: 14, background: ACCENT, borderRadius: 99, flexShrink: 0 }} />
       <p style={{
         fontSize: large ? 16 : 12, fontWeight: 600, letterSpacing: '0.06em',
-        textTransform: 'uppercase', color: large ? '#ffffff' : MUTED,
+        textTransform: 'uppercase', color: large ? TEXT2 : MUTED,
       }}>
         {children}
       </p>
@@ -1123,14 +1123,14 @@ export default function DashboardClient({
               <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                 {/* Text column — first in RTL flex → physical RIGHT */}
                 <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <p style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: '#ffffff' }}>ימים רווחיים</p>
+                  <p style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: TEXT2 }}>ימים רווחיים</p>
                   <p style={{ fontSize: 26, fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums', color: stats.profitDays >= stats.lossDays ? GREEN : RED }}>
                     {stats.profitDayPct}%
                   </p>
                   <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                     <span style={{ fontSize: 14, fontWeight: 800, color: GREEN, fontVariantNumeric: 'tabular-nums' }}>{stats.profitDays}</span>
                     <span style={{ fontSize: 10, color: MUTED, fontWeight: 600 }}>|</span>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: '#ffffff', fontVariantNumeric: 'tabular-nums' }}>{stats.neutralDays}</span>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: TEXT2, fontVariantNumeric: 'tabular-nums' }}>{stats.neutralDays}</span>
                     <span style={{ fontSize: 10, color: MUTED, fontWeight: 600 }}>|</span>
                     <span style={{ fontSize: 14, fontWeight: 800, color: RED, fontVariantNumeric: 'tabular-nums' }}>{stats.lossDays}</span>
                   </div>
@@ -1150,7 +1150,7 @@ export default function DashboardClient({
               <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                 {/* Text column — first in RTL flex → physical RIGHT */}
                 <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <p style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: '#ffffff' }}>אחוזי הצלחה</p>
+                  <p style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: TEXT2 }}>אחוזי הצלחה</p>
                   <p style={{ fontSize: 26, fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums', color: stats.winPct >= 50 ? GREEN : RED }}>
                     {stats.winPct}%
                   </p>
@@ -1172,9 +1172,9 @@ export default function DashboardClient({
 
             {/* Card 3: Avg Win/Loss ratio */}
             <Card>
-              <p style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: '#ffffff', marginBottom: 14 }}>יחס רווח/הפסד ממוצע</p>
+              <p style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: TEXT2, marginBottom: 14 }}>יחס רווח/הפסד ממוצע</p>
               <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-                <span style={{ fontSize: 18, fontWeight: 700, color: '#ffffff', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+                <span style={{ fontSize: 18, fontWeight: 700, color: TEXT2, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
                   {stats.avgLoss < -0.001 ? (stats.avgWin / Math.abs(stats.avgLoss)).toFixed(2) : '—'}
                 </span>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
@@ -1189,7 +1189,7 @@ export default function DashboardClient({
 
             {/* Card 4: P&L Balance */}
             <Card>
-              <p style={{ fontSize: 13, fontWeight: 700, color: '#ffffff', marginBottom: 8 }}>מאזן P&L</p>
+              <p style={{ fontSize: 13, fontWeight: 700, color: TEXT2, marginBottom: 8 }}>מאזן P&L</p>
               <div style={{ display: 'flex', flexDirection: 'row', gap: 4, flexWrap: 'wrap', marginBottom: 10 }}>
                 {(['total', 'monthly', 'weekly', 'daily'] as const).map(p => (
                   <button key={p} onClick={() => setPnlPeriod(p)}
@@ -1211,7 +1211,7 @@ export default function DashboardClient({
                 <span style={{ fontSize: 36, fontWeight: 800, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums', color: selPeriodPnl >= 0 ? GREEN : RED }}>
                   {selPeriodDisplay}
                 </span>
-                <span style={{ fontSize: 12, fontWeight: 600, color: '#ffffff' }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: TEXT2 }}>
                   ({selPeriodCount} עסקאות)
                 </span>
               </div>
