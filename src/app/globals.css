@@ -232,6 +232,15 @@ input[type="button"] {
 
 .animate-slide-up    { animation: slide-up    0.28s cubic-bezier(0.32, 0.72, 0, 1); }
 .animate-fade-in     { animation: fade-in     0.22s ease-out; }
+
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.page-enter {
+  animation: page-enter 300ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
 .animate-pulse-gold  { animation: pulse-gold  2s   infinite; }
 .animate-pulse-danger{ animation: pulse-danger 1.5s infinite; }
 .animate-gold-breathe{ animation: gold-breathe 3s  ease-in-out infinite; }

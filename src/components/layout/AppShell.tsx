@@ -306,7 +306,9 @@ export default function AppShell({
           transition:  `margin-right 250ms ${easing}`,
         }}
       >
-        {children}
+        <div key={pathname} className="page-enter">
+          {children}
+        </div>
       </div>
 
       <TradePlanForm
