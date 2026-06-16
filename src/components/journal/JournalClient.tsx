@@ -72,6 +72,98 @@ function fmtPnl(v: number) {
 
 const PAGE_SIZES = [15, 30, 50, 100];
 
+// ── Mobile trade card (shown instead of table on small screens) ───────────────
+function MobileTradeCard({ t, onView, onEdit, onDelete, onClose, onDebrief, hasDebrief }: {
+  t: Trade;
+  onView: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onClose: () => void;
+  onDebrief: () => void;
+  hasDebrief: boolean;
+}) {
+  const pnl = calcPnl(t);
+  const dir = inferDirection(t);
+  const isWin = pnl !== null ? pnl > 0 : null;
+  const isClosed = t.status === 'closed';
+
+  return (
+    <div
+      onClick={onView}
+      style={{ background: SURF, border: `1px solid ${BORDER}`, borderRadius: 14, cursor: 'pointer' }}
+    >
+      <div className="p-3 flex flex-col gap-2">
+        {/* Row 1: asset + status */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <AssetDot symbol={t.symbol} />
+            <span className="font-semibold truncate" style={{ fontSize: 14, color: TEXT }}>
+              {t.symbol ?? t.strategy}
+            </span>
+            <Chip
+              bg={dir === 'long' ? 'rgba(74,222,128,0.12)' : 'rgba(248,113,113,0.12)'}
+              color={dir === 'long' ? GREEN : RED}>
+              {dir === 'long' ? 'לונג' : 'שורט'}
+            </Chip>
+          </div>
+          {isClosed ? <StatusBadge win={isWin} /> : <Chip bg="rgba(0,210,210,0.12)" color={GOLD}>פתוח</Chip>}
+        </div>
+
+        {/* Row 2: date + P&L */}
+        <div className="flex items-center justify-between">
+          <span style={{ fontSize: 12, color: MUTED, fontWeight: 600 }}>{fmtDate(t.submitted_at)}</span>
+          {pnl !== null ? (
+            t.pnl_amount != null ? (
+              <span style={{ fontSize: 14, fontWeight: 700, color: t.pnl_amount >= 0 ? GREEN : RED }}>
+                {formatPnlIls(t.pnl_amount, t.pnl_currency ?? '₪')}
+                <span style={{ fontSize: 11, opacity: 0.6 }}> ({formatPnlPoints(pnl)})</span>
+              </span>
+            ) : (
+              <span style={{ fontSize: 14, fontWeight: 700, color: pnl >= 0 ? GREEN : RED }}>
+                {fmtPnl(pnl)}
+              </span>
+            )
+          ) : (
+            <span style={{ fontSize: 12, color: GOLD, fontWeight: 600 }}>פתוח</span>
+          )}
+        </div>
+
+        {/* Row 3: action buttons */}
+        <div className="flex gap-2 pt-2" style={{ borderTop: `1px solid ${BORDER}` }}>
+          <button
+            onClick={e => { e.stopPropagation(); onEdit(); }}
+            className="flex-1 flex items-center justify-center rounded-xl text-xs font-semibold h-11"
+            style={{ background: SURF2, color: TEXT2 }}>
+            ערוך
+          </button>
+          {t.status === 'open' && (
+            <button
+              onClick={e => { e.stopPropagation(); onClose(); }}
+              className="flex-1 flex items-center justify-center rounded-xl text-xs font-semibold h-11"
+              style={{ background: 'var(--color-tg-danger-muted)', color: 'var(--color-tg-danger)', border: '1px solid rgba(239,68,68,0.3)' }}>
+              סגור עסקה
+            </button>
+          )}
+          {hasDebrief && (
+            <button
+              onClick={e => { e.stopPropagation(); onDebrief(); }}
+              className="flex-1 flex items-center justify-center rounded-xl text-xs font-semibold h-11"
+              style={{ background: 'var(--color-tg-primary-muted)', color: 'var(--color-tg-primary)', border: '1px solid rgba(0,210,210,0.3)' }}>
+              ניתוח AI
+            </button>
+          )}
+          <button
+            onClick={e => { e.stopPropagation(); onDelete(); }}
+            className="w-11 h-11 flex items-center justify-center rounded-xl shrink-0"
+            style={{ background: 'rgba(248,113,113,0.1)', color: RED }}>
+            <Trash2 size={16} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Root ──────────────────────────────────────────────────────────────────────
 export default function JournalClient({ trades: initialTrades }: { trades: Trade[] }) {
   const [trades,       setTrades]       = useState<Trade[]>(initialTrades);
@@ -284,8 +376,26 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
         </div>
       </div>
 
-      {/* Table */}
-      <div className="rounded-2xl overflow-hidden" style={{ border: `1px solid ${BORDER}` }}>
+      {/* Mobile card list */}
+      <div className="md:hidden flex flex-col gap-2">
+        {pageTrades.length === 0 ? (
+          <div className="text-center py-14 text-sm" style={{ color: MUTED, fontWeight: 600 }}>לא נמצאו עסקאות</div>
+        ) : pageTrades.map(t => (
+          <MobileTradeCard
+            key={t.id}
+            t={t}
+            onView={() => setViewTradeId(t.id)}
+            onEdit={() => setEditingTradeId(t.id)}
+            onDelete={() => { setDeletingTradeId(t.id); setDeleteError(''); }}
+            onClose={() => { setViewTradeId(null); setClosingTradeId(t.id); }}
+            onDebrief={() => setViewDebriefId(t.id)}
+            hasDebrief={!!debriefResults[t.id]}
+          />
+        ))}
+      </div>
+
+      {/* Desktop table */}
+      <div className="hidden md:block rounded-2xl overflow-hidden" style={{ border: `1px solid ${BORDER}` }}>
         <div className="overflow-x-auto">
           <table className="w-full" style={{ borderCollapse: 'collapse' }}>
             <thead>
@@ -421,14 +531,14 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
                       <div className="flex items-center gap-1.5 justify-end">
                         <button
                           onClick={e => { e.stopPropagation(); setEditingTradeId(t.id); }}
-                          className="p-1.5 rounded-lg transition-colors hover:opacity-80"
+                          className="w-9 h-9 flex items-center justify-center rounded-lg transition-colors hover:opacity-80"
                           style={{ background: SURF2, color: MUTED }}
                           title="ערוך עסקה">
                           <Pencil size={14} />
                         </button>
                         <button
                           onClick={e => { e.stopPropagation(); setDeletingTradeId(t.id); setDeleteError(''); }}
-                          className="p-1.5 rounded-lg transition-colors hover:opacity-80"
+                          className="w-9 h-9 flex items-center justify-center rounded-lg transition-colors hover:opacity-80"
                           style={{ background: 'rgba(248,113,113,0.1)', color: RED }}
                           title="מחק עסקה">
                           <Trash2 size={14} />
@@ -467,39 +577,39 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
             </tbody>
           </table>
         </div>
+      </div>
 
-        {/* Pagination bar */}
-        <div className="flex items-center justify-between flex-wrap gap-2 px-4 py-3"
-          style={{ borderTop: `1px solid ${BORDER}`, background: SURF }}>
+      {/* Pagination bar */}
+      <div className="flex items-center justify-between flex-col sm:flex-row gap-3 px-4 py-3 rounded-2xl"
+        style={{ border: `1px solid ${BORDER}`, background: SURF }}>
 
-          {/* Rows per page */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs" style={{ color: MUTED, fontWeight: 600 }}>שורות בעמוד:</span>
-            <select value={pageSize}
-              onChange={e => { setPageSize(Number(e.target.value)); setPage(1); }}
-              className="text-xs rounded-lg px-2 py-1 outline-none"
-              style={{ background: SURF2, border: `1px solid ${BORDER}`, color: TEXT2, fontWeight: 600 }}>
-              {PAGE_SIZES.map(n => <option key={n} value={n}>{n}</option>)}
-            </select>
-          </div>
+        {/* Rows per page */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs" style={{ color: MUTED, fontWeight: 600 }}>שורות בעמוד:</span>
+          <select value={pageSize}
+            onChange={e => { setPageSize(Number(e.target.value)); setPage(1); }}
+            className="text-xs rounded-lg px-2 py-1 outline-none"
+            style={{ background: SURF2, border: `1px solid ${BORDER}`, color: TEXT2, fontWeight: 600 }}>
+            {PAGE_SIZES.map(n => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </div>
 
-          {/* Count */}
-          <span className="text-xs" style={{ color: MUTED, fontWeight: 600 }}>
-            {filtered.length === 0
-              ? 'אין עסקאות'
-              : `מציג ${pageStart + 1}–${Math.min(pageStart + pageSize, filtered.length)} מתוך ${filtered.length} עסקאות`}
-          </span>
+        {/* Count */}
+        <span className="text-xs" style={{ color: MUTED, fontWeight: 600 }}>
+          {filtered.length === 0
+            ? 'אין עסקאות'
+            : `מציג ${pageStart + 1}–${Math.min(pageStart + pageSize, filtered.length)} מתוך ${filtered.length} עסקאות`}
+        </span>
 
-          {/* Page buttons */}
-          <div className="flex items-center gap-1">
-            <PgBtn onClick={() => setPage(1)}             disabled={page === 1}>«</PgBtn>
-            <PgBtn onClick={() => setPage(p => p - 1)}    disabled={page === 1}>‹</PgBtn>
-            {pageNums.map(n => (
-              <PgBtn key={n} onClick={() => setPage(n)} active={n === page}>{n}</PgBtn>
-            ))}
-            <PgBtn onClick={() => setPage(p => p + 1)}    disabled={page === totalPages}>›</PgBtn>
-            <PgBtn onClick={() => setPage(totalPages)}     disabled={page === totalPages}>»</PgBtn>
-          </div>
+        {/* Page buttons */}
+        <div className="flex items-center gap-1">
+          <PgBtn onClick={() => setPage(1)}             disabled={page === 1}>«</PgBtn>
+          <PgBtn onClick={() => setPage(p => p - 1)}    disabled={page === 1}>‹</PgBtn>
+          {pageNums.map(n => (
+            <PgBtn key={n} onClick={() => setPage(n)} active={n === page}>{n}</PgBtn>
+          ))}
+          <PgBtn onClick={() => setPage(p => p + 1)}    disabled={page === totalPages}>›</PgBtn>
+          <PgBtn onClick={() => setPage(totalPages)}     disabled={page === totalPages}>»</PgBtn>
         </div>
       </div>
 

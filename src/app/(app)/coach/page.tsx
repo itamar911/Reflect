@@ -38,8 +38,8 @@ export default async function CoachPage() {
       </div>
 
       {/* Trading Bot - main feature */}
-      <div className="rounded-2xl border border-tg-border overflow-hidden"
-        style={{ background: 'var(--color-tg-surface)', height: '520px', display: 'flex', flexDirection: 'column' }}>
+      <div className="rounded-2xl border border-tg-border overflow-hidden flex flex-col h-[60dvh] md:h-[520px]"
+        style={{ background: 'var(--color-tg-surface)' }}>
         <div className="flex items-center gap-2 px-4 py-3 border-b border-tg-border shrink-0"
           style={{ background: 'var(--color-tg-surface-2)' }}>
           <div className="w-8 h-8 rounded-full flex items-center justify-center"

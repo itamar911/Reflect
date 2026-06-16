@@ -41,8 +41,8 @@ export function StatCard({ label, value, sub, positive, icon, fixedHeight, value
   valueColor?: string; largeLabel?: boolean;
 }) {
   return (
-    <div className={`rounded-xl flex flex-col justify-center gap-1.5 ${fixedHeight ? 'h-28' : ''}`}
-      style={{ background: SURF, borderLeft: `4px solid ${positive ? GREEN : RED}`, padding: 20, borderRadius: 12 }}>
+    <div className={`rounded-xl flex flex-col justify-center gap-1.5 p-3 sm:p-5 ${fixedHeight ? 'h-28' : ''}`}
+      style={{ background: SURF, borderLeft: `4px solid ${positive ? GREEN : RED}`, borderRadius: 12 }}>
       <p className="flex items-center gap-1.5"
         style={largeLabel ? { fontSize: 15, fontWeight: 600, color: TEXT } : { fontSize: 12, color: MUTED }}>
         {icon}
@@ -59,8 +59,8 @@ export function BreakdownRow({ name, pnl, trades, winRate, rr, barPct }: {
   name: string; pnl: number; trades: number; winRate: number | null; rr?: number; barPct: number;
 }) {
   return (
-    <div className="rounded-xl flex items-center gap-4"
-      style={{ background: SURF, borderLeft: `4px solid ${pnlColor(pnl)}`, padding: 20, borderRadius: 12 }}>
+    <div className="rounded-xl flex items-center gap-4 p-3 sm:p-5"
+      style={{ background: SURF, borderLeft: `4px solid ${pnlColor(pnl)}`, borderRadius: 12 }}>
       <div className="flex-1 min-w-0 flex flex-col gap-2">
         <div className="flex items-center justify-between">
           <span style={{ fontSize: 14, fontWeight: 700, color: TEXT }}>{name}</span>

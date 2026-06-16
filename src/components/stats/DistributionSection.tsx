@@ -73,7 +73,7 @@ export default function DistributionSection({ dayBars, hourBars }: Props) {
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <StatCard
           label={view === 'day' ? 'יום רווחי ביותר' : 'שעה רווחית ביותר'}
           value={best && best.pnl > 0 ? `${best.label} (${fmt(best.pnl)})` : '—'}

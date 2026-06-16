@@ -248,7 +248,7 @@ export default function TradingBot() {
             </svg>
           </button>
         </div>
-        <p className="text-[10px] text-tg-muted text-center mt-1.5">Enter לשלוח · Shift+Enter לשורה חדשה</p>
+        <p className="hidden sm:block text-[10px] text-tg-muted text-center mt-1.5">Enter לשלוח · Shift+Enter לשורה חדשה</p>
       </div>
     </div>
   );

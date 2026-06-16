@@ -192,7 +192,7 @@ export default async function StatsPage() {
 
       {/* ── KPI grid (3×3) ───────────────────────────────────── */}
       <Section title="סטטיסטיקה כללית" icon={<BarChart2 size={18} />}>
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
           <StatCard fixedHeight
             label="רווח/הפסד כולל"
             value={closedCount > 0 ? fmt(totalPnl) : '—'}
@@ -286,14 +286,14 @@ export default async function StatsPage() {
       {/* ── Streaks & records ────────────────────────────────── */}
       {closedCount > 0 && (
         <Section title="רצפים ושיאים" icon={<Trophy size={18} />}>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <StatCard largeLabel label="רצף רווחים ארוך ביותר" value={String(maxW)} positive={true} icon={<Flame size={14} />} />
             <StatCard largeLabel label="רצף הפסדים ארוך ביותר" value={String(maxL)} positive={false} icon={<Zap size={14} />} />
           </div>
 
           {/* Best / worst single trade */}
           {(bestTrade || worstTrade) && (
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {bestTrade && (
                 <StatCard largeLabel label="עסקה טובה ביותר"
                   value={fmt(pnlIls(bestTrade), bestTrade.pnl_currency ?? '₪')}
@@ -309,7 +309,7 @@ export default async function StatsPage() {
 
           {/* Best / worst day */}
           {(bestDay || worstDay) && (
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {bestDay && bestDay.pnl > 0 && (
                 <StatCard largeLabel label="יום טוב ביותר" value={fmt(bestDay.pnl)} sub={bestDay.label} positive={true} />
               )}

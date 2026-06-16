@@ -903,6 +903,14 @@ export default function DashboardClient({
   const [isCurrentWeek, setIsCurrentWeek] = useState(false);
   const [latestWeekStart, setLatestWeekStart] = useState<string | null>(null);
   const [previousStats, setPreviousStats] = useState<WeeklyStats | null>(null);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
 
   // "Now" is null during SSR and the first client render (matching), then
   // becomes a real Date once mounted — avoids hydration mismatches from
@@ -1120,9 +1128,8 @@ export default function DashboardClient({
 
             {/* Card 1: Profitable Days */}
             <Card>
-              <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                {/* Text column — first in RTL flex → physical RIGHT */}
-                <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: 'center', gap: 12 }}>
+                <div style={{ flex: isMobile ? undefined : 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4, width: isMobile ? '100%' : undefined }}>
                   <p style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: TEXT2 }}>ימים רווחיים</p>
                   <p style={{ fontSize: 26, fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums', color: stats.profitDays >= stats.lossDays ? GREEN : RED }}>
                     {stats.profitDayPct}%
@@ -1135,9 +1142,8 @@ export default function DashboardClient({
                     <span style={{ fontSize: 14, fontWeight: 800, color: RED, fontVariantNumeric: 'tabular-nums' }}>{stats.lossDays}</span>
                   </div>
                 </div>
-                {/* Gauge — second in RTL flex → physical LEFT */}
                 <div style={{ flexShrink: 0 }}>
-                  <SemiGauge width={140} strokeWidth={12} segments={[
+                  <SemiGauge width={isMobile ? 88 : 140} strokeWidth={12} segments={[
                     { value: stats.profitDays, color: GREEN },
                     { value: stats.lossDays,   color: RED },
                   ]} />
@@ -1147,9 +1153,8 @@ export default function DashboardClient({
 
             {/* Card 2: Win Rate */}
             <Card>
-              <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                {/* Text column — first in RTL flex → physical RIGHT */}
-                <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: 'center', gap: 12 }}>
+                <div style={{ flex: isMobile ? undefined : 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4, width: isMobile ? '100%' : undefined }}>
                   <p style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: TEXT2 }}>אחוזי הצלחה</p>
                   <p style={{ fontSize: 26, fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums', color: stats.winPct >= 50 ? GREEN : RED }}>
                     {stats.winPct}%
@@ -1160,9 +1165,8 @@ export default function DashboardClient({
                     <span style={{ fontSize: 14, fontWeight: 800, color: RED, fontVariantNumeric: 'tabular-nums' }}>{stats.lossTrades}</span>
                   </div>
                 </div>
-                {/* Gauge — second in RTL flex → physical LEFT */}
                 <div style={{ flexShrink: 0 }}>
-                  <SemiGauge width={140} strokeWidth={12} segments={[
+                  <SemiGauge width={isMobile ? 88 : 140} strokeWidth={12} segments={[
                     { value: stats.winPct,       color: GREEN },
                     { value: 100 - stats.winPct, color: RED },
                   ]} />
@@ -1355,7 +1359,7 @@ export default function DashboardClient({
                           <p className="text-xs font-semibold" style={{ color: ACCENT }}>פתוח</p>
                         )}
                         <button onClick={() => setSelTrade(t)}
-                          className="text-[10px] px-2 py-1 rounded-lg font-medium transition-opacity hover:opacity-80"
+                          className="text-[10px] px-2 rounded-lg font-medium transition-opacity hover:opacity-80 min-h-[44px] flex items-center"
                           style={{ background: SURF2, color: TEXT2, fontWeight: 600, whiteSpace: 'nowrap' }}>
                           פרטים
                         </button>
@@ -1411,7 +1415,7 @@ export default function DashboardClient({
 
         <div className="flex items-center justify-between mb-3">
           <button onClick={goToPrevWeek} disabled={weeklyLoading}
-            className="p-1.5 rounded-lg transition-opacity disabled:opacity-40"
+            className="p-3 rounded-lg transition-opacity disabled:opacity-40"
             style={{ background: SURF2, color: TEXT2 }}>
             <ChevronRight size={16} />
           </button>
@@ -1421,7 +1425,7 @@ export default function DashboardClient({
             </p>
           ) : <span />}
           <button onClick={goToNextWeek} disabled={weeklyLoading || viewedWeekStart === latestWeekStart}
-            className="p-1.5 rounded-lg transition-opacity disabled:opacity-40"
+            className="p-3 rounded-lg transition-opacity disabled:opacity-40"
             style={{ background: SURF2, color: TEXT2 }}>
             <ChevronLeft size={16} />
           </button>
