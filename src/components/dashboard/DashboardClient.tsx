@@ -285,7 +285,7 @@ function RadarChart({ scores }: { scores: number[] }) {
 
   return (
     <div className="flex flex-col items-center gap-2">
-      <svg width={240} height={240}>
+      <svg width="100%" viewBox="0 0 240 240" preserveAspectRatio="xMidYMid meet" style={{ maxWidth: 240, display: 'block' }}>
         {[0.25, 0.5, 0.75, 1].map(s => (
           <polygon key={s} points={poly(s)} fill="none" stroke={BORDER} strokeWidth={0.8} />
         ))}
@@ -428,12 +428,12 @@ function MonthCalendar({
     <div className="flex flex-col gap-2">
       {/* Nav */}
       <div className="flex items-center justify-between mb-1">
-        <button onClick={onPrev} className="p-1.5 rounded-lg" style={{ background: SURF2, color: TEXT2 }}>
+        <button onClick={onPrev} className="p-3 rounded-lg" style={{ background: SURF2, color: TEXT2 }}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
             strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
         </button>
         <p className="text-sm font-semibold" style={{ color: TEXT }}>{MONTHS_HE[mo]} {yr}</p>
-        <button onClick={onNext} className="p-1.5 rounded-lg" style={{ background: SURF2, color: TEXT2 }}>
+        <button onClick={onNext} className="p-3 rounded-lg" style={{ background: SURF2, color: TEXT2 }}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
             strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
         </button>
@@ -903,13 +903,14 @@ export default function DashboardClient({
   const [isCurrentWeek, setIsCurrentWeek] = useState(false);
   const [latestWeekStart, setLatestWeekStart] = useState<string | null>(null);
   const [previousStats, setPreviousStats] = useState<WeeklyStats | null>(null);
-  const [isMobile, setIsMobile] = useState(false);
+  const [isMobile, setIsMobile] = useState(true);
 
   useEffect(() => {
-    const check = () => setIsMobile(window.innerWidth < 768);
-    check();
-    window.addEventListener('resize', check);
-    return () => window.removeEventListener('resize', check);
+    const media = window.matchMedia('(max-width: 767px)');
+    setIsMobile(media.matches);
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    media.addEventListener('change', handler);
+    return () => media.removeEventListener('change', handler);
   }, []);
 
   // "Now" is null during SSR and the first client render (matching), then
@@ -1177,13 +1178,13 @@ export default function DashboardClient({
             {/* Card 3: Avg Win/Loss ratio */}
             <Card>
               <p style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: TEXT2, marginBottom: 14 }}>יחס רווח/הפסד ממוצע</p>
-              <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-                <span style={{ fontSize: 18, fontWeight: 700, color: TEXT2, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+              <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'stretch' : 'center', gap: isMobile ? 8 : 16 }}>
+                <span style={{ fontSize: isMobile ? 15 : 18, fontWeight: 700, color: TEXT2, fontVariantNumeric: 'tabular-nums' }}>
                   {stats.avgLoss < -0.001 ? (stats.avgWin / Math.abs(stats.avgLoss)).toFixed(2) : '—'}
                 </span>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: isMobile ? undefined : 1 }}>
                   <SplitBar left={stats.avgWin} right={Math.abs(stats.avgLoss)} leftColor={GREEN} rightColor={RED} />
-                  <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'flex-start' : 'center', gap: isMobile ? 2 : undefined, justifyContent: isMobile ? undefined : 'space-between' }}>
                     <span style={{ fontSize: 12, fontWeight: 700, color: GREEN, fontVariantNumeric: 'tabular-nums' }}>{formatPnlIls(stats.avgWin, stats.pnlCurrency)}</span>
                     <span style={{ fontSize: 12, fontWeight: 700, color: RED, fontVariantNumeric: 'tabular-nums' }}>{formatPnlIls(stats.avgLoss, stats.pnlCurrency)}</span>
                   </div>
@@ -1212,7 +1213,7 @@ export default function DashboardClient({
                 ))}
               </div>
               <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 36, fontWeight: 800, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums', color: selPeriodPnl >= 0 ? GREEN : RED }}>
+                <span style={{ fontSize: isMobile ? 20 : 36, fontWeight: 800, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums', color: selPeriodPnl >= 0 ? GREEN : RED }}>
                   {selPeriodDisplay}
                 </span>
                 <span style={{ fontSize: 12, fontWeight: 600, color: TEXT2 }}>
@@ -1323,8 +1324,9 @@ export default function DashboardClient({
                   const pnl  = calcPnl(t);
                   const dir  = tradeDir(t);
                   return (
-                    <div key={t.id} className="flex items-center gap-2 py-3"
-                      style={{ borderTop: i > 0 ? `1px solid ${BORDER}` : undefined }}>
+                    <div key={t.id} className="flex items-center gap-2 py-3 cursor-pointer"
+                      style={{ borderTop: i > 0 ? `1px solid ${BORDER}` : undefined }}
+                      onClick={() => setSelTrade(t)}>
                       {/* Date + asset */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5 flex-wrap">
@@ -1344,22 +1346,22 @@ export default function DashboardClient({
                           {t.exit_price != null ? ` · יציאה ${t.exit_price.toFixed(2)}` : ''}
                         </p>
                       </div>
-                      {/* P&L + button */}
+                      {/* P&L (+ button on desktop only) */}
                       <div className="flex items-center gap-2 shrink-0">
                         {pnl !== null ? (
                           <p className="text-sm font-bold" style={{ color: pnl >= 0 ? GREEN : RED }}>
                             {t.pnl_amount != null ? (
                               <>
                                 {formatPnlIls(t.pnl_amount, t.pnl_currency ?? '₪')}
-                                <span className="text-xs font-semibold" style={{ opacity: 0.6 }}> ({formatPnlPoints(pnl)})</span>
+                                <span className="hidden md:inline text-xs font-semibold" style={{ opacity: 0.6 }}> ({formatPnlPoints(pnl)})</span>
                               </>
                             ) : fmtPnl(pnl)}
                           </p>
                         ) : (
                           <p className="text-xs font-semibold" style={{ color: ACCENT }}>פתוח</p>
                         )}
-                        <button onClick={() => setSelTrade(t)}
-                          className="text-[10px] px-2 rounded-lg font-medium transition-opacity hover:opacity-80 min-h-[44px] flex items-center"
+                        <button onClick={e => { e.stopPropagation(); setSelTrade(t); }}
+                          className="hidden md:flex text-[10px] px-2 rounded-lg font-medium transition-opacity hover:opacity-80 min-h-[44px] items-center"
                           style={{ background: SURF2, color: TEXT2, fontWeight: 600, whiteSpace: 'nowrap' }}>
                           פרטים
                         </button>
