@@ -8,6 +8,7 @@ import TradePlanForm from '@/components/trade/TradePlanForm';
 import { cn } from '@/lib/utils';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
 import { ReflectLogo } from '@/components/brand/ReflectLogo';
+import { PageTransition } from '@/components/layout/PageTransition';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const ACCENT = '#00d2d2';
@@ -306,9 +307,9 @@ export default function AppShell({
           transition:  `margin-right 250ms ${easing}`,
         }}
       >
-        <div key={pathname} className="page-enter">
+        <PageTransition>
           {children}
-        </div>
+        </PageTransition>
       </div>
 
       <TradePlanForm
