@@ -156,7 +156,7 @@ function buildUserContext(data: {
   const { trades, presetRules, customRules } = data;
 
   const closed = trades.filter(t => t.status === 'closed');
-  const wins = closed.filter(t => t.exit_price != null && Number(t.exit_price) > Number(t.stop_loss));
+  const wins = closed.filter(t => t.exit_price != null && Number(t.exit_price) > Number(t.entry_price));
   const winRate = closed.length > 0 ? Math.round((wins.length / closed.length) * 100) : 0;
   const avgRR = trades.length > 0
     ? (trades.reduce((s, t) => s + Number(t.rr_ratio || 0), 0) / trades.length).toFixed(2)
@@ -183,7 +183,7 @@ function buildUserContext(data: {
   closed.forEach(t => {
     const h = new Date(String(t.submitted_at)).getHours();
     if (!hourWins[h]) hourWins[h] = { w: 0, l: 0 };
-    const win = t.exit_price != null && Number(t.exit_price) > Number(t.stop_loss);
+    const win = t.exit_price != null && Number(t.exit_price) > Number(t.entry_price);
     if (win) hourWins[h].w++; else hourWins[h].l++;
   });
   const hourScores = Object.entries(hourWins)
@@ -200,7 +200,7 @@ function buildUserContext(data: {
     for (let i = 1; i < sorted.length; i++) {
       const prev = sorted[i - 1];
       const curr = sorted[i];
-      if (prev.status === 'closed' && Number(prev.exit_price) <= Number(prev.stop_loss) && Number(curr.emotional_state) <= 2) r++;
+      if (prev.status === 'closed' && Number(prev.exit_price) <= Number(prev.entry_price) && Number(curr.emotional_state) <= 2) r++;
     }
     return r;
   })();
@@ -214,14 +214,14 @@ function buildUserContext(data: {
   let consecutive = 0;
   const sortedTrades = [...trades].sort((a, b) => new Date(String(b.submitted_at)).getTime() - new Date(String(a.submitted_at)).getTime());
   for (const t of sortedTrades) {
-    if (t.status === 'closed' && Number(t.exit_price) <= Number(t.stop_loss)) consecutive++;
+    if (t.status === 'closed' && Number(t.exit_price) <= Number(t.entry_price)) consecutive++;
     else break;
   }
 
   // Recent trades summary
   const recent = trades.slice(0, 5).map(t => {
     const r = Number(t.rr_ratio || 0);
-    const status = t.status === 'closed' ? (Number(t.exit_price) > Number(t.stop_loss) ? '✓' : '✗') : '⏳';
+    const status = t.status === 'closed' ? (Number(t.exit_price) > Number(t.entry_price) ? '✓' : '✗') : '⏳';
     return `${status} ${t.strategy} R:R ${r.toFixed(1)} מצב-רגשי:${t.emotional_state}`;
   }).join('\n');
 
