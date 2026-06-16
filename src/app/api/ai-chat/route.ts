@@ -280,6 +280,7 @@ export async function POST(request: Request) {
           max_tokens: 1500,
           system: systemPrompt,
           messages: messages.map(m => ({ role: m.role, content: m.content })),
+          tools: [{ type: 'web_search_20260209', name: 'web_search' }],
         });
 
         for await (const chunk of anthropicStream) {
