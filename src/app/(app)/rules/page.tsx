@@ -92,58 +92,6 @@ export default async function RulesPage() {
         />
       </div>
 
-      {/* ── Rule activation history ────────────────────────────────── */}
-      <div
-        className="rounded-2xl p-4"
-        style={{ background: 'var(--color-tg-surface)', border: '1px solid var(--color-tg-border)' }}
-      >
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold" style={{ color: 'var(--color-tg-text)' }}>
-            היסטוריית הפעלות חוקים
-          </h2>
-          {plan !== 'pro' && (
-            <span
-              className="px-2 py-0.5 rounded-full text-[11px] font-bold"
-              style={{ background: 'rgba(0,210,210,0.12)', color: '#00d2d2' }}
-            >
-              Pro
-            </span>
-          )}
-        </div>
-
-        {plan === 'pro' ? (
-          <div
-            className="flex items-center justify-center py-8 rounded-xl"
-            style={{ background: 'var(--color-tg-surface-2)' }}
-          >
-            <div className="text-center">
-              <div className="mb-2"><FileText size={28} /></div>
-              <p className="text-sm" style={{ color: 'var(--color-tg-text-2)' }}>
-                אין עדיין הפעלות חוקים מתועדות
-              </p>
-            </div>
-          </div>
-        ) : (
-          <div
-            className="flex items-center justify-center py-7 rounded-xl"
-            style={{ background: 'var(--color-tg-surface-2)' }}
-          >
-            <div className="text-center">
-              <div className="mb-2"><FileText size={28} /></div>
-              <p className="text-sm mb-1" style={{ color: 'var(--color-tg-text-2)' }}>
-                היסטוריית כל החוקים שהופעלו
-              </p>
-              <p className="text-xs" style={{ color: 'var(--color-tg-muted)' }}>
-                תאריך · שם החוק · פעולה שבוצעה
-              </p>
-              <p className="text-xs font-semibold mt-2" style={{ color: '#00d2d2' }}>
-                זמין במסלול Pro
-              </p>
-            </div>
-          </div>
-        )}
-      </div>
-
     </div>
   );
 }
