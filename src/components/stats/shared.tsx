@@ -1,12 +1,12 @@
 import type { ReactNode } from 'react';
 
 // ── Design tokens ────────────────────────────────────────────────────────────
-export const SURF   = '#1a1a28';
-export const ACCENT = '#00d2d2';
-export const GREEN  = '#22c55e';
-export const RED    = '#ef4444';
-export const MUTED  = '#6b7280';
-export const TEXT   = '#ffffff';
+export const SURF   = 'var(--color-tg-surface)';
+export const ACCENT = 'var(--color-tg-primary)';
+export const GREEN  = 'var(--color-tg-success)';
+export const RED    = 'var(--color-tg-danger)';
+export const MUTED  = 'var(--color-tg-muted)';
+export const TEXT   = 'var(--color-tg-text)';
 
 const TRACK = 'var(--color-tg-surface-2)';
 

@@ -16,7 +16,7 @@ interface Props {
   hourBars: DistBar[];
 }
 
-const NO_TRADES = '#35355a';
+const NO_TRADES = 'var(--color-tg-border)';
 
 export default function DistributionSection({ dayBars, hourBars }: Props) {
   const [view, setView] = useState<'day' | 'hour'>('day');
