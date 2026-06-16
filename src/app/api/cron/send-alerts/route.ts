@@ -3,7 +3,6 @@ import { createAdminClient } from '@/lib/supabase/admin';
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const FROM_EMAIL = 'Reflect Trading <onboarding@resend.dev>';
-const WINDOW_MINUTES = 5;
 
 // ── Email sender ────────────────────────────────────────────────────────────
 
@@ -265,49 +264,45 @@ export async function GET(request: Request) {
 
   const supabase = createAdminClient();
 
-  // Current time in Israel (handles IST/IDT automatically)
-  const now = new Date();
-  const ilParts = new Intl.DateTimeFormat('en-US', {
+  // Determine run type from UTC hour:
+  //   morning run  → 0 5 * * *  (5 AM UTC ≈ 7–8 AM Israel): pre_market + weekly_summary
+  //   evening run  → 0 17 * * * (5 PM UTC ≈ 7–8 PM Israel): end_of_day
+  const now       = new Date();
+  const utcHour   = now.getUTCHours();
+  const isMorning = utcHour < 12;
+
+  // Israel weekday — used for Sunday-only weekly summary
+  const ilParts  = new Intl.DateTimeFormat('en-US', {
     timeZone: 'Asia/Jerusalem',
-    hour: '2-digit', minute: '2-digit', hour12: false, weekday: 'short',
+    weekday: 'short',
   }).formatToParts(now);
-  const getPart = (type: string) => ilParts.find((p) => p.type === type)?.value ?? '';
-  const hh = getPart('hour').padStart(2, '0');
-  const mm = getPart('minute').padStart(2, '0');
-  const nowMinutes  = parseInt(hh) * 60 + parseInt(mm);
-  const dayOfWeek   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].indexOf(getPart('weekday'));
-  const currentTime = `${hh}:${mm}`;
+  const dayOfWeek = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+    .indexOf(ilParts.find((p) => p.type === 'weekday')?.value ?? '');
+  const isSunday  = dayOfWeek === 0;
+
+  const currentUTC = `${String(utcHour).padStart(2,'0')}:${String(now.getUTCMinutes()).padStart(2,'0')} UTC`;
 
   // Fetch all alert settings
   const { data: settings, error } = await supabase
     .from('alert_settings')
-    .select(
-      'user_id, pre_market_enabled, pre_market_time, end_of_day_enabled, end_of_day_time, weekly_summary_enabled, weekly_summary_time'
-    );
+    .select('user_id, pre_market_enabled, end_of_day_enabled, weekly_summary_enabled');
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  if (!settings || settings.length === 0) return NextResponse.json({ sent: 0, time: currentTime });
-
-  function inWindow(alertTime: string | null): boolean {
-    if (!alertTime) return false;
-    const [ah, am] = alertTime.split(':').map(Number);
-    const diff = ((nowMinutes - (ah * 60 + am)) % 1440 + 1440) % 1440;
-    return diff <= WINDOW_MINUTES;
-  }
+  if (!settings || settings.length === 0) return NextResponse.json({ sent: 0, utc: currentUTC });
 
   const results = await Promise.allSettled(
     settings.flatMap((s) => {
       const jobs: Promise<void>[] = [];
 
-      if (s.pre_market_enabled && inWindow(s.pre_market_time))
-        jobs.push(dispatchAlert(supabase, s.user_id, 'pre_market'));
-
-      if (s.end_of_day_enabled && inWindow(s.end_of_day_time))
-        jobs.push(dispatchAlert(supabase, s.user_id, 'end_of_day'));
-
-      // Weekly summary only on Sundays (dayOfWeek === 0)
-      if (s.weekly_summary_enabled && inWindow(s.weekly_summary_time) && dayOfWeek === 0)
-        jobs.push(dispatchAlert(supabase, s.user_id, 'weekly_summary'));
+      if (isMorning) {
+        if (s.pre_market_enabled)
+          jobs.push(dispatchAlert(supabase, s.user_id, 'pre_market'));
+        if (s.weekly_summary_enabled && isSunday)
+          jobs.push(dispatchAlert(supabase, s.user_id, 'weekly_summary'));
+      } else {
+        if (s.end_of_day_enabled)
+          jobs.push(dispatchAlert(supabase, s.user_id, 'end_of_day'));
+      }
 
       return jobs;
     })
@@ -318,5 +313,5 @@ export async function GET(request: Request) {
     .filter((r) => r.status === 'rejected')
     .map((r) => (r as PromiseRejectedResult).reason?.message ?? 'unknown');
 
-  return NextResponse.json({ sent, failed, time: currentTime, day: dayOfWeek });
+  return NextResponse.json({ sent, failed, utc: currentUTC, run: isMorning ? 'morning' : 'evening' });
 }
