@@ -20,8 +20,8 @@ const MUTED   = 'var(--color-tg-muted)';
 const GREEN   = '#22c55e';
 const RED     = '#ef4444';
 const YELLOW  = '#eab308';
-const DEEP    = '#0d0d1a';
-const SUBTLE  = '#2a2a3d';
+const DEEP    = 'var(--color-tg-surface)';
+const SUBTLE  = 'var(--color-tg-border)';
 const ICON_GRAY = '#6b7280';
 
 // Fixed, deterministic stand-in for "now" used before the client has mounted,
@@ -775,7 +775,7 @@ function SummarySectionCard({ heading, lines }: { heading: string; lines: string
 
   return (
     <div style={{
-      background: '#1a1a28',
+      background: SURF,
       border: `1px solid ${SUBTLE}`,
       borderLeft: `3px solid ${color}`,
       borderRadius: 8,
@@ -803,7 +803,7 @@ function SummaryQuote({ segments }: { segments: { heading: string; lines: string
 
   return (
     <div style={{
-      background: '#1a1a28',
+      background: SURF,
       border: `1px solid ${SUBTLE}`,
       borderLeft: `3px solid ${ICON_GRAY}`,
       borderRadius: 8,
@@ -826,7 +826,7 @@ function WeeklyDayCard({ label, pnl, trades, currency, maxAbs }: { label: string
   const barPct = maxAbs > 0 ? (Math.abs(pnl) / maxAbs) * 100 : 0;
 
   return (
-    <div style={{ background: '#1a1a28', border: `1px solid ${SUBTLE}`, borderLeft: `3px solid ${borderColor}`, borderRadius: 8, padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+    <div style={{ background: SURF, border: `1px solid ${SUBTLE}`, borderLeft: `3px solid ${borderColor}`, borderRadius: 8, padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
       <div className="flex items-center justify-between">
         <span style={{ fontSize: 13, fontWeight: 700, color: TEXT2 }}>{label}</span>
         <div className="flex items-baseline gap-2">
