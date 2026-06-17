@@ -287,7 +287,9 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
         <StatCard label="רווח / הפסד"
           value={hasPnlAmount ? formatPnlIls(totalPnlAmount, pnlAmountCurrency) : fmtPnl(totalPnl)}
           icon={<DollarSign size={14} color={GOLD} strokeWidth={2} />}
-          color={(hasPnlAmount ? totalPnlAmount : totalPnl) >= 0 ? GREEN : RED} />
+          color={(hasPnlAmount ? totalPnlAmount : totalPnl) >= 0 ? GREEN : RED}
+          className="min-w-0"
+          valueClassName="text-base sm:text-2xl font-bold break-all" />
         <StatCard label="פקטור רווח" value={pfStr}
           icon={<TargetIcon />}
           color={pfNum !== null ? (pfNum >= 1.5 ? GREEN : pfNum >= 1 ? GOLD : RED) : MUTED} />
@@ -713,11 +715,11 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
 
 // ── Atoms ─────────────────────────────────────────────────────────────────────
 
-function StatCard({ label, value, icon, color = TEXT }: {
-  label: string; value: string; icon: React.ReactNode; color?: string;
+function StatCard({ label, value, icon, color = TEXT, className = '', valueClassName = 'text-2xl font-bold' }: {
+  label: string; value: string; icon: React.ReactNode; color?: string; className?: string; valueClassName?: string;
 }) {
   return (
-    <div className="rounded-2xl p-4 flex flex-col gap-2"
+    <div className={`rounded-2xl p-4 flex flex-col gap-2 ${className}`}
       style={{ background: SURF, border: `1px solid ${BORDER}` }}>
       <div className="flex items-center justify-between">
         <span className="text-xs font-semibold" style={{ color: MUTED, fontWeight: 600 }}>{label}</span>
@@ -726,7 +728,7 @@ function StatCard({ label, value, icon, color = TEXT }: {
           {icon}
         </div>
       </div>
-      <span className="text-2xl font-bold" style={{ color }}>{value}</span>
+      <span className={valueClassName} style={{ color }}>{value}</span>
     </div>
   );
 }
