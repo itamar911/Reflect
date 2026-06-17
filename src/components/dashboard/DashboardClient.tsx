@@ -440,8 +440,8 @@ function MonthCalendar({
       </div>
 
       {/* Day headers + Weeks — horizontally scrollable on mobile */}
-      <div className="overflow-x-auto">
-        <div style={{ minWidth: 280 }}>
+      <div className="overflow-x-auto md:overflow-visible" style={{ WebkitOverflowScrolling: 'touch' }}>
+        <div style={{ minWidth: 480 }}>
           {/* Day headers */}
           <div className="grid gap-0.5" style={{ gridTemplateColumns: 'repeat(8, 1fr)' }}>
             {DAYS_SH.map(d => (
@@ -1354,11 +1354,11 @@ export default function DashboardClient({
                       {/* P&L (+ button on desktop only) */}
                       <div className="flex items-center gap-2 shrink-0">
                         {pnl !== null ? (
-                          <p className="text-xs sm:text-sm font-bold" style={{ color: pnl >= 0 ? GREEN : RED }}>
+                          <p className="text-[11px] sm:text-sm font-bold" style={{ color: pnl >= 0 ? GREEN : RED }}>
                             {t.pnl_amount != null ? (
                               <>
                                 {formatPnlIls(t.pnl_amount, t.pnl_currency ?? '₪')}
-                                <span className="text-[9px] sm:text-xs font-semibold" style={{ opacity: 0.6 }}> ({formatPnlPoints(pnl)})</span>
+                                <span className="text-[8px] sm:text-xs font-semibold" style={{ opacity: 0.6 }}> ({formatPnlPoints(pnl)})</span>
                               </>
                             ) : fmtPnl(pnl)}
                           </p>
