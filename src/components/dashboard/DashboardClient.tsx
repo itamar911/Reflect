@@ -439,50 +439,55 @@ function MonthCalendar({
         </button>
       </div>
 
-      {/* Day headers */}
-      <div className="grid gap-0.5" style={{ gridTemplateColumns: 'repeat(8, 1fr)' }}>
-        {DAYS_SH.map(d => (
-          <div key={d} className="text-center text-[9px] font-semibold" style={{ color: MUTED, fontWeight: 600 }}>{d}</div>
-        ))}
-        <div className="text-center text-[9px] font-semibold" style={{ color: MUTED, fontWeight: 600 }}>שבוע</div>
-      </div>
-
-      {/* Weeks */}
-      {weeks.map((week, wi) => {
-        const weekPnl = week.reduce<number>((s, d) => s + (d != null ? dayPnl(d) : 0), 0);
-        return (
-          <div key={wi} className="grid gap-0.5" style={{ gridTemplateColumns: 'repeat(8, 1fr)' }}>
-            {week.map((day, di) => {
-              const pnl = day ? dayPnl(day) : 0;
-              const has = day ? hasTrade(day) : false;
-              return (
-                <div key={di} className="rounded flex flex-col items-center justify-center py-0.5"
-                  style={{ background: day ? bg(pnl) : 'transparent', minHeight: 30, border: `1px solid ${BORDER}`, borderRadius: 6 }}>
-                  {day && (
-                    <>
-                      <span className="text-[10px] font-medium leading-none"
-                        style={{ color: has ? (pnl >= 0 ? GREEN : RED) : MUTED, fontWeight: 600 }}>{day}</span>
-                      {has && (
-                        <span className="text-[8px] font-semibold leading-none mt-0.5"
-                          style={{ color: pnl >= 0 ? GREEN : RED }}>
-                          {pnl > 0 ? '+' : ''}{pnl.toFixed(0)}
-                        </span>
-                      )}
-                    </>
-                  )}
-                </div>
-              );
-            })}
-            <div className="flex items-center justify-center rounded px-0.5"
-              style={{ background: SURF2, minHeight: 30 }}>
-              <span className="text-[9px] font-bold"
-                style={{ color: weekPnl > 0 ? GREEN : weekPnl < 0 ? RED : MUTED }}>
-                {weekPnl > 0 ? '+' : ''}{weekPnl.toFixed(0)}
-              </span>
-            </div>
+      {/* Day headers + Weeks — horizontally scrollable on mobile */}
+      <div className="overflow-x-auto">
+        <div style={{ minWidth: 280 }}>
+          {/* Day headers */}
+          <div className="grid gap-0.5" style={{ gridTemplateColumns: 'repeat(8, 1fr)' }}>
+            {DAYS_SH.map(d => (
+              <div key={d} className="text-center text-[9px] font-semibold" style={{ color: MUTED, fontWeight: 600 }}>{d}</div>
+            ))}
+            <div className="text-center text-[9px] font-semibold" style={{ color: MUTED, fontWeight: 600 }}>שבוע</div>
           </div>
-        );
-      })}
+
+          {/* Weeks */}
+          {weeks.map((week, wi) => {
+            const weekPnl = week.reduce<number>((s, d) => s + (d != null ? dayPnl(d) : 0), 0);
+            return (
+              <div key={wi} className="grid gap-0.5 mt-0.5" style={{ gridTemplateColumns: 'repeat(8, 1fr)' }}>
+                {week.map((day, di) => {
+                  const pnl = day ? dayPnl(day) : 0;
+                  const has = day ? hasTrade(day) : false;
+                  return (
+                    <div key={di} className="rounded flex flex-col items-center justify-center py-0.5"
+                      style={{ background: day ? bg(pnl) : 'transparent', minHeight: 30, border: `1px solid ${BORDER}`, borderRadius: 6 }}>
+                      {day && (
+                        <>
+                          <span className="text-[10px] font-medium leading-none"
+                            style={{ color: has ? (pnl >= 0 ? GREEN : RED) : MUTED, fontWeight: 600 }}>{day}</span>
+                          {has && (
+                            <span className="text-[8px] font-semibold leading-none mt-0.5"
+                              style={{ color: pnl >= 0 ? GREEN : RED }}>
+                              {pnl > 0 ? '+' : ''}{pnl.toFixed(0)}
+                            </span>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+                <div className="flex items-center justify-center rounded px-0.5"
+                  style={{ background: SURF2, minHeight: 30 }}>
+                  <span className="text-[9px] font-bold"
+                    style={{ color: weekPnl > 0 ? GREEN : weekPnl < 0 ? RED : MUTED }}>
+                    {weekPnl > 0 ? '+' : ''}{weekPnl.toFixed(0)}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
 
       {/* Monthly summary */}
       <div className="grid grid-cols-3 gap-2 mt-1">
@@ -1349,11 +1354,11 @@ export default function DashboardClient({
                       {/* P&L (+ button on desktop only) */}
                       <div className="flex items-center gap-2 shrink-0">
                         {pnl !== null ? (
-                          <p className="text-sm font-bold" style={{ color: pnl >= 0 ? GREEN : RED }}>
+                          <p className="text-xs sm:text-sm font-bold" style={{ color: pnl >= 0 ? GREEN : RED }}>
                             {t.pnl_amount != null ? (
                               <>
                                 {formatPnlIls(t.pnl_amount, t.pnl_currency ?? '₪')}
-                                <span className="hidden md:inline text-xs font-semibold" style={{ opacity: 0.6 }}> ({formatPnlPoints(pnl)})</span>
+                                <span className="text-[9px] sm:text-xs font-semibold" style={{ opacity: 0.6 }}> ({formatPnlPoints(pnl)})</span>
                               </>
                             ) : fmtPnl(pnl)}
                           </p>
