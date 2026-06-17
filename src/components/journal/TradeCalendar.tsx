@@ -179,10 +179,14 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
         </button>
       </div>
 
-      {/* ── Calendar grid ───────────────────────────────────── */}
+      {/* ── Calendar grid — horizontally scrollable on mobile ──── */}
+      <div
+        className="overflow-x-auto md:overflow-visible"
+        style={{ WebkitOverflowScrolling: 'touch' }}
+      >
       <div
         className="rounded-2xl overflow-hidden flex flex-col gap-px"
-        style={{ background: 'var(--color-tg-border)' }}
+        style={{ background: 'var(--color-tg-border)', minWidth: 480 }}
       >
 
         {/* Day-name header */}
@@ -306,6 +310,7 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
 
           </div>
         ))}
+      </div>
       </div>
     </div>
   );

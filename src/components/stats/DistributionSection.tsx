@@ -47,7 +47,7 @@ export default function DistributionSection({ dayBars, hourBars }: Props) {
         ))}
       </div>
 
-      <div className="rounded-xl" style={{ background: SURF, borderLeft: `4px solid ${ACCENT}`, padding: 20, borderRadius: 12 }}>
+      <div className="rounded-xl p-3 sm:p-5" style={{ background: SURF, borderLeft: `4px solid ${ACCENT}`, borderRadius: 12 }}>
         {bars.every(b => b.trades === 0) ? (
           <p className="text-center py-4" style={{ fontSize: 12, color: MUTED }}>אין נתונים</p>
         ) : (

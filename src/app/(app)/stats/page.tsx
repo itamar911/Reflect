@@ -239,7 +239,7 @@ export default async function StatsPage() {
 
       {/* ── P&L Chart ───────────────────────────────────────── */}
       <Section title="רווח/הפסד לאורך זמן" icon={<TrendingUp size={18} />}>
-        <div className="rounded-xl" style={{ background: SURF, borderLeft: `4px solid ${ACCENT}`, padding: 20, borderRadius: 12 }}>
+        <div className="rounded-xl p-3 sm:p-5" style={{ background: SURF, borderLeft: `4px solid ${ACCENT}`, borderRadius: 12 }}>
           <PnlChart daily={daily} weekly={weekly} monthly={monthly} />
         </div>
       </Section>

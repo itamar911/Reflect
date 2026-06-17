@@ -48,7 +48,7 @@ export function StatCard({ label, value, sub, positive, icon, fixedHeight, value
         {icon}
         {label}
       </p>
-      <p style={{ fontSize: 22, fontWeight: 700, color: valueColor ?? TEXT, lineHeight: 1.2 }}>{value}</p>
+      <p className="text-lg sm:text-[22px]" style={{ fontWeight: 700, color: valueColor ?? TEXT, lineHeight: 1.2 }}>{value}</p>
       {sub && <p style={{ fontSize: 11, color: MUTED }}>{sub}</p>}
     </div>
   );
@@ -62,16 +62,16 @@ export function BreakdownRow({ name, pnl, trades, winRate, rr, barPct }: {
     <div className="rounded-xl flex items-center gap-4 p-3 sm:p-5"
       style={{ background: SURF, borderLeft: `4px solid ${pnlColor(pnl)}`, borderRadius: 12 }}>
       <div className="flex-1 min-w-0 flex flex-col gap-2">
-        <div className="flex items-center justify-between">
-          <span style={{ fontSize: 14, fontWeight: 700, color: TEXT }}>{name}</span>
-          <span style={{ fontSize: 11, color: MUTED }}>{trades} עסקאות</span>
+        <div className="flex items-center justify-between gap-2">
+          <span className="truncate" style={{ fontSize: 14, fontWeight: 700, color: TEXT }}>{name}</span>
+          <span className="shrink-0" style={{ fontSize: 11, color: MUTED }}>{trades} עסקאות</span>
         </div>
         <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: TRACK }}>
           <div className="h-full rounded-full" style={{ width: `${barPct}%`, background: pnlColor(pnl) }} />
         </div>
       </div>
       <div className="flex flex-col items-end shrink-0 gap-1">
-        <span style={{ fontSize: 22, fontWeight: 700, color: TEXT }}>{fmt(pnl)}</span>
+        <span className="text-lg sm:text-[22px]" style={{ fontWeight: 700, color: TEXT }}>{fmt(pnl)}</span>
         <div className="flex gap-2" style={{ fontSize: 11, color: MUTED }}>
           {winRate !== null && <span>{winRate}%</span>}
           {rr !== undefined && <span>R:R {rr.toFixed(1)}</span>}
