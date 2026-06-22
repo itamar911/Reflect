@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import Card from '@/components/ui/Card';
 import AlertsPanel from '@/components/settings/AlertsPanel';
 import type { AlertSettingsData } from '@/components/settings/AlertsPanel';
+import { Plug } from 'lucide-react';
 
 export const metadata = { title: 'הגדרות — Reflect' };
 
@@ -185,6 +186,35 @@ export default async function SettingsPage() {
         <p className="text-xs text-tg-muted text-center px-2">
           אינטגרציה עתידית: Binance · Interactive Brokers · eToro
         </p>
+      </div>
+
+      {/* Integrations */}
+      <div className="flex flex-col gap-3">
+        <h2 className="text-base font-bold text-tg-text">אינטגרציות</h2>
+
+        <Card className="opacity-75">
+          <div className="flex items-start gap-3">
+            <Plug size={20} style={{ color: '#00d2d2' }} className="shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-sm font-bold text-tg-text">חיבור ברוקר בזמן אמת</h3>
+                <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: 'rgba(0,210,210,0.12)', color: '#00d2d2' }}>
+                  זמין בקרוב למנויי Pro
+                </span>
+              </div>
+              <p className="text-xs text-tg-muted mt-1.5">
+                העסקאות, הפוזיציות והביצועים שלך יסונכרנו באופן אוטומטי ישירות מהברוקר לאפליקציה.
+              </p>
+              <button
+                disabled
+                className="mt-3 w-full py-2.5 rounded-xl text-sm font-semibold cursor-not-allowed"
+                style={{ background: 'var(--color-tg-surface-2)', color: 'var(--color-tg-muted)' }}
+              >
+                חבר ברוקר
+              </button>
+            </div>
+          </div>
+        </Card>
       </div>
     </div>
   );
