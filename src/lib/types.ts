@@ -1,4 +1,4 @@
-﻿export type TradingType = 'day' | 'swing' | 'crypto' | 'futures';
+﻿export type TradingType = 'scalping' | 'day' | 'swing' | 'position' | 'crypto' | 'futures';
 export type ExperienceLevel = 'beginner' | 'intermediate' | 'advanced';
 export type Market = 'stocks' | 'crypto' | 'forex' | 'futures';
 export type SubscriptionTier = 'free' | 'basic' | 'pro';

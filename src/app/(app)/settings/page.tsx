@@ -238,7 +238,9 @@ function PlanFeature({ text, disabled, pro }: { text: string; disabled?: boolean
 }
 
 function tradingTypeLabel(v?: string) {
-  const map: Record<string, string> = { day: 'Day Trading', swing: 'Swing Trading', crypto: 'Crypto Trading' };
+  const map: Record<string, string> = {
+    scalping: 'Scalping', day: 'Day Trading', swing: 'Swing Trading', position: 'Position Trading', crypto: 'Crypto Trading',
+  };
   return v ? (map[v] ?? v) : '—';
 }
 function marketLabel(v?: string) {

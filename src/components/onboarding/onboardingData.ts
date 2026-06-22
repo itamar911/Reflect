@@ -1,5 +1,15 @@
+import type { TradingType } from '@/lib/types';
+
 export type ChallengeId = 'revenge' | 'early_exit' | 'overtrading' | 'rule_breaking' | 'fear_entry';
 export type AfterLossId = 'immediate_revenge' | 'stop_for_day' | 'no_change' | 'lose_confidence';
+
+export const TRADING_STYLE_OPTIONS: { id: TradingType; label: string; description: string }[] = [
+  { id: 'scalping', label: 'Scalping', description: 'עסקאות מהירות של שניות עד דקות' },
+  { id: 'day', label: 'Day Trading', description: 'פתיחה וסגירה של עסקאות ביום אחד' },
+  { id: 'swing', label: 'Swing Trading', description: 'החזקת עסקאות מספר ימים עד שבועות' },
+  { id: 'position', label: 'Position Trading', description: 'החזקת עסקאות לאורך שבועות עד חודשים' },
+  { id: 'crypto', label: 'Crypto Trading', description: 'מסחר בקריפטו — סביב השעון' },
+];
 
 export const CHALLENGE_OPTIONS: { id: ChallengeId; label: string }[] = [
   { id: 'revenge', label: 'Revenge Trading אחרי הפסד' },

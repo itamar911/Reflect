@@ -2,14 +2,17 @@
 
 import { useState, type ReactNode } from 'react';
 import {
-  Zap, Waves, Leaf, TrendingUp, Target, Landmark, RefreshCw, Coins,
+  Zap, Waves, Leaf, TrendingUp, Target, Landmark, RefreshCw, Coins, Clock, Mountain,
   Flame, TrendingDown, Repeat, ShieldOff, Frown, Pause, Minus,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import type { TradingType, ExperienceLevel, Market } from '@/lib/types';
-import { CHALLENGE_OPTIONS, AFTER_LOSS_OPTIONS, type ChallengeId, type AfterLossId } from './onboardingData';
+import {
+  CHALLENGE_OPTIONS, AFTER_LOSS_OPTIONS, TRADING_STYLE_OPTIONS,
+  type ChallengeId, type AfterLossId,
+} from './onboardingData';
 import TraderIdentityReveal from './TraderIdentityReveal';
 
 interface WizardData {
@@ -25,7 +28,10 @@ interface WizardData {
 
 const STEPS = 8;
 
-const TRADING_LABELS: Record<TradingType, string> = { day: 'Day Trading', swing: 'Swing Trading', crypto: 'Crypto Trading', futures: 'חוזים עתידיים' };
+const TRADING_LABELS: Record<TradingType, string> = {
+  scalping: 'Scalping', day: 'Day Trading', swing: 'Swing Trading', position: 'Position Trading',
+  crypto: 'Crypto Trading', futures: 'חוזים עתידיים',
+};
 const MARKET_LABELS: Record<Market, string> = { stocks: 'מניות', crypto: 'קריפטו', forex: 'פורקס', futures: 'חוזים עתידיים' };
 const EXPERIENCE_LABELS: Record<ExperienceLevel, string> = { beginner: 'מתחיל', intermediate: 'בינוני', advanced: 'מתקדם' };
 
@@ -236,14 +242,23 @@ function NameStep({ value, onChange }: { value: string; onChange: (v: string) =>
 }
 
 function Step1({ value, onChange }: { value: TradingType; onChange: (v: TradingType) => void }) {
+  const icons: Record<TradingType, ReactNode> = {
+    scalping: <Zap size={24} />,
+    day: <Clock size={24} />,
+    swing: <Waves size={24} />,
+    position: <Mountain size={24} />,
+    crypto: <Coins size={24} />,
+    futures: <RefreshCw size={24} />,
+  };
   return (
     <div>
       <h2 className="text-lg font-semibold text-tg-text mb-1">איך אתה סוחר?</h2>
       <p className="text-sm text-tg-text-2 mb-4">נתאים את Reflekt לסגנון המסחר שלך</p>
       <div className="flex flex-col gap-3">
-        <OptionButton active={value === 'day'} onClick={() => onChange('day')} icon={<Zap size={24} />} label="Day Trading" description="פתיחה וסגירה של עסקאות ביום אחד" />
-        <OptionButton active={value === 'swing'} onClick={() => onChange('swing')} icon={<Waves size={24} />} label="Swing Trading" description="החזקת עסקאות מספר ימים עד שבועות" />
-        <OptionButton active={value === 'crypto'} onClick={() => onChange('crypto')} icon={<Coins size={24} />} label="Crypto Trading" description="מסחר בקריפטו — סביב השעון" />
+        {TRADING_STYLE_OPTIONS.map((opt) => (
+          <OptionButton key={opt.id} active={value === opt.id} onClick={() => onChange(opt.id)}
+            icon={icons[opt.id]} label={opt.label} description={opt.description} />
+        ))}
       </div>
     </div>
   );
