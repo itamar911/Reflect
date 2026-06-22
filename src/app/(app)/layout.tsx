@@ -10,12 +10,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('onboarding_completed, display_name, subscription_tier')
+    .select('onboarding_completed, display_name')
     .eq('id', user.id)
     .single();
 
-  const isPro = profile?.subscription_tier === 'pro';
-  if (profile && !profile.onboarding_completed && !isPro) redirect('/onboarding');
+  if (profile && !profile.onboarding_completed) redirect('/onboarding');
 
   return (
     <AppShell userId={user.id} displayName={profile?.display_name ?? user.email ?? ''}>

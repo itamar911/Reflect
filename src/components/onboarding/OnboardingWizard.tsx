@@ -5,9 +5,11 @@ import { useRouter } from 'next/navigation';
 import { Zap, Waves, Leaf, TrendingUp, Target, Landmark, RefreshCw, Coins } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
+import Input from '@/components/ui/Input';
 import type { TradingType, ExperienceLevel, Market } from '@/lib/types';
 
 interface WizardData {
+  display_name: string;
   trading_type: TradingType;
   experience_level: ExperienceLevel;
   default_market: Market;
@@ -15,13 +17,14 @@ interface WizardData {
   max_daily_trades: number;
 }
 
-const STEPS = 5;
+const STEPS = 6;
 
-export default function OnboardingWizard({ userId }: { userId: string }) {
+export default function OnboardingWizard({ userId, initialDisplayName = '' }: { userId: string; initialDisplayName?: string }) {
   const router = useRouter();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<WizardData>({
+    display_name: initialDisplayName,
     trading_type: 'day',
     experience_level: 'beginner',
     default_market: 'stocks',
@@ -37,6 +40,7 @@ export default function OnboardingWizard({ userId }: { userId: string }) {
     const supabase = createClient();
 
     await supabase.from('profiles').update({
+      display_name: data.display_name.trim(),
       trading_type: data.trading_type,
       experience_level: data.experience_level,
       default_market: data.default_market,
@@ -86,24 +90,30 @@ export default function OnboardingWizard({ userId }: { userId: string }) {
           style={{ background: 'var(--color-tg-surface)' }}>
 
           {step === 1 && (
+            <NameStep
+              value={data.display_name}
+              onChange={(v) => setData({ ...data, display_name: v })}
+            />
+          )}
+          {step === 2 && (
             <Step1
               value={data.trading_type}
               onChange={(v) => setData({ ...data, trading_type: v })}
             />
           )}
-          {step === 2 && (
+          {step === 3 && (
             <Step2
               value={data.experience_level}
               onChange={(v) => setData({ ...data, experience_level: v })}
             />
           )}
-          {step === 3 && (
+          {step === 4 && (
             <Step3
               value={data.default_market}
               onChange={(v) => setData({ ...data, default_market: v })}
             />
           )}
-          {step === 4 && (
+          {step === 5 && (
             <Step4
               rrRatio={data.min_rr_ratio}
               maxTrades={data.max_daily_trades}
@@ -111,7 +121,7 @@ export default function OnboardingWizard({ userId }: { userId: string }) {
               onTrades={(v) => setData({ ...data, max_daily_trades: v })}
             />
           )}
-          {step === 5 && <Step5 data={data} />}
+          {step === 6 && <Step5 data={data} />}
         </div>
 
         {/* Navigation */}
@@ -122,7 +132,7 @@ export default function OnboardingWizard({ userId }: { userId: string }) {
             </Button>
           )}
           {step < STEPS ? (
-            <Button onClick={next} className="flex-1">
+            <Button onClick={next} className="flex-1" disabled={step === 1 && data.display_name.trim() === ''}>
               המשך
             </Button>
           ) : (
@@ -164,6 +174,24 @@ function OptionButton({
         <div className="text-xs text-tg-text-2 mt-0.5">{description}</div>
       </div>
     </button>
+  );
+}
+
+function NameStep({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div>
+      <h2 className="text-lg font-semibold text-tg-text mb-1">מה השם שלך?</h2>
+      <p className="text-sm text-tg-text-2 mb-4">כך נכיר אותך באפליקציה</p>
+      <Input
+        label="שם"
+        type="text"
+        placeholder="ישראל ישראלי"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        autoFocus
+        required
+      />
+    </div>
   );
 }
 
