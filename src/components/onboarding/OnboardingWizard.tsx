@@ -23,7 +23,7 @@ interface WizardData {
   default_market: Market[];
   min_rr_ratio: number;
   max_daily_trades: number;
-  biggest_challenge: ChallengeId;
+  biggest_challenge: ChallengeId[];
   after_loss_behavior: AfterLossId;
 }
 
@@ -50,7 +50,7 @@ export default function OnboardingWizard({ userId, initialDisplayName = '' }: { 
     default_market: ['stocks'],
     min_rr_ratio: 2,
     max_daily_trades: 5,
-    biggest_challenge: 'revenge',
+    biggest_challenge: ['revenge'],
     after_loss_behavior: 'immediate_revenge',
   });
 
@@ -172,7 +172,12 @@ export default function OnboardingWizard({ userId, initialDisplayName = '' }: { 
           {step === 6 && (
             <Step6
               value={data.biggest_challenge}
-              onChange={(v) => setData({ ...data, biggest_challenge: v })}
+              onToggle={(v) => setData({
+                ...data,
+                biggest_challenge: data.biggest_challenge.includes(v)
+                  ? data.biggest_challenge.filter((c) => c !== v)
+                  : [...data.biggest_challenge, v],
+              })}
             />
           )}
           {step === 7 && (
@@ -196,7 +201,8 @@ export default function OnboardingWizard({ userId, initialDisplayName = '' }: { 
               disabled={
                 (step === 1 && data.display_name.trim() === '') ||
                 (step === 2 && data.trading_type.length === 0) ||
-                (step === 4 && data.default_market.length === 0)
+                (step === 4 && data.default_market.length === 0) ||
+                (step === 6 && data.biggest_challenge.length === 0)
               }>
               המשך
             </Button>
@@ -369,7 +375,7 @@ function Step4({
   );
 }
 
-function Step6({ value, onChange }: { value: ChallengeId; onChange: (v: ChallengeId) => void }) {
+function Step6({ value, onToggle }: { value: ChallengeId[]; onToggle: (v: ChallengeId) => void }) {
   const icons: Record<ChallengeId, ReactNode> = {
     revenge: <Flame size={24} />,
     early_exit: <TrendingDown size={24} />,
@@ -380,10 +386,10 @@ function Step6({ value, onChange }: { value: ChallengeId; onChange: (v: Challeng
   return (
     <div>
       <h2 className="text-lg font-semibold text-tg-text mb-1">מה האתגר הכי גדול שלך?</h2>
-      <p className="text-sm text-tg-text-2 mb-4">נתמקד בדיוק בזה</p>
+      <p className="text-sm text-tg-text-2 mb-4">אפשר לבחור כמה אופציות — נתמקד בדיוק בזה</p>
       <div className="flex flex-col gap-3">
         {CHALLENGE_OPTIONS.map((opt) => (
-          <OptionButton key={opt.id} active={value === opt.id} onClick={() => onChange(opt.id)}
+          <OptionButton key={opt.id} active={value.includes(opt.id)} onClick={() => onToggle(opt.id)}
             icon={icons[opt.id]} label={opt.label} />
         ))}
       </div>
@@ -428,7 +434,9 @@ function Step5({ data }: { data: WizardData }) {
           ['שוק עיקרי', data.default_market.map((m) => MARKET_LABELS[m]).join(', ')],
           ['R:R מינימלי', `1:${data.min_rr_ratio}`],
           ['מקסימום עסקאות/יום', `${data.max_daily_trades}`],
-          ['האתגר הכי גדול', CHALLENGE_OPTIONS.find((o) => o.id === data.biggest_challenge)?.label ?? ''],
+          ['האתגר הכי גדול', data.biggest_challenge
+            .map((id) => CHALLENGE_OPTIONS.find((o) => o.id === id)?.label ?? id)
+            .join(', ')],
           ['אחרי הפסד', AFTER_LOSS_OPTIONS.find((o) => o.id === data.after_loss_behavior)?.label ?? ''],
         ].map(([label, value]) => (
           <div key={label} className="flex justify-between items-center py-2 border-b border-tg-border last:border-0">

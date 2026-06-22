@@ -20,7 +20,7 @@ interface RevealProps {
   marketLabel: string;
   minRrRatio: number;
   maxDailyTrades: number;
-  biggestChallenge: ChallengeId;
+  biggestChallenge: ChallengeId[];
   afterLossBehavior: AfterLossId;
 }
 
@@ -48,7 +48,9 @@ export default function TraderIdentityReveal({
             defaultMarket: marketLabel,
             minRrRatio,
             maxDailyTrades,
-            biggestChallenge: CHALLENGE_OPTIONS.find((o) => o.id === biggestChallenge)?.label ?? biggestChallenge,
+            biggestChallenge: biggestChallenge
+              .map((id) => CHALLENGE_OPTIONS.find((o) => o.id === id)?.label ?? id)
+              .join(', '),
             afterLossBehavior: AFTER_LOSS_OPTIONS.find((o) => o.id === afterLossBehavior)?.label ?? afterLossBehavior,
           }),
         });
@@ -57,7 +59,7 @@ export default function TraderIdentityReveal({
         result = json.analysis as TraderAnalysis;
       } catch (err) {
         console.error('[onboarding] AI analysis failed, using fallback', err);
-        result = FALLBACK_ANALYSIS[biggestChallenge];
+        result = FALLBACK_ANALYSIS[biggestChallenge[0] ?? 'revenge'];
       }
 
       const elapsed = Date.now() - startedAt;
