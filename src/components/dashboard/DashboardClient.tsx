@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect, useCallback, useSyncExternalStore } from 'react';
-import { Sparkles, TrendingUp, TrendingDown, RefreshCw, CheckCircle, AlertCircle, AlertTriangle, Heart, Target, ChevronRight, ChevronLeft, Quote } from 'lucide-react';
+import { Sparkles, TrendingUp, TrendingDown, RefreshCw, CheckCircle, AlertCircle, AlertTriangle, Heart, Target, ChevronRight, ChevronLeft, Quote, Clock } from 'lucide-react';
 import { formatPnlIls, formatPnlPoints } from '@/lib/utils';
 import { createClient } from '@/lib/supabase/client';
 import { DASH_TRADE_SELECT, mapDashTrade } from '@/lib/dashboard/trades';
@@ -1531,6 +1531,13 @@ export default function DashboardClient({
           </div>
         )}
       </Card>
+
+      {/* ── Coming soon banner ───────────────────────────────────────────── */}
+      <div className="flex items-center justify-center gap-2 text-sm py-4"
+        style={{ borderTop: `1px solid ${BORDER}`, color: TEXT2 }}>
+        <Clock size={14} />
+        <span>בקרוב - חיבור ברוקר בזמן אמת</span>
+      </div>
 
       {/* ── Trade detail panel ────────────────────────────────────────────── */}
       {selTrade && (
