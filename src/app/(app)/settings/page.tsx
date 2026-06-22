@@ -244,9 +244,13 @@ function tradingTypeLabel(v?: string[] | string | null) {
   const values = Array.isArray(v) ? v : v ? [v] : [];
   return values.length > 0 ? values.map((t) => map[t] ?? t).join(', ') : '—';
 }
-function marketLabel(v?: string) {
-  const map: Record<string, string> = { stocks: 'מניות', crypto: 'קריפטו', forex: 'פורקס' };
-  return v ? (map[v] ?? v) : '—';
+function marketLabel(v?: string[] | string | null) {
+  const map: Record<string, string> = {
+    stocks: 'מניות', crypto: 'קריפטו', forex: 'פורקס', options: 'אופציות',
+    futures: 'חוזים עתידיים', etf: 'ETFs', commodities: 'סחורות',
+  };
+  const values = Array.isArray(v) ? v : v ? [v] : [];
+  return values.length > 0 ? values.map((m) => map[m] ?? m).join(', ') : '—';
 }
 function experienceLabel(v?: string) {
   const map: Record<string, string> = { beginner: 'מתחיל', intermediate: 'בינוני', advanced: 'מתקדם' };

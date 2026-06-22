@@ -4,13 +4,14 @@ import { useState, type ReactNode } from 'react';
 import {
   Zap, Waves, Leaf, TrendingUp, Target, Landmark, RefreshCw, Coins, Clock, Mountain,
   Flame, TrendingDown, Repeat, ShieldOff, Frown, Pause, Minus,
+  Shuffle, CalendarClock, Layers, Package,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import type { TradingType, ExperienceLevel, Market } from '@/lib/types';
 import {
-  CHALLENGE_OPTIONS, AFTER_LOSS_OPTIONS, TRADING_STYLE_OPTIONS,
+  CHALLENGE_OPTIONS, AFTER_LOSS_OPTIONS, TRADING_STYLE_OPTIONS, MARKET_OPTIONS,
   type ChallengeId, type AfterLossId,
 } from './onboardingData';
 import TraderIdentityReveal from './TraderIdentityReveal';
@@ -19,7 +20,7 @@ interface WizardData {
   display_name: string;
   trading_type: TradingType[];
   experience_level: ExperienceLevel;
-  default_market: Market;
+  default_market: Market[];
   min_rr_ratio: number;
   max_daily_trades: number;
   biggest_challenge: ChallengeId;
@@ -32,7 +33,10 @@ const TRADING_LABELS: Record<TradingType, string> = {
   scalping: 'Scalping', day: 'Day Trading', swing: 'Swing Trading', position: 'Position Trading',
   crypto: 'Crypto Trading', futures: 'חוזים עתידיים',
 };
-const MARKET_LABELS: Record<Market, string> = { stocks: 'מניות', crypto: 'קריפטו', forex: 'פורקס', futures: 'חוזים עתידיים' };
+const MARKET_LABELS: Record<Market, string> = {
+  stocks: 'מניות', crypto: 'קריפטו', forex: 'פורקס', options: 'אופציות',
+  futures: 'חוזים עתידיים', etf: 'ETFs', commodities: 'סחורות',
+};
 const EXPERIENCE_LABELS: Record<ExperienceLevel, string> = { beginner: 'מתחיל', intermediate: 'בינוני', advanced: 'מתקדם' };
 
 export default function OnboardingWizard({ userId, initialDisplayName = '' }: { userId: string; initialDisplayName?: string }) {
@@ -43,7 +47,7 @@ export default function OnboardingWizard({ userId, initialDisplayName = '' }: { 
     display_name: initialDisplayName,
     trading_type: ['day'],
     experience_level: 'beginner',
-    default_market: 'stocks',
+    default_market: ['stocks'],
     min_rr_ratio: 2,
     max_daily_trades: 5,
     biggest_challenge: 'revenge',
@@ -82,7 +86,7 @@ export default function OnboardingWizard({ userId, initialDisplayName = '' }: { 
         displayName={data.display_name.trim()}
         tradingTypeLabel={data.trading_type.map((t) => TRADING_LABELS[t]).join(', ')}
         experienceLabel={EXPERIENCE_LABELS[data.experience_level]}
-        marketLabel={MARKET_LABELS[data.default_market]}
+        marketLabel={data.default_market.map((m) => MARKET_LABELS[m]).join(', ')}
         minRrRatio={data.min_rr_ratio}
         maxDailyTrades={data.max_daily_trades}
         biggestChallenge={data.biggest_challenge}
@@ -149,7 +153,12 @@ export default function OnboardingWizard({ userId, initialDisplayName = '' }: { 
           {step === 4 && (
             <Step3
               value={data.default_market}
-              onChange={(v) => setData({ ...data, default_market: v })}
+              onToggle={(v) => setData({
+                ...data,
+                default_market: data.default_market.includes(v)
+                  ? data.default_market.filter((m) => m !== v)
+                  : [...data.default_market, v],
+              })}
             />
           )}
           {step === 5 && (
@@ -184,7 +193,11 @@ export default function OnboardingWizard({ userId, initialDisplayName = '' }: { 
           )}
           {step < STEPS ? (
             <Button onClick={next} className="flex-1"
-              disabled={(step === 1 && data.display_name.trim() === '') || (step === 2 && data.trading_type.length === 0)}>
+              disabled={
+                (step === 1 && data.display_name.trim() === '') ||
+                (step === 2 && data.trading_type.length === 0) ||
+                (step === 4 && data.default_market.length === 0)
+              }>
               המשך
             </Button>
           ) : (
@@ -284,15 +297,25 @@ function Step2({ value, onChange }: { value: ExperienceLevel; onChange: (v: Expe
   );
 }
 
-function Step3({ value, onChange }: { value: Market; onChange: (v: Market) => void }) {
+function Step3({ value, onToggle }: { value: Market[]; onToggle: (v: Market) => void }) {
+  const icons: Record<Market, ReactNode> = {
+    stocks: <Landmark size={24} />,
+    crypto: '₿',
+    forex: <RefreshCw size={24} />,
+    options: <Shuffle size={24} />,
+    futures: <CalendarClock size={24} />,
+    etf: <Layers size={24} />,
+    commodities: <Package size={24} />,
+  };
   return (
     <div>
       <h2 className="text-lg font-semibold text-tg-text mb-1">באיזה שוק אתה פועל בעיקר?</h2>
-      <p className="text-sm text-tg-text-2 mb-4">ניתן לשנות בהגדרות מאוחר יותר</p>
+      <p className="text-sm text-tg-text-2 mb-4">אפשר לבחור כמה אופציות — ניתן לשנות בהגדרות מאוחר יותר</p>
       <div className="flex flex-col gap-3">
-        <OptionButton active={value === 'stocks'} onClick={() => onChange('stocks')} icon={<Landmark size={24} />} label="מניות" description="NYSE, NASDAQ, ת&quot;א" />
-        <OptionButton active={value === 'crypto'} onClick={() => onChange('crypto')} icon="₿" label="קריפטו" description="BTC, ETH ועוד" />
-        <OptionButton active={value === 'forex'} onClick={() => onChange('forex')} icon={<RefreshCw size={24} />} label="פורקס" description="זוגות מטבעות" />
+        {MARKET_OPTIONS.map((opt) => (
+          <OptionButton key={opt.id} active={value.includes(opt.id)} onClick={() => onToggle(opt.id)}
+            icon={icons[opt.id]} label={opt.label} description={opt.description} />
+        ))}
       </div>
     </div>
   );
@@ -402,7 +425,7 @@ function Step5({ data }: { data: WizardData }) {
           ['שם', data.display_name],
           ['סגנון מסחר', data.trading_type.map((t) => TRADING_LABELS[t]).join(', ')],
           ['רמת ניסיון', EXPERIENCE_LABELS[data.experience_level]],
-          ['שוק עיקרי', MARKET_LABELS[data.default_market]],
+          ['שוק עיקרי', data.default_market.map((m) => MARKET_LABELS[m]).join(', ')],
           ['R:R מינימלי', `1:${data.min_rr_ratio}`],
           ['מקסימום עסקאות/יום', `${data.max_daily_trades}`],
           ['האתגר הכי גדול', CHALLENGE_OPTIONS.find((o) => o.id === data.biggest_challenge)?.label ?? ''],

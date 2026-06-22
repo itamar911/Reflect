@@ -1,4 +1,4 @@
-import type { TradingType } from '@/lib/types';
+import type { TradingType, Market } from '@/lib/types';
 
 export type ChallengeId = 'revenge' | 'early_exit' | 'overtrading' | 'rule_breaking' | 'fear_entry';
 export type AfterLossId = 'immediate_revenge' | 'stop_for_day' | 'no_change' | 'lose_confidence';
@@ -9,6 +9,16 @@ export const TRADING_STYLE_OPTIONS: { id: TradingType; label: string; descriptio
   { id: 'swing', label: 'Swing Trading', description: 'החזקת עסקאות מספר ימים עד שבועות' },
   { id: 'position', label: 'Position Trading', description: 'החזקת עסקאות לאורך שבועות עד חודשים' },
   { id: 'crypto', label: 'Crypto Trading', description: 'מסחר בקריפטו — סביב השעון' },
+];
+
+export const MARKET_OPTIONS: { id: Market; label: string; description: string }[] = [
+  { id: 'stocks', label: 'מניות', description: 'NYSE, NASDAQ, ת"א' },
+  { id: 'crypto', label: 'קריפטו', description: 'BTC, ETH ועוד' },
+  { id: 'forex', label: 'פורקס', description: 'זוגות מטבעות' },
+  { id: 'options', label: 'אופציות', description: 'Options' },
+  { id: 'futures', label: 'חוזים עתידיים', description: 'Futures' },
+  { id: 'etf', label: 'ETFs', description: '' },
+  { id: 'commodities', label: 'סחורות', description: 'זהב, נפט' },
 ];
 
 export const CHALLENGE_OPTIONS: { id: ChallengeId; label: string }[] = [

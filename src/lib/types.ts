@@ -1,6 +1,6 @@
 ﻿export type TradingType = 'scalping' | 'day' | 'swing' | 'position' | 'crypto' | 'futures';
 export type ExperienceLevel = 'beginner' | 'intermediate' | 'advanced';
-export type Market = 'stocks' | 'crypto' | 'forex' | 'futures';
+export type Market = 'stocks' | 'crypto' | 'forex' | 'options' | 'futures' | 'etf' | 'commodities';
 export type SubscriptionTier = 'free' | 'basic' | 'pro';
 export type TradeStrategy = 'Breakout' | 'Trend Follow' | 'Reversal' | 'Range' | 'Futures' | 'Custom';
 export type Enforcement = 'reminder' | 'warning' | 'block';
@@ -16,7 +16,7 @@ export interface Profile {
   display_name: string | null;
   trading_type: TradingType[];
   experience_level: ExperienceLevel;
-  default_market: Market | Market[];
+  default_market: Market[];
   custom_strategies: string[] | null;
   trader_identity: TraderIdentity | null;
   trader_type: string | null;
