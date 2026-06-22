@@ -1,12 +1,16 @@
 'use client';
 
 import { useState, type ReactNode } from 'react';
-import { useRouter } from 'next/navigation';
-import { Zap, Waves, Leaf, TrendingUp, Target, Landmark, RefreshCw, Coins } from 'lucide-react';
+import {
+  Zap, Waves, Leaf, TrendingUp, Target, Landmark, RefreshCw, Coins,
+  Flame, TrendingDown, Repeat, ShieldOff, Frown, Pause, Minus,
+} from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import type { TradingType, ExperienceLevel, Market } from '@/lib/types';
+import { CHALLENGE_OPTIONS, AFTER_LOSS_OPTIONS, type ChallengeId, type AfterLossId } from './onboardingData';
+import TraderIdentityReveal from './TraderIdentityReveal';
 
 interface WizardData {
   display_name: string;
@@ -15,14 +19,20 @@ interface WizardData {
   default_market: Market;
   min_rr_ratio: number;
   max_daily_trades: number;
+  biggest_challenge: ChallengeId;
+  after_loss_behavior: AfterLossId;
 }
 
-const STEPS = 6;
+const STEPS = 8;
+
+const TRADING_LABELS: Record<TradingType, string> = { day: 'Day Trading', swing: 'Swing Trading', crypto: 'Crypto Trading', futures: 'חוזים עתידיים' };
+const MARKET_LABELS: Record<Market, string> = { stocks: 'מניות', crypto: 'קריפטו', forex: 'פורקס', futures: 'חוזים עתידיים' };
+const EXPERIENCE_LABELS: Record<ExperienceLevel, string> = { beginner: 'מתחיל', intermediate: 'בינוני', advanced: 'מתקדם' };
 
 export default function OnboardingWizard({ userId, initialDisplayName = '' }: { userId: string; initialDisplayName?: string }) {
-  const router = useRouter();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [phase, setPhase] = useState<'wizard' | 'reveal'>('wizard');
   const [data, setData] = useState<WizardData>({
     display_name: initialDisplayName,
     trading_type: 'day',
@@ -30,6 +40,8 @@ export default function OnboardingWizard({ userId, initialDisplayName = '' }: { 
     default_market: 'stocks',
     min_rr_ratio: 2,
     max_daily_trades: 5,
+    biggest_challenge: 'revenge',
+    after_loss_behavior: 'immediate_revenge',
   });
 
   function next() { setStep((s) => Math.min(s + 1, STEPS)); }
@@ -54,7 +66,23 @@ export default function OnboardingWizard({ userId, initialDisplayName = '' }: { 
       updated_at: new Date().toISOString(),
     }).eq('user_id', userId);
 
-    router.push('/dashboard');
+    setPhase('reveal');
+  }
+
+  if (phase === 'reveal') {
+    return (
+      <TraderIdentityReveal
+        userId={userId}
+        displayName={data.display_name.trim()}
+        tradingTypeLabel={TRADING_LABELS[data.trading_type]}
+        experienceLabel={EXPERIENCE_LABELS[data.experience_level]}
+        marketLabel={MARKET_LABELS[data.default_market]}
+        minRrRatio={data.min_rr_ratio}
+        maxDailyTrades={data.max_daily_trades}
+        biggestChallenge={data.biggest_challenge}
+        afterLossBehavior={data.after_loss_behavior}
+      />
+    );
   }
 
   const progress = (step / STEPS) * 100;
@@ -121,7 +149,19 @@ export default function OnboardingWizard({ userId, initialDisplayName = '' }: { 
               onTrades={(v) => setData({ ...data, max_daily_trades: v })}
             />
           )}
-          {step === 6 && <Step5 data={data} />}
+          {step === 6 && (
+            <Step6
+              value={data.biggest_challenge}
+              onChange={(v) => setData({ ...data, biggest_challenge: v })}
+            />
+          )}
+          {step === 7 && (
+            <Step7
+              value={data.after_loss_behavior}
+              onChange={(v) => setData({ ...data, after_loss_behavior: v })}
+            />
+          )}
+          {step === 8 && <Step5 data={data} />}
         </div>
 
         {/* Navigation */}
@@ -157,7 +197,7 @@ function OptionButton({
   onClick: () => void;
   icon: ReactNode;
   label: string;
-  description: string;
+  description?: string;
 }) {
   return (
     <button
@@ -171,7 +211,7 @@ function OptionButton({
       <span className="text-2xl">{icon}</span>
       <div>
         <div className="text-sm font-semibold text-tg-text">{label}</div>
-        <div className="text-xs text-tg-text-2 mt-0.5">{description}</div>
+        {description && <div className="text-xs text-tg-text-2 mt-0.5">{description}</div>}
       </div>
     </button>
   );
@@ -285,11 +325,50 @@ function Step4({
   );
 }
 
-function Step5({ data }: { data: WizardData }) {
-  const tradingLabels: Record<TradingType, string> = { day: 'Day Trading', swing: 'Swing Trading', crypto: 'Crypto Trading', futures: 'חוזים עתידיים' };
-  const marketLabels: Record<Market, string> = { stocks: 'מניות', crypto: 'קריפטו', forex: 'פורקס', futures: 'חוזים עתידיים' };
-  const levelLabels: Record<ExperienceLevel, string> = { beginner: 'מתחיל', intermediate: 'בינוני', advanced: 'מתקדם' };
+function Step6({ value, onChange }: { value: ChallengeId; onChange: (v: ChallengeId) => void }) {
+  const icons: Record<ChallengeId, ReactNode> = {
+    revenge: <Flame size={24} />,
+    early_exit: <TrendingDown size={24} />,
+    overtrading: <Repeat size={24} />,
+    rule_breaking: <ShieldOff size={24} />,
+    fear_entry: <Frown size={24} />,
+  };
+  return (
+    <div>
+      <h2 className="text-lg font-semibold text-tg-text mb-1">מה האתגר הכי גדול שלך?</h2>
+      <p className="text-sm text-tg-text-2 mb-4">נתמקד בדיוק בזה</p>
+      <div className="flex flex-col gap-3">
+        {CHALLENGE_OPTIONS.map((opt) => (
+          <OptionButton key={opt.id} active={value === opt.id} onClick={() => onChange(opt.id)}
+            icon={icons[opt.id]} label={opt.label} />
+        ))}
+      </div>
+    </div>
+  );
+}
 
+function Step7({ value, onChange }: { value: AfterLossId; onChange: (v: AfterLossId) => void }) {
+  const icons: Record<AfterLossId, ReactNode> = {
+    immediate_revenge: <Zap size={24} />,
+    stop_for_day: <Pause size={24} />,
+    no_change: <Minus size={24} />,
+    lose_confidence: <Frown size={24} />,
+  };
+  return (
+    <div>
+      <h2 className="text-lg font-semibold text-tg-text mb-1">מה קורה לך אחרי הפסד?</h2>
+      <p className="text-sm text-tg-text-2 mb-4">היו אמיתיים — זה בינינו</p>
+      <div className="flex flex-col gap-3">
+        {AFTER_LOSS_OPTIONS.map((opt) => (
+          <OptionButton key={opt.id} active={value === opt.id} onClick={() => onChange(opt.id)}
+            icon={icons[opt.id]} label={opt.label} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Step5({ data }: { data: WizardData }) {
   return (
     <div>
       <div className="text-center mb-5">
@@ -299,11 +378,14 @@ function Step5({ data }: { data: WizardData }) {
       </div>
       <div className="flex flex-col gap-2">
         {[
-          ['סגנון מסחר', tradingLabels[data.trading_type]],
-          ['רמת ניסיון', levelLabels[data.experience_level]],
-          ['שוק עיקרי', marketLabels[data.default_market]],
+          ['שם', data.display_name],
+          ['סגנון מסחר', TRADING_LABELS[data.trading_type]],
+          ['רמת ניסיון', EXPERIENCE_LABELS[data.experience_level]],
+          ['שוק עיקרי', MARKET_LABELS[data.default_market]],
           ['R:R מינימלי', `1:${data.min_rr_ratio}`],
           ['מקסימום עסקאות/יום', `${data.max_daily_trades}`],
+          ['האתגר הכי גדול', CHALLENGE_OPTIONS.find((o) => o.id === data.biggest_challenge)?.label ?? ''],
+          ['אחרי הפסד', AFTER_LOSS_OPTIONS.find((o) => o.id === data.after_loss_behavior)?.label ?? ''],
         ].map(([label, value]) => (
           <div key={label} className="flex justify-between items-center py-2 border-b border-tg-border last:border-0">
             <span className="text-sm text-tg-text-2">{label}</span>

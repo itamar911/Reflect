@@ -19,6 +19,7 @@ export interface Profile {
   default_market: Market | Market[];
   custom_strategies: string[] | null;
   trader_identity: TraderIdentity | null;
+  trader_type: string | null;
   onboarding_completed: boolean;
   subscription_tier: SubscriptionTier;
   created_at: string;
