@@ -17,7 +17,7 @@ import TraderIdentityReveal from './TraderIdentityReveal';
 
 interface WizardData {
   display_name: string;
-  trading_type: TradingType;
+  trading_type: TradingType[];
   experience_level: ExperienceLevel;
   default_market: Market;
   min_rr_ratio: number;
@@ -41,7 +41,7 @@ export default function OnboardingWizard({ userId, initialDisplayName = '' }: { 
   const [phase, setPhase] = useState<'wizard' | 'reveal'>('wizard');
   const [data, setData] = useState<WizardData>({
     display_name: initialDisplayName,
-    trading_type: 'day',
+    trading_type: ['day'],
     experience_level: 'beginner',
     default_market: 'stocks',
     min_rr_ratio: 2,
@@ -80,7 +80,7 @@ export default function OnboardingWizard({ userId, initialDisplayName = '' }: { 
       <TraderIdentityReveal
         userId={userId}
         displayName={data.display_name.trim()}
-        tradingTypeLabel={TRADING_LABELS[data.trading_type]}
+        tradingTypeLabel={data.trading_type.map((t) => TRADING_LABELS[t]).join(', ')}
         experienceLabel={EXPERIENCE_LABELS[data.experience_level]}
         marketLabel={MARKET_LABELS[data.default_market]}
         minRrRatio={data.min_rr_ratio}
@@ -132,7 +132,12 @@ export default function OnboardingWizard({ userId, initialDisplayName = '' }: { 
           {step === 2 && (
             <Step1
               value={data.trading_type}
-              onChange={(v) => setData({ ...data, trading_type: v })}
+              onToggle={(v) => setData({
+                ...data,
+                trading_type: data.trading_type.includes(v)
+                  ? data.trading_type.filter((t) => t !== v)
+                  : [...data.trading_type, v],
+              })}
             />
           )}
           {step === 3 && (
@@ -178,7 +183,8 @@ export default function OnboardingWizard({ userId, initialDisplayName = '' }: { 
             </Button>
           )}
           {step < STEPS ? (
-            <Button onClick={next} className="flex-1" disabled={step === 1 && data.display_name.trim() === ''}>
+            <Button onClick={next} className="flex-1"
+              disabled={(step === 1 && data.display_name.trim() === '') || (step === 2 && data.trading_type.length === 0)}>
               המשך
             </Button>
           ) : (
@@ -241,7 +247,7 @@ function NameStep({ value, onChange }: { value: string; onChange: (v: string) =>
   );
 }
 
-function Step1({ value, onChange }: { value: TradingType; onChange: (v: TradingType) => void }) {
+function Step1({ value, onToggle }: { value: TradingType[]; onToggle: (v: TradingType) => void }) {
   const icons: Record<TradingType, ReactNode> = {
     scalping: <Zap size={24} />,
     day: <Clock size={24} />,
@@ -253,10 +259,10 @@ function Step1({ value, onChange }: { value: TradingType; onChange: (v: TradingT
   return (
     <div>
       <h2 className="text-lg font-semibold text-tg-text mb-1">איך אתה סוחר?</h2>
-      <p className="text-sm text-tg-text-2 mb-4">נתאים את Reflekt לסגנון המסחר שלך</p>
+      <p className="text-sm text-tg-text-2 mb-4">נתאים את Reflekt לסגנון המסחר שלך — אפשר לבחור כמה אופציות</p>
       <div className="flex flex-col gap-3">
         {TRADING_STYLE_OPTIONS.map((opt) => (
-          <OptionButton key={opt.id} active={value === opt.id} onClick={() => onChange(opt.id)}
+          <OptionButton key={opt.id} active={value.includes(opt.id)} onClick={() => onToggle(opt.id)}
             icon={icons[opt.id]} label={opt.label} description={opt.description} />
         ))}
       </div>
@@ -394,7 +400,7 @@ function Step5({ data }: { data: WizardData }) {
       <div className="flex flex-col gap-2">
         {[
           ['שם', data.display_name],
-          ['סגנון מסחר', TRADING_LABELS[data.trading_type]],
+          ['סגנון מסחר', data.trading_type.map((t) => TRADING_LABELS[t]).join(', ')],
           ['רמת ניסיון', EXPERIENCE_LABELS[data.experience_level]],
           ['שוק עיקרי', MARKET_LABELS[data.default_market]],
           ['R:R מינימלי', `1:${data.min_rr_ratio}`],

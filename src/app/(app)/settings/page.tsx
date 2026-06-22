@@ -237,11 +237,12 @@ function PlanFeature({ text, disabled, pro }: { text: string; disabled?: boolean
   );
 }
 
-function tradingTypeLabel(v?: string) {
+function tradingTypeLabel(v?: string[] | string | null) {
   const map: Record<string, string> = {
     scalping: 'Scalping', day: 'Day Trading', swing: 'Swing Trading', position: 'Position Trading', crypto: 'Crypto Trading',
   };
-  return v ? (map[v] ?? v) : '—';
+  const values = Array.isArray(v) ? v : v ? [v] : [];
+  return values.length > 0 ? values.map((t) => map[t] ?? t).join(', ') : '—';
 }
 function marketLabel(v?: string) {
   const map: Record<string, string> = { stocks: 'מניות', crypto: 'קריפטו', forex: 'פורקס' };

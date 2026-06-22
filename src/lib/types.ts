@@ -14,7 +14,7 @@ export interface Profile {
   id: string;
   email: string;
   display_name: string | null;
-  trading_type: TradingType | TradingType[];
+  trading_type: TradingType[];
   experience_level: ExperienceLevel;
   default_market: Market | Market[];
   custom_strategies: string[] | null;
