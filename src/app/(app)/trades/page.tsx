@@ -35,6 +35,8 @@ export default async function TradesPage() {
     closed_at:        t.closed_at        as string | null,
     plan_score:       t.plan_score       as number | null,
     quantity:         t.quantity != null ? Number(t.quantity) : null,
+    units:            t.units != null ? Number(t.units) : null,
+    direction:        (t.direction as 'long' | 'short' | null) ?? null,
     pnl_amount:       t.pnl_amount != null ? Number(t.pnl_amount) : null,
     pnl_currency:     (t.pnl_currency as string | null) ?? null,
   }));

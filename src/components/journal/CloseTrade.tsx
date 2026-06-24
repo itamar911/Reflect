@@ -4,7 +4,6 @@ import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
-import Toggle from '@/components/ui/Toggle';
 import { Bot, Target, BarChart3, ShieldCheck } from 'lucide-react';
 import { formatPnlIls, formatPnlPoints } from '@/lib/utils';
 
@@ -68,7 +67,8 @@ interface CloseTradeProps {
   emotionalState: number;
   strategy: string;
   tradeReason: string;
-  quantity: number | null;
+  direction: 'long' | 'short';
+  units: number | null;
   pnlCurrency: string | null;
   onClosed: () => void;
   onDebrief?: (result: AIDebriefResult) => void;
@@ -87,16 +87,17 @@ const EXIT_REASONS = [
 
 export default function CloseTrade({
   tradeId, entryPrice, stopLoss, takeProfit, rrRatio,
-  emotionalState, strategy, tradeReason, quantity, pnlCurrency, onClosed, onDebrief
+  emotionalState, strategy, tradeReason, direction, units, pnlCurrency, onClosed, onDebrief
 }: CloseTradeProps) {
   const [exitPrice, setExitPrice] = useState('');
   const [exitReason, setExitReason] = useState('');
-  const [notes, setNotes] = useState('');
   const [followedPlan, setFollowedPlan] = useState(true);
   const [movedSl, setMovedSl] = useState(false);
   const [exitedEarly, setExitedEarly] = useState(false);
   const [fomoEntry, setFomoEntry] = useState(false);
   const [revengeTrade, setRevengeTrade] = useState(false);
+  const [actualPnl, setActualPnl] = useState('');
+  const [actualPnlCurrency, setActualPnlCurrency] = useState<'₪' | '$'>((pnlCurrency as '₪' | '$') ?? '₪');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [debriefResult, setDebriefResult] = useState<AIDebriefResult | null>(null);
@@ -106,25 +107,34 @@ export default function CloseTrade({
   const supabase = createClient();
 
   const exit = parseFloat(exitPrice);
-  const direction: 'long' | 'short' = takeProfit >= entryPrice ? 'long' : 'short';
-  const pnlPoints = exitPrice && !isNaN(exit)
+  const hasExit = exitPrice !== '' && !isNaN(exit);
+  const pnlPoints = hasExit
     ? (direction === 'long' ? exit - entryPrice : entryPrice - exit)
     : null;
   const pnlPercent = pnlPoints !== null ? ((pnlPoints / entryPrice) * 100) : null;
-  const isWin = pnlPoints !== null ? pnlPoints > 0 : null;
+
+  const calculatedAmount = pnlPoints !== null && units != null
+    ? Math.round(pnlPoints * units * 100) / 100
+    : null;
+
+  const actualPnlNum = parseFloat(actualPnl);
+  const hasActualPnl = actualPnl.trim() !== '' && !isNaN(actualPnlNum);
+
+  const finalAmount = hasActualPnl ? actualPnlNum : calculatedAmount;
+  const finalCurrency = hasActualPnl ? actualPnlCurrency : pnlCurrency;
+  const isWin = finalAmount !== null ? finalAmount > 0 : (pnlPoints !== null ? pnlPoints > 0 : null);
 
   async function handleClose() {
     if (!exitPrice || !exitReason) { setError('מלא מחיר יציאה וסיבה'); return; }
     setLoading(true);
     setError('');
 
-    const pnlAmount = quantity != null
-      ? Math.round((direction === 'long' ? exit - entryPrice : entryPrice - exit) * quantity * 100) / 100
-      : null;
-    const pnlCurrencyValue = pnlAmount != null ? (pnlCurrency ?? '₪') : null;
+    const pnlAmount = finalAmount;
+    const pnlCurrencyValue = pnlAmount != null ? (finalCurrency ?? '₪') : null;
 
     // kept_sl / proper_size are legacy columns retained for the AI-debrief score formula;
-    // kept_sl mirrors the new "moved SL" toggle, proper_size is no longer asked so defaults to true.
+    // kept_sl mirrors the "moved SL" toggle. proper_size defaults to true since position
+    // sizing is now committed at entry-plan time via the units/risk fields.
     const keptSl = !movedSl;
     const properSize = true;
 
@@ -132,10 +142,10 @@ export default function CloseTrade({
       status: 'closed',
       exit_price: exit,
       exit_reason: exitReason,
-      post_trade_notes: notes.trim() || null,
       closed_at: new Date().toISOString(),
       pnl_amount: pnlAmount,
       pnl_currency: pnlCurrencyValue,
+      actual_pnl: hasActualPnl ? actualPnlNum : null,
       followed_plan: followedPlan,
       kept_sl: keptSl,
       proper_size: properSize,
@@ -162,7 +172,7 @@ export default function CloseTrade({
         rr_ratio: rrRatio, emotional_state: emotionalState,
         trade_reason: tradeReason,
         exit_price: exit, exit_reason: exitReason,
-        post_trade_notes: notes.trim(),
+        post_trade_notes: '',
         followed_plan: followedPlan,
         kept_sl: keptSl,
         proper_size: properSize,
@@ -175,7 +185,6 @@ export default function CloseTrade({
       };
       const fd = new FormData();
       fd.append('trade', JSON.stringify({ ...tradeData, status: 'closed', exit_price: exit }));
-      if (notes.trim()) fd.append('description', notes.trim());
       const res = await fetch('/api/ai-debrief', { method: 'POST', body: fd });
       if (res.ok) {
         const data = await res.json();
@@ -282,44 +291,72 @@ export default function CloseTrade({
         </div>
       </div>
 
-      <div className="flex flex-col gap-1">
-        <label className="text-xs text-tg-muted">מה קרה? (יופיע בניתוח AI)</label>
-        <textarea rows={2}
-          placeholder="תאר את ביצוע העסקה — הוזזת Stop? פחד? ביצעת לפי התוכנית?"
-          value={notes} onChange={(e) => setNotes(e.target.value)}
-          className="w-full px-3 py-2 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none focus:border-tg-primary resize-none"
-          style={{ background: 'var(--color-tg-surface-2)' }}
-        />
-      </div>
+      {calculatedAmount !== null && (
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-tg-muted">PnL בפועל (אופציונלי)</label>
+          <div className="flex items-center gap-2">
+            <input type="number" step="any" placeholder={calculatedAmount.toFixed(2)} value={actualPnl}
+              onChange={(e) => setActualPnl(e.target.value)}
+              className="flex-1 h-10 px-3 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary"
+              style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)' }}
+            />
+            <div className="flex rounded-lg overflow-hidden shrink-0" style={{ border: '1px solid var(--color-tg-border)' }}>
+              <button
+                onClick={() => setActualPnlCurrency('₪')}
+                className="px-2 py-1 text-[10px] font-semibold transition-all"
+                style={{
+                  background: actualPnlCurrency === '₪' ? 'var(--color-tg-primary-muted)' : 'transparent',
+                  color: actualPnlCurrency === '₪' ? 'var(--color-tg-primary)' : 'var(--color-tg-muted)',
+                }}>
+                ₪
+              </button>
+              <button
+                onClick={() => setActualPnlCurrency('$')}
+                className="px-2 py-1 text-[10px] font-semibold transition-all"
+                style={{
+                  background: actualPnlCurrency === '$' ? 'var(--color-tg-primary-muted)' : 'transparent',
+                  color: actualPnlCurrency === '$' ? 'var(--color-tg-primary)' : 'var(--color-tg-muted)',
+                }}>
+                $
+              </button>
+            </div>
+          </div>
+          <p className="text-[10px] text-tg-muted">אם שונה מהחישוב האוטומטי (עמלות, סליפג&apos;)</p>
+        </div>
+      )}
 
       <Card padding="sm" className="flex flex-col gap-0.5">
         <p className="text-xs font-semibold text-tg-text flex items-center gap-1.5 pb-1">
           <ShieldCheck size={14} /> רשימת משמעת
         </p>
-        <Toggle
-          label="פעל לפי התוכנית המקורית"
-          checked={followedPlan}
+        <DisciplineToggle
+          label="פעלתי לפי התוכנית"
+          value={followedPlan}
           onChange={setFollowedPlan}
         />
-        <Toggle
-          label="הזיז את ה-Stop Loss"
-          checked={movedSl}
+        <DisciplineToggle
+          label="הזזתי Stop Loss"
+          value={movedSl}
           onChange={setMovedSl}
+          violation
         />
-        <Toggle
-          label="יצא מוקדם"
-          checked={exitedEarly}
+        <DisciplineToggle
+          label="יצאתי מוקדם"
+          value={exitedEarly}
           onChange={setExitedEarly}
+          violation
         />
-        <Toggle
+        <DisciplineToggle
           label="כניסת FOMO"
-          checked={fomoEntry}
+          value={fomoEntry}
           onChange={setFomoEntry}
+          violation
         />
-        <Toggle
+        <DisciplineToggle
           label="Revenge Trade"
-          checked={revengeTrade}
+          value={revengeTrade}
           onChange={setRevengeTrade}
+          violation
         />
       </Card>
 
@@ -412,6 +449,35 @@ export function AIDebriefView({ result }: { result: AIDebriefResult }) {
           {result.error ?? 'לא התקבל ניתוח מפורט עבור עסקה זו — ייתכן שהשירות היה עמוס. נסה לסגור עסקה נוספת כדי לקבל ניתוח חדש.'}
         </p>
       )}
+    </div>
+  );
+}
+
+function DisciplineToggle({ label, value, onChange, violation = false }: {
+  label: string;
+  value: boolean;
+  onChange: (value: boolean) => void;
+  violation?: boolean;
+}) {
+  const trackColor = violation
+    ? (value ? 'var(--color-tg-danger)' : 'var(--color-tg-border)')
+    : (value ? 'var(--color-tg-success)' : 'var(--color-tg-danger)');
+  return (
+    <div className="flex items-center justify-between gap-2 py-2">
+      <p className="text-sm text-tg-text-2 flex-1">{label}</p>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={value}
+        onClick={() => onChange(!value)}
+        className="relative w-11 h-6 rounded-full shrink-0 transition-colors"
+        style={{ background: trackColor }}
+      >
+        <span
+          className="absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all"
+          style={{ left: value ? 'calc(100% - 22px)' : '2px' }}
+        />
+      </button>
     </div>
   );
 }

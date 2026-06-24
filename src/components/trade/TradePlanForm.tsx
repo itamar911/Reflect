@@ -16,6 +16,13 @@ const STRATEGIES: TradeStrategy[] = ['Breakout', 'Trend Follow', 'Reversal', 'Ra
 
 const TIMEFRAMES: Timeframe[] = ['1m', '5m', '15m', '30m', '1H', '4H', 'Daily', 'Weekly'];
 
+const PRE_TRADE_CHECKLIST = [
+  'בדקתי R:R',
+  'הגדרתי Stop Loss',
+  'גודל הפוזיציה תואם לסיכון שהגדרתי',
+  'אין לי עסקאות פתוחות סותרות',
+];
+
 const REASON_TAGS = [
   'בריקאאוט מתנגדות',
   'תנועת מומנטום',
@@ -41,7 +48,9 @@ const EMPTY_FORM: TradePlanInput = {
   confidence_level: 3,
   timeframe: '',
   direction: null,
-  quantity: '',
+  units: '',
+  risk_amount: '',
+  risk_type: 'dollar',
 };
 
 type FormState = 'empty' | 'editing' | 'validating' | 'warning' | 'blocked' | 'success' | 'error';
@@ -69,8 +78,21 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
   const [pnlFieldsError, setPnlFieldsError] = useState(false);
   const [slInput, setSlInput] = useState('');
   const [tpInput, setTpInput] = useState('');
+  const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set());
 
   const supabase = createClient();
+
+  function toggleChecklistItem(item: string) {
+    setCheckedItems((prev) => {
+      const next = new Set(prev);
+      if (next.has(item)) {
+        next.delete(item);
+      } else {
+        next.add(item);
+      }
+      return next;
+    });
+  }
 
   // Restore saved TP/SL input unit preference
   useEffect(() => {
@@ -93,8 +115,11 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
   const entryNum = parseFloat(form.entry_price);
   const hasEntry = form.entry_price !== '' && !isNaN(entryNum);
 
-  const quantityNum = parseFloat(form.quantity);
-  const hasQuantity = form.quantity.trim() !== '' && !isNaN(quantityNum) && quantityNum > 0;
+  const unitsNum = parseFloat(form.units);
+  const hasUnits = form.units.trim() !== '' && !isNaN(unitsNum) && unitsNum > 0;
+
+  const riskAmountNum = parseFloat(form.risk_amount);
+  const hasRiskAmount = form.risk_amount.trim() !== '' && !isNaN(riskAmountNum) && riskAmountNum > 0;
 
   // נק׳ mode: the field holds the actual target price directly (no conversion).
   // % mode: the field holds a percentage offset from the entry price —
@@ -177,22 +202,26 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
     : null;
 
   const isFormFilled =
+    form.symbol.trim() !== '' &&
+    form.direction !== null &&
     form.strategy !== '' &&
     hasEntry &&
     slPrice !== null &&
     tpPrice !== null &&
-    hasQuantity &&
+    hasUnits &&
     form.trade_reason.trim() !== '';
 
+  const step1Done = form.symbol.trim() !== '' && form.direction !== null && form.strategy !== '';
+  const step2Done = hasEntry && slPrice !== null && tpPrice !== null && hasUnits;
+
   const activeStep = useMemo(() => {
-    if (!form.strategy) return 1;
-    if (!hasEntry || slPrice === null || tpPrice === null) return 2;
-    if (!form.trade_reason.trim()) return 3;
+    if (!step1Done) return 1;
+    if (!step2Done) return 2;
     return 4;
-  }, [form, hasEntry, slPrice, tpPrice]);
+  }, [step1Done, step2Done]);
 
   async function handleValidate() {
-    if (!hasQuantity) { setPnlFieldsError(true); return; }
+    if (!hasUnits) { setPnlFieldsError(true); return; }
     setPnlFieldsError(false);
     if (!isFormFilled || slPrice === null || tpPrice === null) return;
     setFormState('validating');
@@ -207,7 +236,7 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
   }
 
   async function handleSubmit() {
-    if (!hasQuantity) { setPnlFieldsError(true); return; }
+    if (!hasUnits) { setPnlFieldsError(true); return; }
     setPnlFieldsError(false);
     if (!isFormFilled || slPrice === null || tpPrice === null) return;
 
@@ -230,6 +259,7 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
       user_id: userId,
       strategy: form.strategy,
       symbol: form.symbol.trim() || null,
+      direction: form.direction,
       entry_price: entry,
       stop_loss: sl,
       take_profit: tp,
@@ -239,7 +269,9 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
       confidence_level: form.confidence_level,
       timeframe: form.timeframe || null,
       status: 'open',
-      quantity: quantityNum,
+      units: unitsNum,
+      risk_amount: hasRiskAmount ? riskAmountNum : null,
+      risk_type: hasRiskAmount ? form.risk_type : null,
       pnl_currency: currency,
     });
 
@@ -253,6 +285,7 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
         setTpInput('');
         setValidationResult(null);
         setPnlFieldsError(false);
+        setCheckedItems(new Set());
         setFormState('empty');
         onSuccess();
         onClose();
@@ -339,8 +372,42 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
               </div>
             )}
 
-            {/* Step 1 — Strategy */}
-            <FormSection step={1} label="אסטרטגיה" active={activeStep === 1} done={activeStep > 1}>
+            {/* Step 1 — Asset, direction & strategy */}
+            <FormSection step={1} label="נכס ואסטרטגיה" active={activeStep === 1} done={activeStep > 1}>
+              <input
+                type="text"
+                placeholder="סימול נייר (SPY, EURUSD, AAPL...)"
+                value={form.symbol}
+                onChange={(e) => { setForm({ ...form, symbol: e.target.value.toUpperCase() }); setValidationResult(null); }}
+                className="w-full h-10 px-3 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none focus:border-tg-primary transition-colors"
+                style={{ background: 'var(--color-tg-surface-2)' }}
+              />
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setForm({ ...form, direction: 'long' }); setValidationResult(null); }}
+                  className="h-11 rounded-xl text-sm font-bold border-2 transition-all flex items-center justify-center gap-1.5"
+                  style={{
+                    background: form.direction === 'long' ? 'var(--color-tg-success-muted)' : 'var(--color-tg-surface-2)',
+                    borderColor: form.direction === 'long' ? 'var(--color-tg-success)' : 'var(--color-tg-border)',
+                    color: form.direction === 'long' ? 'var(--color-tg-success)' : 'var(--color-tg-muted)',
+                  }}
+                >
+                  Long ▲
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setForm({ ...form, direction: 'short' }); setValidationResult(null); }}
+                  className="h-11 rounded-xl text-sm font-bold border-2 transition-all flex items-center justify-center gap-1.5"
+                  style={{
+                    background: form.direction === 'short' ? 'var(--color-tg-danger-muted)' : 'var(--color-tg-surface-2)',
+                    borderColor: form.direction === 'short' ? 'var(--color-tg-danger)' : 'var(--color-tg-border)',
+                    color: form.direction === 'short' ? 'var(--color-tg-danger)' : 'var(--color-tg-muted)',
+                  }}
+                >
+                  Short ▼
+                </button>
+              </div>
               <div className="flex flex-wrap gap-2">
                 {STRATEGIES.map((s) => (
                   <StrategyChip
@@ -371,18 +438,6 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
                   </div>
                 </>
               )}
-            </FormSection>
-
-            {/* Step 2 — Prices */}
-            <FormSection step={2} label="סימול ומחירים" active={activeStep === 2} done={activeStep > 2}>
-              <input
-                type="text"
-                placeholder="סימול נייר (SPY, EURUSD, AAPL...)"
-                value={form.symbol}
-                onChange={(e) => { setForm({ ...form, symbol: e.target.value.toUpperCase() }); setValidationResult(null); }}
-                className="w-full h-10 px-3 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none focus:border-tg-primary transition-colors"
-                style={{ background: 'var(--color-tg-surface-2)' }}
-              />
               <Select
                 label="Timeframe"
                 value={form.timeframe}
@@ -390,6 +445,10 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
                 options={TIMEFRAMES.map((tf) => ({ value: tf, label: tf }))}
                 placeholder="בחר Timeframe"
               />
+            </FormSection>
+
+            {/* Step 2 — Prices & position sizing */}
+            <FormSection step={2} label="מחירים וגודל פוזיציה" active={activeStep === 2} done={activeStep > 2}>
               <div className="flex items-center justify-between">
                 <span className="text-xs" style={{ color: 'var(--color-tg-muted)' }}>
                   הזן Stop Loss / Take Profit ב:
@@ -448,7 +507,7 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
               </div>
               <div className="flex flex-col gap-1.5">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-medium text-tg-muted">כמות *</label>
+                  <label className="text-xs font-medium text-tg-muted">יחידות/חוזים *</label>
                   <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-tg-border)' }}>
                     <button
                       type="button"
@@ -476,12 +535,12 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
                   type="number"
                   step="any"
                   placeholder="0"
-                  value={form.quantity}
-                  onChange={(e) => { setForm({ ...form, quantity: e.target.value }); setPnlFieldsError(false); }}
+                  value={form.units}
+                  onChange={(e) => { setForm({ ...form, units: e.target.value }); setPnlFieldsError(false); }}
                   className="w-full h-10 px-2 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors text-center"
                   style={{
                     background: 'var(--color-tg-surface-2)',
-                    borderColor: pnlFieldsError && !hasQuantity ? 'var(--color-tg-danger)' : 'var(--color-tg-border)',
+                    borderColor: pnlFieldsError && !hasUnits ? 'var(--color-tg-danger)' : 'var(--color-tg-border)',
                   }}
                 />
               </div>
@@ -491,9 +550,45 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
               {pnlFieldsError && (
                 <div className="px-3 py-2 rounded-xl text-xs animate-fade-in"
                   style={{ background: 'var(--color-tg-danger-muted)', color: 'var(--color-tg-danger)' }}>
-                  יש למלא כמות תקינה כדי להגיש את התוכנית
+                  יש למלא יחידות תקינות כדי להגיש את התוכנית
                 </div>
               )}
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium text-tg-muted">סיכון בעסקה</label>
+                  <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-tg-border)' }}>
+                    <button
+                      type="button"
+                      onClick={() => setForm({ ...form, risk_type: 'dollar' })}
+                      className="px-2 py-0.5 text-[10px] font-semibold transition-all"
+                      style={{
+                        background: form.risk_type === 'dollar' ? 'var(--color-tg-primary-muted)' : 'transparent',
+                        color: form.risk_type === 'dollar' ? 'var(--color-tg-primary)' : 'var(--color-tg-muted)',
+                      }}>
+                      $
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setForm({ ...form, risk_type: 'percent' })}
+                      className="px-2 py-0.5 text-[10px] font-semibold transition-all"
+                      style={{
+                        background: form.risk_type === 'percent' ? 'var(--color-tg-primary-muted)' : 'transparent',
+                        color: form.risk_type === 'percent' ? 'var(--color-tg-primary)' : 'var(--color-tg-muted)',
+                      }}>
+                      %
+                    </button>
+                  </div>
+                </div>
+                <input
+                  type="number"
+                  step="any"
+                  placeholder="0"
+                  value={form.risk_amount}
+                  onChange={(e) => setForm({ ...form, risk_amount: e.target.value })}
+                  className="w-full h-10 px-2 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors text-center"
+                  style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)' }}
+                />
+              </div>
               {rr !== null && rr > 0 && (
                 <div className="flex items-center justify-between px-4 py-2.5 rounded-xl animate-fade-in"
                   style={{
@@ -508,16 +603,20 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
               )}
             </FormSection>
 
-            {/* Step 3 — Reason */}
-            <FormSection step={3} label="סיבת הכניסה" active={activeStep === 3} done={activeStep > 3}>
-              <textarea
-                rows={2}
-                placeholder="תאר מה אתה רואה בגרף..."
-                value={form.trade_reason}
-                onChange={(e) => { setForm({ ...form, trade_reason: e.target.value }); setValidationResult(null); }}
-                className="w-full px-3 py-2.5 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none focus:border-tg-primary transition-colors resize-none"
-                style={{ background: 'var(--color-tg-surface-2)' }}
+            {/* Step 3 — Emotional State & Confidence */}
+            <FormSection step={3} label="מצב רגשי ורמת ביטחון" active={step1Done && step2Done} done={false}>
+              <EmotionalStateSlider
+                value={form.emotional_state}
+                onChange={(v) => { setForm({ ...form, emotional_state: v }); setValidationResult(null); }}
               />
+              <ConfidenceLevelSlider
+                value={form.confidence_level}
+                onChange={(v) => { setForm({ ...form, confidence_level: v }); setValidationResult(null); }}
+              />
+            </FormSection>
+
+            {/* Step 4 — Reason & plan */}
+            <FormSection step={4} label="סיבת הכניסה ותוכנית" active={activeStep === 4} done={false}>
               <div className="flex flex-wrap gap-1.5">
                 {REASON_TAGS.map((tag) => (
                   <button
@@ -530,18 +629,43 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
                   </button>
                 ))}
               </div>
-            </FormSection>
-
-            {/* Step 4 — Emotional State & Confidence */}
-            <FormSection step={4} label="מצב רגשי ורמת ביטחון" active={activeStep === 4} done={false}>
-              <EmotionalStateSlider
-                value={form.emotional_state}
-                onChange={(v) => { setForm({ ...form, emotional_state: v }); setValidationResult(null); }}
+              <textarea
+                rows={2}
+                placeholder="תאר מה אתה רואה בגרף..."
+                value={form.trade_reason}
+                onChange={(e) => { setForm({ ...form, trade_reason: e.target.value }); setValidationResult(null); }}
+                className="w-full px-3 py-2.5 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none focus:border-tg-primary transition-colors resize-none"
+                style={{ background: 'var(--color-tg-surface-2)' }}
               />
-              <ConfidenceLevelSlider
-                value={form.confidence_level}
-                onChange={(v) => { setForm({ ...form, confidence_level: v }); setValidationResult(null); }}
-              />
+              <div className="flex flex-col gap-1.5 mt-1">
+                {PRE_TRADE_CHECKLIST.map((item) => {
+                  const checked = checkedItems.has(item);
+                  return (
+                    <button
+                      key={item}
+                      type="button"
+                      onClick={() => toggleChecklistItem(item)}
+                      className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-xs border transition-all text-right"
+                      style={{
+                        background: checked ? 'var(--color-tg-success-muted)' : 'var(--color-tg-surface-2)',
+                        borderColor: checked ? 'var(--color-tg-success)' : 'var(--color-tg-border)',
+                        color: checked ? 'var(--color-tg-success)' : 'var(--color-tg-text-2)',
+                      }}
+                    >
+                      <span
+                        className="w-4 h-4 rounded shrink-0 flex items-center justify-center"
+                        style={{
+                          background: checked ? 'var(--color-tg-success)' : 'transparent',
+                          border: checked ? 'none' : '1px solid var(--color-tg-border)',
+                        }}
+                      >
+                        {checked && <Check size={11} color="white" />}
+                      </span>
+                      {item}
+                    </button>
+                  );
+                })}
+              </div>
             </FormSection>
 
             {/* Actions */}

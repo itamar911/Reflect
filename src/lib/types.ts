@@ -10,6 +10,7 @@ export type TradeStatus = 'open' | 'closed';
 export type TraderIdentity = 'Disciplined Sniper' | 'Emotional Trader' | 'Risk Taker' | 'Aggressive Scalper' | 'Developing Trader';
 export type StreakType = 'discipline' | 'no_revenge' | 'stop_loss' | 'full_discipline';
 export type Timeframe = '1m' | '5m' | '15m' | '30m' | '1H' | '4H' | 'Daily' | 'Weekly';
+export type RiskType = 'dollar' | 'percent';
 
 export interface Profile {
   id: string;
@@ -84,6 +85,11 @@ export interface TradePlan {
   exited_early: boolean | null;
   fomo_entry: boolean | null;
   revenge_trade: boolean | null;
+  direction: 'long' | 'short' | null;
+  units: number | null;
+  risk_amount: number | null;
+  risk_type: RiskType | null;
+  actual_pnl: number | null;
 }
 
 export type PnlCurrency = '₪' | '$';
@@ -99,7 +105,9 @@ export interface TradePlanInput {
   confidence_level: number;
   timeframe: Timeframe | '';
   direction: 'long' | 'short' | null;
-  quantity: string;
+  units: string;
+  risk_amount: string;
+  risk_type: RiskType;
 }
 
 export interface RulesetValidationResult {

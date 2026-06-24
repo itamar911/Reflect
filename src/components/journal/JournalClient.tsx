@@ -44,13 +44,15 @@ interface Trade {
   closed_at: string | null;
   plan_score: number | null;
   quantity: number | null;
+  units: number | null;
+  direction: 'long' | 'short' | null;
   pnl_amount: number | null;
   pnl_currency: string | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function inferDirection(t: Trade): 'long' | 'short' {
-  return t.take_profit >= t.entry_price ? 'long' : 'short';
+  return t.direction ?? (t.take_profit >= t.entry_price ? 'long' : 'short');
 }
 
 function calcPnl(t: Trade): number | null {
@@ -633,7 +635,8 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
               emotionalState={t.emotional_state}
               strategy={t.strategy}
               tradeReason={t.trade_reason}
-              quantity={t.quantity}
+              direction={inferDirection(t)}
+              units={t.units ?? t.quantity}
               pnlCurrency={t.pnl_currency}
               onClosed={() => { setClosingTradeId(null); router.refresh(); }}
               onDebrief={result => setDebriefResults(prev => ({ ...prev, [t.id]: result }))}
