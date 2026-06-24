@@ -9,6 +9,7 @@ export type EmotionalPattern = 'FOMO' | 'REVENGE' | 'FEAR' | 'OVERCONFIDENCE' | 
 export type TradeStatus = 'open' | 'closed';
 export type TraderIdentity = 'Disciplined Sniper' | 'Emotional Trader' | 'Risk Taker' | 'Aggressive Scalper' | 'Developing Trader';
 export type StreakType = 'discipline' | 'no_revenge' | 'stop_loss' | 'full_discipline';
+export type Timeframe = '1m' | '5m' | '15m' | '30m' | '1H' | '4H' | 'Daily' | 'Weekly';
 
 export interface Profile {
   id: string;
@@ -62,6 +63,8 @@ export interface TradePlan {
   rr_ratio: number;
   trade_reason: string;
   emotional_state: number;
+  confidence_level: number | null;
+  timeframe: Timeframe | string | null;
   status: TradeStatus;
   exit_price: number | null;
   exit_reason: string | null;
@@ -74,6 +77,13 @@ export interface TradePlan {
   quantity: number | null;
   pnl_amount: number | null;
   pnl_currency: PnlCurrency | null;
+  followed_plan: boolean | null;
+  kept_sl: boolean | null;
+  proper_size: boolean | null;
+  moved_sl: boolean | null;
+  exited_early: boolean | null;
+  fomo_entry: boolean | null;
+  revenge_trade: boolean | null;
 }
 
 export type PnlCurrency = '₪' | '$';
@@ -86,6 +96,8 @@ export interface TradePlanInput {
   take_profit: string;
   trade_reason: string;
   emotional_state: number;
+  confidence_level: number;
+  timeframe: Timeframe | '';
   direction: 'long' | 'short' | null;
   quantity: string;
 }

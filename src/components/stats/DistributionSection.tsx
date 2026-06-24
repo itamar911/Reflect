@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import { Calendar } from 'lucide-react';
-import { SURF, ACCENT, GREEN, RED, MUTED, TEXT, fmt, Section, StatCard } from './shared';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } from 'recharts';
+import { SURF, ACCENT, GREEN, RED, MUTED, fmt, Section, StatCard } from './shared';
 
 export interface DistBar {
   label: string;
@@ -21,7 +22,6 @@ const NO_TRADES = 'var(--color-tg-border)';
 export default function DistributionSection({ dayBars, hourBars }: Props) {
   const [view, setView] = useState<'day' | 'hour'>('day');
   const bars = view === 'day' ? dayBars : hourBars;
-  const maxAbs = Math.max(...bars.map(b => Math.abs(b.pnl)), 0.001);
 
   const withTrades = bars.filter(b => b.trades > 0);
   const best  = withTrades.length ? withTrades.reduce((a, b) => b.pnl > a.pnl ? b : a) : null;
@@ -51,24 +51,23 @@ export default function DistributionSection({ dayBars, hourBars }: Props) {
         {bars.every(b => b.trades === 0) ? (
           <p className="text-center py-4" style={{ fontSize: 12, color: MUTED }}>אין נתונים</p>
         ) : (
-          <div className="flex gap-3 overflow-x-auto pb-1">
-            {bars.map((b, i) => {
-              const color      = b.trades === 0 ? NO_TRADES : b.pnl >= 0 ? GREEN : RED;
-              const heightPct  = b.trades > 0 ? Math.max((Math.abs(b.pnl) / maxAbs) * 100, 8) : 4;
-              return (
-                <div key={i} className="flex flex-col items-center gap-1" style={{ minWidth: 56 }}>
-                  <div className="w-full flex items-end justify-center" style={{ height: 56 }}>
-                    <div style={{ width: '60%', height: `${heightPct}%`, background: color, borderRadius: 3 }} />
-                  </div>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: TEXT }}>{b.label}</span>
-                  <span style={{ fontSize: 10, fontWeight: 700, color: b.trades === 0 ? MUTED : (b.pnl >= 0 ? GREEN : RED) }}>
-                    {b.trades > 0 ? fmt(b.pnl) : '—'}
-                  </span>
-                  <span style={{ fontSize: 9, color: MUTED }}>{b.winRate !== null ? `${b.winRate}%` : '—'}</span>
-                  <span style={{ fontSize: 9, color: MUTED }}>{b.trades} עסקאות</span>
-                </div>
-              );
-            })}
+          <div dir="ltr">
+            <ResponsiveContainer width="100%" height={180}>
+              <BarChart data={bars} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-tg-border)" vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 9, fill: MUTED }} />
+                <YAxis hide />
+                <Tooltip
+                  contentStyle={{ background: SURF, border: 'none', fontSize: 12, borderRadius: 8 }}
+                  formatter={(v) => fmt(Number(v))}
+                />
+                <Bar dataKey="pnl" radius={[3, 3, 0, 0]}>
+                  {bars.map((b, i) => (
+                    <Cell key={i} fill={b.trades === 0 ? NO_TRADES : b.pnl >= 0 ? GREEN : RED} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
           </div>
         )}
       </div>

@@ -3,7 +3,9 @@
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
-import { Bot, Target, BarChart3 } from 'lucide-react';
+import Card from '@/components/ui/Card';
+import Toggle from '@/components/ui/Toggle';
+import { Bot, Target, BarChart3, ShieldCheck } from 'lucide-react';
 import { formatPnlIls, formatPnlPoints } from '@/lib/utils';
 
 export interface ScoreBreakdown {
@@ -49,6 +51,10 @@ interface TradeForDebrief {
   followed_plan: boolean;
   kept_sl: boolean;
   proper_size: boolean;
+  moved_sl: boolean;
+  exited_early: boolean;
+  fomo_entry: boolean;
+  revenge_trade: boolean;
   pnl_amount: number | null;
   pnl_currency: string | null;
 }
@@ -86,9 +92,11 @@ export default function CloseTrade({
   const [exitPrice, setExitPrice] = useState('');
   const [exitReason, setExitReason] = useState('');
   const [notes, setNotes] = useState('');
-  const [followedPlan, setFollowedPlan] = useState<boolean | null>(null);
-  const [keptSl, setKeptSl] = useState<boolean | null>(null);
-  const [properSize, setProperSize] = useState<boolean | null>(null);
+  const [followedPlan, setFollowedPlan] = useState(true);
+  const [movedSl, setMovedSl] = useState(false);
+  const [exitedEarly, setExitedEarly] = useState(false);
+  const [fomoEntry, setFomoEntry] = useState(false);
+  const [revengeTrade, setRevengeTrade] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [debriefResult, setDebriefResult] = useState<AIDebriefResult | null>(null);
@@ -107,10 +115,6 @@ export default function CloseTrade({
 
   async function handleClose() {
     if (!exitPrice || !exitReason) { setError('מלא מחיר יציאה וסיבה'); return; }
-    if (followedPlan === null || keptSl === null || properSize === null) {
-      setError('ענה על שלוש שאלות בדיקת התהליך');
-      return;
-    }
     setLoading(true);
     setError('');
 
@@ -118,6 +122,11 @@ export default function CloseTrade({
       ? Math.round((direction === 'long' ? exit - entryPrice : entryPrice - exit) * quantity * 100) / 100
       : null;
     const pnlCurrencyValue = pnlAmount != null ? (pnlCurrency ?? '₪') : null;
+
+    // kept_sl / proper_size are legacy columns retained for the AI-debrief score formula;
+    // kept_sl mirrors the new "moved SL" toggle, proper_size is no longer asked so defaults to true.
+    const keptSl = !movedSl;
+    const properSize = true;
 
     const { error: err } = await supabase.from('trade_plans').update({
       status: 'closed',
@@ -130,6 +139,10 @@ export default function CloseTrade({
       followed_plan: followedPlan,
       kept_sl: keptSl,
       proper_size: properSize,
+      moved_sl: movedSl,
+      exited_early: exitedEarly,
+      fomo_entry: fomoEntry,
+      revenge_trade: revengeTrade,
     }).eq('id', tradeId);
 
     if (err) {
@@ -153,6 +166,10 @@ export default function CloseTrade({
         followed_plan: followedPlan,
         kept_sl: keptSl,
         proper_size: properSize,
+        moved_sl: movedSl,
+        exited_early: exitedEarly,
+        fomo_entry: fomoEntry,
+        revenge_trade: revengeTrade,
         pnl_amount: pnlAmount,
         pnl_currency: pnlCurrencyValue,
       };
@@ -275,12 +292,36 @@ export default function CloseTrade({
         />
       </div>
 
-      <div className="flex flex-col gap-2 pt-2 border-t border-tg-border">
-        <p className="text-xs font-semibold text-tg-text">בדיקת תהליך *</p>
-        <ProcessQuestion label="האם נכנסת בדיוק לפי התוכנית?" value={followedPlan} onChange={setFollowedPlan} />
-        <ProcessQuestion label="האם שמרת על ה-SL המקורי ולא הזזת אותו?" value={keptSl} onChange={setKeptSl} />
-        <ProcessQuestion label="האם גודל הפוזיציה תאם את חוקי הסיכון שלך?" value={properSize} onChange={setProperSize} />
-      </div>
+      <Card padding="sm" className="flex flex-col gap-0.5">
+        <p className="text-xs font-semibold text-tg-text flex items-center gap-1.5 pb-1">
+          <ShieldCheck size={14} /> רשימת משמעת
+        </p>
+        <Toggle
+          label="פעל לפי התוכנית המקורית"
+          checked={followedPlan}
+          onChange={setFollowedPlan}
+        />
+        <Toggle
+          label="הזיז את ה-Stop Loss"
+          checked={movedSl}
+          onChange={setMovedSl}
+        />
+        <Toggle
+          label="יצא מוקדם"
+          checked={exitedEarly}
+          onChange={setExitedEarly}
+        />
+        <Toggle
+          label="כניסת FOMO"
+          checked={fomoEntry}
+          onChange={setFomoEntry}
+        />
+        <Toggle
+          label="Revenge Trade"
+          checked={revengeTrade}
+          onChange={setRevengeTrade}
+        />
+      </Card>
 
       {error && <p className="text-xs" style={{ color: 'var(--color-tg-danger)' }}>{error}</p>}
 
@@ -288,36 +329,6 @@ export default function CloseTrade({
         variant={isWin === false ? 'danger' : 'primary'}>
         סגור עסקה + קבל ניתוח AI
       </Button>
-    </div>
-  );
-}
-
-function ProcessQuestion({ label, value, onChange }: {
-  label: string;
-  value: boolean | null;
-  onChange: (value: boolean) => void;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-2">
-      <p className="text-xs text-tg-text-2 flex-1">{label}</p>
-      <div className="flex rounded-lg overflow-hidden shrink-0" style={{ border: '1px solid var(--color-tg-border)' }}>
-        <button type="button" onClick={() => onChange(true)}
-          className="px-3 py-1 text-xs font-semibold transition-all"
-          style={{
-            background: value === true ? 'var(--color-tg-success-muted)' : 'transparent',
-            color: value === true ? 'var(--color-tg-success)' : 'var(--color-tg-muted)',
-          }}>
-          כן
-        </button>
-        <button type="button" onClick={() => onChange(false)}
-          className="px-3 py-1 text-xs font-semibold transition-all"
-          style={{
-            background: value === false ? 'var(--color-tg-danger-muted)' : 'transparent',
-            color: value === false ? 'var(--color-tg-danger)' : 'var(--color-tg-muted)',
-          }}>
-          לא
-        </button>
-      </div>
     </div>
   );
 }

@@ -124,6 +124,9 @@ ${description ? `- Trader notes on the exit: ${description}` : '- Trader notes o
 - Followed the entry plan exactly: ${trade.followed_plan === true ? 'כן' : 'לא'}
 - Kept the original stop loss without moving it: ${trade.kept_sl === true ? 'כן' : 'לא'}
 - Position size matched the trader's risk rules: ${trade.proper_size === true ? 'כן' : 'לא'}
+- Exited the trade early: ${trade.exited_early === true ? 'כן' : 'לא'}
+- This was a FOMO entry: ${trade.fomo_entry === true ? 'כן' : 'לא'}
+- This was a revenge trade: ${trade.revenge_trade === true ? 'כן' : 'לא'}
 
 A quantitative process score out of 100 has already been calculated. You may ONLY determine category 5 (learning) — categories 1-4 are fixed and MUST be used exactly as given:
 1. תכנון מוקדם — planning (out of 20): ${fixed.planning} — based on whether entry price, stop loss, take profit, entry reason and strategy were all documented

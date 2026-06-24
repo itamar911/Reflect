@@ -7,10 +7,14 @@ import { validateTradePlan, DEFAULT_PRESET_RULES } from '@/lib/validators/Rulese
 import { calcRR } from '@/lib/utils';
 import ValidationResultBanner from './ValidationResultBanner';
 import EmotionalStateSlider from './EmotionalStateSlider';
+import ConfidenceLevelSlider from './ConfidenceLevelSlider';
 import Button from '@/components/ui/Button';
-import type { TradePlanInput, PresetRules, RulesetValidationResult, TradeStrategy, PnlCurrency } from '@/lib/types';
+import Select from '@/components/ui/Select';
+import type { TradePlanInput, PresetRules, RulesetValidationResult, TradeStrategy, PnlCurrency, Timeframe } from '@/lib/types';
 
 const STRATEGIES: TradeStrategy[] = ['Breakout', 'Trend Follow', 'Reversal', 'Range', 'Custom'];
+
+const TIMEFRAMES: Timeframe[] = ['1m', '5m', '15m', '30m', '1H', '4H', 'Daily', 'Weekly'];
 
 const REASON_TAGS = [
   'בריקאאוט מתנגדות',
@@ -34,6 +38,8 @@ const EMPTY_FORM: TradePlanInput = {
   take_profit: '',
   trade_reason: '',
   emotional_state: 3,
+  confidence_level: 3,
+  timeframe: '',
   direction: null,
   quantity: '',
 };
@@ -230,6 +236,8 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
       rr_ratio: calcRR(entry, sl, tp),
       trade_reason: form.trade_reason.trim(),
       emotional_state: form.emotional_state,
+      confidence_level: form.confidence_level,
+      timeframe: form.timeframe || null,
       status: 'open',
       quantity: quantityNum,
       pnl_currency: currency,
@@ -375,6 +383,13 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
                 className="w-full h-10 px-3 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none focus:border-tg-primary transition-colors"
                 style={{ background: 'var(--color-tg-surface-2)' }}
               />
+              <Select
+                label="Timeframe"
+                value={form.timeframe}
+                onChange={(e) => { setForm({ ...form, timeframe: e.target.value as Timeframe }); setValidationResult(null); }}
+                options={TIMEFRAMES.map((tf) => ({ value: tf, label: tf }))}
+                placeholder="בחר Timeframe"
+              />
               <div className="flex items-center justify-between">
                 <span className="text-xs" style={{ color: 'var(--color-tg-muted)' }}>
                   הזן Stop Loss / Take Profit ב:
@@ -517,11 +532,15 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
               </div>
             </FormSection>
 
-            {/* Step 4 — Emotional State */}
-            <FormSection step={4} label="מצב רגשי" active={activeStep === 4} done={false}>
+            {/* Step 4 — Emotional State & Confidence */}
+            <FormSection step={4} label="מצב רגשי ורמת ביטחון" active={activeStep === 4} done={false}>
               <EmotionalStateSlider
                 value={form.emotional_state}
                 onChange={(v) => { setForm({ ...form, emotional_state: v }); setValidationResult(null); }}
+              />
+              <ConfidenceLevelSlider
+                value={form.confidence_level}
+                onChange={(v) => { setForm({ ...form, confidence_level: v }); setValidationResult(null); }}
               />
             </FormSection>
 

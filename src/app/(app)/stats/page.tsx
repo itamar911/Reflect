@@ -2,9 +2,10 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import PnlChart, { type PeriodPoint } from '@/components/stats/PnlChart';
 import DistributionSection, { type DistBar } from '@/components/stats/DistributionSection';
+import ScaleBreakdownSection, { type ScaleBucket } from '@/components/stats/ScaleBreakdownSection';
 import { SURF, ACCENT, GREEN, RED, MUTED, TEXT, fmt, pnlColor, Section, StatCard, BreakdownRow } from '@/components/stats/shared';
 import type { TradePlan } from '@/lib/types';
-import { Zap, TrendingUp, BarChart2, Target, CandlestickChart, Trophy, Flame } from 'lucide-react';
+import { Zap, TrendingUp, BarChart2, Target, CandlestickChart, Trophy, Flame, Brain, ShieldAlert } from 'lucide-react';
 
 export const metadata = { title: 'סטטיסטיקה — Reflect' };
 
@@ -120,6 +121,71 @@ export default async function StatsPage() {
     .sort((a, b) => b.trades - a.trades);
   const maxStratTrades = Math.max(...strategies.map(s => s.trades), 1);
 
+  // ── Behavioral / discipline metrics ─────────────────────────────────────────
+  const withFollowed = closed.filter(t => t.followed_plan !== null);
+  const deviatedPct = withFollowed.length
+    ? Math.round((withFollowed.filter(t => t.followed_plan === false).length / withFollowed.length) * 100) : null;
+
+  const withMovedSl = closed.filter(t => t.moved_sl !== null);
+  const movedSlPct = withMovedSl.length
+    ? Math.round((withMovedSl.filter(t => t.moved_sl === true).length / withMovedSl.length) * 100) : null;
+
+  const withFomo = closed.filter(t => t.fomo_entry !== null);
+  const fomoPct = withFomo.length
+    ? Math.round((withFomo.filter(t => t.fomo_entry === true).length / withFomo.length) * 100) : null;
+
+  const withRevenge = closed.filter(t => t.revenge_trade !== null);
+  const revengePct = withRevenge.length
+    ? Math.round((withRevenge.filter(t => t.revenge_trade === true).length / withRevenge.length) * 100) : null;
+
+  const disciplineComponents = [
+    withFollowed.length ? withFollowed.filter(t => t.followed_plan === true).length / withFollowed.length : null,
+    withMovedSl.length  ? withMovedSl.filter(t => t.moved_sl === false).length / withMovedSl.length : null,
+    withFomo.length     ? withFomo.filter(t => t.fomo_entry === false).length / withFomo.length : null,
+    withRevenge.length  ? withRevenge.filter(t => t.revenge_trade === false).length / withRevenge.length : null,
+  ].filter((v): v is number => v !== null);
+  const disciplineScore = disciplineComponents.length
+    ? Math.round((disciplineComponents.reduce((s, v) => s + v, 0) / disciplineComponents.length) * 100) : null;
+
+  // ── Confidence / emotional-state breakdowns ─────────────────────────────────
+  function buildScaleBuckets(field: 'confidence_level' | 'emotional_state'): ScaleBucket[] {
+    return [1, 2, 3, 4, 5].map((level) => {
+      const allAtLevel = trades.filter(t => Number(t[field]) === level);
+      const closedAtLevel = closed.filter(t => Number(t[field]) === level);
+      const wins = closedAtLevel.filter(t => pnlOf(t)! > 0).length;
+      return {
+        level,
+        trades: allAtLevel.length,
+        closedN: closedAtLevel.length,
+        wins,
+        pnl: closedAtLevel.reduce((s, t) => s + pnlIls(t), 0),
+      };
+    });
+  }
+  const confidenceBuckets = buildScaleBuckets('confidence_level');
+  const emotionBuckets = buildScaleBuckets('emotional_state');
+
+  function insightSentences(buckets: ScaleBucket[], label: string): string[] {
+    const out: string[] = [];
+    const high = buckets.filter(b => b.level >= 4);
+    const highClosed = high.reduce((s, b) => s + b.closedN, 0);
+    const highWins = high.reduce((s, b) => s + b.wins, 0);
+    if (highClosed > 0) {
+      out.push(`${Math.round((highWins / highClosed) * 100)}% מהעסקאות עם ${label} 4-5 הסתיימו ברווח`);
+    }
+    const low = buckets.filter(b => b.level <= 2);
+    const lowClosed = low.reduce((s, b) => s + b.closedN, 0);
+    const lowLosses = low.reduce((s, b) => s + (b.closedN - b.wins), 0);
+    if (lowClosed > 0) {
+      out.push(`${Math.round((lowLosses / lowClosed) * 100)}% מהעסקאות עם ${label} 2 ומטה הסתיימו בהפסד`);
+    }
+    return out;
+  }
+  const confidenceInsights = insightSentences(confidenceBuckets, 'רמת ביטחון');
+  const emotionInsights = insightSentences(emotionBuckets, 'מצב רגשי');
+  const hasConfidenceData = confidenceBuckets.some(b => b.trades > 0);
+  const hasEmotionData = emotionBuckets.some(b => b.trades > 0);
+
   // ── Day / hour distribution ─────────────────────────────────────────────────
   const dayBars: DistBar[] = HE_DAYS.map((label, i) => {
     const dayT  = closed.filter(t => new Date(t.submitted_at).getDay() === i);
@@ -234,6 +300,38 @@ export default async function StatsPage() {
             value={currentStreak ? `${currentStreak.count} ${currentStreak.type === 'win' ? 'רווחים' : 'הפסדים'}` : '—'}
             positive={!currentStreak || currentStreak.type === 'win'}
           />
+          <StatCard fixedHeight
+            label="ציון משמעת"
+            value={disciplineScore !== null ? `${disciplineScore}` : '—'}
+            sub="מתוך 100"
+            positive={disciplineScore === null || disciplineScore >= 70}
+          />
+        </div>
+      </Section>
+
+      {/* ── Behavioral metrics ─────────────────────────────────── */}
+      <Section title="מדדים התנהגותיים" icon={<ShieldAlert size={18} />}>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatCard fixedHeight
+            label="סטייה מהתוכנית"
+            value={deviatedPct !== null ? `${deviatedPct}%` : '—'}
+            positive={deviatedPct === null || deviatedPct <= 20}
+          />
+          <StatCard fixedHeight
+            label="הזזת Stop Loss"
+            value={movedSlPct !== null ? `${movedSlPct}%` : '—'}
+            positive={movedSlPct === null || movedSlPct <= 20}
+          />
+          <StatCard fixedHeight
+            label="עסקאות FOMO"
+            value={fomoPct !== null ? `${fomoPct}%` : '—'}
+            positive={fomoPct === null || fomoPct <= 10}
+          />
+          <StatCard fixedHeight
+            label="Revenge Trades"
+            value={revengePct !== null ? `${revengePct}%` : '—'}
+            positive={revengePct === null || revengePct <= 10}
+          />
         </div>
       </Section>
 
@@ -259,6 +357,26 @@ export default async function StatsPage() {
             })}
           </div>
         </Section>
+      )}
+
+      {/* ── Confidence-level breakdown ──────────────────────────── */}
+      {hasConfidenceData && (
+        <ScaleBreakdownSection
+          title="ביצועים לפי רמת ביטחון"
+          icon={<Target size={18} />}
+          buckets={confidenceBuckets}
+          insights={confidenceInsights}
+        />
+      )}
+
+      {/* ── Emotional-state breakdown ───────────────────────────── */}
+      {hasEmotionData && (
+        <ScaleBreakdownSection
+          title="ביצועים לפי מצב רגשי"
+          icon={<Brain size={18} />}
+          buckets={emotionBuckets}
+          insights={emotionInsights}
+        />
       )}
 
       {/* ── Day / hour distribution ───────────────────────────── */}

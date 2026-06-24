@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } from 'recharts';
 
 type Period = 'day' | 'week' | 'month';
 
@@ -18,6 +19,9 @@ interface Props {
 }
 
 const GREEN = 'var(--color-tg-success)';
+const RED = 'var(--color-tg-danger)';
+const MUTED = 'var(--color-tg-muted)';
+const SURF = 'var(--color-tg-surface)';
 
 function fmt(v: number) {
   if (v === 0) return '₪0';
@@ -29,34 +33,15 @@ export default function PnlChart({ daily, weekly, monthly }: Props) {
 
   const data: PeriodPoint[] = period === 'day' ? daily : period === 'week' ? weekly : monthly;
 
-  const totalPnl   = data.reduce((s, d) => s + d.pnl, 0);
+  const totalPnl    = data.reduce((s, d) => s + d.pnl, 0);
   const totalTrades = data.reduce((s, d) => s + d.trades, 0);
-  const totalWins  = data.reduce((s, d) => s + d.wins, 0);
-  const isUp       = totalPnl >= 0;
-  const pnlColor   = isUp ? GREEN : 'var(--color-tg-danger)';
+  const totalWins   = data.reduce((s, d) => s + d.wins, 0);
+  const pnlColor    = totalPnl >= 0 ? GREEN : RED;
 
-  const W = 300, H = 96;
-  const MID = 56;              // zero-line y
-  const n = data.length || 1;
-  const step = W / n;
-  const barW = step * 0.62;
-  const maxBar = Math.max(...data.map(d => Math.abs(d.pnl)), 0.001);
-
-  // Cumulative equity line
-  const cum: number[] = [];
-  let acc = 0;
-  for (const d of data) { acc += d.pnl; cum.push(acc); }
-
-  const minCum = Math.min(...cum, 0);
-  const maxCum = Math.max(...cum, 0);
-  const cumSpan = maxCum - minCum || 0.001;
-  const lineY = (v: number) => H - 4 - ((v - minCum) / cumSpan) * (H - MID - 4);
-
-  const linePoints = cum
-    .map((v, i) => `${(i * step + step / 2).toFixed(1)},${lineY(v).toFixed(1)}`)
-    .join(' ');
-
-  const showLabels = data.length > 0 && data.length <= 14;
+  const chartData = data.reduce<(PeriodPoint & { cum: number })[]>((acc, d) => {
+    const prevCum = acc.length ? acc[acc.length - 1].cum : 0;
+    return [...acc, { ...d, cum: prevCum + d.pnl }];
+  }, []);
 
   return (
     <div className="flex flex-col gap-3">
@@ -82,65 +67,37 @@ export default function PnlChart({ daily, weekly, monthly }: Props) {
         <span className="text-sm font-bold" style={{ color: pnlColor }}>{fmt(totalPnl)}</span>
       </div>
 
-      {/* SVG chart */}
-      {data.length > 0 ? (
+      {chartData.length > 0 ? (
         <>
-          {/* LTR wrapper — keeps the oldest point on the left and the most recent on the right */}
           <div dir="ltr">
-            <svg
-              viewBox={`0 0 ${W} ${H}`}
-              preserveAspectRatio="none"
-              style={{ width: '100%', height: H, display: 'block' }}
-            >
-              {/* Bars */}
-              {data.map((d, i) => {
-                const bh = Math.max((Math.abs(d.pnl) / maxBar) * (MID - 6), d.trades > 0 ? 2 : 0);
-                const x = i * step + (step - barW) / 2;
-                const y = d.pnl >= 0 ? MID - bh : MID;
-                return (
-                  <rect
-                    key={i}
-                    x={x.toFixed(1)} y={y.toFixed(1)}
-                    width={barW.toFixed(1)} height={bh.toFixed(1)}
-                    fill={d.pnl > 0 ? 'rgba(34,197,94,0.6)' : d.pnl < 0 ? 'rgba(239,68,68,0.6)' : 'rgba(100,116,139,0.25)'}
-                    rx="1.5"
-                  />
-                );
-              })}
-
-              {/* Zero line */}
-              <line x1="0" y1={MID} x2={W} y2={MID} style={{ stroke: 'var(--color-tg-border-light)' }} strokeWidth="0.8" />
-
-              {/* Equity line */}
-              {cum.length > 1 && (
-                <polyline
-                  points={linePoints}
-                  fill="none"
-                  stroke={pnlColor}
-                  strokeWidth="1.6"
-                  vectorEffect="non-scaling-stroke"
-                  strokeLinejoin="round"
+            <ResponsiveContainer width="100%" height={140}>
+              <ComposedChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-tg-border)" vertical={false} />
+                <XAxis
+                  dataKey="label"
+                  tick={{ fontSize: 9, fill: MUTED }}
+                  interval={chartData.length > 14 ? Math.ceil(chartData.length / 10) : 0}
                 />
-              )}
-            </svg>
-
-            {/* X-axis labels */}
-            {showLabels && (
-              <div className="flex" style={{ marginTop: -6 }}>
-                {data.map((d, i) => (
-                  <div key={i} style={{ flex: 1, textAlign: 'center' }}>
-                    <span style={{ fontSize: 9, color: 'var(--color-tg-muted)' }}>{d.label}</span>
-                  </div>
-                ))}
-              </div>
-            )}
+                <YAxis hide />
+                <Tooltip
+                  contentStyle={{ background: SURF, border: 'none', fontSize: 12, borderRadius: 8 }}
+                  formatter={(v, name) => name === 'cum' ? [fmt(Number(v)), 'שווי מצטבר'] : [fmt(Number(v)), 'רווח/הפסד']}
+                />
+                <Bar dataKey="pnl" radius={[2, 2, 0, 0]}>
+                  {chartData.map((d, i) => (
+                    <Cell key={i} fill={d.pnl > 0 ? 'rgba(34,197,94,0.6)' : d.pnl < 0 ? 'rgba(239,68,68,0.6)' : 'rgba(100,116,139,0.25)'} />
+                  ))}
+                </Bar>
+                <Line type="monotone" dataKey="cum" stroke={pnlColor} strokeWidth={1.6} dot={false} />
+              </ComposedChart>
+            </ResponsiveContainer>
           </div>
 
           {/* Footer summary */}
-          <div className="flex gap-4" style={{ fontSize: 11, color: 'var(--color-tg-muted)' }}>
+          <div className="flex gap-4" style={{ fontSize: 11, color: MUTED }}>
             <span>{totalTrades} עסקאות</span>
             {totalTrades > 0 && (
-              <span style={{ color: totalWins / totalTrades >= 0.5 ? GREEN : 'var(--color-tg-muted)' }}>
+              <span style={{ color: totalWins / totalTrades >= 0.5 ? GREEN : MUTED }}>
                 {Math.round((totalWins / totalTrades) * 100)}% הצלחה
               </span>
             )}
@@ -151,7 +108,7 @@ export default function PnlChart({ daily, weekly, monthly }: Props) {
           className="flex items-center justify-center py-8 rounded-xl"
           style={{ background: 'var(--color-tg-surface-2)' }}
         >
-          <p style={{ fontSize: 12, color: 'var(--color-tg-muted)' }}>אין עסקאות סגורות להצגה</p>
+          <p style={{ fontSize: 12, color: MUTED }}>אין עסקאות סגורות להצגה</p>
         </div>
       )}
     </div>
