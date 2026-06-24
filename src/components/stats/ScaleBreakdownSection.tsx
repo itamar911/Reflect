@@ -1,3 +1,5 @@
+'use client';
+
 import type { ReactNode } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } from 'recharts';
 import { SURF, ACCENT, GREEN, RED, MUTED, TEXT, fmt, Section } from './shared';
