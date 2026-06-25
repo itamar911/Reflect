@@ -337,7 +337,6 @@ export default function AppShell({
       {ruleBlock && (
         <RuleBlockedModal
           ruleName={ruleBlock.ruleName}
-          description={ruleBlock.description}
           cooldownMinutes={ruleBlock.actionType === 'block_timer' ? ruleBlock.cooldownMinutes : null}
           onClose={() => setRuleBlock(null)}
         />

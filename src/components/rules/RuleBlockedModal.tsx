@@ -5,12 +5,11 @@ import { formatCooldownMinutes } from '@/lib/validators/RulesetValidator';
 
 interface RuleBlockedModalProps {
   ruleName: string;
-  description: string;
   cooldownMinutes?: number | null;
   onClose: () => void;
 }
 
-export default function RuleBlockedModal({ ruleName, description, cooldownMinutes, onClose }: RuleBlockedModalProps) {
+export default function RuleBlockedModal({ ruleName, cooldownMinutes, onClose }: RuleBlockedModalProps) {
   return (
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center p-4"
@@ -31,12 +30,8 @@ export default function RuleBlockedModal({ ruleName, description, cooldownMinute
           לא ניתן לפתוח עסקה
         </p>
 
-        <p className="text-sm font-semibold" style={{ color: 'var(--color-tg-danger)' }}>
+        <p className="text-sm font-bold" style={{ color: 'var(--color-tg-primary)' }}>
           {ruleName}
-        </p>
-
-        <p className="text-xs text-tg-text-2">
-          {description}
         </p>
 
         {cooldownMinutes ? (
