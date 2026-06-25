@@ -50,6 +50,7 @@ export interface CustomRule {
   action_required: string;
   is_active: boolean;
   enforcement: Enforcement;
+  cooldown_minutes: number | null;
   created_at: string;
   updated_at: string;
 }

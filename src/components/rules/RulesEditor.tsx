@@ -6,6 +6,7 @@ import PresetRulesPanel from './PresetRulesPanel';
 import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
 import { Lock, ClipboardList } from 'lucide-react';
+import { COOLDOWN_MINUTE_OPTIONS, formatCooldownMinutes } from '@/lib/validators/RulesetValidator';
 import type { PresetRules, CustomRule, Enforcement } from '@/lib/types';
 
 type Tab = 'preset' | 'custom';
@@ -199,6 +200,7 @@ function CustomRuleCard({
           <span className="text-sm font-semibold text-tg-text">{rule.rule_name}</span>
           <Badge variant={ENFORCEMENT_VARIANTS[rule.enforcement]}>
             {ENFORCEMENT_LABELS[rule.enforcement]}
+            {rule.enforcement === 'block' && rule.cooldown_minutes ? ` · ${formatCooldownMinutes(rule.cooldown_minutes)}` : ''}
           </Badge>
         </div>
         <button
@@ -280,6 +282,7 @@ function CustomRuleBuilder({
     trigger_condition: '',
     action_required: '',
     enforcement: 'warning' as Enforcement,
+    cooldown_minutes: String(COOLDOWN_MINUTE_OPTIONS[1].minutes),
   });
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -305,6 +308,7 @@ function CustomRuleBuilder({
         trigger_condition: form.trigger_condition.trim(),
         action_required: form.action_required.trim(),
         enforcement: form.enforcement,
+        cooldown_minutes: form.enforcement === 'block' ? parseInt(form.cooldown_minutes) : null,
         is_active: true,
       })
       .select()
@@ -456,6 +460,24 @@ function CustomRuleBuilder({
         {plan !== 'pro' && (
           <p className="text-xs text-tg-muted">נעילה וחסימה עצמית מלאה זמינות ב-Pro</p>
         )}
+
+        {form.enforcement === 'block' && (
+          <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl"
+            style={{ background: 'var(--color-tg-surface-2)' }}>
+            <label className="text-xs font-medium text-tg-text-2">משך הנעילה</label>
+            <select
+              value={form.cooldown_minutes}
+              onChange={(e) => setForm({ ...form, cooldown_minutes: e.target.value })}
+              className="w-24 h-9 px-3 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary text-center"
+              style={{ background: 'var(--color-tg-surface)', borderColor: 'var(--color-tg-border)' }}
+            >
+              {COOLDOWN_MINUTE_OPTIONS.map((o) => (
+                <option key={o.minutes} value={o.minutes}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
         {/* Self-block explanation — always visible */}
         <div className="flex items-start gap-2 p-3 rounded-xl"
           style={{ background: 'rgba(0,210,210,0.08)', border: '1px solid rgba(0,210,210,0.2)' }}>

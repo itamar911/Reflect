@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS custom_rules (
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   enforcement TEXT NOT NULL DEFAULT 'warning'
     CHECK (enforcement IN ('reminder', 'warning', 'block')),
+  cooldown_minutes INTEGER,
   sort_order INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
