@@ -14,7 +14,7 @@ export default async function RulesPage() {
   const [profileRes, presetRes, customRes] = await Promise.all([
     supabase.from('profiles').select('subscription_tier').eq('id', user.id).single(),
     supabase.from('preset_rules').select('*').eq('user_id', user.id).single(),
-    supabase.from('custom_rules').select('*').eq('user_id', user.id).order('sort_order').order('created_at'),
+    supabase.from('custom_rules').select('*').eq('user_id', user.id).order('created_at'),
   ]);
 
   const plan        = (profileRes.data?.subscription_tier ?? 'free') as 'free' | 'basic' | 'pro';

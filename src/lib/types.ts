@@ -3,7 +3,16 @@ export type ExperienceLevel = 'beginner' | 'intermediate' | 'advanced';
 export type Market = 'stocks' | 'crypto' | 'forex' | 'options' | 'futures' | 'etf' | 'commodities';
 export type SubscriptionTier = 'free' | 'basic' | 'pro';
 export type TradeStrategy = 'Breakout' | 'Trend Follow' | 'Reversal' | 'Range' | 'Futures' | 'Custom';
-export type Enforcement = 'reminder' | 'warning' | 'block';
+export type ConditionType =
+  | 'daily_loss_dollar'
+  | 'daily_loss_percent'
+  | 'daily_trades_count'
+  | 'loss_streak'
+  | 'hour_after'
+  | 'fomo_last_trade'
+  | 'exited_early_last_trade'
+  | 'moved_sl_last_trade';
+export type ActionType = 'block_day' | 'block_timer' | 'warn';
 export type ValidationStatus = 'valid' | 'warning' | 'blocked';
 export type EmotionalPattern = 'FOMO' | 'REVENGE' | 'FEAR' | 'OVERCONFIDENCE' | 'NONE';
 export type TradeStatus = 'open' | 'closed';
@@ -45,14 +54,13 @@ export interface PresetRules {
 export interface CustomRule {
   id: string;
   user_id: string;
-  rule_name: string;
-  trigger_condition: string;
-  action_required: string;
+  name: string;
   is_active: boolean;
-  enforcement: Enforcement;
+  condition_type: ConditionType;
+  threshold_value: number | null;
+  action_type: ActionType;
   cooldown_minutes: number | null;
   created_at: string;
-  updated_at: string;
 }
 
 export interface TradePlan {

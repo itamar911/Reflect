@@ -1,4 +1,4 @@
-import type { TradePlanInput, PresetRules, CustomRule, RulesetValidationResult } from '@/lib/types';
+import type { TradePlanInput, PresetRules, CustomRule, ConditionType, ActionType, RulesetValidationResult } from '@/lib/types';
 import { calcRR } from '@/lib/utils';
 
 export function validateTradePlan(
@@ -157,32 +157,101 @@ export function checkActiveViolation(
   return null;
 }
 
-/**
- * Custom rules are free-text ("אם X אז Y") — there's no structured threshold
- * column to compare against. This recognizes the one concrete pattern the
- * app itself suggests as a quick-pick example: a daily-loss-limit sentence
- * mentioning "הפסד" (loss), "יומי" (daily), and a $amount, e.g.
- * "ההפסד היומי עבר $200". Returns the threshold in dollars, or null if the
- * rule's trigger_condition doesn't match that shape.
- */
-export function parseDailyLossThreshold(triggerCondition: string): number | null {
-  if (!/הפסד/.test(triggerCondition) || !/יומי/.test(triggerCondition)) return null;
-  const match = triggerCondition.match(/\$\s*(\d+(?:\.\d+)?)/);
-  if (!match) return null;
-  return parseFloat(match[1]);
+// ── Structured custom rules ──────────────────────────────────────────────────
+
+export const CONDITION_LABELS: Record<ConditionType, string> = {
+  daily_loss_dollar: 'הפסד יומי עבר סכום קבוע ($)',
+  daily_loss_percent: 'הפסד יומי עבר אחוז מהתיק (%)',
+  daily_trades_count: 'מספר עסקאות היום עבר',
+  loss_streak: 'רצף הפסדים רצוף הגיע ל',
+  hour_after: 'השעה עברה (24h)',
+  fomo_last_trade: 'הרגשתי FOMO בעסקה האחרונה',
+  exited_early_last_trade: 'יצאתי מוקדם מהעסקה האחרונה',
+  moved_sl_last_trade: 'הזזתי Stop Loss בעסקה האחרונה',
+};
+
+export const ACTION_LABELS: Record<ActionType, string> = {
+  block_day: 'חסום כניסה לעסקה חדשה ליום שלם',
+  block_timer: 'חסום עם טיימר',
+  warn: 'הצג אזהרה בלבד',
+};
+
+const CONDITIONS_WITHOUT_THRESHOLD: ConditionType[] = [
+  'fomo_last_trade',
+  'exited_early_last_trade',
+  'moved_sl_last_trade',
+];
+
+export function conditionNeedsThreshold(conditionType: ConditionType): boolean {
+  return !CONDITIONS_WITHOUT_THRESHOLD.includes(conditionType);
 }
 
-/**
- * Checks active ("block" enforcement, is_active) custom rules against
- * today's realized loss. Returns the violated rule's own trigger text as
- * the block message, or null if none of them currently apply.
- */
-export function checkCustomRuleViolations(customRules: CustomRule[], todayLossAmount: number): string | null {
+/** Human-readable Hebrew description of a rule's condition, e.g. "הפסד יומי עבר $200". */
+export function describeCustomRule(rule: Pick<CustomRule, 'condition_type' | 'threshold_value'>): string {
+  const t = rule.threshold_value ?? 0;
+  switch (rule.condition_type) {
+    case 'daily_loss_dollar': return `הפסד יומי עבר $${t}`;
+    case 'daily_loss_percent': return `הפסד יומי עבר ${t}% מהתיק`;
+    case 'daily_trades_count': return `מספר עסקאות היום עבר ${t}`;
+    case 'loss_streak': return `רצף הפסדים רצוף הגיע ל-${t}`;
+    case 'hour_after': return `השעה עברה ${t} (פורמט 24h)`;
+    case 'fomo_last_trade': return 'הרגשתי FOMO בעסקה האחרונה';
+    case 'exited_early_last_trade': return 'יצאתי מוקדם מהעסקה האחרונה';
+    case 'moved_sl_last_trade': return 'הזזתי Stop Loss בעסקה האחרונה';
+    default: return '';
+  }
+}
+
+export interface CustomRuleCheckContext {
+  /** Dollar amount lost today (positive number), from realized (closed) trades. */
+  todayLossAmount: number;
+  /** Today's loss as % of portfolio, or null if portfolio size is unknown (condition is skipped). */
+  todayLossPercent: number | null;
+  /** Number of trades taken (submitted) today. */
+  todayTradeCount: number;
+  /** Consecutive losses counting back from the most recently closed trade. */
+  lossStreak: number;
+  /** Current hour, 0-23, local time. */
+  currentHour: number;
+  lastTradeFomo: boolean;
+  lastTradeExitedEarly: boolean;
+  lastTradeMovedSl: boolean;
+}
+
+export function evaluateCustomRuleCondition(rule: CustomRule, ctx: CustomRuleCheckContext): boolean {
+  switch (rule.condition_type) {
+    case 'daily_loss_dollar':
+      return rule.threshold_value !== null && ctx.todayLossAmount > rule.threshold_value;
+    case 'daily_loss_percent':
+      return rule.threshold_value !== null && ctx.todayLossPercent !== null && ctx.todayLossPercent > rule.threshold_value;
+    case 'daily_trades_count':
+      return rule.threshold_value !== null && ctx.todayTradeCount > rule.threshold_value;
+    case 'loss_streak':
+      return rule.threshold_value !== null && ctx.lossStreak >= rule.threshold_value;
+    case 'hour_after':
+      return rule.threshold_value !== null && ctx.currentHour >= rule.threshold_value;
+    case 'fomo_last_trade':
+      return ctx.lastTradeFomo;
+    case 'exited_early_last_trade':
+      return ctx.lastTradeExitedEarly;
+    case 'moved_sl_last_trade':
+      return ctx.lastTradeMovedSl;
+    default:
+      return false;
+  }
+}
+
+export interface CustomRuleViolation {
+  rule: CustomRule;
+  description: string;
+}
+
+/** Returns the first active custom rule whose condition currently holds, or null. */
+export function checkCustomRules(customRules: CustomRule[], ctx: CustomRuleCheckContext): CustomRuleViolation | null {
   for (const rule of customRules) {
-    if (!rule.is_active || rule.enforcement !== 'block') continue;
-    const threshold = parseDailyLossThreshold(rule.trigger_condition);
-    if (threshold !== null && todayLossAmount >= threshold) {
-      return rule.trigger_condition;
+    if (!rule.is_active) continue;
+    if (evaluateCustomRuleCondition(rule, ctx)) {
+      return { rule, description: describeCustomRule(rule) };
     }
   }
   return null;

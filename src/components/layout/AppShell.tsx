@@ -6,7 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import TradePlanForm from '@/components/trade/TradePlanForm';
 import RuleBlockedModal from '@/components/rules/RuleBlockedModal';
-import { fetchActiveRuleViolation } from '@/lib/rules/fetchActiveViolation';
+import { fetchActiveRuleViolation, type RuleViolationResult } from '@/lib/rules/fetchActiveRuleViolation';
 import { cn } from '@/lib/utils';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
 import { ReflectLogo } from '@/components/brand/ReflectLogo';
@@ -102,13 +102,15 @@ export default function AppShell({
   const [formOpen,  setFormOpen]  = useState(false);
   const [expanded,  setExpanded]  = useState(false);
   const [isMobile,  setIsMobile]  = useState(false);
-  const [ruleBlock, setRuleBlock] = useState<string | null>(null);
+  const [ruleBlock,   setRuleBlock]   = useState<RuleViolationResult | null>(null);
+  const [ruleWarning, setRuleWarning] = useState<string | null>(null);
 
   async function tryOpenTradeForm() {
     const violation = await fetchActiveRuleViolation(userId);
-    if (violation) {
+    if (violation && (violation.actionType === 'block_day' || violation.actionType === 'block_timer')) {
       setRuleBlock(violation);
     } else {
+      setRuleWarning(violation?.actionType === 'warn' ? violation.description : null);
       setFormOpen(true);
     }
   }
@@ -329,10 +331,16 @@ export default function AppShell({
         isOpen={formOpen}
         onClose={() => setFormOpen(false)}
         onSuccess={() => router.refresh()}
+        initialWarning={ruleWarning}
       />
 
       {ruleBlock && (
-        <RuleBlockedModal reason={ruleBlock} onClose={() => setRuleBlock(null)} />
+        <RuleBlockedModal
+          ruleName={ruleBlock.ruleName}
+          description={ruleBlock.description}
+          cooldownMinutes={ruleBlock.actionType === 'block_timer' ? ruleBlock.cooldownMinutes : null}
+          onClose={() => setRuleBlock(null)}
+        />
       )}
     </div>
   );

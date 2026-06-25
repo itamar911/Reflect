@@ -93,16 +93,23 @@ CREATE OR REPLACE TRIGGER on_profile_created
 CREATE TABLE IF NOT EXISTS custom_rules (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
-  rule_name TEXT NOT NULL,
-  trigger_condition TEXT NOT NULL,
-  action_required TEXT NOT NULL,
+  name TEXT NOT NULL,
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
-  enforcement TEXT NOT NULL DEFAULT 'warning'
-    CHECK (enforcement IN ('reminder', 'warning', 'block')),
+  condition_type TEXT NOT NULL CHECK (condition_type IN (
+    'daily_loss_dollar',
+    'daily_loss_percent',
+    'daily_trades_count',
+    'loss_streak',
+    'hour_after',
+    'fomo_last_trade',
+    'exited_early_last_trade',
+    'moved_sl_last_trade'
+  )),
+  threshold_value NUMERIC,
+  action_type TEXT NOT NULL DEFAULT 'warn'
+    CHECK (action_type IN ('block_day', 'block_timer', 'warn')),
   cooldown_minutes INTEGER,
-  sort_order INTEGER NOT NULL DEFAULT 0,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 ALTER TABLE custom_rules ENABLE ROW LEVEL SECURITY;
@@ -160,9 +167,6 @@ CREATE TRIGGER profiles_updated_at
 
 CREATE TRIGGER preset_rules_updated_at
   BEFORE UPDATE ON preset_rules FOR EACH ROW EXECUTE FUNCTION update_updated_at();
-
-CREATE TRIGGER custom_rules_updated_at
-  BEFORE UPDATE ON custom_rules FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 -- ─────────────────────────────────────────
 -- MIGRATIONS — run on existing databases
@@ -226,3 +230,9 @@ ALTER TABLE trade_plans
   ADD COLUMN IF NOT EXISTS risk_amount NUMERIC,
   ADD COLUMN IF NOT EXISTS risk_type TEXT CHECK (risk_type IN ('dollar', 'percent')),
   ADD COLUMN IF NOT EXISTS actual_pnl NUMERIC;
+
+-- v15: custom_rules rebuilt as a structured rule system (condition_type +
+-- threshold_value + action_type + cooldown_minutes) — see the CUSTOM RULES
+-- section above (already updated to the final shape) and
+-- migrations/015_rebuild_custom_rules.sql for the actual ALTER to run
+-- against an existing database (drops and recreates the table).

@@ -6,8 +6,15 @@ import PresetRulesPanel from './PresetRulesPanel';
 import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
 import { Lock, ClipboardList } from 'lucide-react';
-import { COOLDOWN_MINUTE_OPTIONS, formatCooldownMinutes } from '@/lib/validators/RulesetValidator';
-import type { PresetRules, CustomRule, Enforcement } from '@/lib/types';
+import {
+  CONDITION_LABELS,
+  ACTION_LABELS,
+  COOLDOWN_MINUTE_OPTIONS,
+  formatCooldownMinutes,
+  conditionNeedsThreshold,
+  describeCustomRule,
+} from '@/lib/validators/RulesetValidator';
+import type { PresetRules, CustomRule, ConditionType, ActionType } from '@/lib/types';
 
 type Tab = 'preset' | 'custom';
 type Plan = 'free' | 'basic' | 'pro';
@@ -19,16 +26,14 @@ interface RulesEditorProps {
   plan?: Plan;
 }
 
-const ENFORCEMENT_LABELS: Record<Enforcement, string> = {
-  reminder: 'התראה',
-  warning: 'אזהרה',
-  block: 'נעילה עם טיימר',
+const ACTION_VARIANTS: Record<ActionType, 'warning' | 'danger'> = {
+  warn: 'warning',
+  block_day: 'danger',
+  block_timer: 'danger',
 };
-const ENFORCEMENT_VARIANTS: Record<Enforcement, 'default' | 'warning' | 'danger'> = {
-  reminder: 'default',
-  warning: 'warning',
-  block: 'danger',
-};
+
+const CONDITION_TYPES = Object.keys(CONDITION_LABELS) as ConditionType[];
+const ACTION_TYPES = Object.keys(ACTION_LABELS) as ActionType[];
 
 export default function RulesEditor({ presetRules: initialPreset, customRules: initialCustom, userId, plan = 'free' }: RulesEditorProps) {
   const [tab, setTab] = useState<Tab>('preset');
@@ -105,9 +110,9 @@ function CustomRulesTab({
         <p className="text-xs text-tg-muted mb-5">עד 3 חוקים ב-Basic · ללא הגבלה ב-Pro</p>
         <div className="flex flex-col gap-2 text-right px-2 mb-5">
           {[
-            'אם הפסדתי יותר מ-3% היום ← לא להיכנס לעסקה נוספת',
-            'אם מסחר אחרי 21:00 ← לא לפתוח עסקות חדשות',
-            'אם הרגשתי FOMO בעסקה הקודמת ← לקחת הפסקה של שעה',
+            'הפסד יומי עבר אחוז מהתיק (%) ← חסום כניסה לעסקה נוספת',
+            'השעה עברה 21:00 (24h) ← חסום עם טיימר',
+            'הרגשתי FOMO בעסקה האחרונה ← הצג אזהרה בלבד',
           ].map((ex) => (
             <div key={ex} className="flex items-start gap-2 px-3 py-2 rounded-xl text-xs text-tg-muted"
               style={{ background: 'var(--color-tg-surface-2)' }}>
@@ -197,10 +202,10 @@ function CustomRuleCard({
     >
       <div className="flex items-start justify-between gap-3 mb-3">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-semibold text-tg-text">{rule.rule_name}</span>
-          <Badge variant={ENFORCEMENT_VARIANTS[rule.enforcement]}>
-            {ENFORCEMENT_LABELS[rule.enforcement]}
-            {rule.enforcement === 'block' && rule.cooldown_minutes ? ` · ${formatCooldownMinutes(rule.cooldown_minutes)}` : ''}
+          <span className="text-sm font-semibold text-tg-text">{rule.name}</span>
+          <Badge variant={ACTION_VARIANTS[rule.action_type]}>
+            {ACTION_LABELS[rule.action_type]}
+            {rule.action_type === 'block_timer' && rule.cooldown_minutes ? ` · ${formatCooldownMinutes(rule.cooldown_minutes)}` : ''}
           </Badge>
         </div>
         <button
@@ -214,25 +219,16 @@ function CustomRuleCard({
         </button>
       </div>
 
-      <div className="flex flex-col gap-1.5 mb-3">
-        <div className="flex gap-2 text-xs">
-          <span className="px-2 py-0.5 rounded-md font-medium shrink-0"
-            style={{ background: 'var(--color-tg-primary-muted)', color: 'var(--color-tg-primary)' }}>
-            אם
-          </span>
-          <span className="text-tg-text-2">{rule.trigger_condition}</span>
-        </div>
-        <div className="flex gap-2 text-xs">
-          <span className="px-2 py-0.5 rounded-md font-medium shrink-0"
-            style={{ background: 'var(--color-tg-success-muted)', color: 'var(--color-tg-success)' }}>
-            אז
-          </span>
-          <span className="text-tg-text-2">{rule.action_required}</span>
-        </div>
+      <div className="flex gap-2 text-xs">
+        <span className="px-2 py-0.5 rounded-md font-medium shrink-0"
+          style={{ background: 'var(--color-tg-primary-muted)', color: 'var(--color-tg-primary)' }}>
+          אם
+        </span>
+        <span className="text-tg-text-2">{describeCustomRule(rule)}</span>
       </div>
 
       {/* Toggle */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between mt-3">
         <span className="text-xs text-tg-muted">{rule.is_active ? 'פעיל' : 'כבוי'}</span>
         <button
           onClick={() => onToggle(rule.id, !rule.is_active)}
@@ -249,26 +245,6 @@ function CustomRuleCard({
   );
 }
 
-const TRIGGER_EXAMPLES_BASIC = [
-  'כמות העסקאות היום עברה 3',
-  'ההפסד היומי עבר $200',
-  'השוק עלה ביותר מ-2% בשעה האחרונה',
-];
-
-const TRIGGER_EXAMPLES_PRO = [
-  'השעה היא אחרי 21:00',
-  'יום שני (תחילת שבוע)',
-  'הרגשתי FOMO בעסקה האחרונה',
-  'ירידה רצופה של 3 עסקאות',
-];
-
-const ACTION_EXAMPLES = [
-  'לא להיכנס לעסקה נוספת היום',
-  'להמתין 30 דקות לפני כניסה',
-  'לקחת הפסקה של שעה',
-  'לסגור את כל הפוזיציות הפתוחות',
-];
-
 function CustomRuleBuilder({
   userId, plan, onSave, onCancel,
 }: {
@@ -278,20 +254,46 @@ function CustomRuleBuilder({
   onCancel: () => void;
 }) {
   const [form, setForm] = useState({
-    rule_name: '',
-    trigger_condition: '',
-    action_required: '',
-    enforcement: 'warning' as Enforcement,
+    name: describeCustomRule({ condition_type: 'daily_loss_dollar', threshold_value: 200 }),
+    nameTouched: false,
+    condition_type: 'daily_loss_dollar' as ConditionType,
+    threshold_value: '200',
+    action_type: 'warn' as ActionType,
     cooldown_minutes: String(COOLDOWN_MINUTE_OPTIONS[1].minutes),
   });
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  const needsThreshold = conditionNeedsThreshold(form.condition_type);
+
+  function applyCondition(condition_type: ConditionType) {
+    const threshold = needsThresholdFor(condition_type) ? form.threshold_value || '1' : '';
+    setForm((f) => ({
+      ...f,
+      condition_type,
+      threshold_value: threshold,
+      name: f.nameTouched ? f.name : describeCustomRule({ condition_type, threshold_value: threshold ? parseFloat(threshold) : null }),
+    }));
+  }
+
+  function needsThresholdFor(c: ConditionType) {
+    return conditionNeedsThreshold(c);
+  }
+
+  function applyThreshold(value: string) {
+    setForm((f) => ({
+      ...f,
+      threshold_value: value,
+      name: f.nameTouched ? f.name : describeCustomRule({ condition_type: f.condition_type, threshold_value: value ? parseFloat(value) : null }),
+    }));
+  }
+
   function validate() {
     const e: Record<string, string> = {};
-    if (!form.rule_name.trim()) e.rule_name = 'שם החוק חובה';
-    if (!form.trigger_condition.trim()) e.trigger_condition = 'תנאי הטריגר חובה';
-    if (!form.action_required.trim()) e.action_required = 'הפעולה חובה';
+    if (!form.name.trim()) e.name = 'שם החוק חובה';
+    if (needsThreshold && (form.threshold_value.trim() === '' || isNaN(parseFloat(form.threshold_value)))) {
+      e.threshold_value = 'יש להזין ערך';
+    }
     setErrors(e);
     return Object.keys(e).length === 0;
   }
@@ -304,11 +306,11 @@ function CustomRuleBuilder({
       .from('custom_rules')
       .insert({
         user_id: userId,
-        rule_name: form.rule_name.trim(),
-        trigger_condition: form.trigger_condition.trim(),
-        action_required: form.action_required.trim(),
-        enforcement: form.enforcement,
-        cooldown_minutes: form.enforcement === 'block' ? parseInt(form.cooldown_minutes) : null,
+        name: form.name.trim(),
+        condition_type: form.condition_type,
+        threshold_value: needsThreshold ? parseFloat(form.threshold_value) : null,
+        action_type: form.action_type,
+        cooldown_minutes: form.action_type === 'block_timer' ? parseInt(form.cooldown_minutes) : null,
         is_active: true,
       })
       .select()
@@ -318,150 +320,84 @@ function CustomRuleBuilder({
     setLoading(false);
   }
 
+  const isBlockLocked = plan === 'basic';
+
   return (
     <div className="p-4 rounded-2xl border border-tg-primary/30 flex flex-col gap-4 animate-fade-in"
       style={{ background: 'var(--color-tg-surface)' }}>
-      <h3 className="text-sm font-semibold text-tg-text">חוק חדש — אם/אז</h3>
+      <h3 className="text-sm font-semibold text-tg-text">חוק חדש</h3>
 
       <div className="flex flex-col gap-1.5">
         <label className="text-sm font-medium text-tg-text-2">שם החוק</label>
         <input
           type="text"
           maxLength={50}
-          placeholder='לדוגמה: "הפסד גדול ביום"'
-          value={form.rule_name}
-          onChange={(e) => setForm({ ...form, rule_name: e.target.value })}
+          value={form.name}
+          onChange={(e) => setForm({ ...form, name: e.target.value, nameTouched: true })}
           className="w-full h-10 px-3 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors"
-          style={{ background: 'var(--color-tg-surface-2)', borderColor: errors.rule_name ? 'var(--color-tg-danger)' : 'var(--color-tg-border)' }}
+          style={{ background: 'var(--color-tg-surface-2)', borderColor: errors.name ? 'var(--color-tg-danger)' : 'var(--color-tg-border)' }}
         />
-        {errors.rule_name && <p className="text-xs text-tg-danger">{errors.rule_name}</p>}
+        {errors.name && <p className="text-xs text-tg-danger">{errors.name}</p>}
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <div className="flex items-center gap-2">
-          <span className="px-2 py-0.5 rounded-md text-xs font-medium"
-            style={{ background: 'var(--color-tg-primary-muted)', color: 'var(--color-tg-primary)' }}>
-            אם (טריגר)
-          </span>
-        </div>
-        <textarea
-          rows={2}
-          placeholder='לדוגמה: "הפסדתי יותר מ-3% מההון היום"'
-          value={form.trigger_condition}
-          onChange={(e) => setForm({ ...form, trigger_condition: e.target.value })}
-          className="w-full px-3 py-2.5 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors resize-none"
-          style={{ background: 'var(--color-tg-surface-2)', borderColor: errors.trigger_condition ? 'var(--color-tg-danger)' : 'var(--color-tg-border)' }}
-        />
-        {errors.trigger_condition && <p className="text-xs text-tg-danger">{errors.trigger_condition}</p>}
-        <div className="flex flex-col gap-1">
-          <p className="text-xs text-tg-muted">דוגמאות מהירות:</p>
-          <div className="flex flex-wrap gap-1.5">
-            {TRIGGER_EXAMPLES_BASIC.map((ex) => (
-              <button key={ex} type="button"
-                onClick={() => setForm({ ...form, trigger_condition: ex })}
-                className="px-2 py-1 rounded-lg text-xs border transition-all duration-150"
-                style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)', color: 'var(--color-tg-text-2)' }}>
-                {ex}
-              </button>
-            ))}
-            {TRIGGER_EXAMPLES_PRO.map((ex) => (
-              <button key={ex} type="button"
-                onClick={plan === 'pro' ? () => setForm({ ...form, trigger_condition: ex }) : undefined}
-                className="px-2 py-1 rounded-lg text-xs border flex items-center gap-1"
-                style={{
-                  background: 'var(--color-tg-surface-2)',
-                  borderColor: 'var(--color-tg-border)',
-                  color: plan === 'pro' ? 'var(--color-tg-text-2)' : 'var(--color-tg-muted)',
-                  opacity: plan === 'pro' ? 1 : 0.6,
-                  cursor: plan === 'pro' ? 'pointer' : 'default',
-                }}>
-                {ex}
-                {plan !== 'pro' && <span className="text-[10px] font-bold" style={{ color: '#00d2d2' }}>Pro</span>}
-              </button>
-            ))}
-          </div>
-        </div>
+        <label className="text-sm font-medium text-tg-text-2">תנאי</label>
+        <select
+          value={form.condition_type}
+          onChange={(e) => applyCondition(e.target.value as ConditionType)}
+          className="w-full h-10 px-3 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary"
+          style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)' }}
+        >
+          {CONDITION_TYPES.map((c) => (
+            <option key={c} value={c}>{CONDITION_LABELS[c]}</option>
+          ))}
+        </select>
       </div>
 
-      <div className="flex flex-col gap-1.5">
-        <div className="flex items-center gap-2">
-          <span className="px-2 py-0.5 rounded-md text-xs font-medium"
-            style={{ background: 'var(--color-tg-success-muted)', color: 'var(--color-tg-success)' }}>
-            אז (פעולה)
-          </span>
+      {needsThreshold && (
+        <div className="flex flex-col gap-1.5">
+          <label className="text-sm font-medium text-tg-text-2">ערך</label>
+          <input
+            type="number"
+            value={form.threshold_value}
+            onChange={(e) => applyThreshold(e.target.value)}
+            className="w-full h-10 px-3 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors"
+            style={{ background: 'var(--color-tg-surface-2)', borderColor: errors.threshold_value ? 'var(--color-tg-danger)' : 'var(--color-tg-border)' }}
+          />
+          {errors.threshold_value && <p className="text-xs text-tg-danger">{errors.threshold_value}</p>}
         </div>
-        <textarea
-          rows={2}
-          placeholder='לדוגמה: "לא להיכנס לעסקה נוספת היום"'
-          value={form.action_required}
-          onChange={(e) => setForm({ ...form, action_required: e.target.value })}
-          className="w-full px-3 py-2.5 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors resize-none"
-          style={{ background: 'var(--color-tg-surface-2)', borderColor: errors.action_required ? 'var(--color-tg-danger)' : 'var(--color-tg-border)' }}
-        />
-        {errors.action_required && <p className="text-xs text-tg-danger">{errors.action_required}</p>}
-        <div className="flex flex-col gap-1">
-          <p className="text-xs text-tg-muted">דוגמאות מהירות:</p>
-          <div className="flex flex-wrap gap-1.5">
-            {ACTION_EXAMPLES.map((ex) => (
-              <button key={ex} type="button"
-                onClick={() => setForm({ ...form, action_required: ex })}
-                className="px-2 py-1 rounded-lg text-xs border transition-all duration-150"
-                style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)', color: 'var(--color-tg-text-2)' }}>
-                {ex}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
+      )}
 
-      {/* Enforcement */}
       <div className="flex flex-col gap-2">
-        <label className="text-sm font-medium text-tg-text-2">עוצמת האכיפה</label>
-        <div className="grid grid-cols-2 gap-2">
-          {(Object.entries(ENFORCEMENT_LABELS) as [Enforcement, string][]).map(([key, label]) => {
-            const isBasicLocked = plan === 'basic' && key === 'block';
-            const disabled = isBasicLocked;
+        <label className="text-sm font-medium text-tg-text-2">פעולה</label>
+        <div className="grid grid-cols-1 gap-2">
+          {ACTION_TYPES.map((key) => {
+            const disabled = isBlockLocked && key !== 'warn';
             return (
               <button
                 key={key}
                 type="button"
-                onClick={() => !disabled && setForm({ ...form, enforcement: key })}
-                className="py-2 px-2 rounded-xl text-xs font-medium border transition-all duration-150 text-center flex items-center justify-center gap-1"
+                onClick={() => !disabled && setForm({ ...form, action_type: key })}
+                className="py-2 px-3 rounded-xl text-xs font-medium border transition-all duration-150 text-center flex items-center justify-center gap-1"
                 style={{
-                  background: form.enforcement === key ? 'var(--color-tg-primary-muted)' : 'var(--color-tg-surface-2)',
-                  borderColor: form.enforcement === key ? 'var(--color-tg-primary)' : 'var(--color-tg-border)',
-                  color: form.enforcement === key ? 'var(--color-tg-primary)' : disabled ? 'var(--color-tg-muted)' : 'var(--color-tg-text-2)',
+                  background: form.action_type === key ? 'var(--color-tg-primary-muted)' : 'var(--color-tg-surface-2)',
+                  borderColor: form.action_type === key ? 'var(--color-tg-primary)' : 'var(--color-tg-border)',
+                  color: form.action_type === key ? 'var(--color-tg-primary)' : disabled ? 'var(--color-tg-muted)' : 'var(--color-tg-text-2)',
                   opacity: disabled ? 0.6 : 1,
                   cursor: disabled ? 'default' : 'pointer',
                 }}
               >
-                {label}
-                {isBasicLocked && <span className="text-[10px] font-bold" style={{ color: '#00d2d2' }}>Pro</span>}
+                {ACTION_LABELS[key]}
+                {disabled && <span className="text-[10px] font-bold" style={{ color: '#00d2d2' }}>Pro</span>}
               </button>
             );
           })}
-          {/* Self-block — Pro only */}
-          <button
-            type="button"
-            onClick={() => {}}
-            className="py-2 px-2 rounded-xl text-xs font-medium border text-center flex items-center justify-center gap-1"
-            style={{
-              background: 'var(--color-tg-surface-2)',
-              borderColor: 'var(--color-tg-border)',
-              color: 'var(--color-tg-muted)',
-              opacity: 0.6,
-              cursor: 'default',
-            }}
-          >
-            חסימה עצמית מלאה
-            <span className="text-[10px] font-bold" style={{ color: '#00d2d2' }}>Pro</span>
-          </button>
         </div>
-        {plan !== 'pro' && (
-          <p className="text-xs text-tg-muted">נעילה וחסימה עצמית מלאה זמינות ב-Pro</p>
+        {isBlockLocked && (
+          <p className="text-xs text-tg-muted">חסימות זמינות ב-Pro · ב-Basic ניתן להציג אזהרה בלבד</p>
         )}
 
-        {form.enforcement === 'block' && (
+        {form.action_type === 'block_timer' && (
           <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl"
             style={{ background: 'var(--color-tg-surface-2)' }}>
             <label className="text-xs font-medium text-tg-text-2">משך הנעילה</label>
@@ -477,21 +413,6 @@ function CustomRuleBuilder({
             </select>
           </div>
         )}
-
-        {/* Self-block explanation — always visible */}
-        <div className="flex items-start gap-2 p-3 rounded-xl"
-          style={{ background: 'rgba(0,210,210,0.08)', border: '1px solid rgba(0,210,210,0.2)' }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#00d2d2" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 shrink-0">
-            <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-            <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
-          </svg>
-          <div>
-            <p className="text-xs font-semibold" style={{ color: '#00d2d2' }}>חסימה עצמית מלאה — Pro</p>
-            <p className="text-xs mt-0.5" style={{ color: 'var(--color-tg-text-2)' }}>
-              כשהחוק מופעל — לא ניתן להגיש תוכנית עסקה. לא ניתן לעקוף. אתה בוחר מראש לחסום את עצמך. הסבר מלא יוצג לפני ההפעלה.
-            </p>
-          </div>
-        </div>
       </div>
 
       <div className="flex gap-2 mt-1">

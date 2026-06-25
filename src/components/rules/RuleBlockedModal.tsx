@@ -1,13 +1,16 @@
 'use client';
 
 import { Ban } from 'lucide-react';
+import { formatCooldownMinutes } from '@/lib/validators/RulesetValidator';
 
 interface RuleBlockedModalProps {
-  reason: string;
+  ruleName: string;
+  description: string;
+  cooldownMinutes?: number | null;
   onClose: () => void;
 }
 
-export default function RuleBlockedModal({ reason, onClose }: RuleBlockedModalProps) {
+export default function RuleBlockedModal({ ruleName, description, cooldownMinutes, onClose }: RuleBlockedModalProps) {
   return (
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center p-4"
@@ -29,12 +32,22 @@ export default function RuleBlockedModal({ reason, onClose }: RuleBlockedModalPr
         </p>
 
         <p className="text-sm font-semibold" style={{ color: 'var(--color-tg-danger)' }}>
-          {reason}
+          {ruleName}
         </p>
 
-        <p className="text-xs text-tg-muted">
-          החוק שלך מונע כניסה לעסקה חדשה כרגע
+        <p className="text-xs text-tg-text-2">
+          {description}
         </p>
+
+        {cooldownMinutes ? (
+          <p className="text-xs text-tg-muted">
+            נעילה למשך {formatCooldownMinutes(cooldownMinutes)}
+          </p>
+        ) : (
+          <p className="text-xs text-tg-muted">
+            החוק שלך מונע כניסה לעסקה חדשה כרגע
+          </p>
+        )}
 
         <button
           onClick={onClose}

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Check } from 'lucide-react';
+import { Check, AlertTriangle } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { validateTradePlan, DEFAULT_PRESET_RULES } from '@/lib/validators/RulesetValidator';
 import { calcRR } from '@/lib/utils';
@@ -60,9 +60,11 @@ interface TradePlanFormProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  /** A "warn"-action personal rule that's currently triggered — shown as a persistent banner, doesn't block submission. */
+  initialWarning?: string | null;
 }
 
-export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: TradePlanFormProps) {
+export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, initialWarning }: TradePlanFormProps) {
   const [form, setForm] = useState<TradePlanInput>(EMPTY_FORM);
   const [formState, setFormState] = useState<FormState>('empty');
   const [validationResult, setValidationResult] = useState<RulesetValidationResult | null>(null);
@@ -357,6 +359,15 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess }: Tr
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
                 טוען חוקים...
+              </div>
+            )}
+
+            {/* Personal-rule warning (action_type = 'warn') — doesn't block submission */}
+            {initialWarning && (
+              <div className="flex items-start gap-2 px-4 py-3 rounded-xl text-sm"
+                style={{ background: 'var(--color-tg-warning-muted)', color: 'var(--color-tg-warning)', border: '1px solid rgba(0,210,210,0.3)' }}>
+                <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+                <span>{initialWarning}</span>
               </div>
             )}
 

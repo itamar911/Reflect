@@ -1,6 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { describeCustomRule, ACTION_LABELS } from '@/lib/validators/RulesetValidator';
+import type { CustomRule } from '@/lib/types';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -151,7 +153,7 @@ ${ctx.recentTrades || 'אין עסקאות עדיין'}
 function buildUserContext(data: {
   trades: Record<string, unknown>[];
   presetRules: Record<string, unknown> | null;
-  customRules: Record<string, unknown>[];
+  customRules: CustomRule[];
 }) {
   const { trades, presetRules, customRules } = data;
 
@@ -234,7 +236,7 @@ function buildUserContext(data: {
     `מצב רגשי מינימלי: ${presetRules.min_emotional_state}/5`,
   ].filter(Boolean).join(', ') : 'לא הוגדרו';
 
-  const customRulesText = customRules.map(r => `- ${r.rule_name}: ${r.trigger_condition} → ${r.action_required}`).join('\n');
+  const customRulesText = customRules.map(r => `- ${r.name}: ${describeCustomRule(r)} → ${ACTION_LABELS[r.action_type]}`).join('\n');
 
   return {
     totalTrades: trades.length,
@@ -265,7 +267,7 @@ export async function POST(request: Request) {
   const ctx = buildUserContext({
     trades: (tradesRes.data ?? []) as Record<string, unknown>[],
     presetRules: presetRes.data as Record<string, unknown> | null,
-    customRules: (customRes.data ?? []) as Record<string, unknown>[],
+    customRules: (customRes.data ?? []) as CustomRule[],
   });
 
   const systemPrompt = buildSystemPrompt(ctx);
