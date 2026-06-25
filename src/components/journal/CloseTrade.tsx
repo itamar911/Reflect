@@ -234,10 +234,10 @@ export default function CloseTrade({
     <div className="flex flex-col gap-3 animate-fade-in">
       <div className="flex flex-col gap-1">
         <label className="text-xs text-tg-muted">מחיר יציאה *</label>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <input type="number" step="any" placeholder="0.00" value={exitPrice}
             onChange={(e) => setExitPrice(e.target.value)}
-            className="flex-1 h-10 px-3 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary"
+            className="flex-1 min-w-0 h-10 px-3 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary"
             style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)' }}
           />
           <div className="flex items-center gap-1">
