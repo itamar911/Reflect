@@ -98,7 +98,61 @@ export const DEFAULT_PRESET_RULES: Omit<PresetRules, 'id' | 'user_id' | 'created
   min_rr_ratio: 2,
   max_daily_trades: 5,
   cooldown_after_losses: 3,
+  cooldown_minutes: null,
   max_daily_loss: null,
   min_emotional_state: 2,
   allowed_strategies: ['Breakout', 'Trend Follow', 'Reversal', 'Range', 'Custom'],
 };
+
+export const COOLDOWN_MINUTE_OPTIONS: { label: string; minutes: number }[] = [
+  { label: '30m', minutes: 30 },
+  { label: '1h', minutes: 60 },
+  { label: '2h', minutes: 120 },
+  { label: '4h', minutes: 240 },
+  { label: '6h', minutes: 360 },
+  { label: '12h', minutes: 720 },
+  { label: '1d', minutes: 1440 },
+];
+
+export function formatCooldownMinutes(minutes: number): string {
+  return COOLDOWN_MINUTE_OPTIONS.find((o) => o.minutes === minutes)?.label ?? `${minutes} דקות`;
+}
+
+export interface ActiveRuleContext {
+  todayTradeCount: number;
+  recentLossCount: number;
+  todayLossAmount: number;
+  /** Minutes elapsed since the most recent closed trade in the loss streak, or null if not applicable. */
+  minutesSinceLastClose: number | null;
+}
+
+/**
+ * Lightweight, input-independent check used to gate opening the trade form —
+ * unlike validateTradePlan, this doesn't require a filled-in trade (no R:R,
+ * emotional state, or strategy fields), only the rules + recent trade history.
+ */
+export function checkActiveViolation(
+  presetRules: PresetRules,
+  ctx: ActiveRuleContext
+): string | null {
+  if (ctx.todayTradeCount >= presetRules.max_daily_trades) {
+    return `הגעת למקסימום ${presetRules.max_daily_trades} עסקאות ליום`;
+  }
+
+  if (ctx.recentLossCount >= presetRules.cooldown_after_losses) {
+    if (presetRules.cooldown_minutes && ctx.minutesSinceLastClose !== null) {
+      const remaining = presetRules.cooldown_minutes - ctx.minutesSinceLastClose;
+      if (remaining > 0) {
+        return `${ctx.recentLossCount} הפסדים רצופים — נדרש Cooldown של ${formatCooldownMinutes(presetRules.cooldown_minutes)} (נותרו ${Math.ceil(remaining)} דקות)`;
+      }
+    } else {
+      return `${ctx.recentLossCount} הפסדים רצופים — נדרש Cooldown לפני עסקה נוספת`;
+    }
+  }
+
+  if (presetRules.max_daily_loss !== null && presetRules.max_daily_loss > 0 && ctx.todayLossAmount >= presetRules.max_daily_loss) {
+    return `הפסד יומי עבר $${presetRules.max_daily_loss}`;
+  }
+
+  return null;
+}

@@ -34,6 +34,7 @@ export interface PresetRules {
   min_rr_ratio: number;
   max_daily_trades: number;
   cooldown_after_losses: number;
+  cooldown_minutes: number | null;
   max_daily_loss: number | null;
   min_emotional_state: number;
   allowed_strategies: TradeStrategy[];

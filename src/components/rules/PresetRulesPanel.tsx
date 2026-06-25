@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
+import { COOLDOWN_MINUTE_OPTIONS } from '@/lib/validators/RulesetValidator';
 import type { PresetRules, TradeStrategy } from '@/lib/types';
 
 const STRATEGIES: TradeStrategy[] = ['Breakout', 'Trend Follow', 'Reversal', 'Range', 'Custom'];
@@ -22,6 +23,7 @@ export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: Prese
     min_rr_ratio: String(rules.min_rr_ratio),
     max_daily_trades: String(rules.max_daily_trades),
     cooldown_after_losses: String(rules.cooldown_after_losses),
+    cooldown_minutes: rules.cooldown_minutes ? String(rules.cooldown_minutes) : '',
     max_daily_loss: rules.max_daily_loss ? String(rules.max_daily_loss) : '',
     min_emotional_state: rules.min_emotional_state,
     allowed_strategies: rules.allowed_strategies,
@@ -48,6 +50,7 @@ export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: Prese
       min_rr_ratio: parseFloat(form.min_rr_ratio) || 2,
       max_daily_trades: parseInt(form.max_daily_trades) || 5,
       cooldown_after_losses: parseInt(form.cooldown_after_losses) || 3,
+      cooldown_minutes: form.cooldown_minutes ? parseInt(form.cooldown_minutes) : null,
       max_daily_loss: form.max_daily_loss ? parseFloat(form.max_daily_loss) : null,
       min_emotional_state: form.min_emotional_state,
       allowed_strategies: form.allowed_strategies,
@@ -144,6 +147,25 @@ export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: Prese
           className="w-20 h-9 px-3 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary text-center"
           style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)', opacity: readOnly ? 0.7 : 1 }}
         />
+      </RuleRow>
+
+      {/* Cooldown duration */}
+      <RuleRow
+        label="משך ה-Cooldown"
+        description="כמה זמן תיחסם כניסה לעסקה חדשה לאחר הפעלת ה-Cooldown — ריק = ללא הגבלת זמן"
+      >
+        <select
+          value={form.cooldown_minutes}
+          onChange={(e) => !readOnly && setForm({ ...form, cooldown_minutes: e.target.value })}
+          disabled={readOnly}
+          className="w-28 h-9 px-3 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary text-center"
+          style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)', opacity: readOnly ? 0.7 : 1 }}
+        >
+          <option value="">ללא הגבלה</option>
+          {COOLDOWN_MINUTE_OPTIONS.map((o) => (
+            <option key={o.minutes} value={o.minutes}>{o.label}</option>
+          ))}
+        </select>
       </RuleRow>
 
       {/* Max daily loss */}

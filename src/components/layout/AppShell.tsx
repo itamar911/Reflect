@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import TradePlanForm from '@/components/trade/TradePlanForm';
+import RuleBlockedModal from '@/components/rules/RuleBlockedModal';
+import { fetchActiveRuleViolation } from '@/lib/rules/fetchActiveViolation';
 import { cn } from '@/lib/utils';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
 import { ReflectLogo } from '@/components/brand/ReflectLogo';
@@ -100,6 +102,16 @@ export default function AppShell({
   const [formOpen,  setFormOpen]  = useState(false);
   const [expanded,  setExpanded]  = useState(false);
   const [isMobile,  setIsMobile]  = useState(false);
+  const [ruleBlock, setRuleBlock] = useState<string | null>(null);
+
+  async function tryOpenTradeForm() {
+    const violation = await fetchActiveRuleViolation(userId);
+    if (violation) {
+      setRuleBlock(violation);
+    } else {
+      setFormOpen(true);
+    }
+  }
 
   // Detect mobile viewport
   useEffect(() => {
@@ -119,10 +131,10 @@ export default function AppShell({
 
   // External trigger (other components can dispatch 'open-trade-form')
   useEffect(() => {
-    const handler = () => setFormOpen(true);
+    const handler = () => { tryOpenTradeForm(); };
     window.addEventListener('open-trade-form', handler);
     return () => window.removeEventListener('open-trade-form', handler);
-  }, []);
+  }, [userId]);
 
   function toggle() {
     const next = !expanded;
@@ -283,7 +295,7 @@ export default function AppShell({
 
           {/* New trade */}
           <button
-            onClick={() => setFormOpen(true)}
+            onClick={() => tryOpenTradeForm()}
             title={!expanded ? 'עסקה חדשה' : undefined}
             className={cn(
               'flex items-center justify-center rounded-xl py-2.5 font-semibold text-sm',
@@ -318,6 +330,10 @@ export default function AppShell({
         onClose={() => setFormOpen(false)}
         onSuccess={() => router.refresh()}
       />
+
+      {ruleBlock && (
+        <RuleBlockedModal reason={ruleBlock} onClose={() => setRuleBlock(null)} />
+      )}
     </div>
   );
 }

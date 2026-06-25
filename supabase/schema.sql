@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS preset_rules (
   min_rr_ratio DECIMAL NOT NULL DEFAULT 2.0,
   max_daily_trades INTEGER NOT NULL DEFAULT 5,
   cooldown_after_losses INTEGER NOT NULL DEFAULT 3,
+  cooldown_minutes INTEGER,
   max_daily_loss DECIMAL,
   min_emotional_state INTEGER NOT NULL DEFAULT 2
     CHECK (min_emotional_state BETWEEN 1 AND 5),
