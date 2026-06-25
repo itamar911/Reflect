@@ -1,4 +1,4 @@
-import type { TradePlanInput, PresetRules, RulesetValidationResult } from '@/lib/types';
+import type { TradePlanInput, PresetRules, CustomRule, RulesetValidationResult } from '@/lib/types';
 import { calcRR } from '@/lib/utils';
 
 export function validateTradePlan(
@@ -154,5 +154,36 @@ export function checkActiveViolation(
     return `הפסד יומי עבר $${presetRules.max_daily_loss}`;
   }
 
+  return null;
+}
+
+/**
+ * Custom rules are free-text ("אם X אז Y") — there's no structured threshold
+ * column to compare against. This recognizes the one concrete pattern the
+ * app itself suggests as a quick-pick example: a daily-loss-limit sentence
+ * mentioning "הפסד" (loss), "יומי" (daily), and a $amount, e.g.
+ * "ההפסד היומי עבר $200". Returns the threshold in dollars, or null if the
+ * rule's trigger_condition doesn't match that shape.
+ */
+export function parseDailyLossThreshold(triggerCondition: string): number | null {
+  if (!/הפסד/.test(triggerCondition) || !/יומי/.test(triggerCondition)) return null;
+  const match = triggerCondition.match(/\$\s*(\d+(?:\.\d+)?)/);
+  if (!match) return null;
+  return parseFloat(match[1]);
+}
+
+/**
+ * Checks active ("block" enforcement, is_active) custom rules against
+ * today's realized loss. Returns the violated rule's own trigger text as
+ * the block message, or null if none of them currently apply.
+ */
+export function checkCustomRuleViolations(customRules: CustomRule[], todayLossAmount: number): string | null {
+  for (const rule of customRules) {
+    if (!rule.is_active || rule.enforcement !== 'block') continue;
+    const threshold = parseDailyLossThreshold(rule.trigger_condition);
+    if (threshold !== null && todayLossAmount >= threshold) {
+      return rule.trigger_condition;
+    }
+  }
   return null;
 }
