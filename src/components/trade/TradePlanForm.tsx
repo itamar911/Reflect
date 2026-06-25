@@ -12,7 +12,11 @@ import Button from '@/components/ui/Button';
 import Select from '@/components/ui/Select';
 import type { TradePlanInput, PresetRules, RulesetValidationResult, TradeStrategy, PnlCurrency, Timeframe } from '@/lib/types';
 
-const STRATEGIES: TradeStrategy[] = ['Breakout', 'Trend Follow', 'Reversal', 'Range', 'Custom'];
+const STRATEGIES: TradeStrategy[] = [
+  'Breakout', 'Trend Follow', 'Reversal', 'Range', 'Custom',
+  'ICT', 'SMC', 'VWAP', 'Supply & Demand', 'Price Action', 'Scalping',
+  'Gap & Go', 'Elliott Wave', 'Fibonacci', 'Moving Average', 'RSI Divergence', 'Order Flow',
+];
 
 const TIMEFRAMES: Timeframe[] = ['1m', '5m', '15m', '30m', '1H', '4H', 'Daily', 'Weekly'];
 
@@ -49,8 +53,7 @@ const EMPTY_FORM: TradePlanInput = {
   timeframe: '',
   direction: null,
   units: '',
-  risk_amount: '',
-  risk_type: 'dollar',
+  point_value: '1',
 };
 
 type FormState = 'empty' | 'editing' | 'validating' | 'warning' | 'blocked' | 'success' | 'error';
@@ -81,6 +84,9 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
   const [slInput, setSlInput] = useState('');
   const [tpInput, setTpInput] = useState('');
   const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set());
+  const [addingStrategy, setAddingStrategy] = useState(false);
+  const [newStrategyName, setNewStrategyName] = useState('');
+  const [addStrategyLoading, setAddStrategyLoading] = useState(false);
 
   const supabase = createClient();
 
@@ -94,6 +100,26 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
       }
       return next;
     });
+  }
+
+  async function handleAddPersonalStrategy() {
+    const name = newStrategyName.trim();
+    if (!name) return;
+    setAddStrategyLoading(true);
+    const { data, error } = await supabase
+      .from('personal_strategies')
+      .insert({ user_id: userId, name })
+      .select('name')
+      .single();
+
+    if (!error && data) {
+      setPersonalStrategies((prev) => prev.includes(data.name) ? prev : [...prev, data.name]);
+      setForm((f) => ({ ...f, strategy: data.name }));
+      setValidationResult(null);
+    }
+    setAddStrategyLoading(false);
+    setAddingStrategy(false);
+    setNewStrategyName('');
   }
 
   // Restore saved TP/SL input unit preference
@@ -120,8 +146,10 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
   const unitsNum = parseFloat(form.units);
   const hasUnits = form.units.trim() !== '' && !isNaN(unitsNum) && unitsNum > 0;
 
-  const riskAmountNum = parseFloat(form.risk_amount);
-  const hasRiskAmount = form.risk_amount.trim() !== '' && !isNaN(riskAmountNum) && riskAmountNum > 0;
+  const pointValueParsed = parseFloat(form.point_value);
+  const pointValueNum = form.point_value.trim() !== '' && !isNaN(pointValueParsed) && pointValueParsed > 0
+    ? pointValueParsed
+    : 1;
 
   // נק׳ mode: the field holds the actual target price directly (no conversion).
   // % mode: the field holds a percentage offset from the entry price —
@@ -272,8 +300,7 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
       timeframe: form.timeframe || null,
       status: 'open',
       units: unitsNum,
-      risk_amount: hasRiskAmount ? riskAmountNum : null,
-      risk_type: hasRiskAmount ? form.risk_type : null,
+      point_value: pointValueNum,
       pnl_currency: currency,
     });
 
@@ -428,7 +455,44 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
                     onClick={() => { setForm({ ...form, strategy: s }); setValidationResult(null); }}
                   />
                 ))}
+                {!addingStrategy && (
+                  <button
+                    type="button"
+                    onClick={() => setAddingStrategy(true)}
+                    className="px-3 py-1.5 rounded-full text-sm border transition-all duration-150"
+                    style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)', color: 'var(--color-tg-primary)' }}
+                  >
+                    אסטרטגיה אישית +
+                  </button>
+                )}
               </div>
+              {addingStrategy && (
+                <div className="flex items-center gap-2 animate-fade-in">
+                  <input
+                    type="text"
+                    autoFocus
+                    placeholder="שם האסטרטגיה"
+                    value={newStrategyName}
+                    onChange={(e) => setNewStrategyName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleAddPersonalStrategy();
+                      if (e.key === 'Escape') { setAddingStrategy(false); setNewStrategyName(''); }
+                    }}
+                    className="flex-1 h-9 px-3 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors"
+                    style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)' }}
+                  />
+                  <Button size="sm" loading={addStrategyLoading} disabled={!newStrategyName.trim()} onClick={handleAddPersonalStrategy}>
+                    הוסף
+                  </Button>
+                  <button
+                    type="button"
+                    onClick={() => { setAddingStrategy(false); setNewStrategyName(''); }}
+                    className="text-xs text-tg-muted shrink-0"
+                  >
+                    ביטול
+                  </button>
+                </div>
+              )}
               {personalStrategies.length > 0 && (
                 <>
                   <div className="flex items-center gap-2 mt-1">
@@ -542,21 +606,32 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
                     </button>
                   </div>
                 </div>
-                <input
-                  type="number"
-                  step="any"
-                  placeholder="0"
-                  value={form.units}
-                  onChange={(e) => { setForm({ ...form, units: e.target.value }); setPnlFieldsError(false); }}
-                  className="w-full h-10 px-2 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors text-center"
-                  style={{
-                    background: 'var(--color-tg-surface-2)',
-                    borderColor: pnlFieldsError && !hasUnits ? 'var(--color-tg-danger)' : 'var(--color-tg-border)',
-                  }}
-                />
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="number"
+                    step="any"
+                    placeholder="0"
+                    value={form.units}
+                    onChange={(e) => { setForm({ ...form, units: e.target.value }); setPnlFieldsError(false); }}
+                    className="w-full h-10 px-2 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors text-center"
+                    style={{
+                      background: 'var(--color-tg-surface-2)',
+                      borderColor: pnlFieldsError && !hasUnits ? 'var(--color-tg-danger)' : 'var(--color-tg-border)',
+                    }}
+                  />
+                  <input
+                    type="number"
+                    step="any"
+                    placeholder="שווי נקודה ($)"
+                    value={form.point_value}
+                    onChange={(e) => setForm({ ...form, point_value: e.target.value })}
+                    className="w-full h-10 px-2 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors text-center"
+                    style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)' }}
+                  />
+                </div>
               </div>
               <p className="text-[10px] text-tg-muted">
-                שדה חובה — נדרש כדי שהמערכת תחשב עבורך רווח/הפסד ({currency}) בסגירת העסקה
+                יחידות/חוזים — שדה חובה. שווי נקודה ($) — אופציונלי, ברירת מחדל 1. נדרשים כדי שהמערכת תחשב עבורך רווח/הפסד ({currency}) בסגירת העסקה
               </p>
               {pnlFieldsError && (
                 <div className="px-3 py-2 rounded-xl text-xs animate-fade-in"
@@ -564,42 +639,6 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
                   יש למלא יחידות תקינות כדי להגיש את התוכנית
                 </div>
               )}
-              <div className="flex flex-col gap-1.5">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-medium text-tg-muted">סיכון בעסקה</label>
-                  <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-tg-border)' }}>
-                    <button
-                      type="button"
-                      onClick={() => setForm({ ...form, risk_type: 'dollar' })}
-                      className="px-2 py-0.5 text-[10px] font-semibold transition-all"
-                      style={{
-                        background: form.risk_type === 'dollar' ? 'var(--color-tg-primary-muted)' : 'transparent',
-                        color: form.risk_type === 'dollar' ? 'var(--color-tg-primary)' : 'var(--color-tg-muted)',
-                      }}>
-                      $
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setForm({ ...form, risk_type: 'percent' })}
-                      className="px-2 py-0.5 text-[10px] font-semibold transition-all"
-                      style={{
-                        background: form.risk_type === 'percent' ? 'var(--color-tg-primary-muted)' : 'transparent',
-                        color: form.risk_type === 'percent' ? 'var(--color-tg-primary)' : 'var(--color-tg-muted)',
-                      }}>
-                      %
-                    </button>
-                  </div>
-                </div>
-                <input
-                  type="number"
-                  step="any"
-                  placeholder="0"
-                  value={form.risk_amount}
-                  onChange={(e) => setForm({ ...form, risk_amount: e.target.value })}
-                  className="w-full h-10 px-2 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors text-center"
-                  style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)' }}
-                />
-              </div>
               {rr !== null && rr > 0 && (
                 <div className="flex items-center justify-between px-4 py-2.5 rounded-xl animate-fade-in"
                   style={{

@@ -69,6 +69,7 @@ interface CloseTradeProps {
   tradeReason: string;
   direction: 'long' | 'short';
   units: number | null;
+  pointValue: number | null;
   pnlCurrency: string | null;
   onClosed: () => void;
   onDebrief?: (result: AIDebriefResult) => void;
@@ -87,7 +88,7 @@ const EXIT_REASONS = [
 
 export default function CloseTrade({
   tradeId, entryPrice, stopLoss, takeProfit, rrRatio,
-  emotionalState, strategy, tradeReason, direction, units, pnlCurrency, onClosed, onDebrief
+  emotionalState, strategy, tradeReason, direction, units, pointValue, pnlCurrency, onClosed, onDebrief
 }: CloseTradeProps) {
   const [exitPrice, setExitPrice] = useState('');
   const [exitReason, setExitReason] = useState('');
@@ -114,7 +115,7 @@ export default function CloseTrade({
   const pnlPercent = pnlPoints !== null ? ((pnlPoints / entryPrice) * 100) : null;
 
   const calculatedAmount = pnlPoints !== null && units != null
-    ? Math.round(pnlPoints * units * 100) / 100
+    ? Math.round(pnlPoints * units * (pointValue ?? 1) * 100) / 100
     : null;
 
   const actualPnlNum = parseFloat(actualPnl);

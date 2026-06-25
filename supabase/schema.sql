@@ -236,3 +236,7 @@ ALTER TABLE trade_plans
 -- section above (already updated to the final shape) and
 -- migrations/015_rebuild_custom_rules.sql for the actual ALTER to run
 -- against an existing database (drops and recreates the table).
+
+-- v16: Point/contract value multiplier for PnL calculation
+ALTER TABLE trade_plans
+  ADD COLUMN IF NOT EXISTS point_value NUMERIC DEFAULT 1;

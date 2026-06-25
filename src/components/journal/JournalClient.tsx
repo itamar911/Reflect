@@ -46,6 +46,7 @@ interface Trade {
   plan_score: number | null;
   quantity: number | null;
   units: number | null;
+  point_value: number | null;
   direction: 'long' | 'short' | null;
   pnl_amount: number | null;
   pnl_currency: string | null;
@@ -638,6 +639,7 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
               tradeReason={t.trade_reason}
               direction={inferDirection(t)}
               units={t.units ?? t.quantity}
+              pointValue={t.point_value}
               pnlCurrency={t.pnl_currency}
               onClosed={() => { setClosingTradeId(null); router.refresh(); }}
               onDebrief={result => setDebriefResults(prev => ({ ...prev, [t.id]: result }))}

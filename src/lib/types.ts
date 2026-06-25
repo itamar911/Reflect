@@ -2,7 +2,10 @@
 export type ExperienceLevel = 'beginner' | 'intermediate' | 'advanced';
 export type Market = 'stocks' | 'crypto' | 'forex' | 'options' | 'futures' | 'etf' | 'commodities';
 export type SubscriptionTier = 'free' | 'basic' | 'pro';
-export type TradeStrategy = 'Breakout' | 'Trend Follow' | 'Reversal' | 'Range' | 'Futures' | 'Custom';
+export type TradeStrategy =
+  | 'Breakout' | 'Trend Follow' | 'Reversal' | 'Range' | 'Futures' | 'Custom'
+  | 'ICT' | 'SMC' | 'VWAP' | 'Supply & Demand' | 'Price Action' | 'Scalping'
+  | 'Gap & Go' | 'Elliott Wave' | 'Fibonacci' | 'Moving Average' | 'RSI Divergence' | 'Order Flow';
 export type ConditionType =
   | 'daily_loss_dollar'
   | 'daily_loss_percent'
@@ -97,6 +100,7 @@ export interface TradePlan {
   revenge_trade: boolean | null;
   direction: 'long' | 'short' | null;
   units: number | null;
+  point_value: number | null;
   risk_amount: number | null;
   risk_type: RiskType | null;
   actual_pnl: number | null;
@@ -116,8 +120,7 @@ export interface TradePlanInput {
   timeframe: Timeframe | '';
   direction: 'long' | 'short' | null;
   units: string;
-  risk_amount: string;
-  risk_type: RiskType;
+  point_value: string;
 }
 
 export interface RulesetValidationResult {
