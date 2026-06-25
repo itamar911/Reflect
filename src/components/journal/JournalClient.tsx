@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { Bot, DollarSign, Pencil, Trash2 } from 'lucide-react';
 import CloseTrade, { AIDebriefView, type AIDebriefResult } from '@/components/journal/CloseTrade';
@@ -819,20 +820,28 @@ function PgBtn({ children, onClick, disabled, active }: {
 // ── Modals ────────────────────────────────────────────────────────────────────
 
 function Modal({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
-  return (
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+  if (!mounted) return null;
+
+  // Rendered via portal so the fixed overlay covers the full viewport — an
+  // ancestor (.page-enter) animates with `transform`, which would otherwise
+  // scope position:fixed to that ancestor's box instead of the real viewport.
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-start sm:items-center justify-center overflow-y-auto p-4"
       style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md mx-auto max-h-[90dvh] overflow-y-auto rounded-2xl p-5 flex flex-col gap-3 my-auto"
+        className="w-full max-w-lg mx-auto max-h-[90dvh] overflow-y-auto rounded-2xl p-5 flex flex-col gap-3 my-auto"
         style={{ background: 'var(--color-tg-surface)', border: '1px solid var(--color-tg-border)', boxShadow: '0 24px 64px rgba(0,0,0,0.8)' }}
         onClick={e => e.stopPropagation()}
       >
         {children}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
