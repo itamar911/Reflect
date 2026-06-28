@@ -70,7 +70,11 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
     for (const t of trades) {
       const key  = toDayKey(new Date(t.submitted_at));
       const prev = map.get(key) ?? { pnl: 0, tradeCount: 0, hasViolation: false };
-      const pnl  = t.actual_pnl ?? 0;
+      const pnl  = t.actual_pnl != null
+        ? t.actual_pnl
+        : (t.status === 'closed' && t.exit_price != null
+            ? t.exit_price - t.entry_price
+            : 0);
       const violation =
         t.emotional_state <= 2 || (t.plan_score != null && t.plan_score < 70);
       map.set(key, {
