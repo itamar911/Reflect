@@ -34,6 +34,7 @@ export default async function JournalPage() {
     submitted_at:     t.submitted_at     as string,
     closed_at:        t.closed_at        as string | null,
     plan_score:       t.plan_score       as number | null,
+    actual_pnl:       t.actual_pnl != null ? Number(t.actual_pnl) : null,
   }));
 
   const exportTrades = allTrades.map((t) => ({
