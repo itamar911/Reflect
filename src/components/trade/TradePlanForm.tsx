@@ -84,6 +84,8 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
   const [slInput, setSlInput] = useState('');
   const [tpInput, setTpInput] = useState('');
   const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set());
+  const [chartSymbol, setChartSymbol] = useState('');
+
   const supabase = createClient();
 
   function toggleChecklistItem(item: string) {
@@ -203,6 +205,10 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
     if (isOpen) loadContext();
   }, [isOpen, loadContext]);
 
+  useEffect(() => {
+    const t = setTimeout(() => setChartSymbol(form.symbol.trim()), 800);
+    return () => clearTimeout(t);
+  }, [form.symbol]);
 
   const rr = hasEntry && slPrice !== null && tpPrice !== null
     ? calcRR(entryNum, slPrice, tpPrice)
@@ -662,6 +668,36 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
                 })}
               </div>
             </FormSection>
+
+            {/* TradingView chart — iframe embed, no external scripts */}
+            {(() => {
+              const TV_INTERVAL: Record<string, string> = {
+                '1m': '1', '5m': '5', '15m': '15', '30m': '30',
+                '1H': '60', '4H': '240', 'Daily': 'D', 'Weekly': 'W',
+              };
+              const interval = TV_INTERVAL[form.timeframe] || 'D';
+              return chartSymbol ? (
+                <iframe
+                  key={`${chartSymbol}-${interval}`}
+                  src={`https://www.tradingview.com/widgetembed/?symbol=${encodeURIComponent(chartSymbol)}&interval=${interval}&theme=dark&style=1&locale=he`}
+                  className="w-full rounded-2xl border border-tg-border"
+                  style={{ height: 'clamp(300px, 40vw, 500px)' }}
+                  allowFullScreen
+                />
+              ) : (
+                <div
+                  className="w-full rounded-2xl flex items-center justify-center text-sm"
+                  style={{
+                    height: 'clamp(300px, 40vw, 500px)',
+                    border: '1px solid var(--color-tg-border)',
+                    background: 'var(--color-tg-surface-2)',
+                    color: 'var(--color-tg-muted)',
+                  }}
+                >
+                  הזן סמל נכס כדי לראות את הגרף
+                </div>
+              );
+            })()}
 
             {/* Actions */}
             <div className="flex flex-col gap-2 pb-4">
