@@ -69,9 +69,9 @@ export default function TradingViewChart({ symbol, timeframe }: Props) {
     function build() {
       if (cancelled || !tvContainerRef.current) return;
 
-      const isMobile = window.innerWidth < 768;
-      const w = isMobile ? 380 : 600;
-      const h = isMobile ? 400 : 600;
+      const isMobile = window.innerWidth <= 768;
+      const w = isMobile ? 380 : 800;
+      const h = isMobile ? 214 : 450;
 
       try { widgetRef.current?.remove(); } catch { /* ignore */ }
       tvContainerRef.current.innerHTML = '';
@@ -116,7 +116,7 @@ export default function TradingViewChart({ symbol, timeframe }: Props) {
   }, [symbol, timeframe]);
 
   return (
-    <div className="w-full rounded-2xl h-[400px] md:h-[600px]"
+    <div className="w-full rounded-2xl h-[214px] md:h-[450px]"
       style={{ border: '1px solid var(--color-tg-border)', background: 'var(--color-tg-surface-2)' }}
     >
       {!symbol ? (
