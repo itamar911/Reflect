@@ -679,16 +679,16 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
               return chartSymbol ? (
                 <iframe
                   key={`${chartSymbol}-${interval}`}
-                  src={`https://www.tradingview.com/widgetembed/?symbol=${encodeURIComponent(chartSymbol)}&interval=${interval}&theme=dark&style=1&locale=he`}
+                  src={`https://www.tradingview.com/widgetembed/?symbol=${encodeURIComponent(chartSymbol)}&interval=${interval}&theme=dark&style=1&locale=he&hide_top_toolbar=0&hide_side_toolbar=0&allow_symbol_change=1&save_image=0&withdateranges=1`}
                   className="w-full rounded-2xl border border-tg-border"
-                  style={{ height: 'clamp(300px, 40vw, 500px)' }}
+                  style={{ height: 'clamp(400px, 50vw, 600px)' }}
                   allowFullScreen
                 />
               ) : (
                 <div
                   className="w-full rounded-2xl flex items-center justify-center text-sm"
                   style={{
-                    height: 'clamp(300px, 40vw, 500px)',
+                    height: 'clamp(400px, 50vw, 600px)',
                     border: '1px solid var(--color-tg-border)',
                     background: 'var(--color-tg-surface-2)',
                     color: 'var(--color-tg-muted)',
