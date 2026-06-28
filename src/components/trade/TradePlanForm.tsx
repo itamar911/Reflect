@@ -8,6 +8,7 @@ import { calcRR } from '@/lib/utils';
 import ValidationResultBanner from './ValidationResultBanner';
 import EmotionalStateSlider from './EmotionalStateSlider';
 import ConfidenceLevelSlider from './ConfidenceLevelSlider';
+import TradingViewChart from './TradingViewChart';
 import Button from '@/components/ui/Button';
 import Select from '@/components/ui/Select';
 import type { TradePlanInput, PresetRules, RulesetValidationResult, TradeStrategy, PnlCurrency, Timeframe } from '@/lib/types';
@@ -84,6 +85,11 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
   const [slInput, setSlInput] = useState('');
   const [tpInput, setTpInput] = useState('');
   const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set());
+  const [chartSymbol, setChartSymbol] = useState('');
+  const [chartTimeframe, setChartTimeframe] = useState('');
+  const [chartEntry, setChartEntry] = useState<number | null>(null);
+  const [chartSL, setChartSL] = useState<number | null>(null);
+  const [chartTP, setChartTP] = useState<number | null>(null);
 
   const supabase = createClient();
 
@@ -203,6 +209,18 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
   useEffect(() => {
     if (isOpen) loadContext();
   }, [isOpen, loadContext]);
+
+  // Debounce chart props so the widget only recreates after the user pauses typing
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setChartSymbol(form.symbol.trim());
+      setChartTimeframe(form.timeframe);
+      setChartEntry(hasEntry ? entryNum : null);
+      setChartSL(slPrice);
+      setChartTP(tpPrice);
+    }, 800);
+    return () => clearTimeout(t);
+  }, [form.symbol, form.timeframe, entryNum, slPrice, tpPrice, hasEntry]);
 
   const rr = hasEntry && slPrice !== null && tpPrice !== null
     ? calcRR(entryNum, slPrice, tpPrice)
@@ -662,6 +680,15 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
                 })}
               </div>
             </FormSection>
+
+            {/* TradingView Chart */}
+            <TradingViewChart
+              symbol={chartSymbol}
+              timeframe={chartTimeframe}
+              entryPrice={chartEntry}
+              stopLoss={chartSL}
+              takeProfit={chartTP}
+            />
 
             {/* Actions */}
             <div className="flex flex-col gap-2 pb-4">
