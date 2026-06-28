@@ -146,7 +146,7 @@ export default function CloseTrade({
       closed_at: new Date().toISOString(),
       pnl_amount: pnlAmount,
       pnl_currency: pnlCurrencyValue,
-      actual_pnl: hasActualPnl ? actualPnlNum : null,
+      actual_pnl: hasActualPnl ? actualPnlNum : calculatedAmount,
       followed_plan: followedPlan,
       kept_sl: keptSl,
       proper_size: properSize,
