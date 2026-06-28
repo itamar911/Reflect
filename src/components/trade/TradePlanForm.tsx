@@ -521,8 +521,7 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-medium text-tg-muted">יחידות/חוזים *</label>
+                <div className="flex items-center justify-end">
                   <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-tg-border)' }}>
                     <button
                       type="button"
@@ -547,27 +546,33 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  <input
-                    type="number"
-                    step="any"
-                    placeholder="0"
-                    value={form.units}
-                    onChange={(e) => { setForm({ ...form, units: e.target.value }); setPnlFieldsError(false); }}
-                    className="w-full h-10 px-2 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors text-center"
-                    style={{
-                      background: 'var(--color-tg-surface-2)',
-                      borderColor: pnlFieldsError && !hasUnits ? 'var(--color-tg-danger)' : 'var(--color-tg-border)',
-                    }}
-                  />
-                  <input
-                    type="number"
-                    step="any"
-                    placeholder="שווי נקודה ($)"
-                    value={form.point_value}
-                    onChange={(e) => setForm({ ...form, point_value: e.target.value })}
-                    className="w-full h-10 px-2 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors text-center"
-                    style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)' }}
-                  />
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-medium text-tg-muted">יחידות/חוזים</label>
+                    <input
+                      type="number"
+                      step="any"
+                      placeholder="0"
+                      value={form.units}
+                      onChange={(e) => { setForm({ ...form, units: e.target.value }); setPnlFieldsError(false); }}
+                      className="w-full h-10 px-2 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors text-center"
+                      style={{
+                        background: 'var(--color-tg-surface-2)',
+                        borderColor: pnlFieldsError && !hasUnits ? 'var(--color-tg-danger)' : 'var(--color-tg-border)',
+                      }}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-medium text-tg-muted">שווי נקודה ($)</label>
+                    <input
+                      type="number"
+                      step="any"
+                      placeholder="1"
+                      value={form.point_value}
+                      onChange={(e) => setForm({ ...form, point_value: e.target.value })}
+                      className="w-full h-10 px-2 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors text-center"
+                      style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)' }}
+                    />
+                  </div>
                 </div>
               </div>
               <p className="text-[10px] text-tg-muted">
