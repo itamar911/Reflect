@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react';
 
 declare global {
   interface Window {
-    TradingView: {
+    TradingView?: {
       widget: new (config: Record<string, unknown>) => TvWidget;
     };
   }
@@ -107,7 +107,7 @@ export default function TradingViewChart({ symbol, timeframe, entryPrice, stopLo
       inner.style.height = `${h}px`;
       tvContainerRef.current.appendChild(inner);
 
-      const widget = new window.TradingView.widget({
+      const widget = new window.TradingView!.widget({
         container_id: idRef.current!,
         symbol,
         interval: TIMEFRAME_MAP[timeframe] || 'D',
