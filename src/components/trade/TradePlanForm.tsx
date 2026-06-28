@@ -681,8 +681,14 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
               </div>
             </FormSection>
 
-            {/* TradingView Chart — TEST: red div to confirm position renders */}
-            <div style={{ height: '200px', background: 'red', width: '100%' }}>TEST CHART</div>
+            {/* TradingView Chart */}
+            <TradingViewChart
+              symbol={chartSymbol}
+              timeframe={chartTimeframe}
+              entryPrice={chartEntry}
+              stopLoss={chartSL}
+              takeProfit={chartTP}
+            />
 
             {/* Actions */}
             <div className="flex flex-col gap-2 pb-4">
