@@ -44,57 +44,77 @@ interface Props {
 
 const TV_SCRIPT_SRC = 'https://s3.tradingview.com/tv.js';
 
-function loadTvScript(onReady: () => void) {
+function loadTvScript(onReady: () => void): () => void {
   if (typeof window.TradingView !== 'undefined') {
     onReady();
-    return;
+    return () => {};
   }
+
   const existing = document.querySelector<HTMLScriptElement>(`script[src="${TV_SCRIPT_SRC}"]`);
   if (existing) {
+    let active = true;
     const poll = setInterval(() => {
       if (typeof window.TradingView !== 'undefined') {
         clearInterval(poll);
-        onReady();
+        if (active) onReady();
       }
     }, 100);
-    return;
+    return () => { active = false; clearInterval(poll); };
   }
+
   const script = document.createElement('script');
   script.src = TV_SCRIPT_SRC;
   script.async = true;
   script.onload = onReady;
   document.head.appendChild(script);
+  return () => { script.onload = null; };
 }
 
+// Stable unique ID per component instance, generated only on client.
+let _counter = 0;
+
 export default function TradingViewChart({ symbol, timeframe, entryPrice, stopLoss, takeProfit }: Props) {
-  const containerRef = useRef<HTMLDivElement>(null);
+  const outerRef = useRef<HTMLDivElement>(null);
+  const tvContainerRef = useRef<HTMLDivElement>(null);
   const widgetRef = useRef<TvWidget | null>(null);
-  const idRef = useRef(`tv_${Math.random().toString(36).slice(2, 9)}`);
+  const idRef = useRef<string | null>(null);
+
+  if (!idRef.current) {
+    idRef.current = `tv_chart_${++_counter}`;
+  }
 
   useEffect(() => {
-    if (!symbol || !containerRef.current) return;
+    if (!symbol || !tvContainerRef.current) return;
 
     let cancelled = false;
+    let cleanupScript: (() => void) | null = null;
 
     function build() {
-      if (cancelled || !containerRef.current) return;
+      if (cancelled || !tvContainerRef.current) return;
 
+      // Destroy previous widget
       try { widgetRef.current?.remove(); } catch { /* ignore */ }
-      containerRef.current.innerHTML = '';
+      tvContainerRef.current.innerHTML = '';
 
-      const div = document.createElement('div');
-      div.id = idRef.current;
-      div.style.width = '100%';
-      div.style.height = '100%';
-      containerRef.current.appendChild(div);
+      // Read real pixel dimensions from the outer wrapper
+      const h = outerRef.current?.clientHeight ?? 400;
+      const w = outerRef.current?.clientWidth ?? 600;
 
-      const w = new window.TradingView.widget({
-        container_id: idRef.current,
+      // TV widget needs a real DOM element by ID
+      const inner = document.createElement('div');
+      inner.id = idRef.current!;
+      inner.style.width = `${w}px`;
+      inner.style.height = `${h}px`;
+      tvContainerRef.current.appendChild(inner);
+
+      const widget = new window.TradingView.widget({
+        container_id: idRef.current!,
         symbol,
         interval: TIMEFRAME_MAP[timeframe] || 'D',
         theme: 'dark',
         locale: 'en',
-        autosize: true,
+        width: w,
+        height: h,
         allow_symbol_change: false,
         hide_side_toolbar: false,
         save_image: false,
@@ -106,93 +126,67 @@ export default function TradingViewChart({ symbol, timeframe, entryPrice, stopLo
         calendar: false,
       });
 
-      widgetRef.current = w;
+      widgetRef.current = widget;
 
-      w.onChartReady(() => {
+      widget.onChartReady(() => {
         if (cancelled) return;
-        const chart = w.chart();
+        const chart = widget.chart();
         const now = Math.floor(Date.now() / 1000);
 
-        if (entryPrice !== null) {
-          try {
-            chart.createShape({ time: now, price: entryPrice }, {
-              shape: 'horizontal_line',
-              overrides: {
-                linecolor: '#2962FF',
-                linewidth: 2,
-                linestyle: 0,
-                showLabel: true,
-                text: 'Entry',
-                textcolor: '#2962FF',
-                horzLabelsAlign: 'right',
-              },
-            });
-          } catch { /* free widget may not support shape API */ }
-        }
+        const lines: Array<{ price: number | null; color: string; label: string }> = [
+          { price: entryPrice, color: '#2962FF', label: 'Entry' },
+          { price: stopLoss,   color: '#F23645', label: 'SL'    },
+          { price: takeProfit, color: '#089981', label: 'TP'    },
+        ];
 
-        if (stopLoss !== null) {
+        for (const { price, color, label } of lines) {
+          if (price === null) continue;
           try {
-            chart.createShape({ time: now, price: stopLoss }, {
+            chart.createShape({ time: now, price }, {
               shape: 'horizontal_line',
               overrides: {
-                linecolor: '#F23645',
+                linecolor: color,
                 linewidth: 2,
                 linestyle: 0,
                 showLabel: true,
-                text: 'SL',
-                textcolor: '#F23645',
+                text: label,
+                textcolor: color,
                 horzLabelsAlign: 'right',
               },
             });
-          } catch { /* free widget may not support shape API */ }
-        }
-
-        if (takeProfit !== null) {
-          try {
-            chart.createShape({ time: now, price: takeProfit }, {
-              shape: 'horizontal_line',
-              overrides: {
-                linecolor: '#089981',
-                linewidth: 2,
-                linestyle: 0,
-                showLabel: true,
-                text: 'TP',
-                textcolor: '#089981',
-                horzLabelsAlign: 'right',
-              },
-            });
-          } catch { /* free widget may not support shape API */ }
+          } catch { /* free widget may not expose shape API */ }
         }
       });
     }
 
-    loadTvScript(build);
+    cleanupScript = loadTvScript(build);
 
     return () => {
       cancelled = true;
+      cleanupScript?.();
     };
   }, [symbol, timeframe, entryPrice, stopLoss, takeProfit]);
 
-  if (!symbol) {
-    return (
-      <div
-        className="flex items-center justify-center rounded-2xl text-sm text-tg-muted"
-        style={{
-          height: 300,
-          background: 'var(--color-tg-surface-2)',
-          border: '1px solid var(--color-tg-border)',
-        }}
-      >
-        הזן סמל נכס כדי לראות את הגרף
-      </div>
-    );
-  }
-
+  // The outer div always renders so it takes up space in the form.
+  // Inside: placeholder when no symbol, TV container when symbol is set.
   return (
     <div
-      ref={containerRef}
-      className="rounded-2xl overflow-hidden w-full"
-      style={{ height: 'clamp(300px, 40vw, 500px)' }}
-    />
+      ref={outerRef}
+      className="w-full rounded-2xl overflow-hidden"
+      style={{
+        height: 'clamp(300px, 40vw, 500px)',
+        border: '1px solid var(--color-tg-border)',
+        background: 'var(--color-tg-surface-2)',
+      }}
+    >
+      {!symbol ? (
+        <div className="flex items-center justify-center w-full h-full text-sm"
+          style={{ color: 'var(--color-tg-muted)' }}>
+          הזן סמל נכס כדי לראות את הגרף
+        </div>
+      ) : (
+        <div ref={tvContainerRef} style={{ width: '100%', height: '100%' }} />
+      )}
+    </div>
   );
 }
