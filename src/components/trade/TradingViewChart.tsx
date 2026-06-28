@@ -52,6 +52,7 @@ function loadTvScript(onReady: () => void): () => void {
 let _counter = 0;
 
 export default function TradingViewChart({ symbol, timeframe }: Props) {
+  console.log('TradingViewChart rendered', symbol);
   const outerRef = useRef<HTMLDivElement>(null);
   const tvContainerRef = useRef<HTMLDivElement>(null);
   const widgetRef = useRef<TvWidget | null>(null);
