@@ -628,67 +628,76 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
               />
             </FormSection>
 
-            {/* Step 4 — Reason & plan */}
-            <FormSection step={4} label="סיבת הכניסה ותוכנית" active={activeStep === 4} done={false}>
-              <div className="flex flex-wrap gap-1.5">
-                {REASON_TAGS.map((tag) => (
-                  <button
-                    key={tag}
-                    onClick={() => addTag(tag)}
-                    className="px-2.5 py-1 rounded-full text-xs border transition-all duration-150"
-                    style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)', color: 'var(--color-tg-muted)' }}
-                  >
-                    {tag}
-                  </button>
-                ))}
-              </div>
-              <textarea
-                rows={2}
-                placeholder="תאר מה אתה רואה בגרף..."
-                value={form.trade_reason}
-                onChange={(e) => { setForm({ ...form, trade_reason: e.target.value }); setValidationResult(null); }}
-                className="w-full px-3 py-2.5 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none focus:border-tg-primary transition-colors resize-none"
-                style={{ background: 'var(--color-tg-surface-2)' }}
-              />
-              <div className="flex flex-col gap-1.5 mt-1">
-                {PRE_TRADE_CHECKLIST.map((item) => {
-                  const checked = checkedItems.has(item);
-                  return (
-                    <button
-                      key={item}
-                      type="button"
-                      onClick={() => toggleChecklistItem(item)}
-                      className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-xs border transition-all text-right"
-                      style={{
-                        background: checked ? 'var(--color-tg-success-muted)' : 'var(--color-tg-surface-2)',
-                        borderColor: checked ? 'var(--color-tg-success)' : 'var(--color-tg-border)',
-                        color: checked ? 'var(--color-tg-success)' : 'var(--color-tg-text-2)',
-                      }}
-                    >
-                      <span
-                        className="w-4 h-4 rounded shrink-0 flex items-center justify-center"
-                        style={{
-                          background: checked ? 'var(--color-tg-success)' : 'transparent',
-                          border: checked ? 'none' : '1px solid var(--color-tg-border)',
-                        }}
-                      >
-                        {checked && <Check size={11} color="white" />}
-                      </span>
-                      {item}
-                    </button>
-                  );
-                })}
-              </div>
-            </FormSection>
+            {/* Step 4 + Chart — stacked on mobile, side-by-side on desktop */}
+            <div className="flex flex-col md:flex-row gap-4">
 
-            {/* TradingView chart */}
-            <TradingViewChart
-              symbol={chartSymbol}
-              timeframe={chartTimeframe}
-              entryPrice={chartEntry}
-              stopLoss={chartSL}
-              takeProfit={chartTP}
-            />
+              {/* Step 4 (mobile: first; desktop: right) */}
+              <div className="order-1 md:order-2 md:flex-1 md:overflow-y-auto md:max-h-[450px]">
+                <FormSection step={4} label="סיבת הכניסה ותוכנית" active={activeStep === 4} done={false}>
+                  <div className="flex flex-wrap gap-1.5">
+                    {REASON_TAGS.map((tag) => (
+                      <button
+                        key={tag}
+                        onClick={() => addTag(tag)}
+                        className="px-2.5 py-1 rounded-full text-xs border transition-all duration-150"
+                        style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)', color: 'var(--color-tg-muted)' }}
+                      >
+                        {tag}
+                      </button>
+                    ))}
+                  </div>
+                  <textarea
+                    rows={2}
+                    placeholder="תאר מה אתה רואה בגרף..."
+                    value={form.trade_reason}
+                    onChange={(e) => { setForm({ ...form, trade_reason: e.target.value }); setValidationResult(null); }}
+                    className="w-full px-3 py-2.5 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none focus:border-tg-primary transition-colors resize-none"
+                    style={{ background: 'var(--color-tg-surface-2)' }}
+                  />
+                  <div className="flex flex-col gap-1.5 mt-1">
+                    {PRE_TRADE_CHECKLIST.map((item) => {
+                      const checked = checkedItems.has(item);
+                      return (
+                        <button
+                          key={item}
+                          type="button"
+                          onClick={() => toggleChecklistItem(item)}
+                          className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-xs border transition-all text-right"
+                          style={{
+                            background: checked ? 'var(--color-tg-success-muted)' : 'var(--color-tg-surface-2)',
+                            borderColor: checked ? 'var(--color-tg-success)' : 'var(--color-tg-border)',
+                            color: checked ? 'var(--color-tg-success)' : 'var(--color-tg-text-2)',
+                          }}
+                        >
+                          <span
+                            className="w-4 h-4 rounded shrink-0 flex items-center justify-center"
+                            style={{
+                              background: checked ? 'var(--color-tg-success)' : 'transparent',
+                              border: checked ? 'none' : '1px solid var(--color-tg-border)',
+                            }}
+                          >
+                            {checked && <Check size={11} color="white" />}
+                          </span>
+                          {item}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </FormSection>
+              </div>
+
+              {/* Chart (mobile: second/below; desktop: left) */}
+              <div className="order-2 md:order-1 md:flex-1">
+                <TradingViewChart
+                  symbol={chartSymbol}
+                  timeframe={chartTimeframe}
+                  entryPrice={chartEntry}
+                  stopLoss={chartSL}
+                  takeProfit={chartTP}
+                />
+              </div>
+
+            </div>
 
             {/* Actions */}
             <div className="flex flex-col gap-2 pb-4">
