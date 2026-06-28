@@ -49,7 +49,6 @@ function loadTvScript(onReady: () => void): () => void {
   return () => { script.onload = null; };
 }
 
-// Stable unique ID per component instance, generated only on client.
 let _counter = 0;
 
 export default function TradingViewChart({ symbol, timeframe, entryPrice, stopLoss, takeProfit }: Props) {
@@ -67,19 +66,21 @@ export default function TradingViewChart({ symbol, timeframe, entryPrice, stopLo
 
     let cancelled = false;
     let cleanupScript: (() => void) | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
 
     function build() {
-      if (cancelled || !tvContainerRef.current) return;
+      if (cancelled || !tvContainerRef.current || !outerRef.current) return;
 
-      // Destroy previous widget
+      // Read actual painted dimensions — must happen after the 100ms delay
+      // so the browser has laid out the container inside the bottom sheet.
+      const w = outerRef.current.clientWidth || (window.innerWidth >= 768 ? 600 : 380);
+      const h = outerRef.current.clientHeight || (window.innerWidth >= 768 ? 600 : 400);
+
+      if (w === 0 || h === 0) return; // container not visible yet, skip
+
       try { widgetRef.current?.remove(); } catch { /* ignore */ }
       tvContainerRef.current.innerHTML = '';
 
-      // Read real pixel dimensions from the outer wrapper
-      const h = outerRef.current?.clientHeight ?? 400;
-      const w = outerRef.current?.clientWidth ?? 600;
-
-      // TV widget needs a real DOM element by ID
       const inner = document.createElement('div');
       inner.id = idRef.current!;
       inner.style.width = `${w}px`;
@@ -111,13 +112,11 @@ export default function TradingViewChart({ symbol, timeframe, entryPrice, stopLo
         if (cancelled) return;
         const chart = widget.chart();
         const now = Math.floor(Date.now() / 1000);
-
         const lines: Array<{ price: number | null; color: string; label: string }> = [
           { price: entryPrice, color: '#2962FF', label: 'Entry' },
           { price: stopLoss,   color: '#F23645', label: 'SL'    },
           { price: takeProfit, color: '#089981', label: 'TP'    },
         ];
-
         for (const { price, color, label } of lines) {
           if (price === null) continue;
           try {
@@ -138,29 +137,40 @@ export default function TradingViewChart({ symbol, timeframe, entryPrice, stopLo
       });
     }
 
-    cleanupScript = loadTvScript(build);
+    // 100ms delay gives the bottom-sheet time to finish its CSS transition
+    // and paint the container at its real dimensions before we read them.
+    function scheduleAndLoad() {
+      timer = setTimeout(() => {
+        if (cancelled) return;
+        cleanupScript = loadTvScript(build);
+      }, 100);
+    }
+
+    scheduleAndLoad();
 
     return () => {
       cancelled = true;
+      if (timer !== null) clearTimeout(timer);
       cleanupScript?.();
     };
   }, [symbol, timeframe, entryPrice, stopLoss, takeProfit]);
 
-  // The outer div always renders so it takes up space in the form.
-  // Inside: placeholder when no symbol, TV container when symbol is set.
+  // Explicit pixel heights so clientHeight is never 0 when we read it.
+  // 400px on mobile (< md), 600px on desktop.
   return (
     <div
       ref={outerRef}
-      className="w-full rounded-2xl overflow-hidden"
+      className="w-full rounded-2xl overflow-hidden h-[400px] md:h-[600px]"
       style={{
-        height: 'clamp(300px, 40vw, 500px)',
         border: '1px solid var(--color-tg-border)',
         background: 'var(--color-tg-surface-2)',
       }}
     >
       {!symbol ? (
-        <div className="flex items-center justify-center w-full h-full text-sm"
-          style={{ color: 'var(--color-tg-muted)' }}>
+        <div
+          className="flex items-center justify-center w-full h-full text-sm"
+          style={{ color: 'var(--color-tg-muted)' }}
+        >
           הזן סמל נכס כדי לראות את הגרף
         </div>
       ) : (
