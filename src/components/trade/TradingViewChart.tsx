@@ -52,8 +52,6 @@ function loadTvScript(onReady: () => void): () => void {
 let _counter = 0;
 
 export default function TradingViewChart({ symbol, timeframe }: Props) {
-  console.log('TradingViewChart rendered', symbol);
-  const outerRef = useRef<HTMLDivElement>(null);
   const tvContainerRef = useRef<HTMLDivElement>(null);
   const widgetRef = useRef<TvWidget | null>(null);
   const idRef = useRef<string | null>(null);
@@ -67,23 +65,19 @@ export default function TradingViewChart({ symbol, timeframe }: Props) {
 
     let cancelled = false;
     let cleanupScript: (() => void) | null = null;
-    let timer: ReturnType<typeof setTimeout> | null = null;
 
     function build() {
-      if (cancelled || !tvContainerRef.current || !outerRef.current) return;
+      if (cancelled || !tvContainerRef.current) return;
 
-      const w = outerRef.current.clientWidth || (window.innerWidth >= 768 ? 600 : 380);
-      const h = outerRef.current.clientHeight || (window.innerWidth >= 768 ? 600 : 400);
-
-      if (w === 0 || h === 0) return;
+      const isMobile = window.innerWidth < 768;
+      const w = isMobile ? 380 : 600;
+      const h = isMobile ? 400 : 600;
 
       try { widgetRef.current?.remove(); } catch { /* ignore */ }
       tvContainerRef.current.innerHTML = '';
 
       const inner = document.createElement('div');
       inner.id = idRef.current!;
-      inner.style.width = `${w}px`;
-      inner.style.height = `${h}px`;
       tvContainerRef.current.appendChild(inner);
 
       widgetRef.current = new window.TradingView!.widget({
@@ -106,33 +100,28 @@ export default function TradingViewChart({ symbol, timeframe }: Props) {
       });
     }
 
-    // 100ms delay lets the bottom-sheet CSS transition finish so clientWidth/Height are non-zero.
-    timer = setTimeout(() => {
+    // 100ms delay lets the bottom-sheet CSS transition finish before the widget initializes.
+    const timer = setTimeout(() => {
       if (cancelled) return;
       cleanupScript = loadTvScript(build);
     }, 100);
 
     return () => {
       cancelled = true;
-      if (timer !== null) clearTimeout(timer);
+      clearTimeout(timer);
       cleanupScript?.();
+      try { widgetRef.current?.remove(); } catch { /* ignore */ }
+      widgetRef.current = null;
     };
   }, [symbol, timeframe]);
 
   return (
-    <div
-      ref={outerRef}
-      className="w-full rounded-2xl overflow-hidden h-[400px] md:h-[600px]"
-      style={{
-        border: '1px solid var(--color-tg-border)',
-        background: 'var(--color-tg-surface-2)',
-      }}
+    <div className="w-full rounded-2xl h-[400px] md:h-[600px]"
+      style={{ border: '1px solid var(--color-tg-border)', background: 'var(--color-tg-surface-2)' }}
     >
       {!symbol ? (
-        <div
-          className="flex items-center justify-center w-full h-full text-sm"
-          style={{ color: 'var(--color-tg-muted)' }}
-        >
+        <div className="flex items-center justify-center w-full h-full text-sm"
+          style={{ color: 'var(--color-tg-muted)' }}>
           הזן סמל נכס כדי לראות את הגרף
         </div>
       ) : (
