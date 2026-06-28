@@ -25,26 +25,34 @@ const TV_SCRIPT_SRC = 'https://s3.tradingview.com/tv.js';
 
 function loadTvScript(onReady: () => void): () => void {
   if (typeof window.TradingView !== 'undefined') {
+    console.log('TV: TradingView already loaded, calling onReady immediately');
     onReady();
     return () => {};
   }
 
   const existing = document.querySelector<HTMLScriptElement>(`script[src="${TV_SCRIPT_SRC}"]`);
   if (existing) {
+    console.log('TV: script tag exists, polling for TradingView...');
     let active = true;
     const poll = setInterval(() => {
       if (typeof window.TradingView !== 'undefined') {
         clearInterval(poll);
+        console.log('TV: script loaded (poll), TradingView available:', typeof window.TradingView);
         if (active) onReady();
       }
     }, 100);
     return () => { active = false; clearInterval(poll); };
   }
 
+  console.log('TV: injecting script tag from', TV_SCRIPT_SRC);
   const script = document.createElement('script');
   script.src = TV_SCRIPT_SRC;
   script.async = true;
-  script.onload = onReady;
+  script.onload = () => {
+    console.log('TV: script loaded (onload), TradingView available:', typeof window.TradingView);
+    onReady();
+  };
+  script.onerror = (e) => console.error('TV: script failed to load', e);
   document.head.appendChild(script);
   return () => { script.onload = null; };
 }
@@ -62,6 +70,7 @@ export default function TradingViewChart({ symbol, timeframe, entryPrice, stopLo
   }
 
   useEffect(() => {
+    console.log('TV: component mounted, symbol=', symbol);
     if (!symbol || !tvContainerRef.current) return;
 
     let cancelled = false;
@@ -71,12 +80,15 @@ export default function TradingViewChart({ symbol, timeframe, entryPrice, stopLo
     function build() {
       if (cancelled || !tvContainerRef.current || !outerRef.current) return;
 
-      // Read actual painted dimensions — must happen after the 100ms delay
-      // so the browser has laid out the container inside the bottom sheet.
       const w = outerRef.current.clientWidth || (window.innerWidth >= 768 ? 600 : 380);
       const h = outerRef.current.clientHeight || (window.innerWidth >= 768 ? 600 : 400);
 
-      if (w === 0 || h === 0) return; // container not visible yet, skip
+      console.log('TV: creating widget with container:', w, 'x', h);
+
+      if (w === 0 || h === 0) {
+        console.log('TV: container has zero dimensions, aborting');
+        return;
+      }
 
       try { widgetRef.current?.remove(); } catch { /* ignore */ }
       tvContainerRef.current.innerHTML = '';
@@ -87,6 +99,7 @@ export default function TradingViewChart({ symbol, timeframe, entryPrice, stopLo
       inner.style.height = `${h}px`;
       tvContainerRef.current.appendChild(inner);
 
+      console.log('TV: calling new TradingView.widget(), container_id=', idRef.current);
       const widget = new window.TradingView!.widget({
         container_id: idRef.current!,
         symbol,
@@ -107,8 +120,10 @@ export default function TradingViewChart({ symbol, timeframe, entryPrice, stopLo
       });
 
       widgetRef.current = widget;
+      console.log('TV: widget created', widget);
 
       widget.onChartReady(() => {
+        console.log('TV: onChartReady fired');
         if (cancelled) return;
         const chart = widget.chart();
         const now = Math.floor(Date.now() / 1000);
@@ -140,8 +155,10 @@ export default function TradingViewChart({ symbol, timeframe, entryPrice, stopLo
     // 100ms delay gives the bottom-sheet time to finish its CSS transition
     // and paint the container at its real dimensions before we read them.
     function scheduleAndLoad() {
+      console.log('TV: scheduling script load in 100ms');
       timer = setTimeout(() => {
         if (cancelled) return;
+        console.log('TV: 100ms elapsed, loading script...');
         cleanupScript = loadTvScript(build);
       }, 100);
     }
@@ -162,7 +179,7 @@ export default function TradingViewChart({ symbol, timeframe, entryPrice, stopLo
       ref={outerRef}
       className="w-full rounded-2xl overflow-hidden h-[400px] md:h-[600px]"
       style={{
-        border: '1px solid var(--color-tg-border)',
+        border: '2px solid red',
         background: 'var(--color-tg-surface-2)',
       }}
     >
