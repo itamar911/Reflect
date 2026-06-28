@@ -84,9 +84,6 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
   const [slInput, setSlInput] = useState('');
   const [tpInput, setTpInput] = useState('');
   const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set());
-  const [addingStrategy, setAddingStrategy] = useState(false);
-  const [newStrategyName, setNewStrategyName] = useState('');
-  const [addStrategyLoading, setAddStrategyLoading] = useState(false);
 
   const supabase = createClient();
 
@@ -100,26 +97,6 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
       }
       return next;
     });
-  }
-
-  async function handleAddPersonalStrategy() {
-    const name = newStrategyName.trim();
-    if (!name) return;
-    setAddStrategyLoading(true);
-    const { data, error } = await supabase
-      .from('personal_strategies')
-      .insert({ user_id: userId, name })
-      .select('name')
-      .single();
-
-    if (!error && data) {
-      setPersonalStrategies((prev) => prev.includes(data.name) ? prev : [...prev, data.name]);
-      setForm((f) => ({ ...f, strategy: data.name }));
-      setValidationResult(null);
-    }
-    setAddStrategyLoading(false);
-    setAddingStrategy(false);
-    setNewStrategyName('');
   }
 
   // Restore saved TP/SL input unit preference
@@ -455,63 +432,26 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
                     onClick={() => { setForm({ ...form, strategy: s }); setValidationResult(null); }}
                   />
                 ))}
-                {!addingStrategy && (
-                  <button
-                    type="button"
-                    onClick={() => setAddingStrategy(true)}
-                    className="px-3 py-1.5 rounded-full text-sm border transition-all duration-150"
-                    style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)', color: 'var(--color-tg-primary)' }}
-                  >
-                    אסטרטגיה אישית +
-                  </button>
-                )}
               </div>
-              {addingStrategy && (
-                <div className="flex items-center gap-2 animate-fade-in">
-                  <input
-                    type="text"
-                    autoFocus
-                    placeholder="שם האסטרטגיה"
-                    value={newStrategyName}
-                    onChange={(e) => setNewStrategyName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleAddPersonalStrategy();
-                      if (e.key === 'Escape') { setAddingStrategy(false); setNewStrategyName(''); }
-                    }}
-                    className="flex-1 h-9 px-3 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors"
-                    style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)' }}
-                  />
-                  <Button size="sm" loading={addStrategyLoading} disabled={!newStrategyName.trim()} onClick={handleAddPersonalStrategy}>
-                    הוסף
-                  </Button>
-                  <button
-                    type="button"
-                    onClick={() => { setAddingStrategy(false); setNewStrategyName(''); }}
-                    className="text-xs text-tg-muted shrink-0"
-                  >
-                    ביטול
-                  </button>
+              <div className="flex items-center gap-2 mt-1">
+                <div className="flex-1 h-px" style={{ background: 'var(--color-tg-border)' }} />
+                <span className="text-[10px] text-tg-muted shrink-0">האסטרטגיות שלי</span>
+                <div className="flex-1 h-px" style={{ background: 'var(--color-tg-border)' }} />
+              </div>
+              {personalStrategies.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {personalStrategies.map((s) => (
+                    <StrategyChip
+                      key={s}
+                      label={s}
+                      selected={form.strategy === s}
+                      personal
+                      onClick={() => { setForm({ ...form, strategy: s }); setValidationResult(null); }}
+                    />
+                  ))}
                 </div>
-              )}
-              {personalStrategies.length > 0 && (
-                <>
-                  <div className="flex items-center gap-2 mt-1">
-                    <div className="flex-1 h-px" style={{ background: 'var(--color-tg-border)' }} />
-                    <span className="text-[10px] text-tg-muted shrink-0">האסטרטגיות שלי</span>
-                    <div className="flex-1 h-px" style={{ background: 'var(--color-tg-border)' }} />
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {personalStrategies.map((s) => (
-                      <StrategyChip
-                        key={s}
-                        label={s}
-                        selected={form.strategy === s}
-                        personal
-                        onClick={() => { setForm({ ...form, strategy: s }); setValidationResult(null); }}
-                      />
-                    ))}
-                  </div>
-                </>
+              ) : (
+                <p className="text-xs text-tg-muted">לא הוספת אסטרטגיות עדיין — ניתן להוסיף בעמוד האסטרטגיות</p>
               )}
               <Select
                 label="Timeframe"
