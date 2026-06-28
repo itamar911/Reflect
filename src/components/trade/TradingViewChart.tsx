@@ -2,27 +2,6 @@
 
 import { useEffect, useRef } from 'react';
 
-declare global {
-  interface Window {
-    TradingView?: {
-      widget: new (config: Record<string, unknown>) => TvWidget;
-    };
-  }
-}
-
-interface TvWidget {
-  onChartReady(cb: () => void): void;
-  chart(): TvChart;
-  remove(): void;
-}
-
-interface TvChart {
-  createShape(
-    point: { time: number; price: number },
-    options: Record<string, unknown>,
-  ): void;
-}
-
 const TIMEFRAME_MAP: Record<string, string> = {
   '1m': '1',
   '5m': '5',

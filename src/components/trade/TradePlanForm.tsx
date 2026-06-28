@@ -8,6 +8,7 @@ import { calcRR } from '@/lib/utils';
 import ValidationResultBanner from './ValidationResultBanner';
 import EmotionalStateSlider from './EmotionalStateSlider';
 import ConfidenceLevelSlider from './ConfidenceLevelSlider';
+import TradingViewChart from './TradingViewChart';
 import Button from '@/components/ui/Button';
 import Select from '@/components/ui/Select';
 import type { TradePlanInput, PresetRules, RulesetValidationResult, TradeStrategy, PnlCurrency, Timeframe } from '@/lib/types';
@@ -85,6 +86,10 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
   const [tpInput, setTpInput] = useState('');
   const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set());
   const [chartSymbol, setChartSymbol] = useState('');
+  const [chartTimeframe, setChartTimeframe] = useState('');
+  const [chartEntry, setChartEntry] = useState<number | null>(null);
+  const [chartSL, setChartSL] = useState<number | null>(null);
+  const [chartTP, setChartTP] = useState<number | null>(null);
 
   const supabase = createClient();
 
@@ -206,9 +211,15 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
   }, [isOpen, loadContext]);
 
   useEffect(() => {
-    const t = setTimeout(() => setChartSymbol(form.symbol.trim()), 800);
+    const t = setTimeout(() => {
+      setChartSymbol(form.symbol.trim());
+      setChartTimeframe(form.timeframe);
+      setChartEntry(hasEntry ? entryNum : null);
+      setChartSL(slPrice);
+      setChartTP(tpPrice);
+    }, 800);
     return () => clearTimeout(t);
-  }, [form.symbol]);
+  }, [form.symbol, form.timeframe, hasEntry, entryNum, slPrice, tpPrice]);
 
   const rr = hasEntry && slPrice !== null && tpPrice !== null
     ? calcRR(entryNum, slPrice, tpPrice)
@@ -669,35 +680,14 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
               </div>
             </FormSection>
 
-            {/* TradingView chart — iframe embed, no external scripts */}
-            {(() => {
-              const TV_INTERVAL: Record<string, string> = {
-                '1m': '1', '5m': '5', '15m': '15', '30m': '30',
-                '1H': '60', '4H': '240', 'Daily': 'D', 'Weekly': 'W',
-              };
-              const interval = TV_INTERVAL[form.timeframe] || 'D';
-              return chartSymbol ? (
-                <iframe
-                  key={`${chartSymbol}-${interval}`}
-                  src={`https://s.tradingview.com/widgetembed/?frameElementId=tradingview&symbol=${encodeURIComponent(chartSymbol)}&interval=${interval}&hidesidetoolbar=0&hidetoptoolbar=0&symboledit=1&saveimage=0&toolbarbg=141420&studies=%5B%5D&theme=dark&style=1&timezone=Asia%2FJerusalem&withdateranges=1&showpopupbutton=0&locale=he`}
-                  className="w-full rounded-2xl border border-tg-border"
-                  style={{ height: 'clamp(450px, 60vw, 700px)' }}
-                  allowFullScreen
-                />
-              ) : (
-                <div
-                  className="w-full rounded-2xl flex items-center justify-center text-sm"
-                  style={{
-                    height: 'clamp(450px, 60vw, 700px)',
-                    border: '1px solid var(--color-tg-border)',
-                    background: 'var(--color-tg-surface-2)',
-                    color: 'var(--color-tg-muted)',
-                  }}
-                >
-                  הזן סמל נכס כדי לראות את הגרף
-                </div>
-              );
-            })()}
+            {/* TradingView chart */}
+            <TradingViewChart
+              symbol={chartSymbol}
+              timeframe={chartTimeframe}
+              entryPrice={chartEntry}
+              stopLoss={chartSL}
+              takeProfit={chartTP}
+            />
 
             {/* Actions */}
             <div className="flex flex-col gap-2 pb-4">
