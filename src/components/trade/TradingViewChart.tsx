@@ -49,6 +49,30 @@ function loadTvScript(onReady: () => void): () => void {
   return () => { script.onload = null; };
 }
 
+const SYMBOL_MAP: Record<string, string> = {
+  'NQ': 'CME_MINI:NQ1!',
+  'NQ1': 'CME_MINI:NQ1!',
+  'NQ1!': 'CME_MINI:NQ1!',
+  'ES': 'CME_MINI:ES1!',
+  'ES1': 'CME_MINI:ES1!',
+  'ES1!': 'CME_MINI:ES1!',
+  'NASDAQ': 'NASDAQ:NDX',
+  'NSDQ': 'NASDAQ:NDX',
+  'NDX': 'NASDAQ:NDX',
+  'SPX': 'SP:SPX',
+  'SPY': 'AMEX:SPY',
+  'QQQ': 'NASDAQ:QQQ',
+  'GOLD': 'OANDA:XAUUSD',
+  'XAUUSD': 'OANDA:XAUUSD',
+  'BTC': 'BINANCE:BTCUSDT',
+  'BTCUSD': 'BINANCE:BTCUSDT',
+};
+
+function normalizeSymbol(raw: string): string {
+  const upper = raw.trim().toUpperCase();
+  return SYMBOL_MAP[upper] ?? upper;
+}
+
 let _counter = 0;
 
 export default function TradingViewChart({ symbol, timeframe }: Props) {
@@ -82,7 +106,7 @@ export default function TradingViewChart({ symbol, timeframe }: Props) {
 
       widgetRef.current = new window.TradingView!.widget({
         container_id: idRef.current!,
-        symbol,
+        symbol: normalizeSymbol(symbol),
         interval: TIMEFRAME_MAP[timeframe] || 'D',
         theme: 'dark',
         locale: 'en',
