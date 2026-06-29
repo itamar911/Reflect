@@ -140,17 +140,24 @@ export default function TradingViewChart({ symbol, timeframe }: Props) {
   }, [symbol, timeframe]);
 
   return (
-    <div className="w-full rounded-2xl h-[214px] md:h-[450px]"
-      style={{ border: '1px solid var(--color-tg-border)', background: 'var(--color-tg-surface-2)' }}
-    >
-      {!symbol ? (
-        <div className="flex items-center justify-center w-full h-full text-sm"
-          style={{ color: 'var(--color-tg-muted)' }}>
-          הזן סמל נכס כדי לראות את הגרף
-        </div>
-      ) : (
-        <div ref={tvContainerRef} style={{ width: '100%', height: '100%' }} />
+    <>
+      <div className="w-full rounded-2xl h-[214px] md:h-[450px]"
+        style={{ border: '1px solid var(--color-tg-border)', background: 'var(--color-tg-surface-2)' }}
+      >
+        {!symbol ? (
+          <div className="flex items-center justify-center w-full h-full text-sm"
+            style={{ color: 'var(--color-tg-muted)' }}>
+            הזן סמל נכס כדי לראות את הגרף
+          </div>
+        ) : (
+          <div ref={tvContainerRef} style={{ width: '100%', height: '100%' }} />
+        )}
+      </div>
+      {symbol && normalizeSymbol(symbol).startsWith('CAPITALCOM:') && (
+        <p className="text-[10px] mt-1 text-center" style={{ color: 'var(--color-tg-muted)' }}>
+          ⚠️ הנתונים המוצגים הם אינדיקטיביים בלבד ועשויים שלא לשקף את המחיר המדויק של הנכס. יש לאמת מול פלטפורמת המסחר שלך.
+        </p>
       )}
-    </div>
+    </>
   );
 }
