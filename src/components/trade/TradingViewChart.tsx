@@ -50,12 +50,12 @@ function loadTvScript(onReady: () => void): () => void {
 }
 
 const SYMBOL_MAP: Record<string, string> = {
-  'NQ': 'CME_MINI:NQ1!',
-  'NQ1': 'CME_MINI:NQ1!',
-  'NQ1!': 'CME_MINI:NQ1!',
-  'ES': 'CME_MINI:ES1!',
-  'ES1': 'CME_MINI:ES1!',
-  'ES1!': 'CME_MINI:ES1!',
+  'NQ': 'CAPITALCOM:NAS100',
+  'NQ1': 'CAPITALCOM:NAS100',
+  'NQ1!': 'CAPITALCOM:NAS100',
+  'ES': 'CAPITALCOM:US500',
+  'ES1': 'CAPITALCOM:US500',
+  'ES1!': 'CAPITALCOM:US500',
   'NASDAQ': 'NASDAQ:NDX',
   'NSDQ': 'NASDAQ:NDX',
   'NDX': 'NASDAQ:NDX',
