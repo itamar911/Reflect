@@ -8,26 +8,26 @@ const BASIC_FEATURES: FeatureItem[] = [
   { text: 'יומן חודשי עם רווח והפסד אוטומטי', type: 'check' },
   { text: 'גרף TradingView מובנה בתוך כל עסקה', type: 'check' },
   { text: 'סטטיסטיקות ביצועים בסיסיות', type: 'check' },
+  { text: 'ניתוח מעמיק אחרי כל עסקה', type: 'check' },
   { text: 'סטטיסטיקות מלאות לפי שעה ויום', type: 'cross' },
   { text: 'חסימה בזמן אמת לפני כניסה רגשית', type: 'cross' },
-  { text: 'עד 3 חוקי משמעת עם התראות', type: 'dash' },
-  { text: 'עד 3 תנאי חסימה מתוך 8', type: 'dash' },
-  { text: 'ניתוח מעמיק אחרי כל עסקה', type: 'check' },
   { text: 'מאמן אישי שמכיר את דפוסי המסחר שלך', type: 'cross' },
   { text: 'סיכום שבועי עם תובנות מספריות', type: 'cross' },
+  { text: 'עד 3 חוקי משמעת עם התראות', type: 'dash' },
+  { text: 'עד 3 תנאי חסימה מתוך 8', type: 'dash' },
 ];
 
 const PRO_FEATURES: FeatureItem[] = [
   { text: 'יומן חודשי עם רווח והפסד אוטומטי', type: 'check' },
   { text: 'גרף TradingView מובנה בתוך כל עסקה', type: 'check' },
   { text: 'סטטיסטיקות ביצועים בסיסיות', type: 'check' },
+  { text: 'ניתוח מעמיק אחרי כל עסקה', type: 'check' },
   { text: 'סטטיסטיקות מלאות לפי שעה ויום', type: 'check' },
   { text: 'חסימה בזמן אמת לפני כניסה רגשית', type: 'check' },
-  { text: 'חוקי משמעת ללא הגבלה עם חסימה אוטומטית', type: 'check' },
-  { text: 'חסימה על בסיס 8 תנאים — FOMO, הפסד יומי, רצף הפסדים ועוד', type: 'check' },
-  { text: 'ניתוח מעמיק אחרי כל עסקה', type: 'check' },
   { text: 'מאמן אישי שמכיר את דפוסי המסחר שלך', type: 'check' },
   { text: 'סיכום שבועי עם תובנות מספריות', type: 'check' },
+  { text: 'חוקי משמעת ללא הגבלה עם חסימה אוטומטית', type: 'check' },
+  { text: 'חסימה על בסיס 8 תנאים — FOMO, הפסד יומי, רצף הפסדים ועוד', type: 'check' },
 ];
 
 export default function PricingPlans({ plan }: { plan: 'free' | 'basic' | 'pro' }) {
