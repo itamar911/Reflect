@@ -4,7 +4,7 @@ import { useState } from 'react';
 
 const SHARED_FEATURES = [
   'יומן חודשי עם רווח והפסד אוטומטי',
-  'גרף מובנה בתוך כל עסקה',
+  'גרף TradingView מובנה בתוך כל עסקה',
   'ניתוח מעמיק אחרי כל עסקה עם ציון תהליך',
   'מפת חום זמנים',
   'מחברת אישית',
@@ -17,10 +17,10 @@ type FeatureItem = { text: string; type: 'check' | 'cross' | 'text' };
 const BASIC_SPECIFIC: FeatureItem[] = [
   { text: 'סטטיסטיקות מלאות לפי שעה ויום', type: 'cross' },
   { text: 'חסימה בזמן אמת לפני כניסה רגשית', type: 'cross' },
-  { text: 'עד 3 חוקי משמעת עם התראות', type: 'text' },
-  { text: 'עד 3 טריגרים מתוך 8', type: 'text' },
   { text: 'מאמן אישי שמכיר את דפוסי המסחר שלך', type: 'cross' },
   { text: 'סיכום שבועי עם תובנות מספריות', type: 'cross' },
+  { text: 'עד 3 חוקי משמעת עם התראות', type: 'text' },
+  { text: 'עד 3 טריגרים מתוך 8', type: 'text' },
   { text: 'עד 5 עסקאות בשבוע', type: 'text' },
   { text: 'עד 3 אסטרטגיות אישיות', type: 'text' },
   { text: 'ייצוא CSV בלבד', type: 'text' },
@@ -29,10 +29,10 @@ const BASIC_SPECIFIC: FeatureItem[] = [
 const PRO_SPECIFIC: FeatureItem[] = [
   { text: 'סטטיסטיקות מלאות לפי שעה ויום', type: 'check' },
   { text: 'חסימה בזמן אמת לפני כניסה רגשית', type: 'check' },
-  { text: 'חוקי משמעת ללא הגבלה עם חסימה אוטומטית', type: 'check' },
-  { text: 'כל 8 הטריגרים', type: 'check' },
   { text: 'מאמן אישי שמכיר את דפוסי המסחר שלך', type: 'check' },
   { text: 'סיכום שבועי עם תובנות מספריות', type: 'check' },
+  { text: 'חוקי משמעת ללא הגבלה עם חסימה אוטומטית', type: 'check' },
+  { text: 'כל 8 הטריגרים', type: 'check' },
   { text: 'עסקאות ללא הגבלה', type: 'check' },
   { text: 'אסטרטגיות אישיות ללא הגבלה', type: 'check' },
   { text: 'ייצוא CSV ו-Excel', type: 'check' },
@@ -155,7 +155,7 @@ export default function PricingPlans({ plan }: { plan: 'free' | 'basic' | 'pro' 
             )}
           </div>
 
-          <FeatureList specific={PRO_SPECIFIC} pro />
+          <FeatureList specific={PRO_SPECIFIC} />
 
           <div className="mt-4">
             {plan !== 'pro' ? (
@@ -181,7 +181,7 @@ export default function PricingPlans({ plan }: { plan: 'free' | 'basic' | 'pro' 
   );
 }
 
-function FeatureList({ specific, pro }: { specific: FeatureItem[]; pro?: boolean }) {
+function FeatureList({ specific }: { specific: FeatureItem[] }) {
   return (
     <ul className="flex flex-col gap-1.5 flex-1">
       {SHARED_FEATURES.map((f) => (
@@ -193,7 +193,7 @@ function FeatureList({ specific, pro }: { specific: FeatureItem[]; pro?: boolean
       <li aria-hidden className="border-t border-tg-border my-1" />
       {specific.map((f) => (
         <li key={f.text} className="flex items-start gap-2">
-          {f.type === 'check' && <CheckIcon pro={pro} />}
+          {f.type === 'check' && <CheckIcon />}
           {f.type === 'cross' && <CrossIcon />}
           {f.type === 'text'  && <span className="w-3.5 shrink-0 mt-0.5" />}
           <span className={`text-xs ${f.type === 'cross' ? 'text-tg-muted' : 'text-tg-text-2'}`}>
@@ -205,11 +205,11 @@ function FeatureList({ specific, pro }: { specific: FeatureItem[]; pro?: boolean
   );
 }
 
-function CheckIcon({ pro }: { pro?: boolean }) {
+function CheckIcon() {
   return (
     <svg
       width="14" height="14" viewBox="0 0 24 24" fill="none"
-      stroke={pro ? '#00d2d2' : 'var(--color-tg-success)'}
+      stroke="var(--color-tg-success)"
       strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
       className="shrink-0 mt-0.5"
     >
@@ -222,7 +222,7 @@ function CrossIcon() {
   return (
     <svg
       width="14" height="14" viewBox="0 0 24 24" fill="none"
-      stroke="var(--color-tg-muted)"
+      stroke="var(--color-tg-danger)"
       strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
       className="shrink-0 mt-0.5"
     >
