@@ -2,40 +2,32 @@
 
 import { useState } from 'react';
 
-const SHARED_FEATURES = [
-  'יומן חודשי עם רווח והפסד אוטומטי',
-  'גרף TradingView מובנה בתוך כל עסקה',
-  'ניתוח מעמיק אחרי כל עסקה עם ציון תהליך',
-  'מפת חום זמנים',
-  'מחברת אישית',
-  'סטאפים ותגיות',
-  'סטטיסטיקות ביצועים בסיסיות',
-];
+type FeatureItem = { text: string; type: 'check' | 'cross' | 'dash' };
 
-type FeatureItem = { text: string; type: 'check' | 'cross' | 'text' };
-
-const BASIC_SPECIFIC: FeatureItem[] = [
+const BASIC_FEATURES: FeatureItem[] = [
+  { text: 'יומן חודשי עם רווח והפסד אוטומטי', type: 'check' },
+  { text: 'גרף TradingView מובנה בתוך כל עסקה', type: 'check' },
+  { text: 'סטטיסטיקות ביצועים בסיסיות', type: 'check' },
   { text: 'סטטיסטיקות מלאות לפי שעה ויום', type: 'cross' },
   { text: 'חסימה בזמן אמת לפני כניסה רגשית', type: 'cross' },
+  { text: 'עד 3 חוקי משמעת עם התראות', type: 'dash' },
+  { text: 'עד 3 תנאי חסימה מתוך 8', type: 'dash' },
+  { text: 'ניתוח מעמיק אחרי כל עסקה', type: 'check' },
   { text: 'מאמן אישי שמכיר את דפוסי המסחר שלך', type: 'cross' },
   { text: 'סיכום שבועי עם תובנות מספריות', type: 'cross' },
-  { text: 'עד 3 חוקי משמעת עם התראות', type: 'text' },
-  { text: 'עד 3 טריגרים מתוך 8', type: 'text' },
-  { text: 'עד 5 עסקאות בשבוע', type: 'text' },
-  { text: 'עד 3 אסטרטגיות אישיות', type: 'text' },
-  { text: 'ייצוא CSV בלבד', type: 'text' },
 ];
 
-const PRO_SPECIFIC: FeatureItem[] = [
+const PRO_FEATURES: FeatureItem[] = [
+  { text: 'יומן חודשי עם רווח והפסד אוטומטי', type: 'check' },
+  { text: 'גרף TradingView מובנה בתוך כל עסקה', type: 'check' },
+  { text: 'סטטיסטיקות ביצועים בסיסיות', type: 'check' },
   { text: 'סטטיסטיקות מלאות לפי שעה ויום', type: 'check' },
   { text: 'חסימה בזמן אמת לפני כניסה רגשית', type: 'check' },
+  { text: 'חוקי משמעת ללא הגבלה עם חסימה אוטומטית', type: 'check' },
+  { text: 'חסימה על בסיס 8 תנאים — FOMO, הפסד יומי, רצף הפסדים ועוד', type: 'check' },
+  { text: 'ניתוח מעמיק אחרי כל עסקה', type: 'check' },
   { text: 'מאמן אישי שמכיר את דפוסי המסחר שלך', type: 'check' },
   { text: 'סיכום שבועי עם תובנות מספריות', type: 'check' },
-  { text: 'חוקי משמעת ללא הגבלה עם חסימה אוטומטית', type: 'check' },
-  { text: 'כל 8 הטריגרים', type: 'check' },
-  { text: 'עסקאות ללא הגבלה', type: 'check' },
-  { text: 'אסטרטגיות אישיות ללא הגבלה', type: 'check' },
-  { text: 'ייצוא CSV ו-Excel', type: 'check' },
 ];
 
 export default function PricingPlans({ plan }: { plan: 'free' | 'basic' | 'pro' }) {
@@ -98,7 +90,7 @@ export default function PricingPlans({ plan }: { plan: 'free' | 'basic' | 'pro' 
             )}
           </div>
 
-          <FeatureList specific={BASIC_SPECIFIC} />
+          <FeatureList features={BASIC_FEATURES} />
 
           <div className="mt-4">
             {plan !== 'basic' ? (
@@ -155,7 +147,7 @@ export default function PricingPlans({ plan }: { plan: 'free' | 'basic' | 'pro' 
             )}
           </div>
 
-          <FeatureList specific={PRO_SPECIFIC} />
+          <FeatureList features={PRO_FEATURES} />
 
           <div className="mt-4">
             {plan !== 'pro' ? (
@@ -181,22 +173,17 @@ export default function PricingPlans({ plan }: { plan: 'free' | 'basic' | 'pro' 
   );
 }
 
-function FeatureList({ specific }: { specific: FeatureItem[] }) {
+function FeatureList({ features }: { features: FeatureItem[] }) {
   return (
     <ul className="flex flex-col gap-1.5 flex-1">
-      {SHARED_FEATURES.map((f) => (
-        <li key={f} className="flex items-start gap-2">
-          <CheckIcon />
-          <span className="text-xs text-tg-text-2">{f}</span>
-        </li>
-      ))}
-      <li aria-hidden className="border-t border-tg-border my-1" />
-      {specific.map((f) => (
+      {features.map((f) => (
         <li key={f.text} className="flex items-start gap-2">
           {f.type === 'check' && <CheckIcon />}
           {f.type === 'cross' && <CrossIcon />}
-          {f.type === 'text'  && <span className="w-3.5 shrink-0 mt-0.5" />}
-          <span className={`text-xs ${f.type === 'cross' ? 'text-tg-muted' : 'text-tg-text-2'}`}>
+          {f.type === 'dash'  && (
+            <span className="w-3.5 shrink-0 mt-0.5 text-xs leading-none font-medium" style={{ color: 'var(--color-tg-muted)' }}>—</span>
+          )}
+          <span className={`text-xs ${f.type === 'dash' ? 'text-tg-muted' : f.type === 'cross' ? 'text-tg-muted' : 'text-tg-text-2'}`}>
             {f.text}
           </span>
         </li>
