@@ -270,6 +270,17 @@ input[type="button"] {
   .page-enter,
   .page-enter > * { animation: none; }
 }
+@keyframes shimmer {
+  0%   { background-position: 200% center; }
+  100% { background-position: -200% center; }
+}
+
+.shimmer-btn {
+  background: linear-gradient(90deg, #00d2d2, #00a8a8, #00d2d2);
+  background-size: 200% 100%;
+  animation: shimmer 2s linear infinite;
+}
+
 .animate-pulse-gold  { animation: pulse-gold  2s   infinite; }
 .animate-pulse-danger{ animation: pulse-danger 1.5s infinite; }
 .animate-gold-breathe{ animation: gold-breathe 3s  ease-in-out infinite; }
