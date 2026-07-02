@@ -13,6 +13,7 @@ const TradingViewChart = dynamic(() => import('./TradingViewChart'), { ssr: fals
 import Button from '@/components/ui/Button';
 import Select from '@/components/ui/Select';
 import type { TradePlanInput, PresetRules, RulesetValidationResult, TradeStrategy, PnlCurrency, Timeframe } from '@/lib/types';
+import type { PersonalStrategy } from '@/components/strategies/StrategiesClient';
 
 const STRATEGIES: TradeStrategy[] = [
   'Breakout', 'Trend Follow', 'Reversal', 'Range', 'Custom',
@@ -79,13 +80,15 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
   const [loading, setLoading] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [todayLossAmount, setTodayLossAmount] = useState(0);
-  const [personalStrategies, setPersonalStrategies] = useState<string[]>([]);
+  const [personalStrategyRows, setPersonalStrategyRows] = useState<PersonalStrategy[]>([]);
   const [pnlMode, setPnlMode] = useState<'points' | 'percent'>('points');
   const [currency, setCurrency] = useState<PnlCurrency>('₪');
   const [pnlFieldsError, setPnlFieldsError] = useState(false);
   const [slInput, setSlInput] = useState('');
   const [tpInput, setTpInput] = useState('');
   const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set());
+  const [strategyConditionsChecked, setStrategyConditionsChecked] = useState<Set<string>>(new Set());
+  const [todayStrategyTradeCount, setTodayStrategyTradeCount] = useState(0);
   const [chartSymbol, setChartSymbol] = useState('');
   const [chartTimeframe, setChartTimeframe] = useState('');
   const [chartEntry, setChartEntry] = useState<number | null>(null);
@@ -101,6 +104,18 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
         next.delete(item);
       } else {
         next.add(item);
+      }
+      return next;
+    });
+  }
+
+  function toggleConditionChecked(condition: string) {
+    setStrategyConditionsChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(condition)) {
+        next.delete(condition);
+      } else {
+        next.add(condition);
       }
       return next;
     });
@@ -164,10 +179,10 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
         .select('id, status, entry_price, exit_price, stop_loss')
         .eq('user_id', userId)
         .gte('submitted_at', todayStart),
-      supabase.from('personal_strategies').select('name').eq('user_id', userId).order('created_at'),
+      supabase.from('personal_strategies').select('*').eq('user_id', userId).order('created_at'),
     ]);
 
-    if (personalRes.data) setPersonalStrategies(personalRes.data.map((s) => s.name));
+    if (personalRes.data) setPersonalStrategyRows(personalRes.data as PersonalStrategy[]);
 
     if (rulesRes.data) setPresetRules(rulesRes.data as PresetRules);
     if (todayRes.data) {
@@ -225,6 +240,79 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
   const rr = hasEntry && slPrice !== null && tpPrice !== null
     ? calcRR(entryNum, slPrice, tpPrice)
     : null;
+
+  const selectedStrategy = useMemo(
+    () => personalStrategyRows.find((s) => s.name === form.strategy) ?? null,
+    [personalStrategyRows, form.strategy],
+  );
+
+  // Reset checklist state whenever the selected strategy (or its condition set) changes
+  useEffect(() => {
+    setStrategyConditionsChecked(new Set());
+  }, [selectedStrategy?.id]);
+
+  // Live count of today's trades logged under this strategy (for the daily-trade-limit check)
+  useEffect(() => {
+    if (!selectedStrategy || selectedStrategy.max_daily_trades == null) {
+      setTodayStrategyTradeCount(0);
+      return;
+    }
+    const todayStart = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
+    let cancelled = false;
+    supabase
+      .from('trade_plans')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('strategy', selectedStrategy.name)
+      .gte('submitted_at', todayStart)
+      .then(({ count }) => {
+        if (!cancelled) setTodayStrategyTradeCount(count ?? 0);
+      });
+    return () => { cancelled = true; };
+  }, [selectedStrategy, userId]);
+
+  const complianceChecks = useMemo(() => {
+    if (!selectedStrategy) return [];
+    const checks: { label: string; passed: boolean }[] = [];
+
+    if (selectedStrategy.min_rr != null) {
+      checks.push({ label: 'R:R', passed: rr !== null && rr >= selectedStrategy.min_rr });
+    }
+
+    if (selectedStrategy.trading_hours_start && selectedStrategy.trading_hours_end) {
+      const now = new Date();
+      const current = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      const start = selectedStrategy.trading_hours_start;
+      const end = selectedStrategy.trading_hours_end;
+      const withinHours = start <= end
+        ? current >= start && current <= end
+        : current >= start || current <= end;
+      checks.push({ label: 'שעות מסחר', passed: withinHours });
+    }
+
+    if (selectedStrategy.allowed_timeframes.length > 0) {
+      checks.push({
+        label: 'טיים-פריים',
+        passed: form.timeframe !== '' && selectedStrategy.allowed_timeframes.includes(form.timeframe),
+      });
+    }
+
+    if (selectedStrategy.direction !== 'both') {
+      checks.push({ label: 'כיוון', passed: form.direction !== null && form.direction === selectedStrategy.direction });
+    }
+
+    if (selectedStrategy.max_daily_trades != null) {
+      checks.push({ label: 'עסקאות היום', passed: todayStrategyTradeCount < selectedStrategy.max_daily_trades });
+    }
+
+    return checks;
+  }, [selectedStrategy, rr, form.timeframe, form.direction, todayStrategyTradeCount]);
+
+  const entryConditions = selectedStrategy?.entry_conditions ?? [];
+  const complianceTotal = complianceChecks.length + entryConditions.length;
+  const compliancePassed = complianceChecks.filter((c) => c.passed).length
+    + entryConditions.filter((c) => strategyConditionsChecked.has(c)).length;
+  const complianceFailed = complianceTotal - compliancePassed;
 
   const isFormFilled =
     form.symbol.trim() !== '' &&
@@ -297,6 +385,9 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
       units: unitsNum,
       point_value: pointValueNum,
       pnl_currency: currency,
+      strategy_conditions_checked: entryConditions.length > 0
+        ? entryConditions.map((condition) => ({ condition, checked: strategyConditionsChecked.has(condition) }))
+        : null,
     });
 
     if (error) {
@@ -310,6 +401,7 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
         setValidationResult(null);
         setPnlFieldsError(false);
         setCheckedItems(new Set());
+        setStrategyConditionsChecked(new Set());
         setFormState('empty');
         onSuccess();
         onClose();
@@ -456,15 +548,15 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
                 <span className="text-[10px] text-tg-muted shrink-0">האסטרטגיות שלי</span>
                 <div className="flex-1 h-px" style={{ background: 'var(--color-tg-border)' }} />
               </div>
-              {personalStrategies.length > 0 ? (
+              {personalStrategyRows.length > 0 ? (
                 <div className="flex flex-wrap gap-2">
-                  {personalStrategies.map((s) => (
+                  {personalStrategyRows.map((s) => (
                     <StrategyChip
-                      key={s}
-                      label={s}
-                      selected={form.strategy === s}
+                      key={s.id}
+                      label={s.name}
+                      selected={form.strategy === s.name}
                       personal
-                      onClick={() => { setForm({ ...form, strategy: s }); setValidationResult(null); }}
+                      onClick={() => { setForm({ ...form, strategy: s.name }); setValidationResult(null); }}
                     />
                   ))}
                 </div>
@@ -615,6 +707,78 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
                 </div>
               )}
             </FormSection>
+
+            {/* Entry conditions checklist — only when the selected personal strategy defines them */}
+            {entryConditions.length > 0 && (
+              <div className="flex flex-col gap-2 rounded-2xl p-3"
+                style={{ background: 'var(--color-tg-surface-2)', border: '1px solid var(--color-tg-border)' }}>
+                <span className="text-xs font-semibold text-tg-text">תנאי הכניסה של האסטרטגיה</span>
+                <div className="flex flex-col gap-1.5">
+                  {entryConditions.map((condition) => {
+                    const checked = strategyConditionsChecked.has(condition);
+                    return (
+                      <button
+                        key={condition}
+                        type="button"
+                        onClick={() => toggleConditionChecked(condition)}
+                        className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-xs border transition-all text-right"
+                        style={{
+                          background: checked ? 'var(--color-tg-success-muted)' : 'var(--color-tg-surface)',
+                          borderColor: checked ? 'var(--color-tg-success)' : 'var(--color-tg-border)',
+                          color: checked ? 'var(--color-tg-success)' : 'var(--color-tg-text-2)',
+                        }}
+                      >
+                        <span
+                          className="w-4 h-4 rounded shrink-0 flex items-center justify-center"
+                          style={{
+                            background: checked ? 'var(--color-tg-success)' : 'transparent',
+                            border: checked ? 'none' : '1px solid var(--color-tg-border)',
+                          }}
+                        >
+                          {checked && <Check size={11} color="white" />}
+                        </span>
+                        {condition}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Compliance panel — how well the current plan matches the selected strategy */}
+            {selectedStrategy && complianceTotal > 0 && (
+              <div className="flex flex-col gap-2 rounded-2xl p-3"
+                style={{ background: 'var(--color-tg-surface-2)', border: '1px solid var(--color-tg-border)' }}>
+                <span className="text-xs font-semibold text-tg-text">התאמה לאסטרטגיה</span>
+                {complianceChecks.length > 0 && (
+                  <div className="flex flex-col gap-1">
+                    {complianceChecks.map((c) => (
+                      <div key={c.label} className="flex items-center justify-between text-xs">
+                        <span style={{ color: 'var(--color-tg-text-2)' }}>{c.label}</span>
+                        <span style={{ color: c.passed ? 'var(--color-tg-success)' : 'var(--color-tg-danger)' }}>
+                          {c.passed ? '✓' : '✗'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="flex items-center justify-between text-xs pt-1.5"
+                  style={{ borderTop: '1px solid var(--color-tg-border)' }}>
+                  <span className="font-semibold text-tg-text">ציון התאמה</span>
+                  <span className="font-bold"
+                    style={{ color: complianceFailed === 0 ? 'var(--color-tg-success)' : 'var(--color-tg-warning)' }}>
+                    {compliancePassed}/{complianceTotal}
+                  </span>
+                </div>
+                {complianceFailed > 0 && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs"
+                    style={{ background: 'var(--color-tg-warning-muted)', color: 'var(--color-tg-warning)' }}>
+                    <AlertTriangle size={14} className="shrink-0" />
+                    <span>העסקה סוטה מהאסטרטגיה שלך ב-{complianceFailed} קריטריונים</span>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Step 3 — Emotional State & Confidence */}
             <FormSection step={3} label="מצב רגשי ורמת ביטחון" active={step1Done && step2Done} done={false}>

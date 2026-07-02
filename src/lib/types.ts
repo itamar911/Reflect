@@ -104,6 +104,7 @@ export interface TradePlan {
   risk_amount: number | null;
   risk_type: RiskType | null;
   actual_pnl: number | null;
+  strategy_conditions_checked: { condition: string; checked: boolean }[] | null;
 }
 
 export type PnlCurrency = '₪' | '$';
