@@ -218,12 +218,14 @@ function computeAll(trades: DashTrade[], now: Date) {
   ];
 
   // ── Performance scores (results-based) ────────────────────────────────────
+  // Drawdown control needs ≥5 distinct trading days to be meaningful
+  const hasDrawdownCtrl   = totalDays >= 5;
   const performanceScores = [
     Math.round(Math.min(winRate, 100)),
     Math.round(Math.min(pf / 3 * 100, 100)),
     Math.round(Math.min(consist, 100)),
     Math.round(Math.min(wlRatio / 2 * 100, 100)),
-    Math.round(Math.max(ddCtrl, 0)),
+    ...(hasDrawdownCtrl ? [Math.round(Math.max(ddCtrl, 0))] : []),
   ];
 
   const profitDayPct = totalDays > 0 ? Math.round(profitDays / totalDays * 100) : 0;
@@ -235,7 +237,7 @@ function computeAll(trades: DashTrade[], now: Date) {
     avgWin, avgLoss, grossProfit, grossLoss, totalPnl, totalPnlPoints,
     hasPnlAmount, pnlCurrency, periodPnl,
     dailyPnl, dailyCount, weeklyPnl, weeklyCount, monthlyPnl, monthlyCount, totalCount,
-    disciplineScores, performanceScores, hasStrategyConditions,
+    disciplineScores, performanceScores, hasStrategyConditions, hasDrawdownCtrl,
     dayMap,
     dailySeries:      buildDailySeries(dayMap, 30, now),
     weeklySeries:     buildWeeklySeries(dayMap, 12, now),
@@ -363,6 +365,7 @@ function RadarCard({
   tips,
   scores,
   gradId,
+  miniCards,
 }: {
   title: string;
   Icon: React.ComponentType<{ size?: number; style?: React.CSSProperties }>;
@@ -371,6 +374,7 @@ function RadarCard({
   tips: string[];
   scores: number[];
   gradId: string;
+  miniCards?: { label: string; score: number | null }[];
 }) {
   const [hov, setHov] = useState<number | null>(null);
   const [animated, setAnimated] = useState(false);
@@ -482,11 +486,18 @@ function RadarCard({
 
       {/* Mini-cards row */}
       <div className="grid grid-cols-3 gap-1 mt-2">
-        {labels.map((l, i) => {
-          const sc = scores[i];
-          const c  = scoreColor(sc);
+        {(miniCards ?? labels.map((l, i) => ({ label: l, score: scores[i] }))).map(({ label, score }, i) => {
+          if (score === null) {
+            return (
+              <div key={label} style={{ background: SURF2, border: `1px solid ${BORDER}`, borderRadius: 8, padding: '6px 8px' }}>
+                <p style={{ fontSize: 10, color: MUTED, fontWeight: 600, lineHeight: 1.3 }}>{label}</p>
+                <p style={{ fontSize: 10, color: MUTED, fontWeight: 600, lineHeight: 1.4, marginTop: 2 }}>אין מספיק נתונים</p>
+              </div>
+            );
+          }
+          const c = scoreColor(score);
           return (
-            <div key={l}
+            <div key={label}
               style={{
                 background: SURF2,
                 border: `1px solid ${BORDER}`,
@@ -498,8 +509,8 @@ function RadarCard({
               onMouseEnter={() => setHov(i)}
               onMouseLeave={() => setHov(null)}
               onClick={() => setHov(hov === i ? null : i)}>
-              <p style={{ fontSize: 10, color: MUTED, fontWeight: 600, lineHeight: 1.3 }}>{l}</p>
-              <p style={{ fontSize: 16, fontWeight: 800, color: c, fontVariantNumeric: 'tabular-nums', lineHeight: 1.2 }}>{sc}</p>
+              <p style={{ fontSize: 10, color: MUTED, fontWeight: 600, lineHeight: 1.3 }}>{label}</p>
+              <p style={{ fontSize: 16, fontWeight: 800, color: c, fontVariantNumeric: 'tabular-nums', lineHeight: 1.2 }}>{score}</p>
             </div>
           );
         })}
@@ -1111,6 +1122,13 @@ export default function DashboardClient({
   const dLabels = stats.hasStrategyConditions ? D_LABELS : [D_LABELS[0], ...D_LABELS.slice(2)];
   const dDescs  = stats.hasStrategyConditions ? D_DESCS  : [D_DESCS[0],  ...D_DESCS.slice(2)];
   const dTips   = stats.hasStrategyConditions ? D_TIPS   : [D_TIPS[0],   ...D_TIPS.slice(2)];
+  const pLabels    = stats.hasDrawdownCtrl ? P_LABELS : P_LABELS.slice(0, 4);
+  const pDescs     = stats.hasDrawdownCtrl ? P_DESCS  : P_DESCS.slice(0, 4);
+  const pTips      = stats.hasDrawdownCtrl ? P_TIPS   : P_TIPS.slice(0, 4);
+  const pMiniCards = P_LABELS.map((label, i) => ({
+    label,
+    score: i < stats.performanceScores.length ? stats.performanceScores[i] : null,
+  }));
   const effectiveCalDate = calDate ?? now;
 
   // Re-fetch trades from Supabase (used by the real-time subscription below)
@@ -1428,11 +1446,12 @@ export default function DashboardClient({
             <RadarCard
               title="ניקוד ביצועים"
               Icon={TrendingUp}
-              labels={P_LABELS}
-              descs={P_DESCS}
-              tips={P_TIPS}
+              labels={pLabels}
+              descs={pDescs}
+              tips={pTips}
               scores={stats.performanceScores}
               gradId="radarGradPerf"
+              miniCards={pMiniCards}
             />
           </div>
 
