@@ -29,6 +29,12 @@ export interface PersonalStrategy {
   markets: string[];
   is_builtin: boolean;
   created_at: string;
+  min_rr: number | null;
+  trading_hours_start: string | null;
+  trading_hours_end: string | null;
+  allowed_timeframes: string[];
+  entry_conditions: string[];
+  max_daily_trades: number | null;
 }
 
 export interface TradeSummary {
@@ -74,6 +80,7 @@ function computeStats(strategyName: string, trades: TradeSummary[]) {
 }
 
 const DIR_LABELS: Record<string, string> = { long: 'לונג', short: 'שורט', both: 'שניהם' };
+const TIMEFRAME_OPTIONS = ['1m', '5m', '15m', '30m', '1H', '4H', 'Daily', 'Weekly'];
 
 // ── Builtin strategies (shown to all users, not editable) ─────────────────────
 interface BuiltinDef {
@@ -149,7 +156,10 @@ const FORM_TEMPLATES = [
 
 const EMPTY_FORM = {
   name: '', description: '', direction: 'both' as 'long' | 'short' | 'both',
-  stop_loss_points: '', take_profit_points: '', risk_rules: '',
+  risk_rules: '',
+  min_rr: '', trading_hours_start: '', trading_hours_end: '',
+  allowed_timeframes: [] as string[], entry_conditions: [] as string[],
+  max_daily_trades: '',
 };
 
 // ── Root ──────────────────────────────────────────────────────────────────────
@@ -173,6 +183,7 @@ export default function StrategiesClient({
   const [expandBuiltin, setExpandBuiltin] = useState<Record<string, boolean>>({});
   const [aiReviews,     setAiReviews]     = useState<Record<string, string | null>>({});
   const [aiLoading,     setAiLoading]     = useState<Record<string, boolean>>({});
+  const [newCondition,  setNewCondition]  = useState('');
   const supabase = createClient();
 
   // ── Form handlers ──────────────────────────────────────────────────────────
@@ -183,9 +194,13 @@ export default function StrategiesClient({
     setEditId(s.id);
     setForm({
       name: s.name, description: s.description, direction: s.direction,
-      stop_loss_points:  s.stop_loss_points  != null ? String(s.stop_loss_points)  : '',
-      take_profit_points: s.take_profit_points != null ? String(s.take_profit_points) : '',
       risk_rules: s.risk_rules,
+      min_rr: s.min_rr != null ? String(s.min_rr) : '',
+      trading_hours_start: s.trading_hours_start ?? '',
+      trading_hours_end: s.trading_hours_end ?? '',
+      allowed_timeframes: s.allowed_timeframes ?? [],
+      entry_conditions: s.entry_conditions ?? [],
+      max_daily_trades: s.max_daily_trades != null ? String(s.max_daily_trades) : '',
     });
     setSaveError(null); setShowForm(true);
   }
@@ -194,19 +209,66 @@ export default function StrategiesClient({
     setEditId(null); setSaveError(null); setShowForm(true);
   }
 
+  function toggleTimeframe(t: string) {
+    setForm((f) => ({
+      ...f,
+      allowed_timeframes: f.allowed_timeframes.includes(t)
+        ? f.allowed_timeframes.filter((x) => x !== t)
+        : [...f.allowed_timeframes, t],
+    }));
+  }
+
+  function addCondition() {
+    const c = newCondition.trim();
+    if (!c) return;
+    setForm((f) => ({ ...f, entry_conditions: [...f.entry_conditions, c] }));
+    setNewCondition('');
+  }
+
+  function removeCondition(index: number) {
+    setForm((f) => ({ ...f, entry_conditions: f.entry_conditions.filter((_, i) => i !== index) }));
+  }
+
   async function handleSave() {
     if (!form.name.trim() || !form.description.trim()) return;
     setSaving(true); setSaveError(null);
+
+    try {
+      const res = await fetch('/api/validate-strategy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: form.name.trim(),
+          description: form.description.trim(),
+          entry_conditions: form.entry_conditions,
+        }),
+      });
+      if (res.ok) {
+        const result = await res.json();
+        if (result.valid === false) {
+          setSaveError(result.feedback || 'האסטרטגיה לא תקינה');
+          setSaving(false);
+          return;
+        }
+      }
+    } catch {
+      // fail-open: allow save if validation call itself fails
+    }
+
     const payload = {
       user_id: userId,
       name:    form.name.trim(),
       description: form.description.trim(),
       direction:   form.direction,
-      stop_loss_points:   form.stop_loss_points   ? parseFloat(form.stop_loss_points)   : null,
-      take_profit_points: form.take_profit_points ? parseFloat(form.take_profit_points) : null,
       risk_rules:  form.risk_rules.trim(),
       preferred_hours: '',
       markets: [],
+      min_rr: form.min_rr ? parseFloat(form.min_rr) : null,
+      trading_hours_start: form.trading_hours_start || null,
+      trading_hours_end: form.trading_hours_end || null,
+      allowed_timeframes: form.allowed_timeframes,
+      entry_conditions: form.entry_conditions,
+      max_daily_trades: form.max_daily_trades ? parseInt(form.max_daily_trades, 10) : null,
     };
     const op = editId
       ? supabase.from('personal_strategies').update(payload).eq('id', editId)
@@ -677,20 +739,77 @@ export default function StrategiesClient({
             </div>
           </Field>
 
-          <div className="grid grid-cols-2 gap-2">
-            <Field label="Stop Loss (נקודות)">
-              <input type="number" step="any" placeholder="0"
-                value={form.stop_loss_points}
-                onChange={e => setForm({ ...form, stop_loss_points: e.target.value })}
+          <Field label="R:R מינימלי">
+            <input type="number" step="any" placeholder="למשל: 2"
+              value={form.min_rr}
+              onChange={e => setForm({ ...form, min_rr: e.target.value })}
+              style={{ ...inputSt }} />
+          </Field>
+
+          <Field label="טווח שעות מסחר (אופציונלי)">
+            <div className="grid grid-cols-2 gap-2">
+              <input type="time"
+                value={form.trading_hours_start}
+                onChange={e => setForm({ ...form, trading_hours_start: e.target.value })}
                 style={{ ...inputSt }} />
-            </Field>
-            <Field label="Take Profit (נקודות)">
-              <input type="number" step="any" placeholder="0"
-                value={form.take_profit_points}
-                onChange={e => setForm({ ...form, take_profit_points: e.target.value })}
+              <input type="time"
+                value={form.trading_hours_end}
+                onChange={e => setForm({ ...form, trading_hours_end: e.target.value })}
                 style={{ ...inputSt }} />
-            </Field>
-          </div>
+            </div>
+          </Field>
+
+          <Field label="טיים-פריימים מותרים">
+            <div className="flex flex-wrap gap-1.5">
+              {TIMEFRAME_OPTIONS.map(t => (
+                <button key={t} onClick={() => toggleTimeframe(t)}
+                  className="px-2.5 py-1 rounded-full text-xs border transition-all"
+                  style={{
+                    background:  form.allowed_timeframes.includes(t) ? 'rgba(0,210,210,0.12)' : SURF2,
+                    borderColor: form.allowed_timeframes.includes(t) ? GOLD : BORDER,
+                    color:       form.allowed_timeframes.includes(t) ? GOLD : TEXT2,
+                  }}>
+                  {t}
+                </button>
+              ))}
+            </div>
+          </Field>
+
+          <Field label="תנאי כניסה">
+            <p className="text-[11px] mb-1.5" style={{ color: MUTED }}>
+              פרק את האסטרטגיה לתנאים בדיקים — בפתיחת עסקה תסמן וי על כל תנאי שמתקיים
+            </p>
+            <div className="flex gap-2">
+              <input type="text" placeholder="למשל: מגמה עולה ב-4H"
+                value={newCondition}
+                onChange={e => setNewCondition(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCondition(); } }}
+                style={{ ...inputSt, flex: 1 }} />
+              <button onClick={addCondition}
+                className="px-3 py-2 rounded-xl text-sm font-semibold shrink-0"
+                style={{ background: SURF2, color: TEXT2, border: `1px solid ${BORDER}` }}>
+                הוסף תנאי
+              </button>
+            </div>
+            {form.entry_conditions.length > 0 && (
+              <div className="flex flex-col gap-1.5 mt-2">
+                {form.entry_conditions.map((c, i) => (
+                  <div key={i} className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-lg text-xs"
+                    style={{ background: SURF2 }}>
+                    <span style={{ color: TEXT }}>{c}</span>
+                    <button onClick={() => removeCondition(i)} style={{ color: RED }} className="shrink-0">✕</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Field>
+
+          <Field label="מקסימום עסקאות ביום (אופציונלי)">
+            <input type="number" step="1" min="0" placeholder="0"
+              value={form.max_daily_trades}
+              onChange={e => setForm({ ...form, max_daily_trades: e.target.value })}
+              style={{ ...inputSt }} />
+          </Field>
 
           <Field label="חוקי ניהול סיכונים">
             <textarea rows={2}
