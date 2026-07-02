@@ -6,7 +6,8 @@ export function validateTradePlan(
   presetRules: PresetRules,
   todayTradeCount: number,
   recentLossCount: number,
-  todayLossAmount: number = 0
+  todayLossAmount: number = 0,
+  personalStrategyNames: string[] = []
 ): RulesetValidationResult {
   const blocked: string[] = [];
   const warnings: string[] = [];
@@ -77,10 +78,12 @@ export function validateTradePlan(
     }
   }
 
-  // Strategy whitelist
+  // Strategy whitelist — personal strategies (from personal_strategies) are always approved;
+  // this list only whitelists the fixed preset strategy names.
   if (
     input.strategy &&
     presetRules.allowed_strategies.length > 0 &&
+    !personalStrategyNames.includes(input.strategy) &&
     !presetRules.allowed_strategies.includes(input.strategy as import('@/lib/types').TradeStrategy)
   ) {
     warnings.push(
