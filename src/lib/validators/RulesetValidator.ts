@@ -7,7 +7,8 @@ export function validateTradePlan(
   todayTradeCount: number,
   recentLossCount: number,
   todayLossAmount: number = 0,
-  personalStrategyNames: string[] = []
+  personalStrategyNames: string[] = [],
+  strategyMinRR: number | null = null
 ): RulesetValidationResult {
   const blocked: string[] = [];
   const warnings: string[] = [];
@@ -29,8 +30,10 @@ export function validateTradePlan(
     }
   }
 
-  // R:R check
-  if (!isNaN(entry) && !isNaN(sl) && !isNaN(tp) && entry > 0 && sl > 0 && tp > 0) {
+  // R:R check — skipped when the selected personal strategy defines its own min_rr;
+  // that check is surfaced instead in the strategy compliance panel, which becomes
+  // the only R:R check for this trade.
+  if (strategyMinRR == null && !isNaN(entry) && !isNaN(sl) && !isNaN(tp) && entry > 0 && sl > 0 && tp > 0) {
     const rr = calcRR(entry, sl, tp);
     if (rr < presetRules.min_rr_ratio * 0.5) {
       blocked.push(

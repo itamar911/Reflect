@@ -343,7 +343,11 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
 
     const rules = presetRules ?? ({ ...DEFAULT_PRESET_RULES, id: '', user_id: userId, created_at: '', updated_at: '' } as PresetRules);
     const planForValidation: TradePlanInput = { ...form, stop_loss: fmtPrice(slPrice), take_profit: fmtPrice(tpPrice) };
-    const result = validateTradePlan(planForValidation, rules, todayCount, lossCount, todayLossAmount, personalStrategyRows.map((s) => s.name));
+    const result = validateTradePlan(
+      planForValidation, rules, todayCount, lossCount, todayLossAmount,
+      personalStrategyRows.map((s) => s.name),
+      selectedStrategy?.min_rr ?? null,
+    );
     setValidationResult(result);
     setFormState(result.status === 'valid' ? 'editing' : result.status);
   }
@@ -356,7 +360,11 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
     // Re-validate silently
     const rules = presetRules ?? ({ ...DEFAULT_PRESET_RULES, id: '', user_id: userId, created_at: '', updated_at: '' } as PresetRules);
     const planForValidation: TradePlanInput = { ...form, stop_loss: fmtPrice(slPrice), take_profit: fmtPrice(tpPrice) };
-    const result = validateTradePlan(planForValidation, rules, todayCount, lossCount, todayLossAmount, personalStrategyRows.map((s) => s.name));
+    const result = validateTradePlan(
+      planForValidation, rules, todayCount, lossCount, todayLossAmount,
+      personalStrategyRows.map((s) => s.name),
+      selectedStrategy?.min_rr ?? null,
+    );
     if (result.status === 'blocked') {
       setValidationResult(result);
       setFormState('blocked');
