@@ -93,6 +93,73 @@ function buildCumulativeSeries(dm: Record<string, number>, n: number, now: Date)
   return buildDailySeries(dm, n, now).map(d => { cum += d.value; return { label: d.label, value: cum }; });
 }
 
+// ── Window scoring helper (for trend computation) ─────────────────────────────
+function windowAvgScores(wClosed: DashTrade[]): { disc: number; perf: number } {
+  const boolPct = (get: (t: DashTrade) => boolean | null) => {
+    const w = wClosed.filter(t => get(t) != null);
+    return w.length > 0 ? w.filter(t => get(t) === false).length / w.length * 100 : 100;
+  };
+
+  // Discipline
+  const withPlan  = wClosed.filter(t => t.plan_score != null);
+  const procS     = withPlan.length > 0 ? withPlan.reduce((s, t) => s + t.plan_score!, 0) / withPlan.length : 50;
+  const withStrat = wClosed.filter(t => Array.isArray(t.strategy_conditions_checked) && t.strategy_conditions_checked.length > 0);
+  const stratS    = withStrat.length > 0
+    ? withStrat.reduce((s, t) => {
+        const a = t.strategy_conditions_checked!;
+        return s + a.filter(x => x.checked).length / a.length * 100;
+      }, 0) / withStrat.length
+    : null;
+  const discArr = [
+    procS,
+    ...(stratS !== null ? [stratS] : []),
+    boolPct(t => t.moved_sl),
+    boolPct(t => t.exited_early),
+    boolPct(t => t.fomo_entry),
+    boolPct(t => t.revenge_trade),
+  ];
+  const disc = Math.round(discArr.reduce((s, v) => s + v, 0) / discArr.length);
+
+  // Performance
+  const wins   = wClosed.filter(t => (calcPnl(t) ?? 0) > 0);
+  const losses = wClosed.filter(t => (calcPnl(t) ?? 0) < 0);
+  const wc = wins.length; const lc = losses.length;
+  const gp = wins.reduce((s, t) => s + (t.pnl_amount ?? 0), 0);
+  const gl = losses.reduce((s, t) => s + (t.pnl_amount ?? 0), 0);
+  const aw = wc > 0 ? gp / wc : 0;
+  const al = lc > 0 ? gl / lc : 0;
+  const wDayMap: Record<string, number> = {};
+  for (const t of wClosed) {
+    const k = dayKey(t.closed_at ?? t.submitted_at);
+    wDayMap[k] = (wDayMap[k] ?? 0) + (t.pnl_amount ?? 0);
+  }
+  const wDayVals    = Object.values(wDayMap);
+  const wTotalDays  = wDayVals.length;
+  const wProfitDays = wDayVals.filter(v => v > 0).length;
+  let wCum = 0, wPeak = 0, wMaxDD = 0;
+  for (const k of Object.keys(wDayMap).sort()) {
+    wCum += wDayMap[k];
+    if (wCum > wPeak) wPeak = wCum;
+    const dd = wPeak - wCum;
+    if (dd > wMaxDD) wMaxDD = dd;
+  }
+  const wWinRate = (wc + lc) > 0 ? wc / (wc + lc) * 100 : 0;
+  const wPf      = Math.abs(gl) > 0.001 ? gp / Math.abs(gl) : gp > 0 ? 3 : 0;
+  const wConsist = wTotalDays > 0 ? wProfitDays / wTotalDays * 100 : 0;
+  const wWlRatio = Math.abs(al) > 0.001 ? aw / Math.abs(al) : aw > 0 ? 2 : 0;
+  const wDdCtrl  = wMaxDD === 0 ? 100 : wPeak > 0.001 ? Math.max(100 - wMaxDD / wPeak * 100, 0) : 0;
+  const perfArr  = [
+    Math.min(wWinRate, 100),
+    Math.min(wPf / 3 * 100, 100),
+    Math.min(wConsist, 100),
+    Math.min(wWlRatio / 2 * 100, 100),
+    ...(wTotalDays >= 5 ? [Math.max(wDdCtrl, 0)] : []),
+  ];
+  const perf = Math.round(perfArr.reduce((s, v) => s + v, 0) / perfArr.length);
+
+  return { disc, perf };
+}
+
 // ── Compute all stats ─────────────────────────────────────────────────────────
 function computeAll(trades: DashTrade[], now: Date) {
   const closed = trades.filter(t => t.status === 'closed' && t.exit_price != null);
@@ -228,6 +295,19 @@ function computeAll(trades: DashTrade[], now: Date) {
     ...(hasDrawdownCtrl ? [Math.round(Math.max(ddCtrl, 0))] : []),
   ];
 
+  // ── Trend: last 30 days vs 31–60 days ago ────────────────────────────────
+  const nowMs  = now.getTime();
+  const ms30   = 30 * 24 * 60 * 60 * 1000;
+  const recent = closed.filter(t => nowMs - new Date(t.closed_at ?? t.submitted_at).getTime() <= ms30);
+  const prev   = closed.filter(t => {
+    const age = nowMs - new Date(t.closed_at ?? t.submitted_at).getTime();
+    return age > ms30 && age <= ms30 * 2;
+  });
+  const rW = recent.length >= 3 ? windowAvgScores(recent) : null;
+  const pW = prev.length   >= 3 ? windowAvgScores(prev)   : null;
+  const disciplineTrend  = rW && pW ? rW.disc - pW.disc : null;
+  const performanceTrend = rW && pW ? rW.perf - pW.perf : null;
+
   const profitDayPct = totalDays > 0 ? Math.round(profitDays / totalDays * 100) : 0;
   const winPct       = (winCount + lossCount) > 0 ? Math.round(winCount / (winCount + lossCount) * 100) : 0;
 
@@ -238,6 +318,7 @@ function computeAll(trades: DashTrade[], now: Date) {
     hasPnlAmount, pnlCurrency, periodPnl,
     dailyPnl, dailyCount, weeklyPnl, weeklyCount, monthlyPnl, monthlyCount, totalCount,
     disciplineScores, performanceScores, hasStrategyConditions, hasDrawdownCtrl,
+    disciplineTrend, performanceTrend,
     dayMap,
     dailySeries:      buildDailySeries(dayMap, 30, now),
     weeklySeries:     buildWeeklySeries(dayMap, 12, now),
@@ -314,10 +395,13 @@ function SplitBar({ left, right, leftColor, rightColor, height = 10 }: {
 
 // ── Score color by value ──────────────────────────────────────────────────────
 function scoreColor(score: number): string {
-  if (score >= 80) return '#00C853';
-  if (score >= 60) return '#00d2d2';
-  if (score >= 40) return '#FF9800';
+  if (score >= 67) return '#00C853';
+  if (score >= 34) return '#FF9800';
   return '#FF3B30';
+}
+
+function miniNumColor(score: number): string {
+  return score >= 60 ? '#00C853' : '#FF3B30';
 }
 
 // ── Discipline radar config ───────────────────────────────────────────────────
@@ -365,6 +449,7 @@ function RadarCard({
   scores,
   gradId,
   miniCards,
+  trend,
 }: {
   title: string;
   labels: string[];
@@ -373,6 +458,7 @@ function RadarCard({
   scores: number[];
   gradId: string;
   miniCards?: { label: string; score: number | null }[];
+  trend?: number | null;
 }) {
   const [hov, setHov] = useState<number | null>(null);
   const [animated, setAnimated] = useState(false);
@@ -392,11 +478,19 @@ function RadarCard({
   const avgScore = Math.round(scores.reduce((s, v) => s + v, 0) / N);
   const color    = scoreColor(avgScore);
 
+  const allMiniCards = miniCards ?? labels.map((l, i) => ({ label: l, score: scores[i] }));
+  const scoredCards  = allMiniCards.filter((mc): mc is { label: string; score: number } => mc.score !== null);
+  const maxS = scoredCards.length >= 2 ? Math.max(...scoredCards.map(mc => mc.score)) : null;
+  const minS = scoredCards.length >= 2 ? Math.min(...scoredCards.map(mc => mc.score)) : null;
+  const showInsight = maxS !== null && minS !== null && maxS !== minS;
+  const bestCard  = showInsight ? scoredCards.find(mc => mc.score === maxS)! : null;
+  const worstCard = showInsight ? [...scoredCards].reverse().find(mc => mc.score === minS)! : null;
+
   return (
     <Card>
-      {/* Card header — title + dynamic-colored score circle */}
+      {/* Header — title + score circle + trend indicator */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-        <p style={{ fontSize: 14, fontWeight: 700, color: TEXT }}>{title}</p>
+        <p style={{ fontSize: 15, fontWeight: 700, color: TEXT }}>{title}</p>
         <div style={{
           width: 48, height: 48, borderRadius: '50%',
           background: `${color}22`,
@@ -406,9 +500,17 @@ function RadarCard({
         }}>
           <span style={{ fontSize: 16, fontWeight: 800, color, fontVariantNumeric: 'tabular-nums' }}>{avgScore}</span>
         </div>
+        {trend != null && (
+          <span style={{
+            fontSize: 12, fontWeight: 700,
+            color: trend > 0 ? '#00C853' : trend < 0 ? '#FF3B30' : MUTED,
+          }}>
+            {trend > 0 ? `▲ +${trend}` : trend < 0 ? `▼ ${trend}` : '—'}
+          </span>
+        )}
       </div>
 
-      {/* SVG radar — brand teal throughout, ~37% larger than before */}
+      {/* SVG radar — brand teal throughout */}
       <svg width="100%" viewBox="0 0 240 240" preserveAspectRatio="xMidYMid meet"
         style={{ maxWidth: 300, display: 'block', margin: '0 auto', overflow: 'visible' }}>
         <defs>
@@ -456,7 +558,7 @@ function RadarCard({
           const [x, y] = pt(i, 1.3);
           return (
             <text key={i} x={x} y={y} textAnchor="middle" dominantBaseline="middle"
-              fontSize={11} fontWeight={600}
+              fontSize={13} fontWeight={600}
               fill={hov === i ? ACCENT : MUTED}>
               {labels[i]}
             </text>
@@ -464,9 +566,9 @@ function RadarCard({
         })}
       </svg>
 
-      {/* Hover tooltip */}
-      <div style={{ minHeight: 40, marginTop: 2 }}>
-        {hov !== null && (
+      {/* Insight line or hover tooltip — share the same space */}
+      <div style={{ minHeight: 44, marginTop: 4 }}>
+        {hov !== null ? (
           <div className="rounded-xl px-3 py-2"
             style={{ background: SURF2, border: `1px solid ${BORDER}` }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -476,27 +578,32 @@ function RadarCard({
             <p style={{ fontSize: 11, color: MUTED, fontWeight: 600, marginTop: 2 }}>{descs[hov]}</p>
             <p style={{ fontSize: 11, color: TEXT2, fontWeight: 600, marginTop: 2 }}>→ {tips[hov]}</p>
           </div>
-        )}
+        ) : showInsight ? (
+          <p style={{ textAlign: 'center', fontSize: 11, color: MUTED, fontWeight: 600, lineHeight: 1.6 }}>
+            {'נקודת החוזק שלך: '}
+            <span style={{ color: '#00C853', fontWeight: 700 }}>{bestCard!.label} ({bestCard!.score})</span>
+            {' · דורש שיפור: '}
+            <span style={{ color: '#FF3B30', fontWeight: 700 }}>{worstCard!.label} ({worstCard!.score})</span>
+          </p>
+        ) : null}
       </div>
 
-      {/* Mini-cards — dynamic side bar, plain white score number */}
+      {/* Mini-cards — binary color on score number, no side bar */}
       <div className="grid grid-cols-3 gap-1 mt-1">
-        {(miniCards ?? labels.map((l, i) => ({ label: l, score: scores[i] }))).map(({ label, score }, i) => {
+        {allMiniCards.map(({ label, score }, i) => {
           if (score === null) {
             return (
               <div key={label} style={{ background: SURF2, border: `1px solid ${BORDER}`, borderRadius: 8, padding: '8px 10px' }}>
-                <p style={{ fontSize: 10, color: MUTED, fontWeight: 600, lineHeight: 1.3 }}>{label}</p>
+                <p style={{ fontSize: 12, color: MUTED, fontWeight: 600, lineHeight: 1.3 }}>{label}</p>
                 <p style={{ fontSize: 10, color: MUTED, fontWeight: 600, lineHeight: 1.4, marginTop: 2 }}>אין מספיק נתונים</p>
               </div>
             );
           }
-          const c = scoreColor(score);
           return (
             <div key={label}
               style={{
                 background: SURF2,
                 border: `1px solid ${BORDER}`,
-                borderRight: `2px solid ${c}`,
                 borderRadius: 8,
                 padding: '8px 10px',
                 cursor: 'pointer',
@@ -504,8 +611,8 @@ function RadarCard({
               onMouseEnter={() => setHov(i)}
               onMouseLeave={() => setHov(null)}
               onClick={() => setHov(hov === i ? null : i)}>
-              <p style={{ fontSize: 10, color: MUTED, fontWeight: 600, lineHeight: 1.3 }}>{label}</p>
-              <p style={{ fontSize: 16, fontWeight: 800, color: TEXT, fontVariantNumeric: 'tabular-nums', lineHeight: 1.2 }}>{score}</p>
+              <p style={{ fontSize: 12, color: MUTED, fontWeight: 600, lineHeight: 1.3 }}>{label}</p>
+              <p style={{ fontSize: 19, fontWeight: 800, color: miniNumColor(score), fontVariantNumeric: 'tabular-nums', lineHeight: 1.2 }}>{score}</p>
             </div>
           );
         })}
@@ -1436,6 +1543,7 @@ export default function DashboardClient({
               tips={dTips}
               scores={stats.disciplineScores}
               gradId="radarGradDisc"
+              trend={stats.disciplineTrend}
             />
             <RadarCard
               title="ניקוד ביצועים"
@@ -1445,6 +1553,7 @@ export default function DashboardClient({
               scores={stats.performanceScores}
               gradId="radarGradPerf"
               miniCards={pMiniCards}
+              trend={stats.performanceTrend}
             />
           </div>
 
