@@ -87,7 +87,7 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
   const [slInput, setSlInput] = useState('');
   const [tpInput, setTpInput] = useState('');
   const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set());
-  const [strategyConditionsChecked, setStrategyConditionsChecked] = useState<Set<string>>(new Set());
+  const [strategyConditionsChecked, setStrategyConditionsChecked] = useState<Record<string, boolean>>({});
   const [todayStrategyTradeCount, setTodayStrategyTradeCount] = useState(0);
   const [chartSymbol, setChartSymbol] = useState('');
   const [chartTimeframe, setChartTimeframe] = useState('');
@@ -110,15 +110,7 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
   }
 
   function toggleConditionChecked(condition: string) {
-    setStrategyConditionsChecked((prev) => {
-      const next = new Set(prev);
-      if (next.has(condition)) {
-        next.delete(condition);
-      } else {
-        next.add(condition);
-      }
-      return next;
-    });
+    setStrategyConditionsChecked((prev) => ({ ...prev, [condition]: !prev[condition] }));
   }
 
   // Restore saved TP/SL input unit preference
@@ -246,9 +238,15 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
     [personalStrategyRows, form.strategy],
   );
 
-  // Reset checklist state whenever the selected strategy (or its condition set) changes
+  // Reset checklist state whenever the selected strategy (or its condition set) changes —
+  // every condition is explicitly seeded to false, never true, so a freshly selected
+  // strategy always starts fully unchecked.
   useEffect(() => {
-    setStrategyConditionsChecked(new Set());
+    const initial: Record<string, boolean> = {};
+    for (const condition of selectedStrategy?.entry_conditions ?? []) {
+      initial[condition] = false;
+    }
+    setStrategyConditionsChecked(initial);
   }, [selectedStrategy?.id]);
 
   // Live count of today's trades logged under this strategy (for the daily-trade-limit check)
@@ -311,7 +309,7 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
   const entryConditions = selectedStrategy?.entry_conditions ?? [];
   const complianceTotal = complianceChecks.length + entryConditions.length;
   const compliancePassed = complianceChecks.filter((c) => c.passed).length
-    + entryConditions.filter((c) => strategyConditionsChecked.has(c)).length;
+    + entryConditions.filter((c) => strategyConditionsChecked[c] === true).length;
   const complianceFailed = complianceTotal - compliancePassed;
 
   const isFormFilled =
@@ -394,7 +392,7 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
       point_value: pointValueNum,
       pnl_currency: currency,
       strategy_conditions_checked: entryConditions.length > 0
-        ? entryConditions.map((condition) => ({ condition, checked: strategyConditionsChecked.has(condition) }))
+        ? entryConditions.map((condition) => ({ condition, checked: strategyConditionsChecked[condition] === true }))
         : null,
     });
 
@@ -409,7 +407,7 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
         setValidationResult(null);
         setPnlFieldsError(false);
         setCheckedItems(new Set());
-        setStrategyConditionsChecked(new Set());
+        setStrategyConditionsChecked({});
         setFormState('empty');
         onSuccess();
         onClose();
@@ -723,7 +721,7 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
                 <span className="text-xs font-semibold text-tg-text">תנאי הכניסה של האסטרטגיה</span>
                 <div className="flex flex-col gap-1.5">
                   {entryConditions.map((condition) => {
-                    const checked = strategyConditionsChecked.has(condition);
+                    const checked = strategyConditionsChecked[condition] === true;
                     return (
                       <button
                         key={condition}
