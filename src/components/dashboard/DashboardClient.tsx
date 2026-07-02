@@ -583,7 +583,7 @@ function RadarCard({
             {'נקודת החוזק שלך: '}
             <span style={{ color: '#00C853', fontWeight: 700 }}>{bestCard!.label} ({bestCard!.score})</span>
             {' · דורש שיפור: '}
-            <span style={{ color: '#FF3B30', fontWeight: 700 }}>{worstCard!.label} ({worstCard!.score})</span>
+            <span style={{ color: worstCard!.score >= 60 ? '#FF9800' : '#FF3B30', fontWeight: 700 }}>{worstCard!.label} ({worstCard!.score})</span>
           </p>
         ) : null}
       </div>
