@@ -154,19 +154,22 @@ function computeAll(trades: DashTrade[], now: Date) {
     if (v > 0) profitDays++; else if (v < 0) lossDays++; else neutralDays++;
   }
 
-  // Drawdown
+  // Drawdown: walk sorted daily equity curve; track high-water mark and largest peak→trough drop
   let cum = 0, peak = 0, maxDD = 0;
   for (const k of Object.keys(dayMap).sort()) {
-    cum += dayMap[k]; if (cum > peak) peak = cum;
-    const dd = peak - cum; if (dd > maxDD) maxDD = dd;
+    cum += dayMap[k];
+    if (cum > peak) peak = cum;
+    const dd = peak - cum;
+    if (dd > maxDD) maxDD = dd;
   }
+  // No drawdown ever → 100; equity never went positive → 0; otherwise invert drawdown/peak ratio
+  const ddCtrl = maxDD === 0 ? 100 : peak > 0.001 ? Math.max(100 - (maxDD / peak) * 100, 0) : 0;
 
   const totalDays = profitDays + lossDays + neutralDays;
   const winRate   = (winCount + lossCount) > 0 ? winCount / (winCount + lossCount) * 100 : 0;
   const pf        = Math.abs(grossLoss) > 0.001 ? grossProfit / Math.abs(grossLoss) : grossProfit > 0 ? 3 : 0;
   const consist   = totalDays > 0 ? profitDays / totalDays * 100 : 0;
   const wlRatio   = Math.abs(avgLoss) > 0.001 ? avgWin / Math.abs(avgLoss) : avgWin > 0 ? 2 : 0;
-  const ddCtrl    = peak > 0.001 ? Math.max(100 - maxDD / peak * 100, 0) : 50;
 
   // ── Discipline scores (process-based) ─────────────────────────────────────
   const withPlanScore   = closed.filter(t => t.plan_score != null);
@@ -174,10 +177,16 @@ function computeAll(trades: DashTrade[], now: Date) {
     ? Math.round(withPlanScore.reduce((s, t) => s + t.plan_score!, 0) / withPlanScore.length)
     : 50;
 
-  const withFollowed    = closed.filter(t => t.followed_plan != null);
-  const strategyLoyalty = withFollowed.length > 0
-    ? Math.round(withFollowed.filter(t => t.followed_plan === true).length / withFollowed.length * 100)
-    : 100;
+  const withStratCond   = closed.filter(t => Array.isArray(t.strategy_conditions_checked) && t.strategy_conditions_checked.length > 0);
+  const hasStrategyConditions = withStratCond.length > 0;
+  const strategyLoyalty = hasStrategyConditions
+    ? Math.round(
+        withStratCond.reduce((s, t) => {
+          const arr = t.strategy_conditions_checked!;
+          return s + (arr.filter(Boolean).length / arr.length) * 100;
+        }, 0) / withStratCond.length
+      )
+    : null;
 
   const withMovedSlD    = closed.filter(t => t.moved_sl != null);
   const slKeeping       = withMovedSlD.length > 0
@@ -199,7 +208,14 @@ function computeAll(trades: DashTrade[], now: Date) {
     ? Math.round(withRevengeTrade.filter(t => t.revenge_trade === false).length / withRevengeTrade.length * 100)
     : 100;
 
-  const disciplineScores  = [processScore, strategyLoyalty, slKeeping, patience, cleanEntries, emotionalControl];
+  const disciplineScores  = [
+    processScore,
+    ...(strategyLoyalty !== null ? [strategyLoyalty] : []),
+    slKeeping,
+    patience,
+    cleanEntries,
+    emotionalControl,
+  ];
 
   // ── Performance scores (results-based) ────────────────────────────────────
   const performanceScores = [
@@ -219,7 +235,7 @@ function computeAll(trades: DashTrade[], now: Date) {
     avgWin, avgLoss, grossProfit, grossLoss, totalPnl, totalPnlPoints,
     hasPnlAmount, pnlCurrency, periodPnl,
     dailyPnl, dailyCount, weeklyPnl, weeklyCount, monthlyPnl, monthlyCount, totalCount,
-    disciplineScores, performanceScores,
+    disciplineScores, performanceScores, hasStrategyConditions,
     dayMap,
     dailySeries:      buildDailySeries(dayMap, 30, now),
     weeklySeries:     buildWeeklySeries(dayMap, 12, now),
@@ -377,21 +393,19 @@ function RadarCard({
   return (
     <Card>
       {/* Card header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Icon size={15} style={{ color: ACCENT, flexShrink: 0 }} />
-          <p style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: MUTED }}>
-            {title}
-          </p>
-        </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+        <Icon size={15} style={{ color: ACCENT, flexShrink: 0 }} />
+        <p style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: MUTED }}>
+          {title}
+        </p>
         <div style={{
-          width: 44, height: 44, borderRadius: '50%',
+          width: 48, height: 48, borderRadius: '50%',
           background: `${color}22`,
           border: `2px solid ${color}`,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           flexShrink: 0,
         }}>
-          <span style={{ fontSize: 15, fontWeight: 800, color, fontVariantNumeric: 'tabular-nums' }}>{avgScore}</span>
+          <span style={{ fontSize: 16, fontWeight: 800, color, fontVariantNumeric: 'tabular-nums' }}>{avgScore}</span>
         </div>
       </div>
 
@@ -1094,6 +1108,9 @@ export default function DashboardClient({
   const now = useMemo(() => mounted ? new Date() : null, [mounted]);
 
   const stats = useMemo(() => computeAll(trades, now ?? EPOCH), [trades, now]);
+  const dLabels = stats.hasStrategyConditions ? D_LABELS : [D_LABELS[0], ...D_LABELS.slice(2)];
+  const dDescs  = stats.hasStrategyConditions ? D_DESCS  : [D_DESCS[0],  ...D_DESCS.slice(2)];
+  const dTips   = stats.hasStrategyConditions ? D_TIPS   : [D_TIPS[0],   ...D_TIPS.slice(2)];
   const effectiveCalDate = calDate ?? now;
 
   // Re-fetch trades from Supabase (used by the real-time subscription below)
@@ -1402,9 +1419,9 @@ export default function DashboardClient({
             <RadarCard
               title="ניקוד משמעת"
               Icon={ShieldCheck}
-              labels={D_LABELS}
-              descs={D_DESCS}
-              tips={D_TIPS}
+              labels={dLabels}
+              descs={dDescs}
+              tips={dTips}
               scores={stats.disciplineScores}
               gradId="radarGradDisc"
             />
