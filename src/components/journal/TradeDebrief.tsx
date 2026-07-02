@@ -18,13 +18,12 @@ interface TradeData {
 }
 
 interface AIDebriefResult {
-  overall?: string;
-  entry_quality?: string;
-  risk_management?: string;
-  execution?: string;
-  emotional?: string;
-  lessons?: string;
+  summary?: string;
+  worked?: string;
+  improve?: string;
+  lesson?: string;
   score?: number;
+  documented?: boolean;
 }
 
 interface TradeDebriefProps {
@@ -78,7 +77,7 @@ export default function TradeDebrief({ trade, existingAnswer }: TradeDebriefProp
       const data = await res.json();
       setAiResult(data);
     } catch {
-      setAiResult({ overall: 'שגיאה בניתוח — נסה שוב' });
+      setAiResult({ summary: 'שגיאה בניתוח — נסה שוב' });
     } finally {
       setAiLoading(false);
     }
@@ -144,17 +143,23 @@ export default function TradeDebrief({ trade, existingAnswer }: TradeDebriefProp
             {aiResult.score !== undefined && (
               <div className="flex items-center justify-between p-3 rounded-xl"
                 style={{ background: 'var(--color-tg-primary-muted)', border: '1px solid var(--color-tg-primary)30' }}>
-                <span className="text-xs text-tg-text-2">ציון עסקה</span>
+                <span className="text-xs text-tg-text-2 flex items-center gap-1.5">
+                  ציון עסקה
+                  {aiResult.documented && (
+                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md"
+                      style={{ background: 'var(--color-tg-surface)', color: 'var(--color-tg-primary)' }}>
+                      ⭐ תועד
+                    </span>
+                  )}
+                </span>
                 <span className="text-xl font-bold" style={{ color: 'var(--color-tg-primary)' }}>{aiResult.score}/100</span>
               </div>
             )}
             {[
-              ['סיכום כללי', aiResult.overall],
-              ['איכות כניסה', aiResult.entry_quality],
-              ['ניהול סיכונים', aiResult.risk_management],
-              ['ביצוע', aiResult.execution],
-              ['מצב רגשי', aiResult.emotional],
-              ['לקחים', aiResult.lessons],
+              ['סיכום', aiResult.summary],
+              ['מה עבד', aiResult.worked],
+              ['מה לשפר', aiResult.improve],
+              ['לקח מרכזי', aiResult.lesson],
             ].filter(([, v]) => v).map(([label, value]) => (
               <div key={label as string} className="rounded-xl p-2.5"
                 style={{ background: 'var(--color-tg-surface-2)' }}>

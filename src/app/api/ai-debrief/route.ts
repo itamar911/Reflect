@@ -1,38 +1,14 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { computeTradeScore, type TradeScoreInput, type TradeScoreResult } from '@/lib/scoring/tradeScore';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
-interface ScoreBreakdown {
-  planning: number;
-  followedPlan: number;
-  keptSl: number;
-  properSize: number;
-  learning: number;
-}
 
 interface Outcome {
   points: number;
   amount: number | null;
   currency: string | null;
-}
-
-function clamp(n: number, min: number, max: number): number {
-  if (!Number.isFinite(n)) return min;
-  return Math.min(max, Math.max(min, n));
-}
-
-function isFilled(v: unknown): boolean {
-  if (v == null) return false;
-  if (typeof v === 'string') return v.trim().length > 0;
-  if (typeof v === 'number') return Number.isFinite(v);
-  return true;
-}
-
-function planningScore(trade: Record<string, unknown>): number {
-  const fields = [trade.entry_price, trade.stop_loss, trade.take_profit, trade.trade_reason, trade.strategy];
-  return Math.round((fields.filter(isFilled).length / fields.length) * 20);
 }
 
 function computeOutcome(trade: Record<string, unknown>): Outcome | null {
@@ -58,10 +34,55 @@ export async function POST(request: Request) {
 
   const formData = await request.formData();
   const tradeData = formData.get('trade') as string;
-  const description = formData.get('description') as string | null;
+  const description = (formData.get('description') as string | null)?.trim() || null;
   const imageFile = formData.get('image') as File | null;
 
-  const trade = JSON.parse(tradeData);
+  const submitted = JSON.parse(tradeData) as { id?: string };
+  if (!submitted.id) return NextResponse.json({ error: 'Missing trade id' }, { status: 400 });
+
+  // Re-fetch the authoritative, persisted trade row rather than trusting the client
+  // payload — this is what the deterministic score is computed from.
+  const { data: trade, error: tradeErr } = await supabase
+    .from('trade_plans')
+    .select('*')
+    .eq('id', submitted.id)
+    .eq('user_id', user.id)
+    .single();
+
+  if (tradeErr || !trade) {
+    return NextResponse.json({ error: 'Trade not found' }, { status: 404 });
+  }
+
+  const [presetRes, strategyRes] = await Promise.all([
+    supabase.from('preset_rules').select('min_rr_ratio').eq('user_id', user.id).maybeSingle(),
+    trade.strategy
+      ? supabase.from('personal_strategies').select('min_rr').eq('user_id', user.id).eq('name', trade.strategy).maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
+
+  const requiredMinRR: number | null = strategyRes.data?.min_rr ?? presetRes.data?.min_rr_ratio ?? null;
+
+  const scoreInput: TradeScoreInput = {
+    stop_loss: trade.stop_loss ?? null,
+    take_profit: trade.take_profit ?? null,
+    rr_ratio: trade.rr_ratio ?? null,
+    required_min_rr: requiredMinRR,
+    strategy_conditions_checked: trade.strategy_conditions_checked ?? null,
+    moved_sl: trade.moved_sl === true,
+    exited_early: trade.exited_early === true,
+    fomo_entry: trade.fomo_entry === true,
+    revenge_trade: trade.revenge_trade === true,
+    exit_price: trade.exit_price ?? null,
+    entry_price: trade.entry_price ?? null,
+    direction: trade.direction ?? null,
+  };
+
+  // The score is computed deterministically in code — Claude never sees a request
+  // to produce or adjust it, and any "score" it might still emit is discarded below.
+  const scoreResult = computeTradeScore(scoreInput);
+
+  const documented = !!(description || trade.post_trade_notes?.trim() || trade.debrief_answer?.trim());
+
   const content: Anthropic.MessageParam['content'] = [];
 
   if (imageFile) {
@@ -71,99 +92,86 @@ export async function POST(request: Request) {
     content.push({ type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } });
   }
 
-  const fixed = {
-    planning: planningScore(trade),
-    followedPlan: trade.followed_plan === true ? 25 : 0,
-    keptSl: trade.kept_sl === true ? 25 : 0,
-    properSize: trade.proper_size === true ? 15 : 0,
-  };
+  content.push({ type: 'text', text: buildDebriefPrompt(trade, description, scoreResult) });
+
   const outcome = computeOutcome(trade);
 
-  content.push({ type: 'text', text: buildDebriefPrompt(trade, description, fixed) });
+  let feedback: Record<string, string> = {};
+  try {
+    const message = await client.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1000,
+      messages: [{ role: 'user', content }],
+    });
+    const text = message.content[0]?.type === 'text' ? message.content[0].text : '';
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    feedback = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+  } catch {
+    feedback = { summary: 'לא ניתן היה לקבל ניתוח AI כרגע — הציון חושב כרגיל.' };
+  }
 
-  const message = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 1500,
-    messages: [{ role: 'user', content }],
+  return NextResponse.json({
+    summary: feedback.summary,
+    worked: feedback.worked,
+    improve: feedback.improve,
+    lesson: feedback.lesson,
+    // The score and breakdown always come from the deterministic calculation —
+    // never from the model's response, even if it produced its own "score" field.
+    score: scoreResult.total,
+    breakdown: scoreResult.breakdown,
+    correctedFlags: scoreResult.correctedFlags,
+    documented,
+    outcome,
   });
-
-  const text = message.content[0].type === 'text' ? message.content[0].text : '{}';
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : { analysis: 'Unable to analyze' };
-
-  // The score is recomputed here from the fixed process categories plus Claude's
-  // (clamped) learning judgement, so the returned score can never drift from the
-  // breakdown shown to the user.
-  const learning = clamp(Math.round(Number(parsed?.breakdown?.learning ?? 0)), 0, 15);
-  const breakdown: ScoreBreakdown = { ...fixed, learning };
-  const score = breakdown.planning + breakdown.followedPlan + breakdown.keptSl
-    + breakdown.properSize + breakdown.learning;
-
-  return NextResponse.json({ ...parsed, score, breakdown, outcome });
 }
 
 function buildDebriefPrompt(
   trade: Record<string, unknown>,
   description: string | null,
-  fixed: { planning: number; followedPlan: number; keptSl: number; properSize: number },
+  scoreResult: TradeScoreResult,
 ): string {
-  const fixedTotal = fixed.planning + fixed.followedPlan + fixed.keptSl + fixed.properSize;
+  const { planning, strategyAdherence, discipline } = scoreResult.breakdown;
 
-  return `You are a professional trading-process coach. Analyze the following completed trade and respond entirely in Hebrew.
+  const documentationLines = [
+    trade.post_trade_notes ? `- הערות שנרשמו אחרי הסגירה: ${trade.post_trade_notes}` : null,
+    trade.debrief_answer ? `- תשובת תחקיר עצמי: ${trade.debrief_answer}` : null,
+    description ? `- הערות שנכתבו בעת בקשת הניתוח: ${description}` : null,
+  ].filter(Boolean).join('\n');
 
-This review evaluates the trader's PROCESS and discipline ONLY — NOT the outcome. Do not discuss profit/loss, points gained or lost, or whether the trade was a win or a loss anywhere in your analysis.
+  return `You are a professional trading-process coach. The trader just closed a trade and a deterministic score (0-100) has already been computed in code from verified, persisted data. Your ONLY job is to write feedback text about this trade — you do NOT determine, adjust, or restate the score.
 
 Trade data:
 - Strategy: ${trade.strategy}
+- Direction: ${trade.direction ?? '—'}
 - Entry: ${trade.entry_price}
 - Stop Loss: ${trade.stop_loss}
 - Take Profit: ${trade.take_profit}
-- Entry reason (the plan): ${trade.trade_reason}
+- Exit price: ${trade.exit_price ?? '—'}
 - Exit reason: ${trade.exit_reason ?? '—'}
-${description ? `- Trader notes on the exit: ${description}` : '- Trader notes on the exit: (none)'}
-- Followed the entry plan exactly: ${trade.followed_plan === true ? 'כן' : 'לא'}
-- Kept the original stop loss without moving it: ${trade.kept_sl === true ? 'כן' : 'לא'}
-- Position size matched the trader's risk rules: ${trade.proper_size === true ? 'כן' : 'לא'}
-- Exited the trade early: ${trade.exited_early === true ? 'כן' : 'לא'}
-- This was a FOMO entry: ${trade.fomo_entry === true ? 'כן' : 'לא'}
-- This was a revenge trade: ${trade.revenge_trade === true ? 'כן' : 'לא'}
+- R:R ratio: ${trade.rr_ratio ?? '—'}
+- Entry reason (the plan): ${trade.trade_reason}
+- Moved Stop Loss: ${trade.moved_sl === true ? 'כן' : 'לא'}
+- Exited early: ${trade.exited_early === true ? 'כן' : 'לא'}
+- FOMO entry: ${trade.fomo_entry === true ? 'כן' : 'לא'}
+- Revenge trade: ${trade.revenge_trade === true ? 'כן' : 'לא'}
+${documentationLines ? documentationLines : '- No post-trade documentation was written for this trade.'}
+${scoreResult.correctedFlags.length > 0 ? `\nNote: the following contradictions were auto-corrected before scoring: ${scoreResult.correctedFlags.join('; ')}` : ''}
 
-A quantitative process score out of 100 has already been calculated. You may ONLY determine category 5 (learning) — categories 1-4 are fixed and MUST be used exactly as given:
-1. תכנון מוקדם — planning (out of 20): ${fixed.planning} — based on whether entry price, stop loss, take profit, entry reason and strategy were all documented
-2. כניסה לפי תוכנית — followed the plan (out of 25): ${fixed.followedPlan} — from the trader's yes/no answer above
-3. שמירה על SL — kept the stop loss (out of 25): ${fixed.keptSl} — from the trader's yes/no answer above
-4. גודל פוזיציה — proper position size (out of 15): ${fixed.properSize} — from the trader's yes/no answer above
-5. למידה — learning (out of 15): judge the depth and insight of the exit reason and trader notes:
-   - Detailed, specific, insightful reflection → 15
-   - Basic / generic reflection → 8
-   - Empty or superficial → 0
+The already-computed score breakdown (this is final — do not second-guess or restate a different number):
+- תכנון (planning): ${planning.score}/${planning.max} — ${planning.details.join('; ')}
+- נאמנות לאסטרטגיה (strategy adherence): ${strategyAdherence.score}/${strategyAdherence.max}${strategyAdherence.details.length > 0 ? ' — ' + strategyAdherence.details.join('; ') : ' — לא הוגדרו תנאי כניסה לאסטרטגיה זו'}
+- משמעת (discipline): ${discipline.score}/${discipline.max} — ${discipline.details.join('; ')}
+- Total: ${scoreResult.total}/100
 
-Categories 1-4 sum to ${fixedTotal}/85. The final score = ${fixedTotal} + your learning score (0-15), out of 100.
+The score was already computed from verified data. Do NOT invent a score. Do NOT claim any event that is not in the data provided. Write in Hebrew, plain text, no emojis, no markdown: 1) short summary 2) what worked 3) what to improve 4) one key lesson. Keep it concise.
 
-Instructions:
-1. Write analysis that explains and is fully consistent with this PROCESS score. Reference the actual breakdown values where relevant (e.g. "שמרת על ה-SL ולכן קיבלת 25/25 בקטגוריה זו").
-2. Do NOT mention profitability, P&L amounts, points gained/lost, or whether the take-profit was reached — that information is shown to the trader separately and is out of scope here.
-3. In "execution", focus on whether the trader followed their plan, kept their stop, and sized the position correctly.
-4. In "emotional", focus on discipline/behavioral signals from the exit reason and notes (impulsiveness vs. composure) — not on emotional reaction to profit or loss.
-5. In "lessons", give concrete process improvements for next time.
+If the trader wrote post-trade documentation (notes above), mention that positively — do not penalize or mention missing documentation if there is none; documentation is not part of the score.
 
-Return JSON exactly in this format (no additional text):
+Return JSON exactly in this format (no additional text, no markdown):
 {
-  "overall": "2-3 sentence overall assessment of the PROCESS, mentioning the final process score",
-  "entry_quality": "Was the entry planned and documented well?",
-  "risk_management": "Risk-management process — stop-loss handling and position sizing",
-  "execution": "Execution discipline — followed the plan, kept the stop, sized correctly",
-  "emotional": "Discipline/behavioral signals from the exit reason and notes",
-  "lessons": "Concrete process improvements for next time",
-  "score": <integer, ${fixedTotal} + your learning score>,
-  "breakdown": {
-    "planning": ${fixed.planning},
-    "followedPlan": ${fixed.followedPlan},
-    "keptSl": ${fixed.keptSl},
-    "properSize": ${fixed.properSize},
-    "learning": <integer 0-15>
-  }
-}
-
-Write all text values in Hebrew.`;
+  "summary": "1-2 sentence summary of the trade",
+  "worked": "what worked well in this trade",
+  "improve": "what to improve next time",
+  "lesson": "one concise key lesson"
+}`;
 }

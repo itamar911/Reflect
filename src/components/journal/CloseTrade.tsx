@@ -7,12 +7,16 @@ import Card from '@/components/ui/Card';
 import { Bot, Target, BarChart3, ShieldCheck } from 'lucide-react';
 import { formatPnlIls, formatPnlPoints } from '@/lib/utils';
 
+export interface ScoreCategory {
+  score: number;
+  max: number;
+  details: string[];
+}
+
 export interface ScoreBreakdown {
-  planning: number;
-  followedPlan: number;
-  keptSl: number;
-  properSize: number;
-  learning: number;
+  planning: ScoreCategory;
+  strategyAdherence: ScoreCategory;
+  discipline: ScoreCategory;
 }
 
 export interface ScoreOutcome {
@@ -22,16 +26,15 @@ export interface ScoreOutcome {
 }
 
 export interface AIDebriefResult {
-  overall?: string;
-  entry_quality?: string;
-  risk_management?: string;
-  execution?: string;
-  emotional?: string;
-  lessons?: string;
+  summary?: string;
+  worked?: string;
+  improve?: string;
+  lesson?: string;
   score?: number;
   breakdown?: ScoreBreakdown;
   outcome?: ScoreOutcome;
-  analysis?: string;
+  documented?: boolean;
+  correctedFlags?: string[];
   error?: string;
 }
 
@@ -373,13 +376,10 @@ export default function CloseTrade({
 
 export function AIDebriefView({ result }: { result: AIDebriefResult }) {
   const rows = ([
-    ['סיכום', result.overall],
-    ['איכות כניסה', result.entry_quality],
-    ['ניהול סיכונים', result.risk_management],
-    ['ביצוע', result.execution],
-    ['מצב רגשי', result.emotional],
-    ['לקחים לפעם הבאה', result.lessons],
-    ['ניתוח', result.analysis],
+    ['סיכום', result.summary],
+    ['מה עבד', result.worked],
+    ['מה לשפר', result.improve],
+    ['לקח מרכזי', result.lesson],
   ] as [string, string | undefined][]).filter(([, v]) => v);
 
   const scoreColor = result.score === undefined
@@ -396,6 +396,19 @@ export function AIDebriefView({ result }: { result: AIDebriefResult }) {
     ? formatPnlIls(outcome.amount, outcome.currency ?? '₪')
     : null;
 
+  const breakdownCategories: [string, number, number][] | null = result.breakdown
+    ? result.breakdown.strategyAdherence.max > 0
+      ? [
+          ['תכנון', result.breakdown.planning.score, result.breakdown.planning.max],
+          ['נאמנות לאסטרטגיה', result.breakdown.strategyAdherence.score, result.breakdown.strategyAdherence.max],
+          ['משמעת', result.breakdown.discipline.score, result.breakdown.discipline.max],
+        ]
+      : [
+          ['תכנון', result.breakdown.planning.score, result.breakdown.planning.max],
+          ['משמעת', result.breakdown.discipline.score, result.breakdown.discipline.max],
+        ]
+    : null;
+
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm font-bold text-tg-text flex items-center gap-1.5"><Bot size={14} /> משוב AI על העסקה</p>
@@ -405,20 +418,20 @@ export function AIDebriefView({ result }: { result: AIDebriefResult }) {
           style={{ background: 'var(--color-tg-surface-2)', border: `1px solid ${scoreColor}` }}>
           <span className="text-sm font-semibold flex items-center gap-1.5" style={{ color: scoreColor }}>
             <Target size={14} /> ציון תהליך
+            {result.documented && (
+              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md"
+                style={{ background: 'var(--color-tg-primary-muted)', color: 'var(--color-tg-primary)' }}>
+                ⭐ תועד
+              </span>
+            )}
           </span>
           <span className="text-2xl font-bold" style={{ color: scoreColor }}>{result.score}/100</span>
         </div>
       )}
 
-      {result.breakdown && (
+      {breakdownCategories && (
         <div className="grid grid-cols-2 gap-1.5">
-          {([
-            ['תכנון', result.breakdown.planning, 20],
-            ['כניסה לפי תוכנית', result.breakdown.followedPlan, 25],
-            ['שמירה על SL', result.breakdown.keptSl, 25],
-            ['גודל פוזיציה', result.breakdown.properSize, 15],
-            ['למידה', result.breakdown.learning, 15],
-          ] as [string, number, number][]).map(([label, value, max]) => (
+          {breakdownCategories.map(([label, value, max]) => (
             <div key={label} className="flex items-center justify-between rounded-lg px-2.5 py-1.5"
               style={{ background: 'var(--color-tg-surface-2)' }}>
               <span className="text-[11px] text-tg-text-2">{label}</span>
