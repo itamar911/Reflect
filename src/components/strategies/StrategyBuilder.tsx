@@ -18,6 +18,12 @@ export interface PersonalStrategy {
   markets: string[];
   is_builtin: boolean;
   created_at: string;
+  min_rr: number | null;
+  trading_hours_start: string | null;
+  trading_hours_end: string | null;
+  allowed_timeframes: string[];
+  entry_conditions: string[];
+  max_daily_trades: number | null;
 }
 
 const BUILTIN_TEMPLATES = [
@@ -33,6 +39,7 @@ const BUILTIN_TEMPLATES = [
 
 const DIRECTION_LABELS = { long: 'Long בלבד', short: 'Short בלבד', both: 'שניהם' };
 const MARKET_OPTIONS = ['Forex', 'Crypto', 'Futures', 'Stocks', 'Indices'];
+const TIMEFRAME_OPTIONS = ['1m', '5m', '15m', '30m', '1H', '4H', 'Daily', 'Weekly'];
 
 interface StrategyBuilderProps {
   userId: string;
@@ -43,11 +50,15 @@ const EMPTY_FORM = {
   name: '',
   description: '',
   direction: 'both' as 'long' | 'short' | 'both',
-  stop_loss_points: '',
-  take_profit_points: '',
   risk_rules: '',
   preferred_hours: '',
   markets: [] as string[],
+  min_rr: '',
+  trading_hours_start: '',
+  trading_hours_end: '',
+  allowed_timeframes: [] as string[],
+  entry_conditions: [] as string[],
+  max_daily_trades: '',
 };
 
 export default function StrategyBuilder({ userId, initialStrategies }: StrategyBuilderProps) {
@@ -58,6 +69,7 @@ export default function StrategyBuilder({ userId, initialStrategies }: StrategyB
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [newCondition, setNewCondition] = useState('');
   const supabase = createClient();
 
 
@@ -74,11 +86,15 @@ export default function StrategyBuilder({ userId, initialStrategies }: StrategyB
       name: s.name,
       description: s.description,
       direction: s.direction,
-      stop_loss_points: s.stop_loss_points != null ? String(s.stop_loss_points) : '',
-      take_profit_points: s.take_profit_points != null ? String(s.take_profit_points) : '',
       risk_rules: s.risk_rules,
       preferred_hours: s.preferred_hours,
       markets: s.markets,
+      min_rr: s.min_rr != null ? String(s.min_rr) : '',
+      trading_hours_start: s.trading_hours_start ?? '',
+      trading_hours_end: s.trading_hours_end ?? '',
+      allowed_timeframes: s.allowed_timeframes ?? [],
+      entry_conditions: s.entry_conditions ?? [],
+      max_daily_trades: s.max_daily_trades != null ? String(s.max_daily_trades) : '',
     });
     setSaveError(null);
     setShowForm(true);
@@ -98,10 +114,52 @@ export default function StrategyBuilder({ userId, initialStrategies }: StrategyB
     }));
   }
 
+  function toggleTimeframe(t: string) {
+    setForm((f) => ({
+      ...f,
+      allowed_timeframes: f.allowed_timeframes.includes(t)
+        ? f.allowed_timeframes.filter((x) => x !== t)
+        : [...f.allowed_timeframes, t],
+    }));
+  }
+
+  function addCondition() {
+    const c = newCondition.trim();
+    if (!c) return;
+    setForm((f) => ({ ...f, entry_conditions: [...f.entry_conditions, c] }));
+    setNewCondition('');
+  }
+
+  function removeCondition(index: number) {
+    setForm((f) => ({ ...f, entry_conditions: f.entry_conditions.filter((_, i) => i !== index) }));
+  }
+
   async function handleSave() {
     if (!form.name.trim() || !form.description.trim()) return;
     setSaving(true);
     setSaveError(null);
+
+    try {
+      const res = await fetch('/api/validate-strategy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: form.name.trim(),
+          description: form.description.trim(),
+          entry_conditions: form.entry_conditions,
+        }),
+      });
+      if (res.ok) {
+        const result = await res.json();
+        if (result.valid === false) {
+          setSaveError(result.feedback || 'האסטרטגיה לא תקינה');
+          setSaving(false);
+          return;
+        }
+      }
+    } catch {
+      // fail-open: allow save if validation call itself fails
+    }
 
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
@@ -115,11 +173,15 @@ export default function StrategyBuilder({ userId, initialStrategies }: StrategyB
       name: form.name.trim(),
       description: form.description.trim(),
       direction: form.direction,
-      stop_loss_points: form.stop_loss_points ? parseFloat(form.stop_loss_points) : null,
-      take_profit_points: form.take_profit_points ? parseFloat(form.take_profit_points) : null,
       risk_rules: form.risk_rules.trim(),
       preferred_hours: form.preferred_hours.trim(),
       markets: form.markets,
+      min_rr: form.min_rr ? parseFloat(form.min_rr) : null,
+      trading_hours_start: form.trading_hours_start || null,
+      trading_hours_end: form.trading_hours_end || null,
+      allowed_timeframes: form.allowed_timeframes,
+      entry_conditions: form.entry_conditions,
+      max_daily_trades: form.max_daily_trades ? parseInt(form.max_daily_trades, 10) : null,
     };
 
     if (editId) {
@@ -302,23 +364,85 @@ export default function StrategyBuilder({ userId, initialStrategies }: StrategyB
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            <div className="flex flex-col gap-1">
-              <label className="text-xs text-tg-muted">Stop Loss (נקודות)</label>
-              <input type="number" step="any" placeholder="0"
-                value={form.stop_loss_points}
-                onChange={(e) => setForm({ ...form, stop_loss_points: e.target.value })}
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-tg-muted">R:R מינימלי</label>
+            <input type="number" step="any" placeholder="למשל: 2"
+              value={form.min_rr}
+              onChange={(e) => setForm({ ...form, min_rr: e.target.value })}
+              className="h-9 px-3 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none"
+              style={{ background: 'var(--color-tg-surface)' }} />
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-tg-muted">טווח שעות מסחר (אופציונלי)</label>
+            <div className="grid grid-cols-2 gap-2">
+              <input type="time"
+                value={form.trading_hours_start}
+                onChange={(e) => setForm({ ...form, trading_hours_start: e.target.value })}
+                className="h-9 px-3 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none"
+                style={{ background: 'var(--color-tg-surface)' }} />
+              <input type="time"
+                value={form.trading_hours_end}
+                onChange={(e) => setForm({ ...form, trading_hours_end: e.target.value })}
                 className="h-9 px-3 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none"
                 style={{ background: 'var(--color-tg-surface)' }} />
             </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs text-tg-muted">Take Profit (נקודות)</label>
-              <input type="number" step="any" placeholder="0"
-                value={form.take_profit_points}
-                onChange={(e) => setForm({ ...form, take_profit_points: e.target.value })}
-                className="h-9 px-3 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none"
-                style={{ background: 'var(--color-tg-surface)' }} />
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-tg-muted">טיים-פריימים מותרים</label>
+            <div className="flex flex-wrap gap-1.5">
+              {TIMEFRAME_OPTIONS.map((t) => (
+                <button key={t} onClick={() => toggleTimeframe(t)}
+                  className="px-2.5 py-1 rounded-full text-xs border transition-all"
+                  style={{
+                    background: form.allowed_timeframes.includes(t) ? 'var(--color-tg-primary-muted)' : 'var(--color-tg-surface)',
+                    borderColor: form.allowed_timeframes.includes(t) ? 'var(--color-tg-primary)' : 'var(--color-tg-border)',
+                    color: form.allowed_timeframes.includes(t) ? 'var(--color-tg-primary)' : 'var(--color-tg-text-2)',
+                  }}>
+                  {t}
+                </button>
+              ))}
             </div>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-tg-muted">תנאי כניסה</label>
+            <p className="text-[11px] text-tg-muted">
+              פרק את האסטרטגיה לתנאים בדיקים — בפתיחת עסקה תסמן וי על כל תנאי שמתקיים
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="למשל: מגמה עולה ב-4H"
+                value={newCondition}
+                onChange={(e) => setNewCondition(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCondition(); } }}
+                className="flex-1 h-9 px-3 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none"
+                style={{ background: 'var(--color-tg-surface)' }}
+              />
+              <Button variant="secondary" onClick={addCondition}>הוסף תנאי</Button>
+            </div>
+            {form.entry_conditions.length > 0 && (
+              <div className="flex flex-col gap-1.5 mt-1">
+                {form.entry_conditions.map((c, i) => (
+                  <div key={i} className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-lg text-xs"
+                    style={{ background: 'var(--color-tg-surface)' }}>
+                    <span className="text-tg-text">{c}</span>
+                    <button onClick={() => removeCondition(i)} className="text-tg-danger shrink-0">✕</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-tg-muted">מקסימום עסקאות ביום (אופציונלי)</label>
+            <input type="number" step="1" min="0" placeholder="0"
+              value={form.max_daily_trades}
+              onChange={(e) => setForm({ ...form, max_daily_trades: e.target.value })}
+              className="h-9 px-3 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none"
+              style={{ background: 'var(--color-tg-surface)' }} />
           </div>
 
           <div className="flex flex-col gap-1">
