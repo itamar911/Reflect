@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect, useCallback, useSyncExternalStore } from 'react';
-import { Sparkles, TrendingUp, TrendingDown, RefreshCw, CheckCircle, AlertCircle, AlertTriangle, Heart, Target, ChevronRight, ChevronLeft, Quote, Clock, ShieldCheck } from 'lucide-react';
+import { Sparkles, TrendingUp, TrendingDown, RefreshCw, CheckCircle, AlertCircle, AlertTriangle, Heart, Target, ChevronRight, ChevronLeft, Quote, Clock } from 'lucide-react';
 import { formatPnlIls, formatPnlPoints } from '@/lib/utils';
 import { createClient } from '@/lib/supabase/client';
 import { DASH_TRADE_SELECT, mapDashTrade } from '@/lib/dashboard/trades';
@@ -359,7 +359,6 @@ const P_TIPS = [
 // ── Radar card (shared for both discipline and performance) ───────────────────
 function RadarCard({
   title,
-  Icon,
   labels,
   descs,
   tips,
@@ -368,7 +367,6 @@ function RadarCard({
   miniCards,
 }: {
   title: string;
-  Icon: React.ComponentType<{ size?: number; style?: React.CSSProperties }>;
   labels: string[];
   descs: string[];
   tips: string[];
@@ -396,12 +394,9 @@ function RadarCard({
 
   return (
     <Card>
-      {/* Card header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-        <Icon size={15} style={{ color: ACCENT, flexShrink: 0 }} />
-        <p style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: MUTED }}>
-          {title}
-        </p>
+      {/* Card header — title + dynamic-colored score circle */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+        <p style={{ fontSize: 14, fontWeight: 700, color: TEXT }}>{title}</p>
         <div style={{
           width: 48, height: 48, borderRadius: '50%',
           background: `${color}22`,
@@ -413,13 +408,13 @@ function RadarCard({
         </div>
       </div>
 
-      {/* SVG radar */}
+      {/* SVG radar — brand teal throughout, ~37% larger than before */}
       <svg width="100%" viewBox="0 0 240 240" preserveAspectRatio="xMidYMid meet"
-        style={{ maxWidth: 220, display: 'block', margin: '0 auto', overflow: 'visible' }}>
+        style={{ maxWidth: 300, display: 'block', margin: '0 auto', overflow: 'visible' }}>
         <defs>
           <radialGradient id={gradId} cx="50%" cy="50%" r="50%">
-            <stop offset="0%"   stopColor={color} stopOpacity={0.25} />
-            <stop offset="100%" stopColor={color} stopOpacity={0.05} />
+            <stop offset="0%"   stopColor={ACCENT} stopOpacity={0.25} />
+            <stop offset="100%" stopColor={ACCENT} stopOpacity={0.05} />
           </radialGradient>
         </defs>
 
@@ -434,13 +429,13 @@ function RadarCard({
           return <line key={i} x1={cx} y1={cy} x2={x} y2={y} stroke={BORDER} strokeWidth={0.8} />;
         })}
 
-        {/* Animated data layer */}
+        {/* Animated data layer — fixed teal */}
         <g style={{
           transformOrigin: `${cx}px ${cy}px`,
           transform: animated ? 'scale(1)' : 'scale(0)',
           transition: 'transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)',
         }}>
-          <polygon points={dataPoly} fill={`url(#${gradId})`} stroke={color} strokeWidth={1.5} />
+          <polygon points={dataPoly} fill={`url(#${gradId})`} stroke={ACCENT} strokeWidth={1.5} />
           {scores.map((v, i) => {
             const [x, y] = pt(i, Math.min(v, 100) / 100);
             const isHov  = hov === i;
@@ -449,8 +444,8 @@ function RadarCard({
                 onMouseEnter={() => setHov(i)}
                 onMouseLeave={() => setHov(null)}
                 onClick={() => setHov(isHov ? null : i)}>
-                <circle cx={x} cy={y} r={9}  fill={color} opacity={isHov ? 0.25 : 0.12} />
-                <circle cx={x} cy={y} r={4}  fill={color} />
+                <circle cx={x} cy={y} r={9}  fill={ACCENT} opacity={isHov ? 0.3 : 0.12} />
+                <circle cx={x} cy={y} r={4}  fill={ACCENT} />
               </g>
             );
           })}
@@ -461,8 +456,8 @@ function RadarCard({
           const [x, y] = pt(i, 1.3);
           return (
             <text key={i} x={x} y={y} textAnchor="middle" dominantBaseline="middle"
-              fontSize={N === 5 ? 13 : 13} fontWeight={600}
-              fill={hov === i ? color : MUTED}>
+              fontSize={11} fontWeight={600}
+              fill={hov === i ? ACCENT : MUTED}>
               {labels[i]}
             </text>
           );
@@ -470,13 +465,13 @@ function RadarCard({
       </svg>
 
       {/* Hover tooltip */}
-      <div style={{ minHeight: 52, marginTop: 4 }}>
+      <div style={{ minHeight: 40, marginTop: 2 }}>
         {hov !== null && (
           <div className="rounded-xl px-3 py-2"
             style={{ background: SURF2, border: `1px solid ${BORDER}` }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color }}>{labels[hov]}</span>
-              <span style={{ fontSize: 15, fontWeight: 800, color, fontVariantNumeric: 'tabular-nums' }}>{scores[hov]}</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: ACCENT }}>{labels[hov]}</span>
+              <span style={{ fontSize: 15, fontWeight: 800, color: ACCENT, fontVariantNumeric: 'tabular-nums' }}>{scores[hov]}</span>
             </div>
             <p style={{ fontSize: 11, color: MUTED, fontWeight: 600, marginTop: 2 }}>{descs[hov]}</p>
             <p style={{ fontSize: 11, color: TEXT2, fontWeight: 600, marginTop: 2 }}>→ {tips[hov]}</p>
@@ -484,12 +479,12 @@ function RadarCard({
         )}
       </div>
 
-      {/* Mini-cards row */}
-      <div className="grid grid-cols-3 gap-1 mt-2">
+      {/* Mini-cards — dynamic side bar, plain white score number */}
+      <div className="grid grid-cols-3 gap-1 mt-1">
         {(miniCards ?? labels.map((l, i) => ({ label: l, score: scores[i] }))).map(({ label, score }, i) => {
           if (score === null) {
             return (
-              <div key={label} style={{ background: SURF2, border: `1px solid ${BORDER}`, borderRadius: 8, padding: '6px 8px' }}>
+              <div key={label} style={{ background: SURF2, border: `1px solid ${BORDER}`, borderRadius: 8, padding: '8px 10px' }}>
                 <p style={{ fontSize: 10, color: MUTED, fontWeight: 600, lineHeight: 1.3 }}>{label}</p>
                 <p style={{ fontSize: 10, color: MUTED, fontWeight: 600, lineHeight: 1.4, marginTop: 2 }}>אין מספיק נתונים</p>
               </div>
@@ -503,14 +498,14 @@ function RadarCard({
                 border: `1px solid ${BORDER}`,
                 borderRight: `2px solid ${c}`,
                 borderRadius: 8,
-                padding: '6px 8px',
+                padding: '8px 10px',
                 cursor: 'pointer',
               }}
               onMouseEnter={() => setHov(i)}
               onMouseLeave={() => setHov(null)}
               onClick={() => setHov(hov === i ? null : i)}>
               <p style={{ fontSize: 10, color: MUTED, fontWeight: 600, lineHeight: 1.3 }}>{label}</p>
-              <p style={{ fontSize: 16, fontWeight: 800, color: c, fontVariantNumeric: 'tabular-nums', lineHeight: 1.2 }}>{score}</p>
+              <p style={{ fontSize: 16, fontWeight: 800, color: TEXT, fontVariantNumeric: 'tabular-nums', lineHeight: 1.2 }}>{score}</p>
             </div>
           );
         })}
@@ -1436,7 +1431,6 @@ export default function DashboardClient({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <RadarCard
               title="ניקוד משמעת"
-              Icon={ShieldCheck}
               labels={dLabels}
               descs={dDescs}
               tips={dTips}
@@ -1445,7 +1439,6 @@ export default function DashboardClient({
             />
             <RadarCard
               title="ניקוד ביצועים"
-              Icon={TrendingUp}
               labels={pLabels}
               descs={pDescs}
               tips={pTips}
