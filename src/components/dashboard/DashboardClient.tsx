@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect, useCallback, useSyncExternalStore } from 'react';
-import { Sparkles, TrendingUp, TrendingDown, RefreshCw, CheckCircle, AlertCircle, AlertTriangle, Heart, Target, ChevronRight, ChevronLeft, Quote, Clock } from 'lucide-react';
+import { Sparkles, TrendingUp, TrendingDown, RefreshCw, CheckCircle, AlertCircle, AlertTriangle, Heart, Target, ChevronRight, ChevronLeft, Quote, Clock, ShieldCheck } from 'lucide-react';
 import { formatPnlIls, formatPnlPoints } from '@/lib/utils';
 import { createClient } from '@/lib/supabase/client';
 import { DASH_TRADE_SELECT, mapDashTrade } from '@/lib/dashboard/trades';
@@ -167,15 +167,47 @@ function computeAll(trades: DashTrade[], now: Date) {
   const consist   = totalDays > 0 ? profitDays / totalDays * 100 : 0;
   const wlRatio   = Math.abs(avgLoss) > 0.001 ? avgWin / Math.abs(avgLoss) : avgWin > 0 ? 2 : 0;
   const ddCtrl    = peak > 0.001 ? Math.max(100 - maxDD / peak * 100, 0) : 50;
-  const recovery  = maxDD > 0.001 ? Math.min(Math.max(totalPnl, 0) / maxDD / 2 * 100, 100) : totalPnl > 0 ? 75 : 50;
 
-  const radarScores = [
+  // ── Discipline scores (process-based) ─────────────────────────────────────
+  const withPlanScore   = closed.filter(t => t.plan_score != null);
+  const processScore    = withPlanScore.length > 0
+    ? Math.round(withPlanScore.reduce((s, t) => s + t.plan_score!, 0) / withPlanScore.length)
+    : 50;
+
+  const withFollowed    = closed.filter(t => t.followed_plan != null);
+  const strategyLoyalty = withFollowed.length > 0
+    ? Math.round(withFollowed.filter(t => t.followed_plan === true).length / withFollowed.length * 100)
+    : 100;
+
+  const withMovedSlD    = closed.filter(t => t.moved_sl != null);
+  const slKeeping       = withMovedSlD.length > 0
+    ? Math.round(withMovedSlD.filter(t => t.moved_sl === false).length / withMovedSlD.length * 100)
+    : 100;
+
+  const withExitedEarly = closed.filter(t => t.exited_early != null);
+  const patience        = withExitedEarly.length > 0
+    ? Math.round(withExitedEarly.filter(t => t.exited_early === false).length / withExitedEarly.length * 100)
+    : 100;
+
+  const withFomoEntry   = closed.filter(t => t.fomo_entry != null);
+  const cleanEntries    = withFomoEntry.length > 0
+    ? Math.round(withFomoEntry.filter(t => t.fomo_entry === false).length / withFomoEntry.length * 100)
+    : 100;
+
+  const withRevengeTrade  = closed.filter(t => t.revenge_trade != null);
+  const emotionalControl  = withRevengeTrade.length > 0
+    ? Math.round(withRevengeTrade.filter(t => t.revenge_trade === false).length / withRevengeTrade.length * 100)
+    : 100;
+
+  const disciplineScores  = [processScore, strategyLoyalty, slKeeping, patience, cleanEntries, emotionalControl];
+
+  // ── Performance scores (results-based) ────────────────────────────────────
+  const performanceScores = [
     Math.round(Math.min(winRate, 100)),
     Math.round(Math.min(pf / 3 * 100, 100)),
     Math.round(Math.min(consist, 100)),
     Math.round(Math.min(wlRatio / 2 * 100, 100)),
     Math.round(Math.max(ddCtrl, 0)),
-    Math.round(Math.max(recovery, 0)),
   ];
 
   const profitDayPct = totalDays > 0 ? Math.round(profitDays / totalDays * 100) : 0;
@@ -187,7 +219,7 @@ function computeAll(trades: DashTrade[], now: Date) {
     avgWin, avgLoss, grossProfit, grossLoss, totalPnl, totalPnlPoints,
     hasPnlAmount, pnlCurrency, periodPnl,
     dailyPnl, dailyCount, weeklyPnl, weeklyCount, monthlyPnl, monthlyCount, totalCount,
-    radarScores,
+    disciplineScores, performanceScores,
     dayMap,
     dailySeries:      buildDailySeries(dayMap, 30, now),
     weeklySeries:     buildWeeklySeries(dayMap, 12, now),
@@ -262,66 +294,203 @@ function SplitBar({ left, right, leftColor, rightColor, height = 10 }: {
   );
 }
 
-// ── Radar chart ───────────────────────────────────────────────────────────────
-const R_LABELS = ['אחוז הצלחה', 'פקטור רווח', 'עקביות', 'ממוצע רווח/הפסד', 'ירידת ערך', 'התאוששות'];
-const R_DESCS  = [
+// ── Score color by value ──────────────────────────────────────────────────────
+function scoreColor(score: number): string {
+  if (score >= 80) return '#00C853';
+  if (score >= 60) return '#00d2d2';
+  if (score >= 40) return '#FF9800';
+  return '#FF3B30';
+}
+
+// ── Discipline radar config ───────────────────────────────────────────────────
+const D_LABELS = ['ציון תהליך', 'נאמנות לאסטרטגיה', 'שמירה על SL', 'סבלנות', 'כניסות נקיות', 'שליטה רגשית'];
+const D_DESCS  = [
+  'ממוצע ציון תהליך לעסקאות סגורות',
+  'אחוז עסקאות שבהן נשמרה האסטרטגיה',
+  'אחוז עסקאות שבהן לא הוזז ה-Stop Loss',
+  'אחוז עסקאות שלא הסתיימו מוקדם מהיעד',
+  'אחוז עסקאות שנכנסו בלי לחץ FOMO',
+  'אחוז עסקאות שנכנסו בלי נקמה אחרי הפסד',
+];
+const D_TIPS = [
+  'מלא ציון תהליך לכל עסקה לפני כניסה',
+  'בדוק את כל תנאי האסטרטגיה לפני כניסה',
+  'הגדר Stop Loss ואל תזיז אותו לעולם',
+  'המתן לסיום היעד המלא לפני יציאה',
+  'כנס רק להגדרות מוכרות, לא מדחף רגשי',
+  'קח הפסקה אחרי הפסד לפני עסקה הבאה',
+];
+
+// ── Performance radar config ──────────────────────────────────────────────────
+const P_LABELS = ['אחוז הצלחה', 'פקטור רווח', 'עקביות', 'יחס רווח/הפסד', 'שליטה בירידת ערך'];
+const P_DESCS  = [
   'אחוז הצלחה מבין עסקאות סגורות',
   'רווח גולמי חלקי הפסד גולמי',
   'אחוז ימים רווחיים מכלל ימי מסחר',
   'ממוצע רווח חלקי ממוצע הפסד',
-  'שליטה בירידה מקסימלית מהשיא',
-  'רווח כולל חלקי מקסימום ירידה',
+  'שליטה בירידה המקסימלית מהשיא',
+];
+const P_TIPS = [
+  'שפר את בחירת ההגדרות ותרכז על איכות',
+  'הגדל את יחס RR המינימלי לכל עסקה',
+  'הגדר מכסת הפסד יומית ועצור כשמגיעים',
+  'הרץ רווחים רחוק יותר וחתוך הפסדים מהר',
+  'הגדר מכסת ירידה שבועית וכבד אותה',
 ];
 
-function RadarChart({ scores }: { scores: number[] }) {
+// ── Radar card (shared for both discipline and performance) ───────────────────
+function RadarCard({
+  title,
+  Icon,
+  labels,
+  descs,
+  tips,
+  scores,
+  gradId,
+}: {
+  title: string;
+  Icon: React.ComponentType<{ size?: number; style?: React.CSSProperties }>;
+  labels: string[];
+  descs: string[];
+  tips: string[];
+  scores: number[];
+  gradId: string;
+}) {
   const [hov, setHov] = useState<number | null>(null);
-  const N = 6; const cx = 120; const cy = 120; const R = 80;
+  const [animated, setAnimated] = useState(false);
+
+  useEffect(() => {
+    const id = setTimeout(() => setAnimated(true), 60);
+    return () => clearTimeout(id);
+  }, []);
+
+  const N   = scores.length;
+  const cx  = 120; const cy = 120; const R = 80;
   const ang = (i: number) => -Math.PI / 2 + (i * 2 * Math.PI) / N;
   const pt  = (i: number, s: number): [number, number] =>
     [cx + R * s * Math.cos(ang(i)), cy + R * s * Math.sin(ang(i))];
-  const poly = (s: number) => Array.from({ length: N }, (_, i) => pt(i, s).join(',')).join(' ');
+  const poly     = (s: number) => Array.from({ length: N }, (_, i) => pt(i, s).join(',')).join(' ');
   const dataPoly = scores.map((v, i) => pt(i, Math.min(v, 100) / 100).join(',')).join(' ');
   const avgScore = Math.round(scores.reduce((s, v) => s + v, 0) / N);
+  const color    = scoreColor(avgScore);
 
   return (
-    <div className="flex flex-col items-center gap-2">
-      <svg width="100%" viewBox="0 0 240 240" preserveAspectRatio="xMidYMid meet" style={{ maxWidth: 240, display: 'block' }}>
+    <Card>
+      {/* Card header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Icon size={15} style={{ color: ACCENT, flexShrink: 0 }} />
+          <p style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: MUTED }}>
+            {title}
+          </p>
+        </div>
+        <div style={{
+          width: 44, height: 44, borderRadius: '50%',
+          background: `${color}22`,
+          border: `2px solid ${color}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexShrink: 0,
+        }}>
+          <span style={{ fontSize: 15, fontWeight: 800, color, fontVariantNumeric: 'tabular-nums' }}>{avgScore}</span>
+        </div>
+      </div>
+
+      {/* SVG radar */}
+      <svg width="100%" viewBox="0 0 240 240" preserveAspectRatio="xMidYMid meet"
+        style={{ maxWidth: 220, display: 'block', margin: '0 auto', overflow: 'visible' }}>
+        <defs>
+          <radialGradient id={gradId} cx="50%" cy="50%" r="50%">
+            <stop offset="0%"   stopColor={color} stopOpacity={0.25} />
+            <stop offset="100%" stopColor={color} stopOpacity={0.05} />
+          </radialGradient>
+        </defs>
+
+        {/* Grid rings */}
         {[0.25, 0.5, 0.75, 1].map(s => (
           <polygon key={s} points={poly(s)} fill="none" stroke={BORDER} strokeWidth={0.8} />
         ))}
+
+        {/* Axis lines */}
         {Array.from({ length: N }, (_, i) => {
           const [x, y] = pt(i, 1);
           return <line key={i} x1={cx} y1={cy} x2={x} y2={y} stroke={BORDER} strokeWidth={0.8} />;
         })}
-        <polygon points={dataPoly} fill="rgba(0,210,210,0.15)" stroke={ACCENT} strokeWidth={1.5} />
-        {scores.map((v, i) => {
-          const [x, y] = pt(i, Math.min(v, 100) / 100);
-          return (
-            <circle key={i} cx={x} cy={y} r={4} fill={ACCENT} style={{ cursor: 'pointer' }}
-              onMouseEnter={() => setHov(i)} onMouseLeave={() => setHov(null)}
-              onClick={() => setHov(hov === i ? null : i)} />
-          );
-        })}
+
+        {/* Animated data layer */}
+        <g style={{
+          transformOrigin: `${cx}px ${cy}px`,
+          transform: animated ? 'scale(1)' : 'scale(0)',
+          transition: 'transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)',
+        }}>
+          <polygon points={dataPoly} fill={`url(#${gradId})`} stroke={color} strokeWidth={1.5} />
+          {scores.map((v, i) => {
+            const [x, y] = pt(i, Math.min(v, 100) / 100);
+            const isHov  = hov === i;
+            return (
+              <g key={i} style={{ cursor: 'pointer' }}
+                onMouseEnter={() => setHov(i)}
+                onMouseLeave={() => setHov(null)}
+                onClick={() => setHov(isHov ? null : i)}>
+                <circle cx={x} cy={y} r={9}  fill={color} opacity={isHov ? 0.25 : 0.12} />
+                <circle cx={x} cy={y} r={4}  fill={color} />
+              </g>
+            );
+          })}
+        </g>
+
+        {/* Axis labels */}
         {Array.from({ length: N }, (_, i) => {
-          const [x, y] = pt(i, 1.28);
+          const [x, y] = pt(i, 1.3);
           return (
             <text key={i} x={x} y={y} textAnchor="middle" dominantBaseline="middle"
-              fontSize={14} fontWeight={600} fill={hov === i ? ACCENT : MUTED}>{R_LABELS[i]}</text>
+              fontSize={N === 5 ? 13 : 13} fontWeight={600}
+              fill={hov === i ? color : MUTED}>
+              {labels[i]}
+            </text>
           );
         })}
-        <text x={cx} y={cy + 10} textAnchor="middle" fontSize={56} fontWeight="bold" fill={ACCENT}>
-          {avgScore}
-        </text>
-        <text x={cx} y={cy + 34} textAnchor="middle" fontSize={13} fontWeight={600} fill={MUTED}>ציון כולל</text>
       </svg>
-      {hov !== null && (
-        <div className="text-center text-xs px-3 py-1.5 rounded-xl mx-4"
-          style={{ background: SURF2, color: TEXT2, fontWeight: 600 }}>
-          <span style={{ color: ACCENT, fontWeight: 600 }}>{R_LABELS[hov]}</span>
-          {' '}— {scores[hov]}% — {R_DESCS[hov]}
-        </div>
-      )}
-    </div>
+
+      {/* Hover tooltip */}
+      <div style={{ minHeight: 52, marginTop: 4 }}>
+        {hov !== null && (
+          <div className="rounded-xl px-3 py-2"
+            style={{ background: SURF2, border: `1px solid ${BORDER}` }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color }}>{labels[hov]}</span>
+              <span style={{ fontSize: 15, fontWeight: 800, color, fontVariantNumeric: 'tabular-nums' }}>{scores[hov]}</span>
+            </div>
+            <p style={{ fontSize: 11, color: MUTED, fontWeight: 600, marginTop: 2 }}>{descs[hov]}</p>
+            <p style={{ fontSize: 11, color: TEXT2, fontWeight: 600, marginTop: 2 }}>→ {tips[hov]}</p>
+          </div>
+        )}
+      </div>
+
+      {/* Mini-cards row */}
+      <div className="grid grid-cols-3 gap-1 mt-2">
+        {labels.map((l, i) => {
+          const sc = scores[i];
+          const c  = scoreColor(sc);
+          return (
+            <div key={l}
+              style={{
+                background: SURF2,
+                border: `1px solid ${BORDER}`,
+                borderRight: `2px solid ${c}`,
+                borderRadius: 8,
+                padding: '6px 8px',
+                cursor: 'pointer',
+              }}
+              onMouseEnter={() => setHov(i)}
+              onMouseLeave={() => setHov(null)}
+              onClick={() => setHov(hov === i ? null : i)}>
+              <p style={{ fontSize: 10, color: MUTED, fontWeight: 600, lineHeight: 1.3 }}>{l}</p>
+              <p style={{ fontSize: 16, fontWeight: 800, color: c, fontVariantNumeric: 'tabular-nums', lineHeight: 1.2 }}>{sc}</p>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
   );
 }
 
@@ -1228,25 +1397,30 @@ export default function DashboardClient({
             </Card>
           </div>
 
-          {/* ── Middle: Radar + Bar + Line ────────────────────────────────── */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {/* ── Radar cards ───────────────────────────────────────────────── */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <RadarCard
+              title="ניקוד משמעת"
+              Icon={ShieldCheck}
+              labels={D_LABELS}
+              descs={D_DESCS}
+              tips={D_TIPS}
+              scores={stats.disciplineScores}
+              gradId="radarGradDisc"
+            />
+            <RadarCard
+              title="ניקוד ביצועים"
+              Icon={TrendingUp}
+              labels={P_LABELS}
+              descs={P_DESCS}
+              tips={P_TIPS}
+              scores={stats.performanceScores}
+              gradId="radarGradPerf"
+            />
+          </div>
 
-            {/* Radar */}
-            <Card>
-              <SectionTitle>ניקוד משמעת</SectionTitle>
-              <RadarChart scores={stats.radarScores} />
-              <div className="grid grid-cols-3 gap-1 mt-2">
-                {R_LABELS.map((l, i) => (
-                  <div key={l} className="text-center rounded-lg py-1.5"
-                    style={{ background: SURF2, border: `1px solid ${BORDER}`, borderRadius: 8, padding: '6px 4px' }}>
-                    <p style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>{l}</p>
-                    <p style={{ fontSize: 15, fontWeight: 700, color: stats.radarScores[i] >= 60 ? GREEN : stats.radarScores[i] >= 35 ? ACCENT : RED }}>
-                      {stats.radarScores[i]}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </Card>
+          {/* ── Bar + Line charts ─────────────────────────────────────────── */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
 
             {/* Bar chart */}
             <Card>
