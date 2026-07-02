@@ -183,7 +183,7 @@ function computeAll(trades: DashTrade[], now: Date) {
     ? Math.round(
         withStratCond.reduce((s, t) => {
           const arr = t.strategy_conditions_checked!;
-          return s + (arr.filter(Boolean).length / arr.length) * 100;
+          return s + (arr.filter(x => x.checked).length / arr.length) * 100;
         }, 0) / withStratCond.length
       )
     : null;

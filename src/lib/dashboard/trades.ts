@@ -21,7 +21,7 @@ export interface DashTrade {
   pnl_currency: string | null;
   plan_score: number | null;
   followed_plan: boolean | null;
-  strategy_conditions_checked: boolean[] | null;
+  strategy_conditions_checked: { condition: string; checked: boolean }[] | null;
   moved_sl: boolean | null;
   exited_early: boolean | null;
   fomo_entry: boolean | null;
@@ -80,7 +80,7 @@ export function mapDashTrade(t: RawTradeRow): DashTrade {
     plan_score:       t.plan_score != null ? Number(t.plan_score) : null,
     followed_plan:    t.followed_plan ?? null,
     strategy_conditions_checked: Array.isArray(t.strategy_conditions_checked)
-      ? (t.strategy_conditions_checked as unknown[]).map(v => v === true)
+      ? (t.strategy_conditions_checked as { condition: string; checked: boolean }[])
       : null,
     moved_sl:         t.moved_sl ?? null,
     exited_early:     t.exited_early ?? null,
