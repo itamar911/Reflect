@@ -126,10 +126,29 @@ export interface TradePlanInput {
   point_value: string;
 }
 
+// The 5 preset checks that validateTradePlan evaluates against numeric PresetRules
+// thresholds — kept as a closed key union so rule-violation logging always has a
+// stable identifier to attach to (the strategy-whitelist check is deliberately
+// excluded: it has no numeric threshold and isn't logged as a structured violation).
+export type PresetRuleKey =
+  | 'min_emotional_state'
+  | 'min_rr_ratio'
+  | 'max_daily_trades'
+  | 'cooldown_after_losses'
+  | 'max_daily_loss';
+
+export interface PresetRuleViolation {
+  ruleKey: PresetRuleKey;
+  ruleName: string;
+  severity: 'block' | 'warn';
+  message: string;
+}
+
 export interface RulesetValidationResult {
   status: ValidationStatus;
   blockedReasons: string[];
   warningReasons: string[];
+  violations: PresetRuleViolation[];
 }
 
 export interface Streak {

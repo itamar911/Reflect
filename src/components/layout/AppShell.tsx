@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/client';
 import TradePlanForm from '@/components/trade/TradePlanForm';
 import RuleBlockedModal from '@/components/rules/RuleBlockedModal';
 import { fetchActiveRuleViolation, type RuleViolationResult } from '@/lib/rules/fetchActiveRuleViolation';
+import { logRuleViolations } from '@/lib/rules/logRuleViolation';
 import { cn } from '@/lib/utils';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
 import { Logo } from '@/components/ui/Logo';
@@ -113,6 +114,19 @@ export default function AppShell({
     const violation = await fetchActiveRuleViolation(userId, limits.realTimeBlocking);
     if (violation && (violation.actionType === 'block_day' || violation.actionType === 'block_timer')) {
       setRuleBlock(violation);
+      // Only custom rules (structured, with an id/condition_type) are logged here —
+      // the generic preset pre-check has no structured identity to attach a row to.
+      if (violation.customRule) {
+        logRuleViolations([{
+          userId,
+          ruleSource: 'custom',
+          customRuleId: violation.customRule.id,
+          ruleKey: violation.customRule.condition_type,
+          ruleName: violation.customRule.name,
+          outcome: 'blocked',
+          tradePlanId: null,
+        }]);
+      }
     } else {
       setRuleWarning(violation?.actionType === 'warn' ? violation.description : null);
       setFormOpen(true);

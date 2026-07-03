@@ -11,6 +11,8 @@ export interface RuleViolationResult {
   description: string;
   actionType: ActionType;
   cooldownMinutes: number | null;
+  /** Present only when this violation came from a custom_rules row — used for rule-violation logging (id, condition_type). */
+  customRule?: CustomRule;
 }
 
 /**
@@ -104,6 +106,7 @@ export async function fetchActiveRuleViolation(userId: string, realTimeBlocking:
       description: customViolation.description,
       actionType,
       cooldownMinutes: actionType === 'warn' ? null : customViolation.rule.cooldown_minutes,
+      customRule: customViolation.rule,
     };
   }
 

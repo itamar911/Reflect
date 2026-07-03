@@ -16,6 +16,8 @@ import type { TradePlanInput, PresetRules, RulesetValidationResult, TradeStrateg
 import type { PersonalStrategy } from '@/components/strategies/StrategiesClient';
 import { getPlanLimits, isPro, type PlanTier } from '@/lib/plans/config';
 import UpgradeModal from '@/components/plans/UpgradeModal';
+import { fetchActiveRuleViolation } from '@/lib/rules/fetchActiveRuleViolation';
+import { logRuleViolations, overrideRuleViolations, type RuleViolationLogInput } from '@/lib/rules/logRuleViolation';
 
 // Monday 00:00 UTC of the current week — matches Postgres date_trunc('week', ...).
 function getWeekStartUTC(now: Date = new Date()): Date {
@@ -28,7 +30,12 @@ function getWeekStartUTC(now: Date = new Date()): Date {
 // a "blocked" verdict is downgraded to a warning instead.
 function applyRealTimeBlockingPolicy(result: RulesetValidationResult, realTimeBlocking: boolean): RulesetValidationResult {
   if (realTimeBlocking || result.status !== 'blocked') return result;
-  return { status: 'warning', blockedReasons: [], warningReasons: [...result.warningReasons, ...result.blockedReasons] };
+  return {
+    status: 'warning',
+    blockedReasons: [],
+    warningReasons: [...result.warningReasons, ...result.blockedReasons],
+    violations: result.violations.map((v) => (v.severity === 'block' ? { ...v, severity: 'warn' as const } : v)),
+  };
 }
 
 const STRATEGIES: TradeStrategy[] = [
@@ -408,6 +415,10 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     highlightTimeoutRef.current = setTimeout(() => setHighlightedFields(new Set()), 2000);
   }
 
+  // Ids of the 'warned' rule_violations rows logged by the most recent handleValidate
+  // call — upgraded to 'overridden' if the user goes on to submit this trade.
+  const warnedViolationIdsRef = useRef<string[]>([]);
+
   const step1Done = form.symbol.trim() !== '' && form.direction !== null && form.strategy !== '';
   const step2Done = hasEntry && slPrice !== null && tpPrice !== null && hasUnits;
 
@@ -434,6 +445,21 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     ), limits.realTimeBlocking);
     setValidationResult(result);
     setFormState(result.status === 'valid' ? 'editing' : result.status);
+
+    // Log warnings the moment they're first shown to the user (not on submit) — if the
+    // user abandons the form from here, these rows stay 'warned'; if they go on to
+    // submit, handleSubmit upgrades this exact batch to 'overridden'.
+    if (result.status === 'warning') {
+      const warnEntries: RuleViolationLogInput[] = result.violations
+        .filter((v) => v.severity === 'warn')
+        .map((v) => ({
+          userId, ruleSource: 'preset', customRuleId: null,
+          ruleKey: v.ruleKey, ruleName: v.ruleName, outcome: 'warned', tradePlanId: null,
+        }));
+      logRuleViolations(warnEntries).then((ids) => { warnedViolationIdsRef.current = ids; });
+    } else {
+      warnedViolationIdsRef.current = [];
+    }
   }
 
   async function handleSubmit() {
@@ -441,7 +467,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     setPnlFieldsError(false);
     if (!isFormFilled || slPrice === null || tpPrice === null) return;
 
-    // Re-validate silently
+    // Re-validate silently — preset rules
     const rules = presetRules ?? ({ ...DEFAULT_PRESET_RULES, id: '', user_id: userId, created_at: '', updated_at: '' } as PresetRules);
     const planForValidation: TradePlanInput = { ...form, stop_loss: fmtPrice(slPrice), take_profit: fmtPrice(tpPrice) };
     const result = applyRealTimeBlockingPolicy(validateTradePlan(
@@ -449,9 +475,33 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
       personalStrategyRows.map((s) => s.name),
       selectedStrategy?.min_rr ?? null,
     ), limits.realTimeBlocking);
-    if (result.status === 'blocked') {
-      setValidationResult(result);
+
+    // Re-check custom rules against current data too — unlike preset rules, these are
+    // normally only evaluated once, when the form opens (fetchActiveRuleViolation), and
+    // can go stale by the time the user actually submits. Reuses that same check as-is;
+    // the generic (non-custom) preset branch it can also return is ignored here since
+    // validateTradePlan above already covers preset rules.
+    const activeCheck = await fetchActiveRuleViolation(userId, limits.realTimeBlocking);
+    const customViolation = activeCheck?.customRule ? activeCheck : null;
+    const customBlocked = customViolation !== null
+      && (customViolation.actionType === 'block_day' || customViolation.actionType === 'block_timer');
+
+    if (result.status === 'blocked' || customBlocked) {
+      setValidationResult(customBlocked && result.status !== 'blocked'
+        ? { ...result, status: 'blocked', blockedReasons: [...result.blockedReasons, customViolation!.description] }
+        : result);
       setFormState('blocked');
+      logRuleViolations([
+        ...result.violations.filter((v) => v.severity === 'block').map((v): RuleViolationLogInput => ({
+          userId, ruleSource: 'preset', customRuleId: null,
+          ruleKey: v.ruleKey, ruleName: v.ruleName, outcome: 'blocked', tradePlanId: null,
+        })),
+        ...(customBlocked ? [{
+          userId, ruleSource: 'custom' as const, customRuleId: customViolation!.customRule!.id,
+          ruleKey: customViolation!.customRule!.condition_type, ruleName: customViolation!.customRule!.name,
+          outcome: 'blocked' as const, tradePlanId: null,
+        }] : []),
+      ]);
       return;
     }
 
@@ -465,7 +515,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     const sl = slPrice;
     const tp = tpPrice;
 
-    const { error } = await supabase.from('trade_plans').insert({
+    const { data: insertedTrade, error } = await supabase.from('trade_plans').insert({
       user_id: userId,
       strategy: form.strategy,
       symbol: form.symbol.trim() || null,
@@ -485,7 +535,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
       strategy_conditions_checked: entryConditions.length > 0
         ? entryConditions.map((condition) => ({ condition, checked: strategyConditionsChecked[condition] === true }))
         : null,
-    });
+    }).select('id').single();
 
     if (error) {
       if (error.message.includes('PLAN_LIMIT:trades_per_week')) {
@@ -494,6 +544,23 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
         setFormState('error');
       }
     } else {
+      const tradePlanId: string | null = insertedTrade?.id ?? null;
+      if (tradePlanId) {
+        // Preset warnings were already logged as 'warned' when first shown in handleValidate —
+        // upgrade that exact batch now that the trade actually went through.
+        overrideRuleViolations(warnedViolationIdsRef.current, tradePlanId);
+        // Custom-rule warnings are only discovered here (never shown separately beforehand),
+        // so there's no prior 'warned' row to upgrade — log them straight as 'overridden'.
+        if (customViolation && customViolation.actionType === 'warn') {
+          logRuleViolations([{
+            userId, ruleSource: 'custom', customRuleId: customViolation.customRule!.id,
+            ruleKey: customViolation.customRule!.condition_type, ruleName: customViolation.customRule!.name,
+            outcome: 'overridden', tradePlanId,
+          }]);
+        }
+      }
+      warnedViolationIdsRef.current = [];
+
       setFormState('success');
       setTimeout(() => {
         setForm(EMPTY_FORM);
