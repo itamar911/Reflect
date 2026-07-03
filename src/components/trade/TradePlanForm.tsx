@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Check, AlertTriangle } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { validateTradePlan, DEFAULT_PRESET_RULES } from '@/lib/validators/RulesetValidator';
@@ -76,6 +76,29 @@ const EMPTY_FORM: TradePlanInput = {
 };
 
 type FormState = 'empty' | 'editing' | 'validating' | 'warning' | 'blocked' | 'success' | 'error';
+
+// Mirrors the required-field conditions in isFormFilled below — one entry per condition,
+// used to tell the user exactly what's missing instead of just disabling the button.
+type RequiredFieldKey =
+  | 'symbol'
+  | 'direction'
+  | 'strategy'
+  | 'entry_price'
+  | 'stop_loss'
+  | 'take_profit'
+  | 'units'
+  | 'trade_reason';
+
+const REQUIRED_FIELD_LABELS: Record<RequiredFieldKey, string> = {
+  symbol: 'סימול',
+  direction: 'כיוון עסקה',
+  strategy: 'אסטרטגיה',
+  entry_price: 'מחיר כניסה',
+  stop_loss: 'סטופ לוס',
+  take_profit: 'טייק פרופיט',
+  units: 'יחידות/חוזים',
+  trade_reason: 'סיבת הכניסה',
+};
 
 interface TradePlanFormProps {
   userId: string;
@@ -340,15 +363,50 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     + entryConditions.filter((c) => strategyConditionsChecked[c] === true).length;
   const complianceFailed = complianceTotal - compliancePassed;
 
-  const isFormFilled =
-    form.symbol.trim() !== '' &&
-    form.direction !== null &&
-    form.strategy !== '' &&
-    hasEntry &&
-    slPrice !== null &&
-    tpPrice !== null &&
-    hasUnits &&
-    form.trade_reason.trim() !== '';
+  const missingFieldKeys = useMemo<RequiredFieldKey[]>(() => {
+    const missing: RequiredFieldKey[] = [];
+    if (form.symbol.trim() === '') missing.push('symbol');
+    if (form.direction === null) missing.push('direction');
+    if (form.strategy === '') missing.push('strategy');
+    if (!hasEntry) missing.push('entry_price');
+    if (slPrice === null) missing.push('stop_loss');
+    if (tpPrice === null) missing.push('take_profit');
+    if (!hasUnits) missing.push('units');
+    if (form.trade_reason.trim() === '') missing.push('trade_reason');
+    return missing;
+  }, [form.symbol, form.direction, form.strategy, hasEntry, slPrice, tpPrice, hasUnits, form.trade_reason]);
+
+  const isFormFilled = missingFieldKeys.length === 0;
+
+  const fieldRefs = useRef<Partial<Record<RequiredFieldKey, HTMLDivElement | null>>>({});
+  const [highlightedFields, setHighlightedFields] = useState<Set<RequiredFieldKey>>(new Set());
+  const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (highlightTimeoutRef.current) clearTimeout(highlightTimeoutRef.current);
+  }, []);
+
+  function setFieldRef(key: RequiredFieldKey) {
+    return (el: HTMLDivElement | null) => { fieldRefs.current[key] = el; };
+  }
+
+  function fieldHighlightStyle(key: RequiredFieldKey): React.CSSProperties {
+    return {
+      borderRadius: 12,
+      boxShadow: highlightedFields.has(key) ? '0 0 0 3px rgba(0, 210, 210, 0.6)' : '0 0 0 3px rgba(0, 210, 210, 0)',
+      transition: 'box-shadow 300ms ease',
+    };
+  }
+
+  // Called when the user clicks a submit-ish button while fields are still missing —
+  // highlights each missing field briefly and scrolls the first one into view.
+  function highlightMissingFields() {
+    if (missingFieldKeys.length === 0) return;
+    setHighlightedFields(new Set(missingFieldKeys));
+    fieldRefs.current[missingFieldKeys[0]]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (highlightTimeoutRef.current) clearTimeout(highlightTimeoutRef.current);
+    highlightTimeoutRef.current = setTimeout(() => setHighlightedFields(new Set()), 2000);
+  }
 
   const step1Done = form.symbol.trim() !== '' && form.direction !== null && form.strategy !== '';
   const step2Done = hasEntry && slPrice !== null && tpPrice !== null && hasUnits;
@@ -453,6 +511,18 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     setSubmitLoading(false);
   }
 
+  // The two submit-ish buttons stay clickable even when fields are missing — clicking
+  // them just highlights what's missing instead of doing nothing (or silently no-op-ing).
+  function attemptValidate() {
+    if (missingFieldKeys.length > 0) { highlightMissingFields(); return; }
+    handleValidate();
+  }
+
+  function attemptSubmit() {
+    if (missingFieldKeys.length > 0) { highlightMissingFields(); return; }
+    handleSubmit();
+  }
+
   function addTag(tag: string) {
     const current = form.trade_reason;
     const sep = current.trim() ? ', ' : '';
@@ -542,15 +612,17 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
 
             {/* Step 1 — Asset, direction & strategy */}
             <FormSection step={1} label="נכס ואסטרטגיה" active={activeStep === 1} done={activeStep > 1}>
-              <input
-                type="text"
-                placeholder="סימול נייר (SPY, EURUSD, AAPL...)"
-                value={form.symbol}
-                onChange={(e) => { setForm({ ...form, symbol: e.target.value.toUpperCase() }); setValidationResult(null); }}
-                className="w-full h-10 px-3 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none focus:border-tg-primary transition-colors"
-                style={{ background: 'var(--color-tg-surface-2)' }}
-              />
-              <div className="grid grid-cols-2 gap-2">
+              <div ref={setFieldRef('symbol')} style={fieldHighlightStyle('symbol')}>
+                <input
+                  type="text"
+                  placeholder="סימול נייר (SPY, EURUSD, AAPL...)"
+                  value={form.symbol}
+                  onChange={(e) => { setForm({ ...form, symbol: e.target.value.toUpperCase() }); setValidationResult(null); }}
+                  className="w-full h-10 px-3 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none focus:border-tg-primary transition-colors"
+                  style={{ background: 'var(--color-tg-surface-2)' }}
+                />
+              </div>
+              <div ref={setFieldRef('direction')} style={fieldHighlightStyle('direction')} className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
                   onClick={() => { setForm({ ...form, direction: 'long' }); setValidationResult(null); }}
@@ -576,7 +648,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                   Short ▼
                 </button>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div ref={setFieldRef('strategy')} style={fieldHighlightStyle('strategy')} className="flex flex-wrap gap-2">
                 {STRATEGIES.map((s) => (
                   <StrategyChip
                     key={s}
@@ -645,33 +717,39 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                 </div>
               </div>
               <div className="grid grid-cols-3 gap-2">
-                <PriceInput
-                  label="כניסה"
-                  value={form.entry_price}
-                  onChange={(v) => { setForm({ ...form, entry_price: v }); setValidationResult(null); }}
-                />
-                <PriceInput
-                  label={`Stop Loss (${pnlMode === 'points' ? 'נק׳' : '%'})`}
-                  value={slInput}
-                  onChange={(v) => { setSlInput(v); setValidationResult(null); }}
-                  danger
-                  hint={
-                    !hasEntry ? 'הזן מחיר כניסה'
-                    : slPrice !== null ? `מחיר: ${fmtPrice(slPrice)}`
-                    : undefined
-                  }
-                />
-                <PriceInput
-                  label={`Take Profit (${pnlMode === 'points' ? 'נק׳' : '%'})`}
-                  value={tpInput}
-                  onChange={(v) => { setTpInput(v); setValidationResult(null); }}
-                  success
-                  hint={
-                    !hasEntry ? 'הזן מחיר כניסה'
-                    : tpPrice !== null ? `מחיר: ${fmtPrice(tpPrice)}`
-                    : undefined
-                  }
-                />
+                <div ref={setFieldRef('entry_price')} style={fieldHighlightStyle('entry_price')}>
+                  <PriceInput
+                    label="כניסה"
+                    value={form.entry_price}
+                    onChange={(v) => { setForm({ ...form, entry_price: v }); setValidationResult(null); }}
+                  />
+                </div>
+                <div ref={setFieldRef('stop_loss')} style={fieldHighlightStyle('stop_loss')}>
+                  <PriceInput
+                    label={`Stop Loss (${pnlMode === 'points' ? 'נק׳' : '%'})`}
+                    value={slInput}
+                    onChange={(v) => { setSlInput(v); setValidationResult(null); }}
+                    danger
+                    hint={
+                      !hasEntry ? 'הזן מחיר כניסה'
+                      : slPrice !== null ? `מחיר: ${fmtPrice(slPrice)}`
+                      : undefined
+                    }
+                  />
+                </div>
+                <div ref={setFieldRef('take_profit')} style={fieldHighlightStyle('take_profit')}>
+                  <PriceInput
+                    label={`Take Profit (${pnlMode === 'points' ? 'נק׳' : '%'})`}
+                    value={tpInput}
+                    onChange={(v) => { setTpInput(v); setValidationResult(null); }}
+                    success
+                    hint={
+                      !hasEntry ? 'הזן מחיר כניסה'
+                      : tpPrice !== null ? `מחיר: ${fmtPrice(tpPrice)}`
+                      : undefined
+                    }
+                  />
+                </div>
               </div>
               <div className="flex flex-col gap-1.5">
                 <div className="flex items-center justify-end">
@@ -699,7 +777,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  <div className="flex flex-col gap-1">
+                  <div ref={setFieldRef('units')} style={fieldHighlightStyle('units')} className="flex flex-col gap-1">
                     <label className="text-xs font-medium text-tg-muted">יחידות/חוזים</label>
                     <input
                       type="number"
@@ -853,14 +931,16 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                       </button>
                     ))}
                   </div>
-                  <textarea
-                    rows={2}
-                    placeholder="תאר מה אתה רואה בגרף..."
-                    value={form.trade_reason}
-                    onChange={(e) => { setForm({ ...form, trade_reason: e.target.value }); setValidationResult(null); }}
-                    className="w-full px-3 py-2.5 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none focus:border-tg-primary transition-colors resize-none"
-                    style={{ background: 'var(--color-tg-surface-2)' }}
-                  />
+                  <div ref={setFieldRef('trade_reason')} style={fieldHighlightStyle('trade_reason')}>
+                    <textarea
+                      rows={2}
+                      placeholder="תאר מה אתה רואה בגרף..."
+                      value={form.trade_reason}
+                      onChange={(e) => { setForm({ ...form, trade_reason: e.target.value }); setValidationResult(null); }}
+                      className="w-full px-3 py-2.5 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none focus:border-tg-primary transition-colors resize-none"
+                      style={{ background: 'var(--color-tg-surface-2)' }}
+                    />
+                  </div>
                   <div className="flex flex-col gap-1.5 mt-1">
                     {PRE_TRADE_CHECKLIST.map((item) => {
                       const checked = checkedItems.has(item);
@@ -912,8 +992,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                 <Button
                   fullWidth
                   variant="secondary"
-                  disabled={!isFormFilled}
-                  onClick={handleValidate}
+                  onClick={attemptValidate}
                 >
                   בדוק מול החוקים שלי
                 </Button>
@@ -928,14 +1007,20 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
               {validationResult && formState !== 'validating' && (
                 <Button
                   fullWidth
-                  disabled={formState === 'blocked' || !isFormFilled}
+                  disabled={formState === 'blocked'}
                   loading={submitLoading}
-                  onClick={handleSubmit}
+                  onClick={attemptSubmit}
                   variant={formState === 'blocked' ? 'danger' : 'primary'}
                   size="lg"
                 >
                   {formState === 'blocked' ? 'עסקה חסומה' : 'הגש תוכנית עסקה'}
                 </Button>
+              )}
+
+              {missingFieldKeys.length > 0 && formState !== 'validating' && (
+                <p dir="rtl" className="text-center text-xs text-zinc-400 mt-0.5">
+                  חסר: {missingFieldKeys.map((key) => REQUIRED_FIELD_LABELS[key]).join(', ')}
+                </p>
               )}
 
               {!validationResult && (
