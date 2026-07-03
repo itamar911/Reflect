@@ -1,11 +1,13 @@
 'use client';
 
 import { useState, useMemo, useEffect, useCallback, useSyncExternalStore } from 'react';
-import { Sparkles, TrendingUp, TrendingDown, RefreshCw, CheckCircle, AlertCircle, AlertTriangle, Heart, Target, ChevronRight, ChevronLeft, Quote, Clock } from 'lucide-react';
+import { Sparkles, TrendingUp, TrendingDown, RefreshCw, CheckCircle, AlertCircle, AlertTriangle, Heart, Target, ChevronRight, ChevronLeft, Quote, Clock, Lock } from 'lucide-react';
 import { formatPnlIls, formatPnlPoints } from '@/lib/utils';
 import { createClient } from '@/lib/supabase/client';
 import { DASH_TRADE_SELECT, mapDashTrade } from '@/lib/dashboard/trades';
 import type { DashTrade } from '@/lib/dashboard/trades';
+import { getPlanLimits, type PlanTier } from '@/lib/plans/config';
+import UpgradeModal from '@/components/plans/UpgradeModal';
 
 export type { DashTrade } from '@/lib/dashboard/trades';
 
@@ -1183,11 +1185,14 @@ export default function DashboardClient({
   trades: initialTrades,
   displayName,
   userId,
+  plan,
 }: {
   trades: DashTrade[];
   displayName: string;
   userId: string;
+  plan: PlanTier;
 }) {
+  const limits = getPlanLimits(plan);
   const [trades,   setTrades]   = useState<DashTrade[]>(initialTrades);
   const [barMode,  setBarMode]  = useState<'daily' | 'weekly' | 'monthly'>('daily');
   const [pnlPeriod, setPnlPeriod] = useState<'daily' | 'weekly' | 'monthly' | 'total'>('total');
@@ -1199,6 +1204,7 @@ export default function DashboardClient({
   const [weeklySummary, setWeeklySummary] = useState<WeeklySummary | null>(null);
   const [weeklyLoading, setWeeklyLoading] = useState(false);
   const [weeklyError, setWeeklyError] = useState<string | null>(null);
+  const [weeklyUpgradeOpen, setWeeklyUpgradeOpen] = useState(false);
   const [viewedWeekStart, setViewedWeekStart] = useState<string | null>(null);
   const [viewedWeekEnd, setViewedWeekEnd] = useState<string | null>(null);
   const [isCurrentWeek, setIsCurrentWeek] = useState(false);
@@ -1274,6 +1280,10 @@ export default function DashboardClient({
       const url = weekStart ? `/api/weekly-summary?week_start=${weekStart}` : '/api/weekly-summary';
       const res = await fetch(url);
       const data = await res.json().catch(() => null);
+      if (res.status === 403 && data?.error === 'PLAN_LIMIT') {
+        setWeeklyUpgradeOpen(true);
+        return null;
+      }
       if (!res.ok || !data) {
         console.error('[weekly-summary] GET failed', res.status, data);
         setWeeklyError(data?.error ?? `שגיאה בטעינת הסיכום (קוד ${res.status})`);
@@ -1298,6 +1308,7 @@ export default function DashboardClient({
 
   // Load this week's AI summary; on Sundays, generate one if it doesn't exist yet.
   useEffect(() => {
+    if (!limits.weeklySummary) return;
     let cancelled = false;
     (async () => {
       const data = await loadWeek();
@@ -1306,6 +1317,10 @@ export default function DashboardClient({
       try {
         const genRes = await fetch('/api/weekly-summary', { method: 'POST' });
         const genData = await genRes.json().catch(() => null);
+        if (genRes.status === 403 && genData?.error === 'PLAN_LIMIT') {
+          if (!cancelled) setWeeklyUpgradeOpen(true);
+          return;
+        }
         if (!genRes.ok || !genData?.summary) {
           console.error('[weekly-summary] auto-generate failed', genRes.status, genData);
           if (!cancelled) setWeeklyError(genData?.error ?? `שגיאה ביצירת הסיכום (קוד ${genRes.status})`);
@@ -1323,15 +1338,20 @@ export default function DashboardClient({
       }
     })();
     return () => { cancelled = true; };
-  }, [loadWeek]);
+  }, [loadWeek, limits.weeklySummary]);
 
   async function refreshWeeklySummary() {
+    if (!limits.weeklySummary) { setWeeklyUpgradeOpen(true); return; }
     setWeeklyLoading(true);
     setWeeklyError(null);
     try {
       const url = viewedWeekStart ? `/api/weekly-summary?week_start=${viewedWeekStart}` : '/api/weekly-summary';
       const res = await fetch(url, { method: 'POST' });
       const data = await res.json().catch(() => null);
+      if (res.status === 403 && data?.error === 'PLAN_LIMIT') {
+        setWeeklyUpgradeOpen(true);
+        return;
+      }
       if (!res.ok || !data?.summary) {
         console.error('[weekly-summary] POST failed', res.status, data);
         setWeeklyError(data?.error ?? `שגיאה ביצירת הסיכום (קוד ${res.status})`);
@@ -1693,6 +1713,30 @@ export default function DashboardClient({
       )}
 
       {/* ── Weekly summary ───────────────────────────────────────────────── */}
+      {!limits.weeklySummary ? (
+        <Card>
+          <div className="flex flex-col items-center text-center gap-3 py-4">
+            <div className="w-12 h-12 rounded-full flex items-center justify-center" style={{ background: 'rgba(0,210,210,0.12)' }}>
+              <Lock size={22} style={{ color: ACCENT }} />
+            </div>
+            <p style={{ fontSize: 13, fontWeight: 700, color: TEXT }}>סיכום שבועי AI זמין ב-Pro בלבד</p>
+            <p style={{ fontSize: 12, color: MUTED, fontWeight: 600 }}>שדרג ל-Pro כדי לקבל ניתוח AI שבועי מלא עם תובנות והשוואה לשבועות קודמים</p>
+            <button onClick={() => setWeeklyUpgradeOpen(true)}
+              className="transition-all active:scale-95"
+              style={{
+                background: 'rgba(0,210,210,0.12)',
+                color: ACCENT,
+                border: `1px solid rgba(0,210,210,0.3)`,
+                borderRadius: 6,
+                padding: '6px 16px',
+                fontSize: 12,
+                fontWeight: 600,
+              }}>
+              שדרוג ל-Pro
+            </button>
+          </div>
+        </Card>
+      ) : (
       <Card>
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2 -mx-5 -mt-5 px-5 py-3 rounded-t-xl"
           style={{ background: `linear-gradient(135deg, rgba(0,210,210,0.16) 0%, rgba(0,210,210,0.03) 100%)`, borderBottom: `1px solid ${BORDER}` }}>
@@ -1843,6 +1887,13 @@ export default function DashboardClient({
           </div>
         )}
       </Card>
+      )}
+
+      <UpgradeModal
+        open={weeklyUpgradeOpen}
+        onClose={() => setWeeklyUpgradeOpen(false)}
+        limitType="weekly_summary"
+      />
 
       {/* ── Coming soon banner ───────────────────────────────────────────── */}
       <div className="flex items-center justify-center gap-2 text-sm py-4"

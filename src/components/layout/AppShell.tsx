@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
 import { Logo } from '@/components/ui/Logo';
 import { PageTransition } from '@/components/layout/PageTransition';
+import { getPlanLimits, type PlanTier } from '@/lib/plans/config';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const ACCENT = '#00d2d2';
@@ -91,13 +92,16 @@ export default function AppShell({
   children,
   userId,
   displayName,
+  plan,
 }: {
   children: React.ReactNode;
   userId: string;
   displayName: string;
+  plan: PlanTier;
 }) {
   const pathname = usePathname();
   const router   = useRouter();
+  const limits   = getPlanLimits(plan);
 
   const [formOpen,  setFormOpen]  = useState(false);
   const [expanded,  setExpanded]  = useState(false);
@@ -106,7 +110,7 @@ export default function AppShell({
   const [ruleWarning, setRuleWarning] = useState<string | null>(null);
 
   async function tryOpenTradeForm() {
-    const violation = await fetchActiveRuleViolation(userId);
+    const violation = await fetchActiveRuleViolation(userId, limits.realTimeBlocking);
     if (violation && (violation.actionType === 'block_day' || violation.actionType === 'block_timer')) {
       setRuleBlock(violation);
     } else {
@@ -311,6 +315,7 @@ export default function AppShell({
 
       <TradePlanForm
         userId={userId}
+        plan={plan}
         isOpen={formOpen}
         onClose={() => setFormOpen(false)}
         onSuccess={() => router.refresh()}

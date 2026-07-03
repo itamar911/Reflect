@@ -15,7 +15,8 @@ import {
   describeCustomRule,
 } from '@/lib/validators/RulesetValidator';
 import type { PresetRules, CustomRule, ConditionType, ActionType } from '@/lib/types';
-import type { PlanTier } from '@/lib/plans/config';
+import { getPlanLimits, isPro, type PlanTier } from '@/lib/plans/config';
+import UpgradeModal, { type UpgradeLimitType } from '@/components/plans/UpgradeModal';
 
 type Tab = 'preset' | 'custom';
 
@@ -99,7 +100,7 @@ function CustomRulesTab({
   setShowBuilder: (v: boolean) => void;
   plan: PlanTier;
 }) {
-  const maxRules = plan === 'basic' ? 3 : plan === 'pro' ? Infinity : 0;
+  const maxRules = getPlanLimits(plan).maxCustomRules ?? Infinity;
   const canAdd = rules.length < maxRules;
 
   if (plan === 'free') {
@@ -127,11 +128,11 @@ function CustomRulesTab({
 
   return (
     <div className="flex flex-col gap-4">
-      {plan === 'basic' && (
+      {!isPro(plan) && Number.isFinite(maxRules) && (
         <div className="flex items-center justify-between px-3 py-2 rounded-xl text-xs"
           style={{ background: 'var(--color-tg-surface-2)', color: 'var(--color-tg-text-2)' }}>
-          <span>חוקים אישיים: {rules.length} / 3</span>
-          {rules.length >= 3 && <span style={{ color: 'var(--color-tg-warning)' }}>הגעת למגבלה · שדרג ל-Pro לחוקים נוספים</span>}
+          <span>חוקים אישיים: {rules.length} / {maxRules}</span>
+          {rules.length >= maxRules && <span style={{ color: 'var(--color-tg-warning)' }}>הגעת למגבלה · שדרג ל-Pro לחוקים נוספים</span>}
         </div>
       )}
 
@@ -173,6 +174,7 @@ function CustomRulesTab({
         <CustomRuleBuilder
           userId={userId}
           plan={plan}
+          existingRules={rules}
           onSave={(rule) => {
             onUpdate([...rules, rule]);
             setShowBuilder(false);
@@ -246,13 +248,15 @@ function CustomRuleCard({
 }
 
 function CustomRuleBuilder({
-  userId, plan, onSave, onCancel,
+  userId, plan, existingRules, onSave, onCancel,
 }: {
   userId: string;
   plan: PlanTier;
+  existingRules: CustomRule[];
   onSave: (rule: CustomRule) => void;
   onCancel: () => void;
 }) {
+  const limits = getPlanLimits(plan);
   const [form, setForm] = useState({
     name: describeCustomRule({ condition_type: 'daily_loss_dollar', threshold_value: 200 }),
     nameTouched: false,
@@ -263,10 +267,21 @@ function CustomRuleBuilder({
   });
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [upgradeType, setUpgradeType] = useState<UpgradeLimitType | null>(null);
 
   const needsThreshold = conditionNeedsThreshold(form.condition_type);
+  const usedConditionTypes = new Set(existingRules.map((r) => r.condition_type));
 
   function applyCondition(condition_type: ConditionType) {
+    if (
+      !isPro(plan) &&
+      limits.maxBlockingConditions !== null &&
+      !usedConditionTypes.has(condition_type) &&
+      usedConditionTypes.size >= limits.maxBlockingConditions
+    ) {
+      setUpgradeType('blocking_conditions');
+      return;
+    }
     const threshold = needsThresholdFor(condition_type) ? form.threshold_value || '1' : '';
     setForm((f) => ({
       ...f,
@@ -316,11 +331,15 @@ function CustomRuleBuilder({
       .select()
       .single();
 
-    if (!error && data) onSave(data as CustomRule);
+    if (!error && data) {
+      onSave(data as CustomRule);
+    } else if (error?.message.includes('PLAN_LIMIT:custom_rules')) {
+      setUpgradeType('custom_rules');
+    }
     setLoading(false);
   }
 
-  const isBlockLocked = plan === 'basic';
+  const isBlockLocked = !limits.realTimeBlocking;
 
   return (
     <div className="p-4 rounded-2xl border border-tg-primary/30 flex flex-col gap-4 animate-fade-in"
@@ -419,6 +438,12 @@ function CustomRuleBuilder({
         <Button variant="secondary" onClick={onCancel} className="flex-1">ביטול</Button>
         <Button onClick={handleSave} loading={loading} className="flex-1">שמור חוק</Button>
       </div>
+
+      <UpgradeModal
+        open={upgradeType !== null}
+        limitType={upgradeType ?? 'custom_rules'}
+        onClose={() => setUpgradeType(null)}
+      />
     </div>
   );
 }

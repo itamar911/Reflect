@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { getUserPlan } from '@/lib/plans/getUserPlan';
 import { describeCustomRule, ACTION_LABELS } from '@/lib/validators/RulesetValidator';
 import type { CustomRule } from '@/lib/types';
 
@@ -259,6 +260,9 @@ export async function POST(request: Request) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { limits } = await getUserPlan(supabase, user.id);
+  if (!limits.aiCoach) return NextResponse.json({ error: 'PLAN_LIMIT', feature: 'ai_coach' }, { status: 403 });
 
   const { messages } = await request.json() as { messages: { role: 'user' | 'assistant'; content: string }[] };
 

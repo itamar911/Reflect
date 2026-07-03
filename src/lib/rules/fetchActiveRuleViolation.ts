@@ -17,8 +17,11 @@ export interface RuleViolationResult {
  * Checks whether the user's active rules — personal (custom_rules, checked
  * first) AND preset — are currently violated. Used to gate opening the trade
  * form before any trade input exists.
+ *
+ * When realTimeBlocking is false (non-pro plans), a matching rule can never
+ * block trade submission — it's downgraded to a warning instead.
  */
-export async function fetchActiveRuleViolation(userId: string): Promise<RuleViolationResult | null> {
+export async function fetchActiveRuleViolation(userId: string, realTimeBlocking: boolean = true): Promise<RuleViolationResult | null> {
   const supabase = createClient();
   const todayStart = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
 
@@ -95,11 +98,12 @@ export async function fetchActiveRuleViolation(userId: string): Promise<RuleViol
   });
 
   if (customViolation) {
+    const actionType = realTimeBlocking ? customViolation.rule.action_type : 'warn';
     return {
       ruleName: customViolation.rule.name,
       description: customViolation.description,
-      actionType: customViolation.rule.action_type,
-      cooldownMinutes: customViolation.rule.cooldown_minutes,
+      actionType,
+      cooldownMinutes: actionType === 'warn' ? null : customViolation.rule.cooldown_minutes,
     };
   }
 
@@ -114,7 +118,7 @@ export async function fetchActiveRuleViolation(userId: string): Promise<RuleViol
     return {
       ruleName: 'חוק מובנה',
       description: presetMessage,
-      actionType: 'block_day',
+      actionType: realTimeBlocking ? 'block_day' : 'warn',
       cooldownMinutes: null,
     };
   }

@@ -14,6 +14,22 @@ import Button from '@/components/ui/Button';
 import Select from '@/components/ui/Select';
 import type { TradePlanInput, PresetRules, RulesetValidationResult, TradeStrategy, PnlCurrency, Timeframe } from '@/lib/types';
 import type { PersonalStrategy } from '@/components/strategies/StrategiesClient';
+import { getPlanLimits, isPro, type PlanTier } from '@/lib/plans/config';
+import UpgradeModal from '@/components/plans/UpgradeModal';
+
+// Monday 00:00 UTC of the current week — matches Postgres date_trunc('week', ...).
+function getWeekStartUTC(now: Date = new Date()): Date {
+  const day = now.getUTCDay();
+  const diffToMonday = day === 0 ? 6 : day - 1;
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - diffToMonday));
+}
+
+// Non-pro plans never hard-block trade submission from the rules engine —
+// a "blocked" verdict is downgraded to a warning instead.
+function applyRealTimeBlockingPolicy(result: RulesetValidationResult, realTimeBlocking: boolean): RulesetValidationResult {
+  if (realTimeBlocking || result.status !== 'blocked') return result;
+  return { status: 'warning', blockedReasons: [], warningReasons: [...result.warningReasons, ...result.blockedReasons] };
+}
 
 const STRATEGIES: TradeStrategy[] = [
   'Breakout', 'Trend Follow', 'Reversal', 'Range', 'Custom',
@@ -63,6 +79,7 @@ type FormState = 'empty' | 'editing' | 'validating' | 'warning' | 'blocked' | 's
 
 interface TradePlanFormProps {
   userId: string;
+  plan: PlanTier;
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
@@ -70,7 +87,10 @@ interface TradePlanFormProps {
   initialWarning?: string | null;
 }
 
-export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, initialWarning }: TradePlanFormProps) {
+export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess, initialWarning }: TradePlanFormProps) {
+  const limits = getPlanLimits(plan);
+  const [weekTradeCount, setWeekTradeCount] = useState(0);
+  const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
   const [form, setForm] = useState<TradePlanInput>(EMPTY_FORM);
   const [formState, setFormState] = useState<FormState>('empty');
   const [validationResult, setValidationResult] = useState<RulesetValidationResult | null>(null);
@@ -163,8 +183,9 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
   const loadContext = useCallback(async () => {
     setLoading(true);
     const todayStart = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
+    const weekStart = getWeekStartUTC().toISOString();
 
-    const [rulesRes, todayRes, personalRes] = await Promise.all([
+    const [rulesRes, todayRes, personalRes, weekCountRes] = await Promise.all([
       supabase.from('preset_rules').select('*').eq('user_id', userId).single(),
       supabase
         .from('trade_plans')
@@ -172,7 +193,14 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
         .eq('user_id', userId)
         .gte('submitted_at', todayStart),
       supabase.from('personal_strategies').select('*').eq('user_id', userId).order('created_at'),
+      supabase
+        .from('trade_plans')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', userId)
+        .gte('submitted_at', weekStart),
     ]);
+
+    setWeekTradeCount(weekCountRes.count ?? 0);
 
     if (personalRes.data) setPersonalStrategyRows(personalRes.data as PersonalStrategy[]);
 
@@ -341,11 +369,11 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
 
     const rules = presetRules ?? ({ ...DEFAULT_PRESET_RULES, id: '', user_id: userId, created_at: '', updated_at: '' } as PresetRules);
     const planForValidation: TradePlanInput = { ...form, stop_loss: fmtPrice(slPrice), take_profit: fmtPrice(tpPrice) };
-    const result = validateTradePlan(
+    const result = applyRealTimeBlockingPolicy(validateTradePlan(
       planForValidation, rules, todayCount, lossCount, todayLossAmount,
       personalStrategyRows.map((s) => s.name),
       selectedStrategy?.min_rr ?? null,
-    );
+    ), limits.realTimeBlocking);
     setValidationResult(result);
     setFormState(result.status === 'valid' ? 'editing' : result.status);
   }
@@ -358,14 +386,19 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
     // Re-validate silently
     const rules = presetRules ?? ({ ...DEFAULT_PRESET_RULES, id: '', user_id: userId, created_at: '', updated_at: '' } as PresetRules);
     const planForValidation: TradePlanInput = { ...form, stop_loss: fmtPrice(slPrice), take_profit: fmtPrice(tpPrice) };
-    const result = validateTradePlan(
+    const result = applyRealTimeBlockingPolicy(validateTradePlan(
       planForValidation, rules, todayCount, lossCount, todayLossAmount,
       personalStrategyRows.map((s) => s.name),
       selectedStrategy?.min_rr ?? null,
-    );
+    ), limits.realTimeBlocking);
     if (result.status === 'blocked') {
       setValidationResult(result);
       setFormState('blocked');
+      return;
+    }
+
+    if (!isPro(plan) && limits.maxTradesPerWeek !== null && weekTradeCount >= limits.maxTradesPerWeek) {
+      setUpgradeModalOpen(true);
       return;
     }
 
@@ -397,7 +430,11 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
     });
 
     if (error) {
-      setFormState('error');
+      if (error.message.includes('PLAN_LIMIT:trades_per_week')) {
+        setUpgradeModalOpen(true);
+      } else {
+        setFormState('error');
+      }
     } else {
       setFormState('success');
       setTimeout(() => {
@@ -910,6 +947,12 @@ export default function TradePlanForm({ userId, isOpen, onClose, onSuccess, init
           </div>
         )}
       </div>
+
+      <UpgradeModal
+        open={upgradeModalOpen}
+        onClose={() => setUpgradeModalOpen(false)}
+        limitType="trades_per_week"
+      />
     </>
   );
 }

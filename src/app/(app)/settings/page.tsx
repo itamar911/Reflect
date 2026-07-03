@@ -53,7 +53,9 @@ export default async function SettingsPage() {
       </Card>
 
       {/* Pricing */}
-      <PricingPlans plan={plan} />
+      <div id="pricing" className="scroll-mt-4">
+        <PricingPlans plan={plan} />
+      </div>
 
       {/* Integrations */}
       <div className="flex flex-col gap-3">

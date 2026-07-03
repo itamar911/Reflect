@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { getUserPlan } from '@/lib/plans/getUserPlan';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -225,6 +226,9 @@ export async function GET(request: Request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+  const { limits } = await getUserPlan(supabase, user.id);
+  if (!limits.weeklySummary) return NextResponse.json({ error: 'PLAN_LIMIT', feature: 'weekly_summary' }, { status: 403 });
+
   const now = new Date();
   const requestedWeekStart = new URL(request.url).searchParams.get('week_start');
   const { weekStartStr, latestWeekStartStr, currentWeekStartStr } = resolveWeekStart(now, requestedWeekStart);
@@ -341,6 +345,9 @@ export async function POST(request: Request) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { limits } = await getUserPlan(supabase, user.id);
+  if (!limits.weeklySummary) return NextResponse.json({ error: 'PLAN_LIMIT', feature: 'weekly_summary' }, { status: 403 });
 
   const now = new Date();
   const requestedWeekStart = new URL(request.url).searchParams.get('week_start');

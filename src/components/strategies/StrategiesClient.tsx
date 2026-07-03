@@ -3,6 +3,8 @@
 import { useState, type CSSProperties, type ReactNode } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { TrendingUp, Rocket, ArrowLeftRight, RefreshCw, Building2, Activity, Ruler } from 'lucide-react';
+import { getPlanLimits, isPro, type PlanTier } from '@/lib/plans/config';
+import UpgradeModal from '@/components/plans/UpgradeModal';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const GOLD   = '#00d2d2';
@@ -167,11 +169,14 @@ export default function StrategiesClient({
   userId,
   initialStrategies,
   allTrades,
+  plan,
 }: {
   userId: string;
   initialStrategies: PersonalStrategy[];
   allTrades: TradeSummary[];
+  plan: PlanTier;
 }) {
+  const limits = getPlanLimits(plan);
   const [strategies,  setStrategies]  = useState<PersonalStrategy[]>(initialStrategies);
   const [showForm,    setShowForm]    = useState(false);
   const [editId,      setEditId]      = useState<string | null>(null);
@@ -184,6 +189,7 @@ export default function StrategiesClient({
   const [aiReviews,     setAiReviews]     = useState<Record<string, string | null>>({});
   const [aiLoading,     setAiLoading]     = useState<Record<string, boolean>>({});
   const [newCondition,  setNewCondition]  = useState('');
+  const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
   const supabase = createClient();
 
   // ── Form handlers ──────────────────────────────────────────────────────────
@@ -231,6 +237,12 @@ export default function StrategiesClient({
 
   async function handleSave() {
     if (!form.name.trim() || !form.description.trim()) return;
+
+    if (!editId && !isPro(plan) && limits.maxStrategies !== null && strategies.length >= limits.maxStrategies) {
+      setUpgradeModalOpen(true);
+      return;
+    }
+
     setSaving(true); setSaveError(null);
 
     try {
@@ -274,7 +286,15 @@ export default function StrategiesClient({
       ? supabase.from('personal_strategies').update(payload).eq('id', editId)
       : supabase.from('personal_strategies').insert(payload);
     const { error } = await op;
-    if (error) { setSaveError(error.message); setSaving(false); return; }
+    if (error) {
+      if (error.message.includes('PLAN_LIMIT:strategies')) {
+        setUpgradeModalOpen(true);
+      } else {
+        setSaveError(error.message);
+      }
+      setSaving(false);
+      return;
+    }
     const { data: fresh } = await supabase.from('personal_strategies').select('*').eq('user_id', userId).order('created_at');
     setStrategies((fresh ?? []) as PersonalStrategy[]);
     setSaving(false); setShowForm(false); setEditId(null);
@@ -841,6 +861,12 @@ export default function StrategiesClient({
         </div>
       )}
       </div>{/* end user strategies */}
+
+      <UpgradeModal
+        open={upgradeModalOpen}
+        onClose={() => setUpgradeModalOpen(false)}
+        limitType="strategies"
+      />
     </div>
   );
 }
