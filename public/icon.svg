@@ -12,24 +12,24 @@
   </defs>
 
   <text
-    x="31"
-    y="46"
+    x="31.05"
+    y="47"
     font-family="Poppins, Arial, sans-serif"
     font-weight="700"
-    font-size="38"
+    font-size="43"
     text-anchor="end"
     fill="url(#reflectMarkGradient)"
   >R</text>
 
-  <rect x="31.1" y="18" width="1.8" height="28" fill="url(#reflectMirrorLine)" />
+  <rect x="31.05" y="16.6" width="1.9" height="30.8" fill="url(#reflectMirrorLine)" />
 
   <g transform="translate(64,0) scale(-1,1)">
     <text
-      x="31"
-      y="46"
+      x="31.05"
+      y="47"
       font-family="Poppins, Arial, sans-serif"
       font-weight="700"
-      font-size="38"
+      font-size="43"
       text-anchor="end"
       fill="#15535f"
     >R</text>
