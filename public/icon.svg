@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="reflectMarkGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00c9c9" />
+      <stop offset="100%" stop-color="#0a4f6e" />
+    </linearGradient>
+    <linearGradient id="reflectMirrorLine" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="rgba(0,201,201,0)" />
+      <stop offset="50%" stop-color="rgba(0,201,201,0.55)" />
+      <stop offset="100%" stop-color="rgba(0,201,201,0)" />
+    </linearGradient>
+  </defs>
+
+  <text
+    x="31"
+    y="46"
+    font-family="Poppins, Arial, sans-serif"
+    font-weight="700"
+    font-size="34"
+    text-anchor="end"
+    fill="url(#reflectMarkGradient)"
+  >R</text>
+
+  <rect x="31.25" y="10" width="1.5" height="34" fill="url(#reflectMirrorLine)" />
+
+  <g transform="translate(64,0) scale(-1,1)">
+    <text
+      x="31"
+      y="46"
+      font-family="Poppins, Arial, sans-serif"
+      font-weight="700"
+      font-size="34"
+      text-anchor="end"
+      fill="#15535f"
+    >R</text>
+  </g>
+</svg>

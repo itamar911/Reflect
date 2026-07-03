@@ -9,7 +9,7 @@ export const metadata: Metadata = {
   title: 'Reflect — השוק בוחן את האסטרטגיה שלך',
   description: 'השוק בוחן את האסטרטגיה שלך. Reflect בוחן אותך. מערכת משמעת מסחר מבוססת AI.',
   icons: {
-    icon: '/logo-mark.svg',
+    icon: '/icon.svg',
   },
 };
 

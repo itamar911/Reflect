@@ -1,0 +1,69 @@
+import { Poppins, Montserrat } from 'next/font/google';
+
+const poppins = Poppins({ variable: '--font-logo-poppins', subsets: ['latin'], weight: '700', display: 'swap' });
+const montserrat = Montserrat({ variable: '--font-logo-montserrat', subsets: ['latin'], weight: '600', display: 'swap' });
+
+interface LogoProps {
+  showWordmark?: boolean;
+}
+
+export function Logo({ showWordmark = true }: LogoProps) {
+  return (
+    <span
+      className={`${poppins.variable} ${montserrat.variable} inline-flex items-center`}
+      style={{ gap: 10 }}
+    >
+      <span className="inline-flex items-center" style={{ direction: 'ltr' }}>
+        <span
+          style={{
+            fontFamily: 'var(--font-logo-poppins)',
+            fontWeight: 700,
+            fontSize: 30,
+            lineHeight: 1,
+            padding: 2,
+            background: 'linear-gradient(135deg, #00c9c9, #0a4f6e)',
+            WebkitBackgroundClip: 'text',
+            backgroundClip: 'text',
+            color: 'transparent',
+          }}
+        >
+          R
+        </span>
+        <span
+          style={{
+            width: 1,
+            height: 26,
+            margin: '0 2px',
+            background: 'linear-gradient(to bottom, rgba(0,201,201,0), rgba(0,201,201,0.55), rgba(0,201,201,0))',
+          }}
+        />
+        <span
+          style={{
+            fontFamily: 'var(--font-logo-poppins)',
+            fontWeight: 700,
+            fontSize: 30,
+            lineHeight: 1,
+            padding: 2,
+            transform: 'scaleX(-1)',
+            color: '#15535f',
+          }}
+        >
+          R
+        </span>
+      </span>
+      {showWordmark && (
+        <span
+          style={{
+            fontFamily: 'var(--font-logo-montserrat)',
+            fontWeight: 600,
+            fontSize: 18,
+            color: 'var(--color-tg-text)',
+            letterSpacing: 5,
+          }}
+        >
+          REFLECT
+        </span>
+      )}
+    </span>
+  );
+}

@@ -9,7 +9,7 @@ import RuleBlockedModal from '@/components/rules/RuleBlockedModal';
 import { fetchActiveRuleViolation, type RuleViolationResult } from '@/lib/rules/fetchActiveRuleViolation';
 import { cn } from '@/lib/utils';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
-import { ReflectLogo } from '@/components/brand/ReflectLogo';
+import { Logo } from '@/components/ui/Logo';
 import { PageTransition } from '@/components/layout/PageTransition';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
@@ -211,31 +211,14 @@ export default function AppShell({
 
         {/* Logo */}
         <div
-          className="flex items-center h-16 shrink-0"
+          className="flex items-center h-16 shrink-0 overflow-hidden"
           style={{
             borderBottom: `1px solid ${SEP}`,
             padding:       expanded ? '0 14px' : '0',
             justifyContent: expanded ? 'flex-start' : 'center',
-            gap:           expanded ? '10px' : '0',
           }}
         >
-          <div className="shrink-0">
-            <ReflectLogo width={expanded ? 44 : 34} wordmark={false} />
-          </div>
-          <span
-            className="whitespace-nowrap overflow-hidden transition-opacity duration-200"
-            style={{
-              opacity:       expanded ? 1 : 0,
-              width:         expanded ? 'auto' : 0,
-              fontFamily:    "Georgia, 'Times New Roman', serif",
-              fontSize:      17,
-              fontWeight:    400,
-              letterSpacing: '0.12em',
-              color:         '#C4BAA8',
-            }}
-          >
-            Reflect
-          </span>
+          <Logo showWordmark={expanded} />
         </div>
 
         {/* Primary nav */}

@@ -6,7 +6,7 @@ import { Ban } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
-import { ReflectLogo } from '@/components/brand/ReflectLogo';
+import { Logo } from '@/components/ui/Logo';
 
 type PageStatus = 'loading' | 'ready' | 'invalid';
 
@@ -90,7 +90,7 @@ export default function ResetPasswordPage() {
       {/* Logo */}
       <div className="text-center mb-8">
         <div className="flex justify-center mb-3">
-          <ReflectLogo width={110} wordmark={true} />
+          <Logo />
         </div>
         <p className="text-sm text-tg-text-2 mt-1">בחר סיסמא חדשה</p>
       </div>
