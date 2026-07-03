@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import type { PlanTier } from '@/lib/plans/config';
 
 type FeatureItem = { text: string; type: 'check' | 'cross' | 'dash' };
 
@@ -30,7 +31,7 @@ const PRO_FEATURES: FeatureItem[] = [
   { text: 'חסימה על בסיס 8 תנאים — FOMO, הפסד יומי, רצף הפסדים ועוד', type: 'check' },
 ];
 
-export default function PricingPlans({ plan }: { plan: 'free' | 'basic' | 'pro' }) {
+export default function PricingPlans({ plan }: { plan: PlanTier }) {
   const [billing, setBilling] = useState<'monthly' | 'yearly'>('monthly');
 
   const basicPrice = billing === 'monthly' ? '₪59' : '₪55';

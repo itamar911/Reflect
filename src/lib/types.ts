@@ -1,7 +1,9 @@
-﻿export type TradingType = 'scalping' | 'day' | 'swing' | 'position' | 'crypto' | 'futures';
+﻿import type { PlanTier } from '@/lib/plans/config';
+
+export type TradingType = 'scalping' | 'day' | 'swing' | 'position' | 'crypto' | 'futures';
 export type ExperienceLevel = 'beginner' | 'intermediate' | 'advanced';
 export type Market = 'stocks' | 'crypto' | 'forex' | 'options' | 'futures' | 'etf' | 'commodities';
-export type SubscriptionTier = 'free' | 'basic' | 'pro';
+export type SubscriptionTier = PlanTier;
 export type TradeStrategy =
   | 'Breakout' | 'Trend Follow' | 'Reversal' | 'Range' | 'Futures' | 'Custom'
   | 'ICT' | 'SMC' | 'VWAP' | 'Supply & Demand' | 'Price Action' | 'Scalping'

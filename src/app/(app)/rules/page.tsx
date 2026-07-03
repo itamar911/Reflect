@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { getUserPlan } from '@/lib/plans/getUserPlan';
 import RulesEditor from '@/components/rules/RulesEditor';
 import type { PresetRules, CustomRule } from '@/lib/types';
 import { Zap, FileText, Shield } from 'lucide-react';
@@ -11,13 +12,12 @@ export default async function RulesPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  const [profileRes, presetRes, customRes] = await Promise.all([
-    supabase.from('profiles').select('subscription_tier').eq('id', user.id).single(),
+  const [{ tier: plan }, presetRes, customRes] = await Promise.all([
+    getUserPlan(supabase, user.id),
     supabase.from('preset_rules').select('*').eq('user_id', user.id).single(),
     supabase.from('custom_rules').select('*').eq('user_id', user.id).order('created_at'),
   ]);
 
-  const plan        = (profileRes.data?.subscription_tier ?? 'free') as 'free' | 'basic' | 'pro';
   const presetRules = presetRes.data as PresetRules | null;
   const customRules = (customRes.data ?? []) as CustomRule[];
 

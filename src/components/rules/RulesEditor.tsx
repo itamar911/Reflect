@@ -15,15 +15,15 @@ import {
   describeCustomRule,
 } from '@/lib/validators/RulesetValidator';
 import type { PresetRules, CustomRule, ConditionType, ActionType } from '@/lib/types';
+import type { PlanTier } from '@/lib/plans/config';
 
 type Tab = 'preset' | 'custom';
-type Plan = 'free' | 'basic' | 'pro';
 
 interface RulesEditorProps {
   presetRules: PresetRules;
   customRules: CustomRule[];
   userId: string;
-  plan?: Plan;
+  plan?: PlanTier;
 }
 
 const ACTION_VARIANTS: Record<ActionType, 'warning' | 'danger'> = {
@@ -97,7 +97,7 @@ function CustomRulesTab({
   onUpdate: (r: CustomRule[]) => void;
   showBuilder: boolean;
   setShowBuilder: (v: boolean) => void;
-  plan: Plan;
+  plan: PlanTier;
 }) {
   const maxRules = plan === 'basic' ? 3 : plan === 'pro' ? Infinity : 0;
   const canAdd = rules.length < maxRules;
@@ -249,7 +249,7 @@ function CustomRuleBuilder({
   userId, plan, onSave, onCancel,
 }: {
   userId: string;
-  plan: Plan;
+  plan: PlanTier;
   onSave: (rule: CustomRule) => void;
   onCancel: () => void;
 }) {

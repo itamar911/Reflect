@@ -2,8 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
-
-type Plan = 'free' | 'basic' | 'pro';
+import type { PlanTier } from '@/lib/plans/config';
 
 interface AlertConfig {
   id: string;
@@ -35,7 +34,7 @@ export interface AlertSettingsData {
 }
 
 interface AlertsPanelProps {
-  plan: Plan;
+  plan: PlanTier;
   userId: string;
   initialSettings?: AlertSettingsData | null;
 }

@@ -6,15 +6,14 @@ import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import { COOLDOWN_MINUTE_OPTIONS } from '@/lib/validators/RulesetValidator';
 import type { PresetRules, TradeStrategy } from '@/lib/types';
+import type { PlanTier } from '@/lib/plans/config';
 
 const STRATEGIES: TradeStrategy[] = ['Breakout', 'Trend Follow', 'Reversal', 'Range', 'Custom'];
-
-type Plan = 'free' | 'basic' | 'pro';
 
 interface PresetRulesPanelProps {
   rules: PresetRules;
   onSave: (rules: PresetRules) => void;
-  plan?: Plan;
+  plan?: PlanTier;
 }
 
 export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: PresetRulesPanelProps) {

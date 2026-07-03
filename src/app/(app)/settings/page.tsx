@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { getUserPlan } from '@/lib/plans/getUserPlan';
 import Card from '@/components/ui/Card';
 import AlertsPanel from '@/components/settings/AlertsPanel';
 import type { AlertSettingsData } from '@/components/settings/AlertsPanel';
@@ -13,13 +14,13 @@ export default async function SettingsPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  const [profileRes, alertRes] = await Promise.all([
+  const [profileRes, alertRes, { tier: plan }] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', user.id).single(),
     supabase.from('alert_settings').select('*').eq('user_id', user.id).single(),
+    getUserPlan(supabase, user.id),
   ]);
 
   const profile = profileRes.data;
-  const plan = (profile?.subscription_tier ?? 'free') as 'free' | 'basic' | 'pro';
   const alertSettings = alertRes.data as AlertSettingsData | null;
 
   return (
