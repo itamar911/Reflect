@@ -18,7 +18,7 @@ export function Logo({ showWordmark = true }: LogoProps) {
           style={{
             fontFamily: 'var(--font-logo-poppins)',
             fontWeight: 700,
-            fontSize: 30,
+            fontSize: 38,
             lineHeight: 1,
             padding: 2,
             background: 'linear-gradient(135deg, #00c9c9, #0a4f6e)',
@@ -32,7 +32,7 @@ export function Logo({ showWordmark = true }: LogoProps) {
         <span
           style={{
             width: 1,
-            height: 26,
+            height: 32,
             margin: '0 2px',
             background: 'linear-gradient(to bottom, rgba(0,201,201,0), rgba(0,201,201,0.55), rgba(0,201,201,0))',
           }}
@@ -41,7 +41,7 @@ export function Logo({ showWordmark = true }: LogoProps) {
           style={{
             fontFamily: 'var(--font-logo-poppins)',
             fontWeight: 700,
-            fontSize: 30,
+            fontSize: 38,
             lineHeight: 1,
             padding: 2,
             transform: 'scaleX(-1)',

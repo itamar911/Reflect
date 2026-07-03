@@ -11,25 +11,27 @@
     </linearGradient>
   </defs>
 
-  <text
-    x="31"
-    y="46"
-    font-family="Poppins, Arial, sans-serif"
-    font-weight="700"
-    font-size="34"
-    text-anchor="end"
-    fill="url(#reflectMarkGradient)"
-  >R</text>
-
-  <rect x="31.25" y="10" width="1.5" height="34" fill="url(#reflectMirrorLine)" />
-
-  <g transform="translate(64,0) scale(-1,1)">
+  <g transform="scale(0.5,1)">
     <text
-      x="31"
-      y="46"
+      x="62"
+      y="60"
       font-family="Poppins, Arial, sans-serif"
       font-weight="700"
-      font-size="34"
+      font-size="78"
+      text-anchor="end"
+      fill="url(#reflectMarkGradient)"
+    >R</text>
+  </g>
+
+  <rect x="31.1" y="4" width="1.8" height="56" fill="url(#reflectMirrorLine)" />
+
+  <g transform="translate(64,0) scale(-0.5,1)">
+    <text
+      x="62"
+      y="60"
+      font-family="Poppins, Arial, sans-serif"
+      font-weight="700"
+      font-size="78"
       text-anchor="end"
       fill="#15535f"
     >R</text>
