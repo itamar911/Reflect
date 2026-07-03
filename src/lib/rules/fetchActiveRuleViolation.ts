@@ -4,7 +4,7 @@ import {
   checkCustomRules,
   DEFAULT_PRESET_RULES,
 } from '@/lib/validators/RulesetValidator';
-import type { ActionType, CustomRule, PresetRules } from '@/lib/types';
+import type { ActionType, CustomRule, PresetRules, PresetRuleKey } from '@/lib/types';
 
 export interface RuleViolationResult {
   ruleName: string;
@@ -13,6 +13,8 @@ export interface RuleViolationResult {
   cooldownMinutes: number | null;
   /** Present only when this violation came from a custom_rules row — used for rule-violation logging (id, condition_type). */
   customRule?: CustomRule;
+  /** Present only when this violation came from the preset (non-custom) branch — used for rule-violation logging. */
+  presetRuleKey?: PresetRuleKey;
 }
 
 /**
@@ -110,19 +112,20 @@ export async function fetchActiveRuleViolation(userId: string, realTimeBlocking:
     };
   }
 
-  const presetMessage = checkActiveViolation(presetRules, {
+  const presetViolation = checkActiveViolation(presetRules, {
     todayTradeCount,
     recentLossCount: lossStreak,
     todayLossAmount,
     minutesSinceLastClose,
   });
 
-  if (presetMessage) {
+  if (presetViolation) {
     return {
-      ruleName: 'חוק מובנה',
-      description: presetMessage,
+      ruleName: presetViolation.ruleName,
+      description: presetViolation.description,
       actionType: realTimeBlocking ? 'block_day' : 'warn',
       cooldownMinutes: null,
+      presetRuleKey: presetViolation.ruleKey,
     };
   }
 

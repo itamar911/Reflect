@@ -114,8 +114,6 @@ export default function AppShell({
     const violation = await fetchActiveRuleViolation(userId, limits.realTimeBlocking);
     if (violation && (violation.actionType === 'block_day' || violation.actionType === 'block_timer')) {
       setRuleBlock(violation);
-      // Only custom rules (structured, with an id/condition_type) are logged here —
-      // the generic preset pre-check has no structured identity to attach a row to.
       if (violation.customRule) {
         logRuleViolations([{
           userId,
@@ -123,6 +121,16 @@ export default function AppShell({
           customRuleId: violation.customRule.id,
           ruleKey: violation.customRule.condition_type,
           ruleName: violation.customRule.name,
+          outcome: 'blocked',
+          tradePlanId: null,
+        }]);
+      } else if (violation.presetRuleKey) {
+        logRuleViolations([{
+          userId,
+          ruleSource: 'preset',
+          customRuleId: null,
+          ruleKey: violation.presetRuleKey,
+          ruleName: violation.ruleName,
           outcome: 'blocked',
           tradePlanId: null,
         }]);
@@ -339,6 +347,7 @@ export default function AppShell({
       {ruleBlock && (
         <RuleBlockedModal
           ruleName={ruleBlock.ruleName}
+          description={ruleBlock.description}
           cooldownMinutes={ruleBlock.actionType === 'block_timer' ? ruleBlock.cooldownMinutes : null}
           onClose={() => setRuleBlock(null)}
         />

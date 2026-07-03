@@ -5,11 +5,12 @@ import { formatCooldownMinutes } from '@/lib/validators/RulesetValidator';
 
 interface RuleBlockedModalProps {
   ruleName: string;
+  description?: string | null;
   cooldownMinutes?: number | null;
   onClose: () => void;
 }
 
-export default function RuleBlockedModal({ ruleName, cooldownMinutes, onClose }: RuleBlockedModalProps) {
+export default function RuleBlockedModal({ ruleName, description, cooldownMinutes, onClose }: RuleBlockedModalProps) {
   return (
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center p-4"
@@ -34,15 +35,21 @@ export default function RuleBlockedModal({ ruleName, cooldownMinutes, onClose }:
           {ruleName}
         </p>
 
+        {description && (
+          <p className="text-xs text-tg-muted">
+            {description}
+          </p>
+        )}
+
         {cooldownMinutes ? (
           <p className="text-xs text-tg-muted">
             נעילה למשך {formatCooldownMinutes(cooldownMinutes)}
           </p>
-        ) : (
+        ) : !description ? (
           <p className="text-xs text-tg-muted">
             החוק שלך מונע כניסה לעסקה חדשה כרגע
           </p>
-        )}
+        ) : null}
 
         <button
           onClick={onClose}

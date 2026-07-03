@@ -150,6 +150,12 @@ export interface ActiveRuleContext {
   minutesSinceLastClose: number | null;
 }
 
+export interface PresetActiveViolation {
+  ruleKey: PresetRuleKey;
+  ruleName: string;
+  description: string;
+}
+
 /**
  * Lightweight, input-independent check used to gate opening the trade form —
  * unlike validateTradePlan, this doesn't require a filled-in trade (no R:R,
@@ -158,24 +164,40 @@ export interface ActiveRuleContext {
 export function checkActiveViolation(
   presetRules: PresetRules,
   ctx: ActiveRuleContext
-): string | null {
+): PresetActiveViolation | null {
   if (ctx.todayTradeCount >= presetRules.max_daily_trades) {
-    return `הגעת למקסימום ${presetRules.max_daily_trades} עסקאות ליום`;
+    return {
+      ruleKey: 'max_daily_trades',
+      ruleName: PRESET_RULE_LABELS.max_daily_trades,
+      description: `הגעת למקסימום ${presetRules.max_daily_trades} עסקאות ליום`,
+    };
   }
 
   if (ctx.recentLossCount >= presetRules.cooldown_after_losses) {
     if (presetRules.cooldown_minutes && ctx.minutesSinceLastClose !== null) {
       const remaining = presetRules.cooldown_minutes - ctx.minutesSinceLastClose;
       if (remaining > 0) {
-        return `${ctx.recentLossCount} הפסדים רצופים — נדרש Cooldown של ${formatCooldownMinutes(presetRules.cooldown_minutes)} (נותרו ${Math.ceil(remaining)} דקות)`;
+        return {
+          ruleKey: 'cooldown_after_losses',
+          ruleName: PRESET_RULE_LABELS.cooldown_after_losses,
+          description: `${ctx.recentLossCount} הפסדים רצופים — נדרש Cooldown של ${formatCooldownMinutes(presetRules.cooldown_minutes)} (נותרו ${Math.ceil(remaining)} דקות)`,
+        };
       }
     } else {
-      return `${ctx.recentLossCount} הפסדים רצופים — נדרש Cooldown לפני עסקה נוספת`;
+      return {
+        ruleKey: 'cooldown_after_losses',
+        ruleName: PRESET_RULE_LABELS.cooldown_after_losses,
+        description: `${ctx.recentLossCount} הפסדים רצופים — נדרש Cooldown לפני עסקה נוספת`,
+      };
     }
   }
 
   if (presetRules.max_daily_loss !== null && presetRules.max_daily_loss > 0 && ctx.todayLossAmount >= presetRules.max_daily_loss) {
-    return `הפסד יומי עבר $${presetRules.max_daily_loss}`;
+    return {
+      ruleKey: 'max_daily_loss',
+      ruleName: PRESET_RULE_LABELS.max_daily_loss,
+      description: `הפסד יומי עבר $${presetRules.max_daily_loss}`,
+    };
   }
 
   return null;
