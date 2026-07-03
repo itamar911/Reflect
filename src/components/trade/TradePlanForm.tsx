@@ -419,6 +419,27 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
   // call — upgraded to 'overridden' if the user goes on to submit this trade.
   const warnedViolationIdsRef = useRef<string[]>([]);
 
+  // Scrolls the warning banner into view + a brief glow, but only the first time a given
+  // set of warnings appears — not on every re-render while it's already on screen.
+  const warningBannerRef = useRef<HTMLDivElement | null>(null);
+  const [warningBannerPulse, setWarningBannerPulse] = useState(false);
+  const lastWarningSignatureRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (formState === 'validating' || !validationResult || validationResult.status !== 'warning') {
+      lastWarningSignatureRef.current = null;
+      return;
+    }
+    const signature = validationResult.warningReasons.join('|');
+    if (signature === lastWarningSignatureRef.current) return;
+    lastWarningSignatureRef.current = signature;
+
+    warningBannerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setWarningBannerPulse(true);
+    const t = setTimeout(() => setWarningBannerPulse(false), 1500);
+    return () => clearTimeout(t);
+  }, [validationResult, formState]);
+
   const step1Done = form.symbol.trim() !== '' && form.direction !== null && form.strategy !== '';
   const step2Done = hasEntry && slPrice !== null && tpPrice !== null && hasUnits;
 
@@ -667,7 +688,12 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
 
             {/* Validation Banner */}
             {validationResult && formState !== 'validating' && (
-              <ValidationResultBanner result={validationResult} />
+              <div
+                ref={warningBannerRef}
+                className={warningBannerPulse ? 'animate-pulse-warning rounded-xl' : 'rounded-xl'}
+              >
+                <ValidationResultBanner result={validationResult} />
+              </div>
             )}
 
             {formState === 'error' && (
@@ -1055,6 +1081,27 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
 
             {/* Actions */}
             <div className="flex flex-col gap-2 pb-4">
+              {/* Missing-fields hint (gray) — guidance, not an error state */}
+              {missingFieldKeys.length > 0 && formState !== 'validating' && (
+                <p dir="rtl" className="text-center text-xs text-zinc-400">
+                  חסר: {missingFieldKeys.map((key) => REQUIRED_FIELD_LABELS[key]).join(', ')}
+                </p>
+              )}
+
+              {/* Warning echo (amber) — repeats the active warnings right by the submit
+                  button, so users who scrolled past the banner still see them before submitting. */}
+              {validationResult && validationResult.status === 'warning' && formState !== 'validating' && (
+                <div dir="rtl" className="flex flex-col gap-1">
+                  {validationResult.warningReasons.map((reason, i) => (
+                    <div key={i} className="flex items-start gap-1.5 text-xs"
+                      style={{ color: 'var(--color-tg-warning)' }}>
+                      <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+                      <span>{reason}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {formState !== 'validating' && !validationResult && (
                 <Button
                   fullWidth
@@ -1082,12 +1129,6 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                 >
                   {formState === 'blocked' ? 'עסקה חסומה' : 'הגש תוכנית עסקה'}
                 </Button>
-              )}
-
-              {missingFieldKeys.length > 0 && formState !== 'validating' && (
-                <p dir="rtl" className="text-center text-xs text-zinc-400 mt-0.5">
-                  חסר: {missingFieldKeys.map((key) => REQUIRED_FIELD_LABELS[key]).join(', ')}
-                </p>
               )}
 
               {!validationResult && (
