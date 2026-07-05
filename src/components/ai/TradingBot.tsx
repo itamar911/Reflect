@@ -11,6 +11,15 @@ interface Message {
 }
 
 const SCROLL_BOTTOM_THRESHOLD = 40;
+const REVEAL_TICK_MS = 45;
+const REVEAL_CATCHUP_WORDS = 80;
+const REVEAL_FLUSH_THRESHOLD = 3;
+
+// Splits text into tokens of (leading whitespace + word); joining tokens
+// reconstructs an exact substring of the original text.
+function tokenize(text: string): string[] {
+  return text.match(/\s*\S+/g) || [];
+}
 
 const QUICK_QUESTIONS = [
   'איך הייתי השבוע?',
@@ -34,6 +43,72 @@ export default function TradingBot() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const lastAssistantRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  const isAtBottomRef = useRef(true);
+  const bufferRef = useRef('');
+  const revealedCountRef = useRef(0);
+  const streamDoneRef = useRef(false);
+  const revealIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    isAtBottomRef.current = isAtBottom;
+  }, [isAtBottom]);
+
+  function stopReveal() {
+    if (revealIntervalRef.current !== null) {
+      clearInterval(revealIntervalRef.current);
+      revealIntervalRef.current = null;
+    }
+  }
+
+  // Keep the reveal loop cleaned up on unmount
+  useEffect(() => () => stopReveal(), []);
+
+  function updateAssistantContent(text: string) {
+    setMessages(prev => {
+      const updated = [...prev];
+      updated[updated.length - 1] = { role: 'assistant', content: text };
+      return updated;
+    });
+    if (isAtBottomRef.current) {
+      const el = containerRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    }
+  }
+
+  function finishReveal() {
+    stopReveal();
+    setLoading(false);
+    setScrollToReplySignal(s => s + 1);
+    inputRef.current?.focus();
+  }
+
+  function startReveal() {
+    stopReveal();
+    revealIntervalRef.current = setInterval(() => {
+      const buffer = bufferRef.current;
+      const tokens = tokenize(buffer);
+      const endsWithWhitespace = /\s$/.test(buffer);
+      // While still streaming, the last token may be a word still being received —
+      // hold it back until it's terminated by whitespace or the stream is done.
+      const safeAvailable = streamDoneRef.current || endsWithWhitespace
+        ? tokens.length
+        : Math.max(tokens.length - 1, 0);
+
+      const pending = safeAvailable - revealedCountRef.current;
+      if (pending > 0) {
+        const next = streamDoneRef.current && pending <= REVEAL_FLUSH_THRESHOLD
+          ? safeAvailable
+          : Math.min(revealedCountRef.current + (pending > REVEAL_CATCHUP_WORDS ? 3 : 1), safeAvailable);
+        revealedCountRef.current = next;
+        updateAssistantContent(tokens.slice(0, next).join(''));
+      }
+
+      if (streamDoneRef.current && revealedCountRef.current >= tokens.length) {
+        finishReveal();
+      }
+    }, REVEAL_TICK_MS);
+  }
 
   // User sent a new message — jump to the bottom to show it
   useEffect(() => {
@@ -78,6 +153,11 @@ export default function TradingBot() {
     const assistantMsg: Message = { role: 'assistant', content: '' };
     setMessages(prev => [...prev, assistantMsg]);
 
+    bufferRef.current = '';
+    revealedCountRef.current = 0;
+    streamDoneRef.current = false;
+    startReveal();
+
     try {
       const res = await fetch('/api/ai-chat', {
         method: 'POST',
@@ -88,8 +168,10 @@ export default function TradingBot() {
       if (res.status === 403) {
         const data = await res.json().catch(() => null);
         if (data?.error === 'PLAN_LIMIT') {
+          stopReveal();
           setMessages((prev) => prev.slice(0, -1));
           setUpgradeModalOpen(true);
+          setLoading(false);
           return;
         }
       }
@@ -98,25 +180,17 @@ export default function TradingBot() {
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
-      let accumulated = '';
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        accumulated += decoder.decode(value, { stream: true });
-        setMessages(prev => {
-          const updated = [...prev];
-          updated[updated.length - 1] = { role: 'assistant', content: accumulated };
-          return updated;
-        });
+        bufferRef.current += decoder.decode(value, { stream: true });
       }
+      // Buffer is fully populated — the reveal loop drains it and finalizes loading state.
+      streamDoneRef.current = true;
     } catch {
-      setMessages(prev => {
-        const updated = [...prev];
-        updated[updated.length - 1] = { role: 'assistant', content: 'שגיאה בתקשורת עם ה-AI — נסה שוב' };
-        return updated;
-      });
-    } finally {
+      stopReveal();
+      updateAssistantContent('שגיאה בתקשורת עם ה-AI — נסה שוב');
       setLoading(false);
       setScrollToReplySignal(s => s + 1);
       inputRef.current?.focus();
