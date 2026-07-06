@@ -36,7 +36,11 @@ export async function proxy(request: NextRequest) {
 
   const isApiRoute = pathname.startsWith('/api/');
 
-  const isPublicRoute = pathname === '/' || isAuthRoute || isApiRoute;
+  const isMarketingRoute =
+    pathname.startsWith('/terms') ||
+    pathname.startsWith('/privacy');
+
+  const isPublicRoute = pathname === '/' || isAuthRoute || isApiRoute || isMarketingRoute;
 
   if (!user && !isPublicRoute) {
     return NextResponse.redirect(new URL('/login', request.url));
