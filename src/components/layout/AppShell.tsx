@@ -216,7 +216,7 @@ export default function AppShell({
       <div
         className="fixed inset-0 z-30"
         style={{
-          background:    'rgba(0,0,0,0.55)',
+          background:    'rgba(0,0,0,0.7)',
           opacity:       isMobile && expanded ? 1 : 0,
           pointerEvents: isMobile && expanded ? 'auto' : 'none',
           transition:    `opacity ${SIDEBAR_TRANSITION}`,
@@ -231,15 +231,30 @@ export default function AppShell({
         className="fixed z-50 flex items-center justify-center w-5 h-9"
         style={
           isMobile
-            ? {
-                // Fixed corner affordance — there's no persistent rail edge to attach to.
-                right:        16,
-                top:          16,
-                background:   NAV_BG,
-                border:       `1px solid ${SEP}`,
-                borderRadius: 8,
-                color:        'rgba(0,210,210,0.55)',
-              }
+            ? expanded
+              ? {
+                  // Open: vertically centered on the drawer's now-visible edge,
+                  // same placement the handle has always used when there's an
+                  // edge to sit on.
+                  right:        W_OPEN,
+                  top:          '50%',
+                  transform:    'translateY(-50%)',
+                  background:   NAV_BG,
+                  border:       `1px solid ${SEP}`,
+                  borderRight:  'none',
+                  borderRadius: '6px 0 0 6px',
+                  color:        'rgba(0,210,210,0.55)',
+                }
+              : {
+                  // Closed: fixed corner affordance — the drawer is fully
+                  // off-canvas, so there's no edge to attach to.
+                  right:        16,
+                  top:          16,
+                  background:   NAV_BG,
+                  border:       `1px solid ${SEP}`,
+                  borderRadius: 8,
+                  color:        'rgba(0,210,210,0.55)',
+                }
             : {
                 // Tracks the sidebar's visible edge via transform only (isolated
                 // fixed element — moving it doesn't reflow any sibling).
@@ -268,7 +283,11 @@ export default function AppShell({
         className="fixed inset-y-0 right-0 z-40 flex flex-col"
         style={{
           width:        W_OPEN,
-          background:   NAV_BG,
+          // Solid surface on mobile: the drawer is a full overlay above live
+          // content there (desktop never has content behind it), so NAV_BG's
+          // built-in translucency would let content bleed through instead of
+          // reading as a proper panel.
+          background:   isMobile ? 'var(--color-tg-surface)' : NAV_BG,
           borderLeft:   `1px solid ${SEP}`,
           overflowY:    'hidden',
           ...(isMobile
