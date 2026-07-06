@@ -186,7 +186,7 @@ export default function NotebookClient({
                         background: active ? `${t.color}18` : 'transparent',
                         color: active ? t.color : MUTED,
                       }}
-                    >{t.icon}{t.label}</button>
+                    ><span style={{ color: GOLD, display: 'flex' }}>{t.icon}</span>{t.label}</button>
                   );
                 })}
                 {tagsInUse.length > 0 && (

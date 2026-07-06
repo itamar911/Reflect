@@ -2,7 +2,7 @@
 
 import { BookOpen } from 'lucide-react';
 import {
-  PAGE_TYPES, PRESET_TAGS, BORDER, SURF, MUTED, TEXT, TEXT2, inputBase, btnStyle,
+  PAGE_TYPES, PRESET_TAGS, GOLD, BORDER, SURF, MUTED, TEXT, TEXT2, inputBase, btnStyle,
   tagChipStyle, formatDateLong,
   type NotebookPage, type SaveStatus, type PageType,
 } from './notebook-shared';
@@ -64,7 +64,7 @@ export default function NotebookEditor({
                     color:       active ? t.color : TEXT2,
                     fontSize:    11.5, fontWeight: active ? 600 : 400,
                   }}>
-                  {t.icon}
+                  <span style={{ color: GOLD, display: 'flex' }}>{t.icon}</span>
                   {t.label}
                 </button>
               );

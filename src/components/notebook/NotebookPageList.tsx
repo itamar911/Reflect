@@ -57,7 +57,7 @@ export default function NotebookPageList({
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ color: tc?.color, display: 'flex', flexShrink: 0 }}>{tc?.icon}</span>
+                <span style={{ color: GOLD, display: 'flex', flexShrink: 0 }}>{tc?.icon}</span>
                 <span style={{ flex: 1, fontSize: 13.5, fontWeight: 700, color: active ? GOLD : TEXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {page.title}
                 </span>

@@ -62,7 +62,7 @@ export default function NotebookSidebar({
                   fontSize: 12.5, fontWeight: active ? 600 : 400, textAlign: 'right',
                 }}
               >
-                <span style={{ color: t.color, display: 'flex' }}>{t.icon}</span>
+                <span style={{ color: GOLD, display: 'flex' }}>{t.icon}</span>
                 {t.label}
               </button>
             );
