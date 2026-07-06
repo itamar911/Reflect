@@ -112,11 +112,11 @@ body::before {
   background:
     /* Gold aurora at top */
     radial-gradient(ellipse 90% 28% at 50% -4%, rgba(245, 197, 24, 0.09) 0%, transparent 65%),
-    /* Navy depth corners */
-    radial-gradient(ellipse 55% 55% at -5% 105%, rgba(13, 27, 42, 0.92) 0%, transparent 55%),
-    radial-gradient(ellipse 55% 55% at 105% -5%, rgba(13, 27, 42, 0.92) 0%, transparent 55%),
-    /* Subtle blue-black depth in center */
-    radial-gradient(ellipse 70% 70% at 50% 50%, rgba(10, 14, 30, 0.25) 0%, transparent 70%),
+    /* Charcoal depth corners */
+    radial-gradient(ellipse 55% 55% at -5% 105%, rgba(22, 28, 38, 0.5) 0%, transparent 55%),
+    radial-gradient(ellipse 55% 55% at 105% -5%, rgba(22, 28, 38, 0.5) 0%, transparent 55%),
+    /* Subtle charcoal depth in center */
+    radial-gradient(ellipse 70% 70% at 50% 50%, rgba(18, 20, 26, 0.18) 0%, transparent 70%),
     /* Stars — bright */
     radial-gradient(1.5px 1.5px at 20% 15%, rgba(255,255,255,0.4) 0%, transparent 100%),
     radial-gradient(1.5px 1.5px at 73% 8%,  rgba(255,255,255,0.35) 0%, transparent 100%),
@@ -140,12 +140,12 @@ body::before {
   z-index: 0;
 }
 
-/* Strong vignette — dark edges like a terminal display */
+/* Subtle vignette — charcoal edges, not black */
 body::after {
   content: '';
   position: fixed;
   inset: 0;
-  background: radial-gradient(ellipse 125% 125% at 50% 50%, transparent 30%, rgba(0, 0, 8, 0.82) 100%);
+  background: radial-gradient(ellipse 125% 125% at 50% 50%, transparent 30%, rgba(10, 11, 13, 0.5) 100%);
   pointer-events: none;
   z-index: 0;
 }
