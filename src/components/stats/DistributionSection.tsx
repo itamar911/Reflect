@@ -52,7 +52,7 @@ export default function DistributionSection({ dayBars, hourBars }: Props) {
           <p className="text-center py-4" style={{ fontSize: 12, color: MUTED }}>אין נתונים</p>
         ) : (
           <div dir="ltr">
-            <ResponsiveContainer debounce={150} width="100%" height={180}>
+            <ResponsiveContainer debounce={60} width="100%" height={180}>
               <BarChart data={bars} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--color-tg-border)" vertical={false} />
                 <XAxis dataKey="label" tick={{ fontSize: 9, fill: MUTED }} />

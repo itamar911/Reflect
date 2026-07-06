@@ -70,7 +70,7 @@ export default function PnlChart({ daily, weekly, monthly }: Props) {
       {chartData.length > 0 ? (
         <>
           <div dir="ltr">
-            <ResponsiveContainer debounce={150} width="100%" height={140}>
+            <ResponsiveContainer debounce={60} width="100%" height={140}>
               <ComposedChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--color-tg-border)" vertical={false} />
                 <XAxis

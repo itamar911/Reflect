@@ -200,14 +200,14 @@ export default function AppShell({
   // Mobile: a true off-canvas drawer — the whole panel translates fully out of
   // view when closed, so there's no persistent rail to reflow around.
   const railInset = isMobile ? 0 : (expanded ? 0 : RAIL_INSET);
-  // Main content only ever needs an instant (non-animated) reflow, timed so it's
-  // masked by the still-opaque, already-in-place sidebar:
-  //  - collapsing: shrink the reserved gutter immediately (sidebar is already
-  //    covering the freed strip and slides off it as it goes).
-  //  - expanding: keep the smaller gutter until the sidebar has fully slid over
-  //    that strip, then snap — the snap happens entirely underneath the sidebar.
+  // Main content's gutter animates on the same curve/duration as the sidebar's
+  // clip-path/transform, so the visible edge and the reclaimed space move as a
+  // single motion instead of the sidebar finishing first and content snapping
+  // afterward. It's a real reflow-driving property (margin-right), but it's a
+  // single cheap container, not the original width/margin/right-on-three-elements
+  // bug — and ResponsiveContainer's debounce (below) coalesces the resulting
+  // per-frame ResizeObserver churn into one repaint near the end of the motion.
   const contentMr = isMobile ? 0 : (expanded ? W_OPEN : W_SHUT);
-  const contentMrDelay = !isMobile && expanded ? SIDEBAR_DURATION : 0;
 
   return (
     <div dir="rtl" className="min-h-screen sidebar-motion">
@@ -382,19 +382,14 @@ export default function AppShell({
       </aside>
 
       {/* ── Main content ───────────────────────────────────────────
-          No CSS transition on margin-right: the value flips in a single,
-          instant reflow rather than animating across every frame (which is
-          what was driving continuous ResizeObserver churn in recharts).
-          Collapsing flips immediately (already masked by the still-covering
-          sidebar as it slides off); expanding is delayed until the sidebar
-          has fully covered the reclaimed strip, so the snap is invisible. */}
+          margin-right animates on the exact same spec as the sidebar so the
+          two move together as one motion instead of content snapping into
+          place after the sidebar has already finished. */}
       <div
         className="min-h-screen"
         style={{
           marginRight: contentMr,
-          transitionProperty: 'margin-right',
-          transitionDuration: '0ms',
-          transitionDelay: `${contentMrDelay}ms`,
+          transition: `margin-right ${SIDEBAR_TRANSITION}`,
         }}
       >
         <PageTransition>
