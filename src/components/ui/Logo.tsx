@@ -1,4 +1,5 @@
 import { Poppins, Montserrat } from 'next/font/google';
+import { SIDEBAR_TRANSITION } from '@/lib/motion';
 
 const poppins = Poppins({ variable: '--font-logo-poppins', subsets: ['latin'], weight: '700', display: 'swap' });
 const montserrat = Montserrat({ variable: '--font-logo-montserrat', subsets: ['latin'], weight: '600', display: 'swap' });
@@ -51,19 +52,23 @@ export function Logo({ showWordmark = true }: LogoProps) {
           R
         </span>
       </span>
-      {showWordmark && (
-        <span
-          style={{
-            fontFamily: 'var(--font-logo-montserrat)',
-            fontWeight: 600,
-            fontSize: 18,
-            color: 'var(--color-tg-text)',
-            letterSpacing: 5,
-          }}
-        >
-          REFLECT
-        </span>
-      )}
+      <span
+        aria-hidden={!showWordmark}
+        style={{
+          fontFamily: 'var(--font-logo-montserrat)',
+          fontWeight: 600,
+          fontSize: 18,
+          color: 'var(--color-tg-text)',
+          letterSpacing: 5,
+          whiteSpace: 'nowrap',
+          opacity: showWordmark ? 1 : 0,
+          transform: showWordmark ? 'translateX(0)' : 'translateX(6px)',
+          transition: `opacity ${SIDEBAR_TRANSITION}, transform ${SIDEBAR_TRANSITION}`,
+          pointerEvents: showWordmark ? 'auto' : 'none',
+        }}
+      >
+        REFLECT
+      </span>
     </span>
   );
 }

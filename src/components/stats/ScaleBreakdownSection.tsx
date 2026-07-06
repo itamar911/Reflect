@@ -37,7 +37,7 @@ export default function ScaleBreakdownSection({ title, icon, buckets, insights }
     <Section title={title} icon={icon}>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <ChartCard label="אחוז הצלחה לפי רמה">
-          <ResponsiveContainer width="100%" height={160}>
+          <ResponsiveContainer debounce={150} width="100%" height={160}>
             <BarChart data={winRateData}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--color-tg-border)" vertical={false} />
               <XAxis dataKey="level" tick={{ fontSize: 11, fill: MUTED }} />
@@ -51,7 +51,7 @@ export default function ScaleBreakdownSection({ title, icon, buckets, insights }
         </ChartCard>
 
         <ChartCard label="ממוצע רווח/הפסד לפי רמה">
-          <ResponsiveContainer width="100%" height={160}>
+          <ResponsiveContainer debounce={150} width="100%" height={160}>
             <BarChart data={avgProfitData}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--color-tg-border)" vertical={false} />
               <XAxis dataKey="level" tick={{ fontSize: 11, fill: MUTED }} />
@@ -65,7 +65,7 @@ export default function ScaleBreakdownSection({ title, icon, buckets, insights }
         </ChartCard>
 
         <ChartCard label="כמות עסקאות לפי רמה">
-          <ResponsiveContainer width="100%" height={160}>
+          <ResponsiveContainer debounce={150} width="100%" height={160}>
             <BarChart data={countData}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--color-tg-border)" vertical={false} />
               <XAxis dataKey="level" tick={{ fontSize: 11, fill: MUTED }} />

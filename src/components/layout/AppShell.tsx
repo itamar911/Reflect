@@ -8,11 +8,11 @@ import TradePlanForm from '@/components/trade/TradePlanForm';
 import RuleBlockedModal from '@/components/rules/RuleBlockedModal';
 import { fetchActiveRuleViolation, type RuleViolationResult } from '@/lib/rules/fetchActiveRuleViolation';
 import { logRuleViolations } from '@/lib/rules/logRuleViolation';
-import { cn } from '@/lib/utils';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
 import { Logo } from '@/components/ui/Logo';
 import { PageTransition } from '@/components/layout/PageTransition';
 import { getPlanLimits, type PlanTier } from '@/lib/plans/config';
+import { SIDEBAR_DURATION, SIDEBAR_EASING, SIDEBAR_TRANSITION } from '@/lib/motion';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const ACCENT = '#00d2d2';
@@ -20,6 +20,7 @@ const NAV_BG = 'var(--shell-nav-bg)';
 const SEP    = 'var(--shell-border)';
 const W_OPEN = 240;
 const W_SHUT = 64;
+const RAIL_INSET = W_OPEN - W_SHUT; // px of the panel clipped away / handle offset when collapsed
 
 // ── Icon helper ───────────────────────────────────────────────────────────────
 function Svg({ children }: { children: React.ReactNode }) {
@@ -66,24 +67,38 @@ const SECONDARY_NAV: NavItem[] = [
 ];
 
 // ── NavLink ───────────────────────────────────────────────────────────────────
+// Layout never changes shape between expanded/collapsed — the icon always sits
+// in the first ~64px (right edge, RTL) so the sidebar's clip-path can reveal
+// just that strip when collapsed without reflowing this row's internals.
 function NavLink({ item, expanded, active }: { item: NavItem; expanded: boolean; active: boolean }) {
   return (
     <Link
       href={item.href}
       prefetch={true}
       title={!expanded ? item.label : undefined}
-      className={cn(
-        'flex items-center rounded-xl transition-all duration-150 select-none',
-        expanded ? 'gap-3 px-3 py-2.5' : 'justify-center py-3',
-      )}
+      className="flex items-center gap-3 px-3 py-2.5 rounded-xl select-none transition-colors"
       style={{
         color:      active ? ACCENT : 'var(--text-primary)',
         background: active ? 'rgba(0,210,210,0.12)' : 'transparent',
         boxShadow:  active ? `inset 0 0 0 1px rgba(0,210,210,0.22)` : undefined,
+        transitionDuration: `${SIDEBAR_DURATION}ms`,
+        transitionTimingFunction: SIDEBAR_EASING,
       }}
     >
-      {item.icon}
-      {expanded && <span className="font-semibold truncate" style={{ fontSize: 16 }}>{item.label}</span>}
+      <span className="shrink-0">{item.icon}</span>
+      <span
+        aria-hidden={!expanded}
+        className="font-semibold truncate"
+        style={{
+          fontSize: 16,
+          opacity: expanded ? 1 : 0,
+          transform: expanded ? 'translateX(0)' : 'translateX(6px)',
+          transition: `opacity ${SIDEBAR_TRANSITION}, transform ${SIDEBAR_TRANSITION}`,
+          pointerEvents: expanded ? 'auto' : 'none',
+        }}
+      >
+        {item.label}
+      </span>
     </Link>
   );
 }
@@ -179,44 +194,70 @@ export default function AppShell({
     return pathname === href || pathname.startsWith(href + '/');
   }
 
-  const sidebarW  = expanded ? W_OPEN : W_SHUT;
-  // On mobile, expanded sidebar overlays content (no push); collapsed always pushes W_SHUT
-  const contentMr = isMobile ? W_SHUT : sidebarW;
-
-  const easing = 'cubic-bezier(0.4,0,0.2,1)';
+  // Desktop: a fixed-width (240px) panel is always mounted; collapse/expand is
+  // purely a clip-path reveal (paint-only, never triggers layout/reflow) of the
+  // left 176px, leaving the rightmost 64px (where icons sit, RTL) always visible.
+  // Mobile: a true off-canvas drawer — the whole panel translates fully out of
+  // view when closed, so there's no persistent rail to reflow around.
+  const railInset = isMobile ? 0 : (expanded ? 0 : RAIL_INSET);
+  // Main content only ever needs an instant (non-animated) reflow, timed so it's
+  // masked by the still-opaque, already-in-place sidebar:
+  //  - collapsing: shrink the reserved gutter immediately (sidebar is already
+  //    covering the freed strip and slides off it as it goes).
+  //  - expanding: keep the smaller gutter until the sidebar has fully slid over
+  //    that strip, then snap — the snap happens entirely underneath the sidebar.
+  const contentMr = isMobile ? 0 : (expanded ? W_OPEN : W_SHUT);
+  const contentMrDelay = !isMobile && expanded ? SIDEBAR_DURATION : 0;
 
   return (
-    <div dir="rtl" className="min-h-screen">
+    <div dir="rtl" className="min-h-screen sidebar-motion">
 
-      {/* Mobile overlay when expanded */}
-      {expanded && isMobile && (
-        <div
-          className="fixed inset-0 z-30"
-          style={{ background: 'rgba(0,0,0,0.55)' }}
-          onClick={() => setExpanded(false)}
-        />
-      )}
+      {/* Mobile backdrop — always mounted, fades so it never pops in/out */}
+      <div
+        className="fixed inset-0 z-30"
+        style={{
+          background:    'rgba(0,0,0,0.55)',
+          opacity:       isMobile && expanded ? 1 : 0,
+          pointerEvents: isMobile && expanded ? 'auto' : 'none',
+          transition:    `opacity ${SIDEBAR_TRANSITION}`,
+        }}
+        onClick={() => setExpanded(false)}
+      />
 
-      {/* ── Toggle tab (fixed, left edge of sidebar) ───────────────── */}
+      {/* ── Toggle handle ────────────────────────────────────────── */}
       <button
         onClick={toggle}
         aria-label={expanded ? 'כווץ סרגל' : 'הרחב סרגל'}
-        className="fixed z-50 flex items-center justify-center w-5 h-9 transition-[right]"
-        style={{
-          right:        sidebarW,
-          top:          '50%',
-          transform:    'translateY(-50%)',
-          transition:   `right 250ms ${easing}`,
-          background:   NAV_BG,
-          border:       `1px solid ${SEP}`,
-          borderRight:  'none',
-          borderRadius: '6px 0 0 6px',
-          color:        'rgba(0,210,210,0.55)',
-        }}
+        className="fixed z-50 flex items-center justify-center w-5 h-9"
+        style={
+          isMobile
+            ? {
+                // Fixed corner affordance — there's no persistent rail edge to attach to.
+                right:        16,
+                top:          16,
+                background:   NAV_BG,
+                border:       `1px solid ${SEP}`,
+                borderRadius: 8,
+                color:        'rgba(0,210,210,0.55)',
+              }
+            : {
+                // Tracks the sidebar's visible edge via transform only (isolated
+                // fixed element — moving it doesn't reflow any sibling).
+                right:        W_SHUT,
+                top:          '50%',
+                transform:    `translate(${expanded ? -RAIL_INSET : 0}px, -50%)`,
+                transition:   `transform ${SIDEBAR_TRANSITION}`,
+                background:   NAV_BG,
+                border:       `1px solid ${SEP}`,
+                borderRight:  'none',
+                borderRadius: '6px 0 0 6px',
+                color:        'rgba(0,210,210,0.55)',
+              }
+        }
       >
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
           strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-          style={{ transform: expanded ? 'rotate(0deg)' : 'rotate(180deg)', transition: `transform 250ms ${easing}` }}>
+          style={{ transform: expanded ? 'rotate(0deg)' : 'rotate(180deg)', transition: `transform ${SIDEBAR_TRANSITION}` }}>
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </button>
@@ -226,29 +267,33 @@ export default function AppShell({
         dir="rtl"
         className="fixed inset-y-0 right-0 z-40 flex flex-col"
         style={{
-          width:        sidebarW,
+          width:        W_OPEN,
           background:   NAV_BG,
           borderLeft:   `1px solid ${SEP}`,
-          transition:   `width 250ms ${easing}`,
-          overflowX:    'hidden',
           overflowY:    'hidden',
+          ...(isMobile
+            ? {
+                transform:  `translateX(${expanded ? 0 : W_OPEN}px)`,
+                transition: `transform ${SIDEBAR_TRANSITION}`,
+              }
+            : {
+                clipPath:   `inset(0 0 0 ${railInset}px)`,
+                transition: `clip-path ${SIDEBAR_TRANSITION}`,
+              }),
         }}
       >
 
-        {/* Logo */}
+        {/* Logo — right-side inset stays small & constant so the mark itself
+            (no wordmark) sits fully inside the 64px rail that's always visible */}
         <div
-          className="flex items-center h-16 shrink-0 overflow-hidden"
-          style={{
-            borderBottom: `1px solid ${SEP}`,
-            padding:       expanded ? '0 14px' : '0',
-            justifyContent: expanded ? 'flex-start' : 'center',
-          }}
+          className="flex items-center h-16 shrink-0 pr-2 pl-3.5"
+          style={{ borderBottom: `1px solid ${SEP}` }}
         >
           <Logo showWordmark={expanded} />
         </div>
 
         {/* Primary nav */}
-        <nav className="flex-1 overflow-y-auto overflow-x-hidden py-2 flex flex-col gap-0.5 px-2">
+        <nav className="flex-1 overflow-y-auto overflow-x-hidden py-2 flex flex-col gap-0.5 px-2 [scrollbar-gutter:stable]">
           {PRIMARY_NAV.map(item => (
             <NavLink key={item.href} item={item} expanded={expanded} active={isActive(item.href)} />
           ))}
@@ -264,70 +309,92 @@ export default function AppShell({
           <button
             onClick={handleSignOut}
             title={!expanded ? 'התנתק' : undefined}
-            className={cn(
-              'flex items-center rounded-xl transition-colors hover:bg-white/5 cursor-pointer',
-              expanded ? 'gap-3 px-3 py-2.5' : 'justify-center py-3',
-            )}
+            className="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors hover:bg-white/5 cursor-pointer"
             style={{ color: 'var(--text-primary)' }}
           >
-            <IconLogout />
-            {expanded && <span className="text-sm font-semibold">התנתק</span>}
+            <span className="shrink-0"><IconLogout /></span>
+            <span
+              aria-hidden={!expanded}
+              className="text-sm font-semibold"
+              style={{
+                opacity: expanded ? 1 : 0,
+                transform: expanded ? 'translateX(0)' : 'translateX(6px)',
+                transition: `opacity ${SIDEBAR_TRANSITION}, transform ${SIDEBAR_TRANSITION}`,
+                pointerEvents: expanded ? 'auto' : 'none',
+              }}
+            >
+              התנתק
+            </span>
           </button>
         </nav>
 
         {/* User area + CTA */}
         <div className="shrink-0 px-2 pb-3 pt-2 flex flex-col gap-2" style={{ borderTop: `1px solid ${SEP}` }}>
 
-          {/* Avatar / user info */}
-          {expanded ? (
-            <div className="flex items-center gap-2 px-1 py-1">
-              <div
-                className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
-                style={{ background: 'rgba(0,210,210,0.12)', color: ACCENT }}
-              >
-                {(displayName || '?').charAt(0).toUpperCase()}
-              </div>
+          {/* Avatar / user info — avatar stays put (rail), name + theme toggle fade */}
+          <div className="flex items-center gap-2 px-1 py-1">
+            <div
+              className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
+              style={{ background: 'rgba(0,210,210,0.12)', color: ACCENT }}
+              title={!expanded ? displayName : undefined}
+            >
+              {(displayName || '?').charAt(0).toUpperCase()}
+            </div>
+            <div
+              className="flex-1 flex items-center gap-2 min-w-0"
+              aria-hidden={!expanded}
+              style={{
+                opacity: expanded ? 1 : 0,
+                transform: expanded ? 'translateX(0)' : 'translateX(6px)',
+                transition: `opacity ${SIDEBAR_TRANSITION}, transform ${SIDEBAR_TRANSITION}`,
+                pointerEvents: expanded ? 'auto' : 'none',
+              }}
+            >
               <p className="flex-1 text-xs font-semibold truncate min-w-0" style={{ color: 'var(--text-primary)' }}>
                 {displayName}
               </p>
               <ThemeToggle className="p-1 rounded-md transition-opacity hover:opacity-70 shrink-0" />
             </div>
-          ) : (
-            <div className="flex justify-center py-1">
-              <div
-                className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold"
-                style={{ background: 'rgba(0,210,210,0.12)', color: ACCENT }}
-                title={displayName}
-              >
-                {(displayName || '?').charAt(0).toUpperCase()}
-              </div>
-            </div>
-          )}
+          </div>
 
           {/* New trade */}
           <button
             onClick={() => tryOpenTradeForm()}
             title={!expanded ? 'עסקה חדשה' : undefined}
-            className={cn(
-              'flex items-center justify-center rounded-xl py-2.5 font-semibold text-sm',
-              'transition-opacity hover:opacity-85 active:scale-95',
-              expanded ? 'gap-2 px-3' : '',
-            )}
+            className="flex items-center justify-center gap-2 px-3 rounded-xl py-2.5 font-semibold text-sm transition-opacity hover:opacity-85 active:scale-95"
             style={{ background: ACCENT, color: '#000' }}
           >
-            <IconPlus />
-            {expanded && <span>עסקה חדשה</span>}
+            <span className="shrink-0"><IconPlus /></span>
+            <span
+              aria-hidden={!expanded}
+              style={{
+                opacity: expanded ? 1 : 0,
+                transform: expanded ? 'translateX(0)' : 'translateX(6px)',
+                transition: `opacity ${SIDEBAR_TRANSITION}, transform ${SIDEBAR_TRANSITION}`,
+                pointerEvents: expanded ? 'auto' : 'none',
+              }}
+            >
+              עסקה חדשה
+            </span>
           </button>
 
         </div>
       </aside>
 
-      {/* ── Main content ─────────────────────────────────────────── */}
+      {/* ── Main content ───────────────────────────────────────────
+          No CSS transition on margin-right: the value flips in a single,
+          instant reflow rather than animating across every frame (which is
+          what was driving continuous ResizeObserver churn in recharts).
+          Collapsing flips immediately (already masked by the still-covering
+          sidebar as it slides off); expanding is delayed until the sidebar
+          has fully covered the reclaimed strip, so the snap is invisible. */}
       <div
         className="min-h-screen"
         style={{
           marginRight: contentMr,
-          transition:  `margin-right 250ms ${easing}`,
+          transitionProperty: 'margin-right',
+          transitionDuration: '0ms',
+          transitionDelay: `${contentMrDelay}ms`,
         }}
       >
         <PageTransition>

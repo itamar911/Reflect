@@ -219,6 +219,16 @@ input[type="button"] {
 @media (prefers-reduced-motion: reduce) {
   .page-enter,
   .page-enter > * { animation: none; }
+
+  /* Sidebar toggle (clip-path/transform/opacity/margin) — collapse straight
+     to the end state instead of animating. Covers inline-styled transitions
+     too, since !important beats a plain (non-!important) inline style. */
+  .sidebar-motion,
+  .sidebar-motion * {
+    transition-duration: 0ms !important;
+    transition-delay: 0ms !important;
+    animation-duration: 0ms !important;
+  }
 }
 @keyframes shimmer {
   0%   { background-position: 200% center; }
