@@ -4,35 +4,37 @@ export default function Loading() {
       {/* Desktop skeleton */}
       <div
         className="hidden md:grid"
-        style={{ gridTemplateColumns: '236px 1fr 216px', height: '100dvh', direction: 'ltr' }}
+        style={{ gridTemplateColumns: '200px 300px 1fr', height: '100dvh', direction: 'rtl' }}
       >
-        {/* Left column */}
-        <div style={{ borderLeft: '1px solid var(--color-tg-border)', background: 'var(--color-tg-surface)', padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {/* Sidebar */}
+        <div style={{ background: 'var(--color-tg-surface)', padding: 12, display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div className="h-9 rounded-xl animate-pulse" style={{ background: 'var(--color-tg-surface-2)' }} />
           <div className="h-7 rounded-lg animate-pulse" style={{ background: 'var(--color-tg-surface-2)' }} />
-          {[80, 64, 64, 80, 64].map((h, i) => (
-            <div key={i} className="rounded-xl animate-pulse" style={{ height: h, background: 'var(--color-tg-surface-2)' }} />
-          ))}
-        </div>
-
-        {/* Middle column */}
-        <div style={{ padding: '16px 24px', display: 'flex', flexDirection: 'column', gap: 12, borderLeft: '1px solid var(--color-tg-border)' }}>
-          <div className="h-8 w-56 rounded-xl animate-pulse" style={{ background: 'var(--color-tg-surface)' }} />
-          <div className="flex-1 rounded-xl animate-pulse" style={{ background: 'var(--color-tg-surface)' }} />
-        </div>
-
-        {/* Right column */}
-        <div style={{ background: 'var(--color-tg-surface)', padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div className="h-3 w-12 rounded animate-pulse" style={{ background: 'var(--color-tg-surface-2)' }} />
-          {[1, 2, 3].map(i => (
-            <div key={i} className="h-10 rounded-xl animate-pulse" style={{ background: 'var(--color-tg-surface-2)' }} />
-          ))}
-          <div className="h-3 w-16 rounded animate-pulse mt-4" style={{ background: 'var(--color-tg-surface-2)' }} />
-          <div className="flex flex-wrap gap-2">
-            {[1, 2, 3, 4].map(i => (
-              <div key={i} className="h-7 w-16 rounded-full animate-pulse" style={{ background: 'var(--color-tg-surface-2)' }} />
+          <div className="flex flex-col gap-2">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="h-8 rounded-xl animate-pulse" style={{ background: 'var(--color-tg-surface-2)' }} />
             ))}
           </div>
+          <div className="flex flex-col gap-2">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="h-7 rounded-xl animate-pulse" style={{ background: 'var(--color-tg-surface-2)' }} />
+            ))}
+          </div>
+        </div>
+
+        {/* Page list */}
+        <div style={{ borderRight: '1px solid var(--color-tg-border)', borderLeft: '1px solid var(--color-tg-border)', background: 'var(--color-tg-surface)', padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div className="h-8 rounded-lg animate-pulse" style={{ background: 'var(--color-tg-surface-2)' }} />
+          {[92, 78, 92, 78, 92].map((h, i) => (
+            <div key={i} className="rounded-2xl animate-pulse" style={{ height: h, background: 'var(--color-tg-surface-2)' }} />
+          ))}
+        </div>
+
+        {/* Editor */}
+        <div style={{ padding: '16px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div className="h-8 w-56 rounded-xl animate-pulse" style={{ background: 'var(--color-tg-surface)' }} />
+          <div className="h-6 w-72 rounded-lg animate-pulse" style={{ background: 'var(--color-tg-surface)' }} />
+          <div className="flex-1 rounded-xl animate-pulse" style={{ background: 'var(--color-tg-surface)' }} />
         </div>
       </div>
 
@@ -43,7 +45,7 @@ export default function Loading() {
           <div className="h-7 rounded-lg animate-pulse" style={{ background: 'var(--color-tg-surface-2)' }} />
         </div>
         {[80, 64, 64, 80].map((h, i) => (
-          <div key={i} className="animate-pulse mx-3 mt-2 rounded-xl" style={{ height: h, background: 'var(--color-tg-surface)' }} />
+          <div key={i} className="animate-pulse mx-3 mt-2 rounded-2xl" style={{ height: h, background: 'var(--color-tg-surface)' }} />
         ))}
       </div>
     </>
