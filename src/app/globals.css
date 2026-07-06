@@ -4,10 +4,10 @@
   --font-sans: var(--font-inter), system-ui, sans-serif;
   --font-mono: ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
 
-  --color-tg-bg: #080810;
-  --color-tg-surface: #141420;
-  --color-tg-surface-2: #1c1c2c;
-  --color-tg-border: #32324a;
+  --color-tg-bg: #131417;
+  --color-tg-surface: #1a1c21;
+  --color-tg-surface-2: #22242a;
+  --color-tg-border: #2a2d34;
   --color-tg-border-light: #ffffff18;
 
   --color-tg-primary: #00d2d2;
@@ -29,16 +29,16 @@
 :root {
   color-scheme: dark;
 
-  --color-tg-surface: #141420;
-  --color-tg-surface-2: #1c1c2c;
+  --color-tg-surface: #1a1c21;
+  --color-tg-surface-2: #22242a;
 
   --text-primary:   #f1f5f9;
   --text-secondary: #ffffff;
   --text-muted:     #ffffff;
 
-  --shell-bg:             rgba(9, 9, 14, 0.97);
-  --shell-header-bg:      rgba(9, 9, 14, 0.88);
-  --shell-nav-bg:         rgba(9, 9, 14, 0.92);
+  --shell-bg:             rgba(19, 20, 23, 0.97);
+  --shell-header-bg:      rgba(19, 20, 23, 0.88);
+  --shell-nav-bg:         rgba(19, 20, 23, 0.92);
   --shell-border:         rgba(0, 210, 210, 0.13);
   --shell-divider:        rgba(255, 255, 255, 0.05);
   --shell-hover:          rgba(255, 255, 255, 0.04);
