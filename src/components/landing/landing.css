@@ -3,7 +3,7 @@
    ══════════════════════════════════════════════════════════════ */
 
 .landing {
-  font-family: var(--font-rubik), var(--font-inter), system-ui, sans-serif;
+  /* Font inherits from the root — Rubik is the app-wide font (layout.tsx). */
   background:
     radial-gradient(1000px 600px at 85% -150px, rgba(0, 210, 210, 0.055), transparent 65%),
     radial-gradient(800px 500px at 8% 30%, rgba(8, 145, 178, 0.045), transparent 60%),

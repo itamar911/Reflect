@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import { Rubik } from 'next/font/google';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { LandingNav } from '@/components/landing/LandingNav';
@@ -14,13 +13,6 @@ import { FaqSection } from '@/components/landing/FaqSection';
 import { FinalCtaSection } from '@/components/landing/FinalCtaSection';
 import { LandingFooter } from '@/components/landing/LandingFooter';
 import '@/components/landing/landing.css';
-
-const rubik = Rubik({
-  variable: '--font-rubik',
-  subsets: ['hebrew', 'latin'],
-  weight: ['400', '500', '700', '800'],
-  display: 'swap',
-});
 
 export const metadata: Metadata = {
   title: 'Reflect — יומן המסחר שעוצר אותך לפני הטעות',
@@ -37,7 +29,7 @@ export default async function HomePage() {
   }
 
   return (
-    <div dir="rtl" className={`${rubik.variable} landing`}>
+    <div dir="rtl" className="landing">
       <LandingNav />
       <main>
         <HeroSection />
