@@ -56,7 +56,9 @@ export function HeroSection() {
               id={landingImages.heroScreenshot.id}
               label={landingImages.heroScreenshot.label}
               src={landingImages.heroScreenshot.src}
-              aspect="aspect-video"
+              width={landingImages.heroScreenshot.width}
+              height={landingImages.heroScreenshot.height}
+              fit="contain"
               className="relative shadow-2xl"
             />
           </div>

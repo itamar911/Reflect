@@ -5,8 +5,11 @@ interface ImagePlaceholderProps {
   id?: string;
   label: string;
   src?: string;
+  width?: number;
+  height?: number;
   objectPosition?: string;
   aspect?: string;
+  fit?: 'cover' | 'contain';
   className?: string;
 }
 
@@ -14,10 +17,32 @@ export function ImagePlaceholder({
   id,
   label,
   src,
+  width,
+  height,
   objectPosition,
   aspect = 'aspect-video',
+  fit = 'cover',
   className = '',
 }: ImagePlaceholderProps) {
+  if (src && fit === 'contain' && width && height) {
+    return (
+      <div
+        id={id}
+        className={`relative w-full rounded-2xl border border-tg-border overflow-hidden ${className}`}
+        style={{ boxShadow: '0 10px 30px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.04)' }}
+      >
+        <Image
+          src={src}
+          alt={label}
+          width={width}
+          height={height}
+          sizes="(max-width: 768px) 100vw, 900px"
+          className="block w-full h-auto"
+        />
+      </div>
+    );
+  }
+
   if (src) {
     return (
       <div

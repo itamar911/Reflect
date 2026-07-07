@@ -1,7 +1,7 @@
 import { ShieldCheck, ClipboardList, Gauge, Sparkles, CalendarDays, Bot, type LucideIcon } from 'lucide-react';
 import { ScrollReveal } from './ScrollReveal';
 import { SectionHeading } from './SectionHeading';
-import { ImagePlaceholder } from './ImagePlaceholder';
+import { LightboxImage } from './LightboxImage';
 import { landingImages } from './landingImages';
 
 const FEATURES: { icon: LucideIcon; title: string; body: string }[] = [
@@ -61,7 +61,7 @@ export function FeaturesSection() {
                   </div>
                   <h3 className="text-lg font-bold text-white">{feature.title}</h3>
                   <p className="text-sm text-tg-muted leading-relaxed">{feature.body}</p>
-                  <ImagePlaceholder
+                  <LightboxImage
                     id={placeholder.id}
                     label={placeholder.label}
                     src={placeholder.src}
@@ -79,7 +79,7 @@ export function FeaturesSection() {
           {landingImages.gallery.map((item, i) => (
             <ScrollReveal key={item.id} delay={i * 110}>
               <div className="flex flex-col gap-2.5">
-                <ImagePlaceholder id={item.id} label={item.label} src={item.src} aspect="aspect-[4/3]" />
+                <LightboxImage id={item.id} label={item.label} src={item.src} aspect="aspect-[4/3]" />
                 <span className="text-xs text-tg-muted text-center">{item.label}</span>
               </div>
             </ScrollReveal>
