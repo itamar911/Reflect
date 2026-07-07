@@ -11,8 +11,8 @@ const FOOTER_LINKS = [
 
 export function LandingFooter() {
   return (
-    <footer className="relative border-t border-tg-border py-14 px-4 md:px-6">
-      <div className="max-w-[1100px] mx-auto flex flex-col items-center gap-6 text-center">
+    <footer className="relative border-t border-tg-border py-14 px-4 md:px-8 lg:px-10">
+      <div className="max-w-[1360px] mx-auto flex flex-col items-center gap-6 text-center">
         <Logo />
 
         <p className="text-sm text-tg-muted max-w-md">

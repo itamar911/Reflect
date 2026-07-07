@@ -33,7 +33,7 @@ export function LandingNav() {
         backdropFilter: 'blur(12px)',
       }}
     >
-      <nav className="max-w-[1100px] mx-auto px-4 md:px-6 h-16 flex items-center justify-between">
+      <nav className="max-w-[1360px] mx-auto px-4 md:px-8 lg:px-10 h-16 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-2 shrink-0">
           <Logo />
         </Link>

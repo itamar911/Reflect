@@ -5,9 +5,9 @@ import { landingImages } from './landingImages';
 
 export function SocialProofSection() {
   return (
-    <section className="section-alt cv-auto relative py-24 px-4 md:px-6">
+    <section className="section-alt cv-auto relative py-24 px-4 md:px-8 lg:px-10">
       <div className="section-glow" aria-hidden />
-      <div className="max-w-[1100px] mx-auto relative">
+      <div className="max-w-[1360px] mx-auto relative">
         <SectionHeading>סוחרים אמיתיים. שינוי אמיתי.</SectionHeading>
 
         <ScrollReveal delay={120}>

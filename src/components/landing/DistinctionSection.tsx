@@ -1,15 +1,23 @@
-import { Plus, ShieldCheck, Check, AlertTriangle } from 'lucide-react';
+import { Plus, ShieldCheck, Check, AlertTriangle, Clock, Unlink, type LucideIcon } from 'lucide-react';
 import { ScrollReveal } from './ScrollReveal';
 import { SectionHeading } from './SectionHeading';
 
+const PROOF_CHIPS: { icon: LucideIcon; text: string; color: string }[] = [
+  { icon: Clock, text: 'אחרי — יומן קלאסי: מנתח את אתמול', color: '#94a3b8' },
+  { icon: ShieldCheck, text: 'לפני — Reflect: בודק אותך עכשיו', color: '#00d2d2' },
+  { icon: Unlink, text: 'יחד — הלופ נשבר', color: '#67e8f9' },
+];
+
+const SPARK_POINTS = '0,20 12,14 24,22 36,10 48,16 60,6 72,12 84,4';
+
 export function DistinctionSection() {
   return (
-    <section className="relative py-24 px-4 md:px-6">
+    <section className="relative py-24 px-4 md:px-8 lg:px-10">
       <div className="section-glow" aria-hidden />
-      <div className="max-w-[1100px] mx-auto relative">
+      <div className="max-w-[1360px] mx-auto relative">
         <SectionHeading>יומן מסחר עובד. אבל רק בחצי מהזמן.</SectionHeading>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-10 md:gap-14 items-center">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 lg:gap-16 items-center">
           {/* copy — first child = right column in RTL */}
           <div className="flex flex-col gap-6">
             <ScrollReveal delay={80}>
@@ -40,7 +48,7 @@ export function DistinctionSection() {
             <div className="relative flex items-stretch gap-4" aria-hidden>
               {/* אחרי — muted stats look-back mock */}
               <div
-                className="mini-mock-hover flex-1 rounded-2xl border p-5 flex flex-col gap-4 min-h-[240px]"
+                className="mini-mock-hover flex-1 rounded-2xl border p-5 lg:p-6 flex flex-col gap-3.5 min-h-[280px]"
                 style={{
                   borderColor: 'rgba(148,163,184,0.25)',
                   background: 'rgba(148,163,184,0.05)',
@@ -66,6 +74,26 @@ export function DistinctionSection() {
                     מה קרה אתמול
                   </p>
                 </div>
+                <div className="rounded-lg px-3 py-2" style={{ background: 'rgba(148,163,184,0.08)' }}>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[11px]" style={{ color: '#94a3b8' }}>
+                      סיכום שבועי
+                    </span>
+                    <span className="text-[11px] font-semibold" style={{ color: '#94a3b8' }}>
+                      3 ימים אדומים מתוך 5
+                    </span>
+                  </div>
+                  <svg viewBox="0 0 84 24" className="w-full h-6" preserveAspectRatio="none" aria-hidden>
+                    <polyline
+                      points={SPARK_POINTS}
+                      fill="none"
+                      stroke="rgba(148,163,184,0.55)"
+                      strokeWidth={1.75}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </div>
               </div>
 
               {/* plus connector — glowing turquoise node */}
@@ -77,7 +105,7 @@ export function DistinctionSection() {
 
               {/* לפני — Reflect's blocking moment, alive with turquoise glow */}
               <div
-                className="mini-mock-hover flex-1 rounded-2xl border p-5 flex flex-col gap-3.5 min-h-[240px]"
+                className="mini-mock-hover flex-1 rounded-2xl border p-5 lg:p-6 flex flex-col gap-3 min-h-[280px]"
                 style={{
                   borderColor: 'rgba(0,210,210,0.45)',
                   background: 'rgba(0,210,210,0.06)',
@@ -96,8 +124,16 @@ export function DistinctionSection() {
                     סטופ מוגדר · יחס 1:2.5
                   </span>
                 </div>
+                <div className="flex items-center justify-between rounded-lg px-2.5 py-1.5" style={{ background: 'rgba(255,255,255,0.04)' }}>
+                  <span className="text-white/60" style={{ fontSize: 12 }}>
+                    סטופ
+                  </span>
+                  <span className="text-white/85 font-semibold" style={{ fontSize: 12.5 }}>
+                    29,340
+                  </span>
+                </div>
                 <div
-                  className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 -mx-1"
+                  className="mock-warn-pulse flex items-center gap-2 rounded-lg px-2.5 py-1.5 -mx-1"
                   style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)' }}
                 >
                   <AlertTriangle size={15} className="shrink-0" style={{ color: '#f59e0b' }} />
@@ -108,8 +144,33 @@ export function DistinctionSection() {
           </ScrollReveal>
         </div>
 
+        <div className="distinction-connector mx-auto" aria-hidden />
+
+        <ScrollReveal delay={260}>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-10">
+            {PROOF_CHIPS.map((chip) => {
+              const Icon = chip.icon;
+              return (
+                <div
+                  key={chip.text}
+                  className="proof-chip flex items-center gap-3 rounded-2xl border p-4"
+                  style={{ borderColor: 'rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)' }}
+                >
+                  <span
+                    className="flex items-center justify-center w-9 h-9 rounded-xl shrink-0"
+                    style={{ background: `${chip.color}1f`, border: `1px solid ${chip.color}55` }}
+                  >
+                    <Icon size={18} style={{ color: chip.color }} />
+                  </span>
+                  <span className="text-sm font-semibold text-white/85 leading-snug">{chip.text}</span>
+                </div>
+              );
+            })}
+          </div>
+        </ScrollReveal>
+
         <ScrollReveal delay={320}>
-          <div className="callout-strip max-w-3xl mx-auto mt-14 px-6 py-5">
+          <div className="callout-strip max-w-3xl mx-auto px-6 py-5">
             <p className="text-xl md:text-2xl font-bold text-white leading-relaxed text-center">
               מראה אחורית + בלמים. זה ההבדל בין לדעת מה קרה — לבין למנוע את זה.
             </p>

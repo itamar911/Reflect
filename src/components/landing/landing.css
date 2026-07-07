@@ -103,6 +103,23 @@
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4), 0 0 28px rgba(0, 210, 210, 0.14);
 }
 
+/* ── Pricing: elevated Pro card ─────────────────────────────── */
+
+.pricing-pro-card {
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease;
+}
+
+@media (min-width: 1024px) {
+  .pricing-pro-card {
+    transform: scale(1.03);
+  }
+
+  .pricing-pro-card:hover {
+    transform: scale(1.03) translateY(-4px);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4), 0 0 50px rgba(0, 210, 210, 0.2) !important;
+  }
+}
+
 /* ── Mini-mock panels (Distinction section) ────────────────── */
 
 .mini-mock-hover {
@@ -123,6 +140,35 @@
 @keyframes plus-node-pulse {
   0%, 100% { box-shadow: 0 0 10px rgba(0, 210, 210, 0.25); }
   50%      { box-shadow: 0 0 20px rgba(0, 210, 210, 0.5); }
+}
+
+.mock-warn-pulse {
+  animation: hero-warn-pulse 3s ease-in-out infinite;
+}
+
+.distinction-connector {
+  width: 2px;
+  height: 56px;
+  margin-top: 8px;
+  margin-bottom: 8px;
+  background: linear-gradient(180deg, rgba(0, 210, 210, 0.5), rgba(0, 210, 210, 0.05));
+  background-size: 100% 220%;
+  animation: connector-flow 3.5s ease-in-out infinite;
+}
+
+@keyframes connector-flow {
+  0%, 100% { background-position: 0 0%; }
+  50%      { background-position: 0 100%; }
+}
+
+.proof-chip {
+  transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+}
+
+.proof-chip:hover {
+  transform: translateY(-2px);
+  border-color: rgba(0, 210, 210, 0.4) !important;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.3), 0 0 18px rgba(0, 210, 210, 0.12);
 }
 
 /* ── Section ambience ──────────────────────────────────────── */
@@ -223,6 +269,48 @@
 
 .hero-warn-row {
   animation: hero-row-in 6s ease-in-out infinite, hero-warn-pulse 6s ease-in-out infinite;
+}
+
+/* ── Loop: winding descent curve + glass cards ─────────────── */
+
+.loop-path {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  transition: stroke-dashoffset 2.2s cubic-bezier(0.4, 0, 0.2, 1) 0.2s;
+}
+
+.loop-in .loop-path {
+  stroke-dashoffset: 0;
+}
+
+.loop-glass-card {
+  background: rgba(20, 23, 29, 0.55);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid;
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease;
+}
+
+.loop-glass-card:hover {
+  transform: translateY(-3px) rotate(0deg) !important;
+}
+
+.loop-node-dot {
+  animation: loop-node-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes loop-node-pulse {
+  0%, 100% { transform: translate(-50%, -50%) scale(1); }
+  50%      { transform: translate(-50%, -50%) scale(1.3); }
+}
+
+.loop-node-dot-rail {
+  animation: loop-node-pulse-rail 2.4s ease-in-out infinite;
+}
+
+@keyframes loop-node-pulse-rail {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.3); }
 }
 
 /* ── How-it-works: self-drawing progress line ──────────────── */
@@ -351,6 +439,10 @@
   .landing .hero-check-row {
     opacity: 1;
     transform: none;
+  }
+
+  .landing .loop-path {
+    stroke-dashoffset: 0;
   }
 
   .landing .hero-mock-card {

@@ -3,7 +3,7 @@ import { ScrollReveal } from './ScrollReveal';
 
 export function FinalCtaSection() {
   return (
-    <section className="relative py-32 px-4 md:px-6 overflow-hidden">
+    <section className="relative py-32 px-4 md:px-8 lg:px-10 overflow-hidden">
       <div className="final-cta-band absolute inset-0" aria-hidden />
       <div
         className="absolute inset-x-0 top-0 h-px"

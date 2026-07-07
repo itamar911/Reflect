@@ -2,7 +2,7 @@
 
 import { useEffect, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
-import { X } from 'lucide-react';
+import { X, ZoomIn } from 'lucide-react';
 import { ImagePlaceholder } from './ImagePlaceholder';
 import { openLightbox, closeLightbox, subscribeLightbox, getLightboxSnapshot } from './lightboxStore';
 
@@ -13,9 +13,10 @@ interface LightboxImageProps {
   objectPosition?: string;
   aspect?: string;
   className?: string;
+  topFade?: boolean;
 }
 
-export function LightboxImage({ id, label, src, objectPosition, aspect, className = '' }: LightboxImageProps) {
+export function LightboxImage({ id, label, src, objectPosition, aspect, className = '', topFade = false }: LightboxImageProps) {
   const { src: openSrc, label: openLabel } = useSyncExternalStore(subscribeLightbox, getLightboxSnapshot, getLightboxSnapshot);
   const isOpen = Boolean(src) && openSrc === src;
 
@@ -45,10 +46,30 @@ export function LightboxImage({ id, label, src, objectPosition, aspect, classNam
       <button
         type="button"
         onClick={() => openLightbox(src, label)}
-        className={`block w-full cursor-zoom-in rounded-2xl text-right focus:outline-none focus-visible:ring-2 focus-visible:ring-[#00d2d2] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0b0f14] ${className}`}
+        className={`group relative block w-full cursor-zoom-in rounded-2xl text-right focus:outline-none focus-visible:ring-2 focus-visible:ring-[#00d2d2] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0b0f14] ${className}`}
         aria-label={`הגדל תמונה: ${label}`}
       >
         <ImagePlaceholder id={id} label={label} src={src} objectPosition={objectPosition} aspect={aspect} />
+        {topFade && (
+          <div
+            className="pointer-events-none absolute inset-x-0 top-0 h-10 rounded-t-2xl"
+            style={{ background: 'linear-gradient(to bottom, rgba(20,23,29,0.5), transparent)' }}
+            aria-hidden
+          />
+        )}
+        <div
+          className="pointer-events-none absolute inset-0 rounded-2xl flex items-center justify-center opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+          style={{ background: 'rgba(10,12,16,0.35)' }}
+          aria-hidden
+        >
+          <span
+            className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold text-white"
+            style={{ background: 'rgba(10,12,16,0.7)', border: '1px solid rgba(255,255,255,0.2)' }}
+          >
+            <ZoomIn size={14} />
+            פתח תצוגה
+          </span>
+        </div>
       </button>
 
       {isOpen &&

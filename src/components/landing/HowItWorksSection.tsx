@@ -162,9 +162,9 @@ export function HowItWorksSection() {
   }, []);
 
   return (
-    <section className="section-alt relative py-24 px-4 md:px-6">
+    <section className="section-alt relative py-24 px-4 md:px-8 lg:px-10">
       <div className="section-glow" aria-hidden />
-      <div className="max-w-[1100px] mx-auto relative">
+      <div className="max-w-[1360px] mx-auto relative">
         <SectionHeading>ככה נראה מסחר עם Reflect:</SectionHeading>
 
         <div ref={ref} className={inView ? 'hiw-in' : ''}>

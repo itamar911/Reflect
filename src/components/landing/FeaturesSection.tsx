@@ -25,6 +25,13 @@ const FEATURES: { icon: LucideIcon; title: string; body: string; imageIndex: num
     imageIndex: 2,
   },
   {
+    icon: Sparkles,
+    title: 'תחקיר AI אחרי כל עסקה',
+    body: 'לא "מה הרווחת" אלא "איך התנהגת". ניתוח אישי שמזהה FOMO, עסקאות נקמה ויציאות מוקדמות — ונותן ציון שמחושב, לא מומצא.',
+    imageIndex: 3,
+    large: true,
+  },
+  {
     icon: CalendarDays,
     title: 'יומן חודשי חכם',
     body: 'כל חודש המסחר שלך במבט אחד: ימים ירוקים, ימים אדומים, ונקודות ההפרה שמספרות את הסיפור האמיתי.',
@@ -36,25 +43,18 @@ const FEATURES: { icon: LucideIcon; title: string; body: string; imageIndex: num
     body: 'שאל כל שאלה על המסחר שלך וקבל תשובות שמבוססות על הנתונים שלך, לא על עצות גנריות.',
     imageIndex: 5,
   },
-  {
-    icon: Sparkles,
-    title: 'תחקיר AI אחרי כל עסקה',
-    body: 'לא "מה הרווחת" אלא "איך התנהגת". ניתוח אישי שמזהה FOMO, עסקאות נקמה ויציאות מוקדמות — ונותן ציון שמחושב, לא מומצא.',
-    imageIndex: 3,
-    large: true,
-  },
 ];
 
 export function FeaturesSection() {
   return (
-    <section id="features" className="cv-auto relative py-24 px-4 md:px-6">
+    <section id="features" className="cv-auto relative py-24 px-4 md:px-8 lg:px-10">
       <div className="section-glow" aria-hidden />
-      <div className="max-w-[1100px] mx-auto relative">
+      <div className="max-w-[1360px] mx-auto relative">
         <SectionHeading sub="כל כלי כאן קיים כדי לענות על שאלה אחת — האם אתה סוחר לפי התוכנית שלך?">
           מה מחכה לך בפנים
         </SectionHeading>
 
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-5 mb-16">
+        <div className="grid grid-cols-1 lg:grid-cols-3 lg:[grid-auto-flow:dense] gap-6 mb-16">
           {FEATURES.map((feature, i) => {
             const Icon = feature.icon;
             const placeholder = landingImages.features[feature.imageIndex];
@@ -74,13 +74,14 @@ export function FeaturesSection() {
                     </div>
                     <h3 className="text-lg font-bold text-white">{feature.title}</h3>
                   </div>
-                  <p className="text-sm text-tg-muted leading-relaxed line-clamp-2">{feature.body}</p>
+                  <p className="text-sm text-tg-muted leading-relaxed">{feature.body}</p>
                   <LightboxImage
                     id={placeholder.id}
                     label={placeholder.label}
                     src={placeholder.src}
                     objectPosition={placeholder.objectPosition}
-                    aspect={feature.large ? 'aspect-[21/9]' : 'aspect-[4/3]'}
+                    aspect="aspect-[16/10]"
+                    topFade
                     className="mt-auto"
                   />
                 </div>
