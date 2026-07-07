@@ -55,6 +55,7 @@ export function HeroSection() {
             <ImagePlaceholder
               id={landingImages.heroScreenshot.id}
               label={landingImages.heroScreenshot.label}
+              src={landingImages.heroScreenshot.src}
               aspect="aspect-video"
               className="relative shadow-2xl"
             />

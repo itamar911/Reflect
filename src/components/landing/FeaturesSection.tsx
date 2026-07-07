@@ -61,23 +61,25 @@ export function FeaturesSection() {
                   </div>
                   <h3 className="text-lg font-bold text-white">{feature.title}</h3>
                   <p className="text-sm text-tg-muted leading-relaxed">{feature.body}</p>
-                  <ImagePlaceholder id={placeholder.id} label={placeholder.label} aspect="aspect-[4/3]" className="mt-1" />
+                  <ImagePlaceholder
+                    id={placeholder.id}
+                    label={placeholder.label}
+                    src={placeholder.src}
+                    objectPosition={placeholder.objectPosition}
+                    aspect="aspect-[4/3]"
+                    className="mt-1"
+                  />
                 </div>
               </ScrollReveal>
             );
           })}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 max-w-3xl mx-auto">
           {landingImages.gallery.map((item, i) => (
             <ScrollReveal key={item.id} delay={i * 110}>
               <div className="flex flex-col gap-2.5">
-                <div
-                  className="rounded-2xl overflow-hidden"
-                  style={{ boxShadow: '0 10px 30px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.06)' }}
-                >
-                  <ImagePlaceholder id={item.id} label={item.label} aspect="aspect-[4/3]" />
-                </div>
+                <ImagePlaceholder id={item.id} label={item.label} src={item.src} aspect="aspect-[4/3]" />
                 <span className="text-xs text-tg-muted text-center">{item.label}</span>
               </div>
             </ScrollReveal>

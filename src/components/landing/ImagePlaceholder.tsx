@@ -1,17 +1,40 @@
+import Image from 'next/image';
 import { Image as ImageIcon } from 'lucide-react';
 
 interface ImagePlaceholderProps {
   id?: string;
   label: string;
   src?: string;
+  objectPosition?: string;
   aspect?: string;
   className?: string;
 }
 
-export function ImagePlaceholder({ id, label, src, aspect = 'aspect-video', className = '' }: ImagePlaceholderProps) {
+export function ImagePlaceholder({
+  id,
+  label,
+  src,
+  objectPosition,
+  aspect = 'aspect-video',
+  className = '',
+}: ImagePlaceholderProps) {
   if (src) {
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img id={id} src={src} alt={label} className={`w-full ${aspect} object-cover rounded-2xl ${className}`} />;
+    return (
+      <div
+        id={id}
+        className={`relative w-full ${aspect} rounded-2xl border border-tg-border overflow-hidden ${className}`}
+        style={{ boxShadow: '0 10px 30px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.04)' }}
+      >
+        <Image
+          src={src}
+          alt={label}
+          fill
+          sizes="(max-width: 768px) 100vw, 50vw"
+          className="object-cover"
+          style={objectPosition ? { objectPosition } : undefined}
+        />
+      </div>
+    );
   }
 
   return (
