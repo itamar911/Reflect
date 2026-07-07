@@ -18,6 +18,7 @@ export interface DashTrade {
   closed_at: string | null;
   quantity: number | null;
   pnl_amount: number | null;
+  actual_pnl: number | null;
   pnl_currency: string | null;
   plan_score: number | null;
   followed_plan: boolean | null;
@@ -29,7 +30,7 @@ export interface DashTrade {
 }
 
 export const DASH_TRADE_SELECT =
-  'id,strategy,symbol,entry_price,exit_price,stop_loss,take_profit,rr_ratio,emotional_state,trade_reason,status,exit_reason,submitted_at,closed_at,quantity,pnl_amount,pnl_currency,plan_score,followed_plan,strategy_conditions_checked,moved_sl,exited_early,fomo_entry,revenge_trade';
+  'id,strategy,symbol,entry_price,exit_price,stop_loss,take_profit,rr_ratio,emotional_state,trade_reason,status,exit_reason,submitted_at,closed_at,quantity,pnl_amount,actual_pnl,pnl_currency,plan_score,followed_plan,strategy_conditions_checked,moved_sl,exited_early,fomo_entry,revenge_trade';
 
 interface RawTradeRow {
   id: string;
@@ -48,6 +49,7 @@ interface RawTradeRow {
   closed_at: string | null;
   quantity: number | string | null;
   pnl_amount: number | string | null;
+  actual_pnl: number | string | null;
   pnl_currency: string | null;
   plan_score: number | string | null;
   followed_plan: boolean | null;
@@ -76,6 +78,7 @@ export function mapDashTrade(t: RawTradeRow): DashTrade {
     closed_at:        t.closed_at ?? null,
     quantity:         t.quantity != null ? Number(t.quantity) : null,
     pnl_amount:       t.pnl_amount != null ? Number(t.pnl_amount) : null,
+    actual_pnl:       t.actual_pnl != null ? Number(t.actual_pnl) : null,
     pnl_currency:     t.pnl_currency ?? null,
     plan_score:       t.plan_score != null ? Number(t.plan_score) : null,
     followed_plan:    t.followed_plan ?? null,

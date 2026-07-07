@@ -5,6 +5,7 @@ import DistributionSection, { type DistBar } from '@/components/stats/Distributi
 import ScaleBreakdownSection, { type ScaleBucket } from '@/components/stats/ScaleBreakdownSection';
 import { SURF, ACCENT, GREEN, RED, MUTED, TEXT, fmt, pnlColor, Section, StatCard, BreakdownRow } from '@/components/stats/shared';
 import type { TradePlan } from '@/lib/types';
+import { tradePointsPnl, tradeMoneyPnl, hasMoneyPnl } from '@/lib/pnl';
 import { Zap, TrendingUp, BarChart2, Target, CandlestickChart, Trophy, Flame, Brain, ShieldAlert } from 'lucide-react';
 
 export const metadata = { title: 'סטטיסטיקה — Reflect' };
@@ -13,16 +14,8 @@ export const metadata = { title: 'סטטיסטיקה — Reflect' };
 const HE_DAYS = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function pnlOf(t: TradePlan): number | null {
-  if (t.status !== 'closed' || t.exit_price == null) return null;
-  return Number(t.exit_price) - Number(t.entry_price);
-}
-
-// ₪ P&L — stored on close when the trade has quantity + value-per-unit
-function pnlIls(t: TradePlan): number {
-  if (t.status !== 'closed' || t.exit_price == null) return 0;
-  return t.pnl_amount != null ? Number(t.pnl_amount) : 0;
-}
+const pnlOf = tradePointsPnl;
+const pnlIls = tradeMoneyPnl;
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default async function StatsPage() {
@@ -63,12 +56,16 @@ export default async function StatsPage() {
   const winRate      = closedCount > 0 ? Math.round(wins.length / closedCount * 100) : 0;
   const avgRR        = trades.length > 0
     ? trades.reduce((s, t) => s + Number(t.rr_ratio), 0) / trades.length : 0;
-  const avgWin       = wins.length > 0
-    ? wins.reduce((s, t) => s + pnlIls(t), 0) / wins.length : 0;
-  const avgLoss      = losses.length > 0
-    ? losses.reduce((s, t) => s + pnlIls(t), 0) / losses.length : 0;
-  const profitFactor = Math.abs(avgLoss) > 0
-    ? Math.abs(wins.reduce((s, t) => s + pnlIls(t), 0) / losses.reduce((s, t) => s + pnlIls(t), 1)) : 0;
+  // Money aggregates classify by the money value itself, so a trade's win/loss
+  // bucket can never disagree with the amount being averaged.
+  const moneyClosed  = closed.filter(hasMoneyPnl);
+  const moneyWins    = moneyClosed.filter(t => pnlIls(t) > 0);
+  const moneyLosses  = moneyClosed.filter(t => pnlIls(t) < 0);
+  const grossProfit  = moneyWins.reduce((s, t) => s + pnlIls(t), 0);
+  const grossLoss    = moneyLosses.reduce((s, t) => s + pnlIls(t), 0);
+  const avgWin       = moneyWins.length > 0 ? grossProfit / moneyWins.length : 0;
+  const avgLoss      = moneyLosses.length > 0 ? grossLoss / moneyLosses.length : 0;
+  const profitFactor = Math.abs(grossLoss) > 0 ? grossProfit / Math.abs(grossLoss) : 0;
 
   // ── P&L chart data ──────────────────────────────────────────────────────────
   const dailyMap   = new Map<string, PeriodPoint>();

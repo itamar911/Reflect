@@ -6,6 +6,7 @@ import { formatPnlIls, formatPnlPoints } from '@/lib/utils';
 import { createClient } from '@/lib/supabase/client';
 import { DASH_TRADE_SELECT, mapDashTrade } from '@/lib/dashboard/trades';
 import type { DashTrade } from '@/lib/dashboard/trades';
+import { tradeMoneyPnl, hasMoneyPnl } from '@/lib/pnl';
 import { getPlanLimits, type PlanTier } from '@/lib/plans/config';
 import UpgradeModal from '@/components/plans/UpgradeModal';
 
@@ -126,14 +127,16 @@ function windowAvgScores(wClosed: DashTrade[]): { disc: number; perf: number } {
   const wins   = wClosed.filter(t => (calcPnl(t) ?? 0) > 0);
   const losses = wClosed.filter(t => (calcPnl(t) ?? 0) < 0);
   const wc = wins.length; const lc = losses.length;
-  const gp = wins.reduce((s, t) => s + (t.pnl_amount ?? 0), 0);
-  const gl = losses.reduce((s, t) => s + (t.pnl_amount ?? 0), 0);
-  const aw = wc > 0 ? gp / wc : 0;
-  const al = lc > 0 ? gl / lc : 0;
+  const wMoneyWins   = wClosed.map(tradeMoneyPnl).filter(v => v > 0);
+  const wMoneyLosses = wClosed.map(tradeMoneyPnl).filter(v => v < 0);
+  const gp = wMoneyWins.reduce((s, v) => s + v, 0);
+  const gl = wMoneyLosses.reduce((s, v) => s + v, 0);
+  const aw = wMoneyWins.length > 0 ? gp / wMoneyWins.length : 0;
+  const al = wMoneyLosses.length > 0 ? gl / wMoneyLosses.length : 0;
   const wDayMap: Record<string, number> = {};
   for (const t of wClosed) {
     const k = dayKey(t.closed_at ?? t.submitted_at);
-    wDayMap[k] = (wDayMap[k] ?? 0) + (t.pnl_amount ?? 0);
+    wDayMap[k] = (wDayMap[k] ?? 0) + tradeMoneyPnl(t);
   }
   const wDayVals    = Object.values(wDayMap);
   const wTotalDays  = wDayVals.length;
@@ -174,15 +177,18 @@ function computeAll(trades: DashTrade[], now: Date) {
   const winCount      = winTrades.length;
   const lossCount     = lossTrades.length;
   const neutralTrades = pnls.filter(p => p === 0).length;
-  // Monetary (₪/$) aggregates — driven by pnl_amount, missing values count as 0
-  const grossProfit   = winTrades.reduce((s, t) => s + (t.pnl_amount ?? 0), 0);
-  const grossLoss     = lossTrades.reduce((s, t) => s + (t.pnl_amount ?? 0), 0);
-  const totalPnl      = closed.reduce((s, t) => s + (t.pnl_amount ?? 0), 0);
-  const avgWin        = winCount  > 0 ? grossProfit / winCount  : 0;
-  const avgLoss       = lossCount > 0 ? grossLoss   / lossCount : 0;
+  // Monetary (₪/$) aggregates — driven by actual_pnl (falling back to pnl_amount),
+  // classified by the money value's own sign so buckets match the amounts averaged
+  const moneyWins     = closed.filter(t => tradeMoneyPnl(t) > 0);
+  const moneyLosses   = closed.filter(t => tradeMoneyPnl(t) < 0);
+  const grossProfit   = moneyWins.reduce((s, t) => s + tradeMoneyPnl(t), 0);
+  const grossLoss     = moneyLosses.reduce((s, t) => s + tradeMoneyPnl(t), 0);
+  const totalPnl      = closed.reduce((s, t) => s + tradeMoneyPnl(t), 0);
+  const avgWin        = moneyWins.length   > 0 ? grossProfit / moneyWins.length   : 0;
+  const avgLoss       = moneyLosses.length > 0 ? grossLoss   / moneyLosses.length : 0;
   const totalPnlPoints = pnls.reduce((s, p) => s + p, 0);
 
-  const closedWithAmount = closed.filter(t => t.pnl_amount != null);
+  const closedWithAmount = closed.filter(hasMoneyPnl);
   const hasPnlAmount     = closedWithAmount.length > 0;
   const pnlCurrencies    = Array.from(new Set(closedWithAmount.map(t => t.pnl_currency ?? '₪')));
   const pnlCurrency      = pnlCurrencies.length === 1 ? pnlCurrencies[0] : '₪';
@@ -191,7 +197,7 @@ function computeAll(trades: DashTrade[], now: Date) {
   const periodPnl = closed.reduce((s, t) => {
     const d = new Date(t.closed_at ?? t.submitted_at);
     return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
-      ? s + (t.pnl_amount ?? 0) : s;
+      ? s + tradeMoneyPnl(t) : s;
   }, 0);
 
   const todayStr    = now.toISOString().slice(0, 10);
@@ -204,18 +210,18 @@ function computeAll(trades: DashTrade[], now: Date) {
     const d = new Date(t.closed_at ?? t.submitted_at);
     return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
   });
-  const dailyPnl    = todayTrades.reduce((s, t) => s + (t.pnl_amount ?? 0), 0);
+  const dailyPnl    = todayTrades.reduce((s, t) => s + tradeMoneyPnl(t), 0);
   const dailyCount  = todayTrades.length;
-  const weeklyPnl   = weekTrades.reduce((s, t) => s + (t.pnl_amount ?? 0), 0);
+  const weeklyPnl   = weekTrades.reduce((s, t) => s + tradeMoneyPnl(t), 0);
   const weeklyCount = weekTrades.length;
-  const monthlyPnl  = monthTrades.reduce((s, t) => s + (t.pnl_amount ?? 0), 0);
+  const monthlyPnl  = monthTrades.reduce((s, t) => s + tradeMoneyPnl(t), 0);
   const monthlyCount = monthTrades.length;
   const totalCount  = closed.length;
 
   const dayMap: Record<string, number> = {};
   for (const t of closed) {
     const k = dayKey(t.closed_at ?? t.submitted_at);
-    dayMap[k] = (dayMap[k] ?? 0) + (t.pnl_amount ?? 0);
+    dayMap[k] = (dayMap[k] ?? 0) + tradeMoneyPnl(t);
   }
 
   let profitDays = 0, lossDays = 0, neutralDays = 0;
