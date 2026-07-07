@@ -262,27 +262,8 @@ input[type="button"] {
     animation-duration: 0ms !important;
   }
 
-  .lightbox-overlay,
-  .lightbox-image {
-    animation: none;
-  }
 }
 
-.lightbox-overlay {
-  animation: lightbox-fade-in 180ms ease-out;
-}
-.lightbox-image {
-  animation: lightbox-zoom-in 220ms cubic-bezier(0.16, 1, 0.3, 1);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-}
-@keyframes lightbox-fade-in {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-@keyframes lightbox-zoom-in {
-  from { opacity: 0; transform: scale(0.94); }
-  to   { opacity: 1; transform: scale(1); }
-}
 @keyframes shimmer {
   0%   { background-position: 200% center; }
   100% { background-position: -200% center; }

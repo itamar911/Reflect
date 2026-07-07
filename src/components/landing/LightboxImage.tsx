@@ -1,8 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { ImagePlaceholder } from './ImagePlaceholder';
+import { openLightbox, closeLightbox, subscribeLightbox, getLightboxSnapshot } from './lightboxStore';
 
 interface LightboxImageProps {
   id?: string;
@@ -14,13 +16,14 @@ interface LightboxImageProps {
 }
 
 export function LightboxImage({ id, label, src, objectPosition, aspect, className = '' }: LightboxImageProps) {
-  const [open, setOpen] = useState(false);
+  const { src: openSrc, label: openLabel } = useSyncExternalStore(subscribeLightbox, getLightboxSnapshot, getLightboxSnapshot);
+  const isOpen = Boolean(src) && openSrc === src;
 
   useEffect(() => {
-    if (!open) return;
+    if (!isOpen) return;
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key === 'Escape') closeLightbox();
     };
     document.addEventListener('keydown', onKeyDown);
 
@@ -31,7 +34,7 @@ export function LightboxImage({ id, label, src, objectPosition, aspect, classNam
       document.removeEventListener('keydown', onKeyDown);
       document.body.style.overflow = previousOverflow;
     };
-  }, [open]);
+  }, [isOpen]);
 
   if (!src) {
     return <ImagePlaceholder id={id} label={label} aspect={aspect} className={className} />;
@@ -41,41 +44,46 @@ export function LightboxImage({ id, label, src, objectPosition, aspect, classNam
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => openLightbox(src, label)}
         className={`block w-full cursor-zoom-in rounded-2xl text-right focus:outline-none focus-visible:ring-2 focus-visible:ring-[#00d2d2] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0b0f14] ${className}`}
         aria-label={`הגדל תמונה: ${label}`}
       >
         <ImagePlaceholder id={id} label={label} src={src} objectPosition={objectPosition} aspect={aspect} />
       </button>
 
-      {open && (
-        <div
-          className="lightbox-overlay fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-10"
-          style={{ background: 'rgba(6,10,16,0.86)' }}
-          onClick={() => setOpen(false)}
-          role="dialog"
-          aria-modal="true"
-          aria-label={label}
-        >
-          <button
-            type="button"
-            onClick={() => setOpen(false)}
-            className="absolute top-4 right-4 md:top-6 md:right-6 flex items-center justify-center w-10 h-10 rounded-full text-white/80 transition-colors hover:text-white"
-            style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)' }}
-            aria-label="סגור"
+      {isOpen &&
+        createPortal(
+          <div
+            className="lightbox-overlay fixed inset-0 z-[9999] flex items-center justify-center p-4 md:p-10"
+            style={{ background: 'rgba(10,12,16,0.92)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)' }}
+            onClick={() => closeLightbox()}
+            role="dialog"
+            aria-modal="true"
+            aria-label={openLabel}
           >
-            <X size={20} />
-          </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                closeLightbox();
+              }}
+              className="absolute top-4 right-4 md:top-6 md:right-6 flex items-center justify-center w-10 h-10 rounded-full text-white/80 transition-colors hover:text-white"
+              style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)' }}
+              aria-label="סגור"
+            >
+              <X size={20} />
+            </button>
 
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={src}
-            alt={label}
-            onClick={(e) => e.stopPropagation()}
-            className="lightbox-image max-h-[88vh] max-w-[92vw] w-auto h-auto rounded-xl object-contain"
-          />
-        </div>
-      )}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={openSrc ?? src}
+              alt={openLabel}
+              onClick={(e) => e.stopPropagation()}
+              className="lightbox-image max-h-[85vh] max-w-[90vw] w-auto h-auto rounded-xl object-contain"
+            />
+          </div>,
+          document.body
+        )}
     </>
   );
 }

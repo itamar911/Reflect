@@ -5,7 +5,7 @@ import { landingImages } from './landingImages';
 
 export function SocialProofSection() {
   return (
-    <section className="cv-auto relative py-24 px-4 md:px-6">
+    <section className="section-alt cv-auto relative py-24 px-4 md:px-6">
       <div className="section-glow" aria-hidden />
       <div className="max-w-[1100px] mx-auto relative">
         <SectionHeading>סוחרים אמיתיים. שינוי אמיתי.</SectionHeading>

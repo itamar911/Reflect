@@ -35,7 +35,7 @@ export function FaqSection() {
   const [openIndex, setOpenIndex] = useState<number | null>(null);
 
   return (
-    <section id="faq" className="cv-auto relative py-24 px-4 md:px-6">
+    <section id="faq" className="section-alt cv-auto relative py-24 px-4 md:px-6">
       <div className="section-glow" aria-hidden />
       <div className="max-w-[800px] mx-auto relative">
         <SectionHeading>שאלות נפוצות</SectionHeading>

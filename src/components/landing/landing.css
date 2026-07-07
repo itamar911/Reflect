@@ -4,11 +4,18 @@
 
 .landing {
   /* Font inherits from the root — Rubik is the app-wide font (layout.tsx). */
+  --landing-bg-base: #1e222a;
+  --landing-bg-alt: #242832;
   background:
-    radial-gradient(1000px 600px at 85% -150px, rgba(0, 210, 210, 0.055), transparent 65%),
-    radial-gradient(800px 500px at 8% 30%, rgba(8, 145, 178, 0.045), transparent 60%),
-    radial-gradient(900px 500px at 92% 75%, rgba(0, 210, 210, 0.035), transparent 60%),
-    var(--color-tg-bg);
+    radial-gradient(1000px 600px at 85% -150px, rgba(0, 210, 210, 0.075), transparent 65%),
+    radial-gradient(800px 500px at 8% 30%, rgba(8, 145, 178, 0.06), transparent 60%),
+    radial-gradient(900px 500px at 92% 75%, rgba(0, 210, 210, 0.05), transparent 60%),
+    var(--landing-bg-base);
+}
+
+/* Alternating section tone — visually separates sections without hard edges */
+.section-alt {
+  background-color: var(--landing-bg-alt);
 }
 
 .landing h1,
@@ -96,13 +103,35 @@
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4), 0 0 28px rgba(0, 210, 210, 0.14);
 }
 
+/* ── Mini-mock panels (Distinction section) ────────────────── */
+
+.mini-mock-hover {
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease;
+}
+
+.mini-mock-hover:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.4);
+}
+
+.plus-node-glow {
+  background: rgba(0, 210, 210, 0.12);
+  border: 1px solid rgba(0, 210, 210, 0.35);
+  animation: plus-node-pulse 2.6s ease-in-out infinite;
+}
+
+@keyframes plus-node-pulse {
+  0%, 100% { box-shadow: 0 0 10px rgba(0, 210, 210, 0.25); }
+  50%      { box-shadow: 0 0 20px rgba(0, 210, 210, 0.5); }
+}
+
 /* ── Section ambience ──────────────────────────────────────── */
 
 .section-glow {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: radial-gradient(640px 320px at 50% 0%, rgba(0, 210, 210, 0.05), transparent 70%);
+  background: radial-gradient(640px 320px at 50% 0%, rgba(0, 210, 210, 0.065), transparent 70%);
 }
 
 /* ── Hero: floating orbs + dot grid ────────────────────────── */
@@ -119,7 +148,7 @@
   height: 420px;
   top: -120px;
   inset-inline-start: -90px;
-  background: rgba(0, 210, 210, 0.1);
+  background: rgba(0, 210, 210, 0.13);
   animation: orb-drift 22s ease-in-out infinite alternate;
 }
 
@@ -128,7 +157,7 @@
   height: 380px;
   bottom: -60px;
   inset-inline-end: -110px;
-  background: rgba(8, 145, 178, 0.1);
+  background: rgba(8, 145, 178, 0.13);
   animation: orb-drift 27s ease-in-out infinite alternate-reverse;
 }
 
@@ -141,54 +170,59 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background-image: radial-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+  background-image: radial-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px);
   background-size: 30px 30px;
   -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 35%, black 30%, transparent 75%);
   mask-image: radial-gradient(ellipse 70% 60% at 50% 35%, black 30%, transparent 75%);
 }
 
-/* ── The Loop: circular diagram ────────────────────────────── */
+/* ── Hero mock: tilted trade-plan card ─────────────────────── */
 
-.loop-node {
-  opacity: 0.18;
-  transform: scale(0.92);
-  transition: opacity 0.6s ease-out, transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+.hero-mock-wrap {
+  perspective: 1400px;
 }
 
-.loop-in .loop-node {
-  opacity: 1;
-  transform: scale(1);
+.hero-mock-card {
+  transform: rotateY(-4deg) rotateX(1deg);
+  transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.loop-core {
-  animation: core-pulse 3.2s ease-in-out infinite;
+.hero-mock-wrap:hover .hero-mock-card {
+  transform: rotateY(0deg) rotateX(0deg);
 }
 
-@keyframes core-pulse {
-  0%, 100% { box-shadow: 0 0 40px rgba(239, 68, 68, 0.22), 0 0 90px rgba(245, 158, 11, 0.1); }
-  50%      { box-shadow: 0 0 64px rgba(239, 68, 68, 0.38), 0 0 120px rgba(245, 158, 11, 0.18); }
+@media (max-width: 767px) {
+  .hero-mock-card {
+    transform: none;
+  }
 }
 
-.loop-core-icon {
-  animation: loop-spin 14s linear infinite;
+@keyframes hero-float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-8px); }
 }
 
-@keyframes loop-spin {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(360deg); }
+.hero-float-1 { animation: hero-float 5s ease-in-out infinite; }
+.hero-float-2 { animation: hero-float 6.5s ease-in-out infinite 1.2s; }
+
+@keyframes hero-row-in {
+  0%, 4%    { opacity: 0; transform: translateY(6px); }
+  10%, 90%  { opacity: 1; transform: translateY(0); }
+  96%, 100% { opacity: 0; transform: translateY(6px); }
 }
 
-.loop-arc-back {
-  opacity: 0.4;
+.hero-check-row {
+  opacity: 0;
+  animation: hero-row-in 6s ease-in-out infinite;
 }
 
-.loop-in .loop-arc-back {
-  animation: arc-pulse 2.2s ease-in-out infinite;
+@keyframes hero-warn-pulse {
+  0%, 8%, 100% { box-shadow: 0 0 0 rgba(245, 158, 11, 0); }
+  10%, 14%     { box-shadow: 0 0 16px rgba(245, 158, 11, 0.45); }
 }
 
-@keyframes arc-pulse {
-  0%, 100% { opacity: 0.5; }
-  50%      { opacity: 1; }
+.hero-warn-row {
+  animation: hero-row-in 6s ease-in-out infinite, hero-warn-pulse 6s ease-in-out infinite;
 }
 
 /* ── How-it-works: self-drawing progress line ──────────────── */
@@ -203,9 +237,52 @@
   stroke-dashoffset: 0;
 }
 
-.step-badge {
-  background: linear-gradient(135deg, #00d2d2, #0891b2);
-  box-shadow: 0 0 22px rgba(0, 210, 210, 0.35);
+.step-badge-ring {
+  background: conic-gradient(from 180deg, #00d2d2, #67e8f9, #0891b2, #00d2d2);
+  animation: step-badge-glow 3s ease-in-out infinite;
+}
+
+@keyframes step-badge-glow {
+  0%, 100% { box-shadow: 0 0 18px rgba(0, 210, 210, 0.3); }
+  50%      { box-shadow: 0 0 30px rgba(0, 210, 210, 0.55); }
+}
+
+.step-card-accent {
+  border-top: 2px solid rgba(0, 210, 210, 0.5);
+}
+
+@keyframes rule-slider-move {
+  0%, 100% { left: 62%; }
+  50%      { left: 22%; }
+}
+
+@keyframes rule-slider-move-alt {
+  0%, 100% { left: 28%; }
+  50%      { left: 68%; }
+}
+
+.rule-slider-thumb { animation: rule-slider-move 4s ease-in-out infinite; }
+.rule-slider-thumb-alt { animation: rule-slider-move-alt 4.6s ease-in-out infinite; }
+
+/* ── Lightbox overlay (portal to document.body) ────────────── */
+
+.lightbox-overlay {
+  animation: lightbox-fade-in 180ms ease-out;
+}
+
+.lightbox-image {
+  animation: lightbox-zoom-in 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+@keyframes lightbox-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes lightbox-zoom-in {
+  from { opacity: 0; transform: scale(0.94); }
+  to   { opacity: 1; transform: scale(1); }
 }
 
 /* ── Callout strip (anchored bold lines) ───────────────────── */
@@ -271,12 +348,22 @@
     transition-duration: 0.01ms !important;
   }
 
-  .landing .loop-node {
+  .landing .hero-check-row {
     opacity: 1;
+    transform: none;
+  }
+
+  .landing .hero-mock-card {
     transform: none;
   }
 
   .landing .hiw-line path {
     stroke-dashoffset: 0;
+  }
+
+  /* The lightbox portals to document.body, outside .landing — needs its own override. */
+  .lightbox-overlay,
+  .lightbox-image {
+    animation: none !important;
   }
 }

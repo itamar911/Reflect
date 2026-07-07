@@ -1,8 +1,7 @@
 import Link from 'next/link';
 import { MonitorSmartphone, Languages, Users } from 'lucide-react';
 import { ScrollReveal } from './ScrollReveal';
-import { ImagePlaceholder } from './ImagePlaceholder';
-import { landingImages } from './landingImages';
+import { HeroMock } from './HeroMock';
 
 const TRUST_ITEMS = [
   { icon: MonitorSmartphone, text: 'עובד לצד כל פלטפורמת מסחר' },
@@ -46,22 +45,7 @@ export function HeroSection() {
         </ScrollReveal>
 
         <ScrollReveal delay={360} className="w-full mt-10">
-          <div className="relative max-w-4xl mx-auto">
-            <div
-              className="absolute -inset-6 rounded-3xl pointer-events-none"
-              style={{ background: 'radial-gradient(60% 60% at 50% 50%, rgba(0,210,210,0.1), transparent 75%)' }}
-              aria-hidden
-            />
-            <ImagePlaceholder
-              id={landingImages.heroScreenshot.id}
-              label={landingImages.heroScreenshot.label}
-              src={landingImages.heroScreenshot.src}
-              width={landingImages.heroScreenshot.width}
-              height={landingImages.heroScreenshot.height}
-              fit="contain"
-              className="relative shadow-2xl"
-            />
-          </div>
+          <HeroMock />
         </ScrollReveal>
 
         <ScrollReveal delay={420}>

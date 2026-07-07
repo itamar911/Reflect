@@ -2,8 +2,6 @@ export interface PlaceholderImage {
   id: string;
   label: string;
   src?: string;
-  width?: number;
-  height?: number;
   objectPosition?: string;
 }
 
@@ -16,14 +14,6 @@ export interface PlaceholderVideo {
 }
 
 export const landingImages = {
-  heroScreenshot: {
-    id: 'hero-screenshot',
-    label: 'צילום מסך: רגע האזהרה בטופס פתיחת העסקה',
-    src: '/landing/hero.png',
-    width: 1908,
-    height: 947,
-  } satisfies PlaceholderImage,
-
   features: [
     {
       id: 'feature-1',
