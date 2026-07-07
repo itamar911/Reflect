@@ -246,13 +246,16 @@ export default function AppShell({
                   color:        'rgba(0,210,210,0.55)',
                 }
               : {
-                  // Closed: fixed corner affordance — the drawer is fully
-                  // off-canvas, so there's no edge to attach to.
-                  right:        16,
-                  top:          16,
+                  // Closed: the drawer is fully off-canvas, so there's no
+                  // panel edge to attach to — sit flush on the screen edge
+                  // instead, vertically centered like the open handle is.
+                  right:        0,
+                  top:          '50%',
+                  transform:    'translateY(-50%)',
                   background:   NAV_BG,
                   border:       `1px solid ${SEP}`,
-                  borderRadius: 8,
+                  borderRight:  'none',
+                  borderRadius: '6px 0 0 6px',
                   color:        'rgba(0,210,210,0.55)',
                 }
             : {
