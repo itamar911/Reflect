@@ -59,10 +59,7 @@ export function MarketingPricing() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl mx-auto w-full">
         {/* Basic */}
-        <div
-          className="rounded-2xl border-2 p-6 flex flex-col"
-          style={{ borderColor: 'var(--color-tg-border)', background: 'var(--color-tg-surface)' }}
-        >
+        <div className="glass-card card-hover rounded-2xl p-6 flex flex-col">
           <div className="mb-4">
             <h3 className="text-lg font-bold text-tg-text mb-1">Basic</h3>
             <div className="flex items-baseline gap-1">
@@ -76,21 +73,14 @@ export function MarketingPricing() {
 
           <Link
             href="/signup"
-            className="shimmer-btn mt-6 w-full py-3 rounded-xl text-sm font-semibold text-black text-center transition-all duration-150 active:scale-95"
+            className="landing-cta mt-6 w-full py-3 rounded-xl text-sm font-semibold text-black text-center"
           >
             התחל ניסיון חינם 5 ימים
           </Link>
         </div>
 
         {/* Pro */}
-        <div
-          className="rounded-2xl border-2 p-6 flex flex-col relative"
-          style={{
-            borderColor: '#00d2d2',
-            background: 'var(--color-tg-surface)',
-            boxShadow: '0 0 18px 3px rgba(0,210,210,0.22)',
-          }}
-        >
+        <div className="glass-card card-hover rounded-2xl p-6 flex flex-col relative">
           <div className="absolute -top-3 left-1/2 -translate-x-1/2">
             <span
               className="px-3 py-0.5 rounded-full text-xs font-bold whitespace-nowrap"
@@ -113,7 +103,7 @@ export function MarketingPricing() {
 
           <Link
             href="/signup"
-            className="shimmer-btn mt-6 w-full py-3 rounded-xl text-sm font-semibold text-black text-center transition-all duration-150 active:scale-95"
+            className="landing-cta mt-6 w-full py-3 rounded-xl text-sm font-semibold text-black text-center"
           >
             התחל ניסיון חינם 5 ימים
           </Link>

@@ -55,7 +55,7 @@ export function LandingNav() {
           </Link>
           <Link
             href="/signup"
-            className="shimmer-btn px-4 py-2 rounded-xl text-sm font-semibold text-black transition-all duration-150 active:scale-95"
+            className="landing-cta px-4 py-2 rounded-xl text-sm font-semibold text-black"
           >
             התחל ניסיון חינם
           </Link>
@@ -97,7 +97,7 @@ export function LandingNav() {
             <Link
               href="/signup"
               onClick={() => setOpen(false)}
-              className="shimmer-btn px-4 py-2.5 rounded-xl text-sm font-semibold text-black text-center active:scale-95"
+              className="landing-cta px-4 py-2.5 rounded-xl text-sm font-semibold text-black text-center"
             >
               התחל ניסיון חינם
             </Link>

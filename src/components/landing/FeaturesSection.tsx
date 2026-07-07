@@ -1,5 +1,6 @@
 import { ShieldCheck, ClipboardList, Gauge, Sparkles, CalendarDays, Bot, type LucideIcon } from 'lucide-react';
 import { ScrollReveal } from './ScrollReveal';
+import { SectionHeading } from './SectionHeading';
 import { ImagePlaceholder } from './ImagePlaceholder';
 import { landingImages } from './landingImages';
 
@@ -38,30 +39,23 @@ const FEATURES: { icon: LucideIcon; title: string; body: string }[] = [
 
 export function FeaturesSection() {
   return (
-    <section id="features" className="relative py-20 px-4 md:px-6">
-      <div className="max-w-[1100px] mx-auto">
-        <ScrollReveal>
-          <h2 className="text-2xl md:text-4xl font-bold text-white text-center mb-3">מה מחכה לך בפנים</h2>
-        </ScrollReveal>
-        <ScrollReveal delay={60}>
-          <p className="text-base text-tg-muted text-center max-w-xl mx-auto mb-14">
-            כל כלי כאן קיים כדי לענות על שאלה אחת — האם אתה סוחר לפי התוכנית שלך?
-          </p>
-        </ScrollReveal>
+    <section id="features" className="cv-auto relative py-24 px-4 md:px-6">
+      <div className="section-glow" aria-hidden />
+      <div className="max-w-[1100px] mx-auto relative">
+        <SectionHeading sub="כל כלי כאן קיים כדי לענות על שאלה אחת — האם אתה סוחר לפי התוכנית שלך?">
+          מה מחכה לך בפנים
+        </SectionHeading>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-16">
           {FEATURES.map((feature, i) => {
             const Icon = feature.icon;
             const placeholder = landingImages.features[i];
             return (
-              <ScrollReveal key={feature.title} delay={(i % 3) * 100}>
-                <div
-                  className="h-full rounded-2xl border border-tg-border p-6 flex flex-col gap-4"
-                  style={{ background: 'var(--color-tg-surface)' }}
-                >
+              <ScrollReveal key={feature.title} delay={(i % 3) * 120}>
+                <div className="glass-card card-hover h-full rounded-2xl p-6 flex flex-col gap-4">
                   <div
                     className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0"
-                    style={{ background: 'rgba(0,210,210,0.12)' }}
+                    style={{ background: 'rgba(0,210,210,0.12)', border: '1px solid rgba(0,210,210,0.2)' }}
                   >
                     <Icon size={22} style={{ color: '#00d2d2' }} />
                   </div>
@@ -76,9 +70,14 @@ export function FeaturesSection() {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
           {landingImages.gallery.map((item, i) => (
-            <ScrollReveal key={item.id} delay={i * 90}>
-              <div className="flex flex-col gap-2">
-                <ImagePlaceholder id={item.id} label={item.label} aspect="aspect-[4/3]" />
+            <ScrollReveal key={item.id} delay={i * 110}>
+              <div className="flex flex-col gap-2.5">
+                <div
+                  className="rounded-2xl overflow-hidden"
+                  style={{ boxShadow: '0 10px 30px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.06)' }}
+                >
+                  <ImagePlaceholder id={item.id} label={item.label} aspect="aspect-[4/3]" />
+                </div>
                 <span className="text-xs text-tg-muted text-center">{item.label}</span>
               </div>
             </ScrollReveal>

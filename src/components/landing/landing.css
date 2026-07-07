@@ -1,0 +1,282 @@
+/* ══════════════════════════════════════════════════════════════
+   Landing-page-only styles — everything scoped under .landing
+   ══════════════════════════════════════════════════════════════ */
+
+.landing {
+  font-family: var(--font-rubik), var(--font-inter), system-ui, sans-serif;
+  background:
+    radial-gradient(1000px 600px at 85% -150px, rgba(0, 210, 210, 0.055), transparent 65%),
+    radial-gradient(800px 500px at 8% 30%, rgba(8, 145, 178, 0.045), transparent 60%),
+    radial-gradient(900px 500px at 92% 75%, rgba(0, 210, 210, 0.035), transparent 60%),
+    var(--color-tg-bg);
+}
+
+.landing h1,
+.landing h2,
+.landing h3 {
+  letter-spacing: -0.02em;
+}
+
+.landing p {
+  line-height: 1.7;
+}
+
+/* Defer rendering of below-the-fold sections */
+.cv-auto {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 700px;
+}
+
+/* ── Gradient text ─────────────────────────────────────────── */
+
+.text-gradient-cyan {
+  background: linear-gradient(100deg, #00d2d2 20%, #67e8f9 80%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ── Signature animated H2 underline ───────────────────────── */
+
+.section-underline {
+  display: inline-block;
+  width: 72px;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #00d2d2, #67e8f9, #0891b2, #00d2d2);
+  background-size: 300% 100%;
+  animation: underline-slide 4s linear infinite;
+}
+
+@keyframes underline-slide {
+  0%   { background-position: 0% 50%; }
+  100% { background-position: 300% 50%; }
+}
+
+/* ── Primary CTA: gradient fill + glow + hover lift ────────── */
+
+.landing-cta {
+  background: linear-gradient(120deg, #00d2d2 0%, #22d3ee 50%, #0891b2 100%);
+  background-size: 170% 100%;
+  background-position: 0% 0;
+  box-shadow: 0 6px 24px rgba(0, 210, 210, 0.3), 0 2px 8px rgba(0, 0, 0, 0.35);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background-position 0.35s ease;
+  will-change: transform;
+}
+
+.landing-cta:hover {
+  transform: translateY(-2px);
+  background-position: 90% 0;
+  box-shadow: 0 10px 34px rgba(0, 210, 210, 0.42), 0 3px 10px rgba(0, 0, 0, 0.4);
+}
+
+.landing-cta:active {
+  transform: translateY(0) scale(0.97);
+}
+
+/* ── Glass cards + hover treatments ────────────────────────── */
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.035);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.card-hover:hover {
+  transform: translateY(-4px);
+  border-color: rgba(0, 210, 210, 0.45);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35), 0 0 24px rgba(0, 210, 210, 0.12);
+}
+
+.tilt-hover:hover {
+  transform: perspective(900px) rotateX(2.5deg) translateY(-4px);
+  border-color: rgba(0, 210, 210, 0.45);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4), 0 0 28px rgba(0, 210, 210, 0.14);
+}
+
+/* ── Section ambience ──────────────────────────────────────── */
+
+.section-glow {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(640px 320px at 50% 0%, rgba(0, 210, 210, 0.05), transparent 70%);
+}
+
+/* ── Hero: floating orbs + dot grid ────────────────────────── */
+
+.hero-orb {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(90px);
+  pointer-events: none;
+}
+
+.hero-orb-1 {
+  width: 420px;
+  height: 420px;
+  top: -120px;
+  inset-inline-start: -90px;
+  background: rgba(0, 210, 210, 0.1);
+  animation: orb-drift 22s ease-in-out infinite alternate;
+}
+
+.hero-orb-2 {
+  width: 380px;
+  height: 380px;
+  bottom: -60px;
+  inset-inline-end: -110px;
+  background: rgba(8, 145, 178, 0.1);
+  animation: orb-drift 27s ease-in-out infinite alternate-reverse;
+}
+
+@keyframes orb-drift {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to   { transform: translate3d(60px, 40px, 0) scale(1.15); }
+}
+
+.hero-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+  background-size: 30px 30px;
+  -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 35%, black 30%, transparent 75%);
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 35%, black 30%, transparent 75%);
+}
+
+/* ── The Loop: circular diagram ────────────────────────────── */
+
+.loop-node {
+  opacity: 0.18;
+  transform: scale(0.92);
+  transition: opacity 0.6s ease-out, transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.loop-in .loop-node {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.loop-core {
+  animation: core-pulse 3.2s ease-in-out infinite;
+}
+
+@keyframes core-pulse {
+  0%, 100% { box-shadow: 0 0 40px rgba(239, 68, 68, 0.22), 0 0 90px rgba(245, 158, 11, 0.1); }
+  50%      { box-shadow: 0 0 64px rgba(239, 68, 68, 0.38), 0 0 120px rgba(245, 158, 11, 0.18); }
+}
+
+.loop-core-icon {
+  animation: loop-spin 14s linear infinite;
+}
+
+@keyframes loop-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.loop-arc-back {
+  opacity: 0.4;
+}
+
+.loop-in .loop-arc-back {
+  animation: arc-pulse 2.2s ease-in-out infinite;
+}
+
+@keyframes arc-pulse {
+  0%, 100% { opacity: 0.5; }
+  50%      { opacity: 1; }
+}
+
+/* ── How-it-works: self-drawing progress line ──────────────── */
+
+.hiw-line path {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  transition: stroke-dashoffset 1.6s cubic-bezier(0.4, 0, 0.2, 1) 0.25s;
+}
+
+.hiw-in .hiw-line path {
+  stroke-dashoffset: 0;
+}
+
+.step-badge {
+  background: linear-gradient(135deg, #00d2d2, #0891b2);
+  box-shadow: 0 0 22px rgba(0, 210, 210, 0.35);
+}
+
+/* ── Callout strip (anchored bold lines) ───────────────────── */
+
+.callout-strip {
+  border-inline-start: 3px solid #00d2d2;
+  background: linear-gradient(90deg, rgba(0, 210, 210, 0.08), rgba(0, 210, 210, 0.02));
+  border-radius: 14px;
+}
+
+/* ── FAQ plus/minus toggle ─────────────────────────────────── */
+
+.faq-toggle {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.faq-toggle::before,
+.faq-toggle::after {
+  content: '';
+  position: absolute;
+  background: #00d2d2;
+  border-radius: 2px;
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.faq-toggle::before {
+  top: 8px;
+  left: 0;
+  width: 18px;
+  height: 2px;
+}
+
+.faq-toggle::after {
+  left: 8px;
+  top: 0;
+  width: 2px;
+  height: 18px;
+}
+
+.faq-toggle.open::after {
+  transform: rotate(90deg);
+}
+
+/* ── Final CTA band ────────────────────────────────────────── */
+
+.final-cta-band {
+  background:
+    radial-gradient(720px 360px at 50% 50%, rgba(0, 210, 210, 0.13), transparent 70%),
+    linear-gradient(180deg, transparent 0%, rgba(8, 145, 178, 0.07) 35%, rgba(0, 210, 210, 0.05) 65%, transparent 100%);
+}
+
+/* ── Reduced motion: kill all landing animation ────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .landing *,
+  .landing *::before,
+  .landing *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .landing .loop-node {
+    opacity: 1;
+    transform: none;
+  }
+
+  .landing .hiw-line path {
+    stroke-dashoffset: 0;
+  }
+}

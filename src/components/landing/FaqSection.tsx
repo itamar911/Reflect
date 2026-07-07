@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { ChevronDown } from 'lucide-react';
 import { ScrollReveal } from './ScrollReveal';
+import { SectionHeading } from './SectionHeading';
 
 const FAQ_ITEMS = [
   {
@@ -35,20 +35,19 @@ export function FaqSection() {
   const [openIndex, setOpenIndex] = useState<number | null>(null);
 
   return (
-    <section id="faq" className="relative py-20 px-4 md:px-6">
-      <div className="max-w-[800px] mx-auto">
-        <ScrollReveal>
-          <h2 className="text-2xl md:text-4xl font-bold text-white text-center mb-12">שאלות נפוצות</h2>
-        </ScrollReveal>
+    <section id="faq" className="cv-auto relative py-24 px-4 md:px-6">
+      <div className="section-glow" aria-hidden />
+      <div className="max-w-[800px] mx-auto relative">
+        <SectionHeading>שאלות נפוצות</SectionHeading>
 
         <div className="flex flex-col gap-3">
           {FAQ_ITEMS.map((item, i) => {
             const isOpen = openIndex === i;
             return (
-              <ScrollReveal key={item.q} delay={i * 60}>
+              <ScrollReveal key={item.q} delay={i * 70}>
                 <div
-                  className="rounded-2xl border border-tg-border overflow-hidden"
-                  style={{ background: 'var(--color-tg-surface)' }}
+                  className="glass-card rounded-2xl overflow-hidden"
+                  style={isOpen ? { borderColor: 'rgba(0,210,210,0.35)' } : undefined}
                 >
                   <button
                     type="button"
@@ -57,18 +56,22 @@ export function FaqSection() {
                     aria-expanded={isOpen}
                   >
                     <span className="text-base font-bold text-white">{item.q}</span>
-                    <ChevronDown
-                      size={20}
-                      className="shrink-0 transition-transform duration-300"
-                      style={{ color: '#00d2d2', transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}
-                    />
+                    <span className={`faq-toggle ${isOpen ? 'open' : ''}`} aria-hidden />
                   </button>
                   <div
-                    className="grid transition-all duration-300 ease-out"
-                    style={{ gridTemplateRows: isOpen ? '1fr' : '0fr' }}
+                    className="grid transition-all duration-[400ms]"
+                    style={{
+                      gridTemplateRows: isOpen ? '1fr' : '0fr',
+                      transitionTimingFunction: 'cubic-bezier(0.16, 1, 0.3, 1)',
+                    }}
                   >
                     <div className="overflow-hidden">
-                      <p className="text-sm text-tg-muted leading-relaxed px-5 pb-5">{item.a}</p>
+                      <p
+                        className="text-sm text-tg-muted leading-relaxed px-5 pb-5 transition-opacity duration-300"
+                        style={{ opacity: isOpen ? 1 : 0 }}
+                      >
+                        {item.a}
+                      </p>
                     </div>
                   </div>
                 </div>
