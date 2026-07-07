@@ -12,7 +12,7 @@ import { ThemeToggle } from '@/components/theme/ThemeToggle';
 import { Logo } from '@/components/ui/Logo';
 import { PageTransition } from '@/components/layout/PageTransition';
 import { getPlanLimits, type PlanTier } from '@/lib/plans/config';
-import { SIDEBAR_DURATION, SIDEBAR_EASING, SIDEBAR_TRANSITION } from '@/lib/motion';
+import { SIDEBAR_TRANSITION } from '@/lib/motion';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const ACCENT = '#00d2d2';
@@ -67,28 +67,60 @@ const SECONDARY_NAV: NavItem[] = [
 ];
 
 // ── NavLink ───────────────────────────────────────────────────────────────────
-// Layout never changes shape between expanded/collapsed — the icon always sits
-// in the first ~64px (right edge, RTL) so the sidebar's clip-path can reveal
-// just that strip when collapsed without reflowing this row's internals.
+// The icon sits in a fixed, absolutely-positioned slot flush with the row's
+// right edge, sized to exactly match the sidebar's revealed rail (W_SHUT wide)
+// — so its position is identical in both states and never depends on the
+// label's width. The active-state highlight is two separate pills (full-row
+// vs rail-only) that cross-fade via opacity instead of one pill trying to be
+// both sizes, so nothing needs to resize/reflow during the collapse motion.
 function NavLink({ item, expanded, active }: { item: NavItem; expanded: boolean; active: boolean }) {
   return (
     <Link
       href={item.href}
       prefetch={true}
       title={!expanded ? item.label : undefined}
-      className="flex items-center gap-3 px-3 py-2.5 rounded-xl select-none transition-colors"
+      className="relative flex items-center rounded-xl select-none"
       style={{
-        color:      active ? ACCENT : 'var(--text-primary)',
-        background: active ? 'rgba(0,210,210,0.12)' : 'transparent',
-        boxShadow:  active ? `inset 0 0 0 1px rgba(0,210,210,0.22)` : undefined,
-        transitionDuration: `${SIDEBAR_DURATION}ms`,
-        transitionTimingFunction: SIDEBAR_EASING,
+        height:       44,
+        paddingRight: W_SHUT,
+        paddingLeft:  12,
+        color:        active ? ACCENT : 'var(--text-primary)',
       }}
     >
-      <span className="shrink-0">{item.icon}</span>
+      {/* Expanded: full-row highlight */}
+      <span
+        aria-hidden
+        className="absolute inset-0 rounded-xl pointer-events-none"
+        style={{
+          background: active ? 'rgba(0,210,210,0.12)' : 'transparent',
+          boxShadow:  active ? `inset 0 0 0 1px rgba(0,210,210,0.22)` : undefined,
+          opacity:    expanded ? 1 : 0,
+          transition: `opacity ${SIDEBAR_TRANSITION}`,
+        }}
+      />
+      {/* Collapsed: compact pill confined to the rail */}
+      <span
+        aria-hidden
+        className="absolute rounded-xl pointer-events-none"
+        style={{
+          top: 4, bottom: 4, right: 12, width: 40,
+          background: active ? 'rgba(0,210,210,0.12)' : 'transparent',
+          boxShadow:  active ? `inset 0 0 0 1px rgba(0,210,210,0.22)` : undefined,
+          opacity:    expanded ? 0 : 1,
+          transition: `opacity ${SIDEBAR_TRANSITION}`,
+        }}
+      />
+      {/* Icon — fixed rail slot, position never changes between states */}
+      <span
+        className="absolute flex items-center justify-center"
+        style={{ top: 0, bottom: 0, right: 0, width: W_SHUT }}
+      >
+        {item.icon}
+      </span>
+      {/* Label — normal flow, fades/slides in as the sidebar expands */}
       <span
         aria-hidden={!expanded}
-        className="font-semibold truncate"
+        className="relative font-semibold truncate"
         style={{
           fontSize: 16,
           opacity: expanded ? 1 : 0,
@@ -305,17 +337,21 @@ export default function AppShell({
         }}
       >
 
-        {/* Logo — right-side inset stays small & constant so the mark itself
-            (no wordmark) sits fully inside the 64px rail that's always visible */}
+        {/* Logo — no right padding, so the mark's row edge lines up with the
+            aside's true right edge exactly like the nav rows below, and the
+            mark sits fully inside the 64px rail that's always visible */}
         <div
-          className="flex items-center h-16 shrink-0 pr-2 pl-3.5"
+          className="flex items-center h-16 shrink-0 pl-3.5"
           style={{ borderBottom: `1px solid ${SEP}` }}
         >
           <Logo showWordmark={expanded} />
         </div>
 
-        {/* Primary nav */}
-        <nav className="flex-1 overflow-y-auto overflow-x-hidden py-2 flex flex-col gap-0.5 px-2 [scrollbar-gutter:stable]">
+        {/* Primary nav — no right padding: rows' own right edges line up with
+            the aside's true right edge, so each row's absolutely-positioned
+            icon slot (right:0, width:W_SHUT) reproduces the visible rail
+            exactly, regardless of collapsed/expanded state. */}
+        <nav className="flex-1 overflow-y-auto overflow-x-hidden py-2 flex flex-col gap-0.5 pl-2 [scrollbar-gutter:stable]">
           {PRIMARY_NAV.map(item => (
             <NavLink key={item.href} item={item} expanded={expanded} active={isActive(item.href)} />
           ))}
@@ -327,17 +363,33 @@ export default function AppShell({
             <NavLink key={item.href} item={item} expanded={expanded} active={isActive(item.href)} />
           ))}
 
-          {/* Sign out */}
+          {/* Sign out — same fixed rail-slot icon as NavLink; hover affordance
+              is two differently-sized decorative spans (full-row vs
+              rail-confined) rather than one background that would clip. */}
           <button
             onClick={handleSignOut}
             title={!expanded ? 'התנתק' : undefined}
-            className="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors hover:bg-white/5 cursor-pointer"
-            style={{ color: 'var(--text-primary)' }}
+            className="relative flex items-center rounded-xl cursor-pointer"
+            style={{ height: 44, paddingRight: W_SHUT, paddingLeft: 12, color: 'var(--text-primary)' }}
           >
-            <span className="shrink-0"><IconLogout /></span>
+            <span
+              aria-hidden
+              className={expanded ? 'absolute inset-0 rounded-xl hover:bg-white/5 pointer-events-auto' : 'hidden'}
+            />
+            <span
+              aria-hidden
+              className={!expanded ? 'absolute rounded-xl hover:bg-white/5 pointer-events-auto' : 'hidden'}
+              style={{ top: 4, bottom: 4, right: 12, width: 40 }}
+            />
+            <span
+              className="absolute flex items-center justify-center"
+              style={{ top: 0, bottom: 0, right: 0, width: W_SHUT }}
+            >
+              <IconLogout />
+            </span>
             <span
               aria-hidden={!expanded}
-              className="text-sm font-semibold"
+              className="relative text-sm font-semibold"
               style={{
                 opacity: expanded ? 1 : 0,
                 transform: expanded ? 'translateX(0)' : 'translateX(6px)',
@@ -350,20 +402,29 @@ export default function AppShell({
           </button>
         </nav>
 
-        {/* User area + CTA */}
-        <div className="shrink-0 px-2 pb-3 pt-2 flex flex-col gap-2" style={{ borderTop: `1px solid ${SEP}` }}>
+        {/* User area + CTA — no right padding, matching nav rows above, so the
+            avatar's and CTA icon's rail slots align exactly with the visible
+            strip regardless of collapsed/expanded state. */}
+        <div className="shrink-0 pl-2 pb-3 pt-2 flex flex-col gap-2" style={{ borderTop: `1px solid ${SEP}` }}>
 
-          {/* Avatar / user info — avatar stays put (rail), name + theme toggle fade */}
-          <div className="flex items-center gap-2 px-1 py-1">
-            <div
-              className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
-              style={{ background: 'rgba(0,210,210,0.12)', color: ACCENT }}
-              title={!expanded ? displayName : undefined}
+          {/* Avatar / user info — avatar sits in a fixed rail slot (its
+              position never changes), name + theme toggle fade in the
+              remaining space when expanded. */}
+          <div className="relative flex items-center" style={{ height: 40, paddingRight: W_SHUT, paddingLeft: 4 }}>
+            <span
+              className="absolute flex items-center justify-center"
+              style={{ top: 0, bottom: 0, right: 0, width: W_SHUT }}
             >
-              {(displayName || '?').charAt(0).toUpperCase()}
-            </div>
+              <div
+                className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold"
+                style={{ background: 'rgba(0,210,210,0.12)', color: ACCENT }}
+                title={!expanded ? displayName : undefined}
+              >
+                {(displayName || '?').charAt(0).toUpperCase()}
+              </div>
+            </span>
             <div
-              className="flex-1 flex items-center gap-2 min-w-0"
+              className="relative flex-1 flex items-center gap-2 min-w-0"
               aria-hidden={!expanded}
               style={{
                 opacity: expanded ? 1 : 0,
@@ -379,16 +440,38 @@ export default function AppShell({
             </div>
           </div>
 
-          {/* New trade */}
+          {/* New trade — same fixed rail-slot icon pattern; the solid accent
+              button cross-fades between a full-width pill (expanded) and a
+              compact pill confined to the rail (collapsed) instead of one
+              shape trying to be both. */}
           <button
             onClick={() => tryOpenTradeForm()}
             title={!expanded ? 'עסקה חדשה' : undefined}
-            className="flex items-center justify-center gap-2 px-3 rounded-xl py-2.5 font-semibold text-sm transition-opacity hover:opacity-85 active:scale-95"
-            style={{ background: ACCENT, color: '#000' }}
+            className="relative flex items-center rounded-xl transition-opacity hover:opacity-85 active:scale-95"
+            style={{ height: 44, paddingRight: W_SHUT, paddingLeft: 12, color: '#000' }}
           >
-            <span className="shrink-0"><IconPlus /></span>
+            <span
+              aria-hidden
+              className="absolute inset-0 rounded-xl pointer-events-none"
+              style={{ background: ACCENT, opacity: expanded ? 1 : 0, transition: `opacity ${SIDEBAR_TRANSITION}` }}
+            />
+            <span
+              aria-hidden
+              className="absolute rounded-xl pointer-events-none"
+              style={{
+                top: 4, bottom: 4, right: 12, width: 40,
+                background: ACCENT, opacity: expanded ? 0 : 1, transition: `opacity ${SIDEBAR_TRANSITION}`,
+              }}
+            />
+            <span
+              className="absolute flex items-center justify-center"
+              style={{ top: 0, bottom: 0, right: 0, width: W_SHUT }}
+            >
+              <IconPlus />
+            </span>
             <span
               aria-hidden={!expanded}
+              className="relative font-semibold text-sm"
               style={{
                 opacity: expanded ? 1 : 0,
                 transform: expanded ? 'translateX(0)' : 'translateX(6px)',
