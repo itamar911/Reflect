@@ -113,6 +113,17 @@ body {
   }
 }
 
+/* Short UI meta text (dates, subtitles, secondary labels) reads semibold to
+   match the sidebar. Scoped to the app shell (.sidebar-motion) so landing /
+   terms / privacy long-form paragraphs, which share these color utilities,
+   keep their weight. In @layer components so explicit font-* utilities win. */
+@layer components {
+  .sidebar-motion .text-tg-muted,
+  .sidebar-motion .text-tg-text-2 {
+    font-weight: 600;
+  }
+}
+
 /* Sidebar active link: swap gold text → dark text in light mode for readability */
 html.light .sidebar-link-active {
   color: var(--text-primary) !important;

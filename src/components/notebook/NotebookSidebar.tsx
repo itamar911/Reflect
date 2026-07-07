@@ -59,7 +59,7 @@ export default function NotebookSidebar({
                   border: `1px solid ${active ? t.color : 'transparent'}`,
                   background: active ? `${t.color}18` : 'transparent',
                   color: active ? t.color : TEXT2,
-                  fontSize: 12.5, fontWeight: active ? 600 : 400, textAlign: 'right',
+                  fontSize: 12.5, fontWeight: 600, textAlign: 'right',
                 }}
               >
                 <span style={{ color: GOLD, display: 'flex' }}>{t.icon}</span>
@@ -90,7 +90,7 @@ export default function NotebookSidebar({
                     border: `1px solid ${active ? hex : 'transparent'}`,
                     background: active ? `${hex}18` : 'transparent',
                     color: active ? hex : TEXT2,
-                    fontSize: 12, fontWeight: active ? 600 : 400, textAlign: 'right',
+                    fontSize: 12, fontWeight: 600, textAlign: 'right',
                   }}
                 >
                   <span style={{ width: 7, height: 7, borderRadius: 999, background: hex, flexShrink: 0 }} />

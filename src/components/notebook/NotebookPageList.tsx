@@ -31,7 +31,7 @@ export default function NotebookPageList({
             style={{ ...inputBase, fontSize: 12, padding: '6px 30px 6px 10px', direction: 'rtl' }}
           />
         </div>
-        <p style={{ fontSize: 11, color: MUTED, padding: '0 2px' }}>{pages.length} דפים</p>
+        <p style={{ fontSize: 11, color: MUTED, fontWeight: 600, padding: '0 2px' }}>{pages.length} דפים</p>
       </div>
 
       {/* Cards */}
@@ -71,12 +71,12 @@ export default function NotebookPageList({
                 </button>
               </div>
 
-              <div style={{ fontSize: 10.5, color: MUTED, marginTop: 4 }}>
+              <div style={{ fontSize: 10.5, color: MUTED, fontWeight: 600, marginTop: 4 }}>
                 {formatDateTime(page.created_at)}
               </div>
 
               {page.content && (
-                <p style={{ fontSize: 11.5, color: TEXT2, marginTop: 5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <p style={{ fontSize: 11.5, color: TEXT2, fontWeight: 600, marginTop: 5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {page.content.slice(0, 60)}
                 </p>
               )}

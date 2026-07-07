@@ -62,7 +62,7 @@ export default function NotebookEditor({
                     border:      `1px solid ${active ? t.color : BORDER}`,
                     background:  active ? `${t.color}18` : 'transparent',
                     color:       active ? t.color : TEXT2,
-                    fontSize:    11.5, fontWeight: active ? 600 : 400,
+                    fontSize:    11.5, fontWeight: 600,
                   }}>
                   <span style={{ color: GOLD, display: 'flex' }}>{t.icon}</span>
                   {t.label}
@@ -70,7 +70,7 @@ export default function NotebookEditor({
               );
             })}
           </div>
-          <div style={{ fontSize: 10.5, color: MUTED, display: 'flex', gap: 10 }}>
+          <div style={{ fontSize: 10.5, color: MUTED, fontWeight: 600, display: 'flex', gap: 10 }}>
             <span>נוצר: {formatDateLong(selected.created_at)}</span>
             <span>עודכן: {formatDateLong(selected.updated_at)}</span>
           </div>
@@ -83,7 +83,7 @@ export default function NotebookEditor({
             const hex = tagChipStyle(tag);
             return (
               <button key={tag} onClick={() => onToggleTag(tag)} style={{
-                padding: '3px 9px', borderRadius: 999, cursor: 'pointer', fontSize: 11, fontWeight: on ? 600 : 400,
+                padding: '3px 9px', borderRadius: 999, cursor: 'pointer', fontSize: 11, fontWeight: 600,
                 border:     on ? hex.border : `1px solid ${BORDER}`,
                 background: on ? hex.background : 'transparent',
                 color:      on ? hex.color : MUTED,

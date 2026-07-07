@@ -181,7 +181,7 @@ export default function NotebookClient({
                       onClick={() => setActiveFolder(t.value)}
                       style={{
                         flexShrink: 0, display: 'flex', alignItems: 'center', gap: 5,
-                        padding: '5px 12px', borderRadius: 999, fontSize: 11.5, fontWeight: active ? 600 : 400, cursor: 'pointer',
+                        padding: '5px 12px', borderRadius: 999, fontSize: 11.5, fontWeight: 600, cursor: 'pointer',
                         border: `1px solid ${active ? t.color : BORDER}`,
                         background: active ? `${t.color}18` : 'transparent',
                         color: active ? t.color : MUTED,
@@ -206,7 +206,7 @@ export default function NotebookClient({
                         key={tag}
                         onClick={() => setActiveTag(active ? null : tag)}
                         style={{
-                          flexShrink: 0, padding: '4px 10px', borderRadius: 999, fontSize: 11, fontWeight: active ? 600 : 400, cursor: 'pointer',
+                          flexShrink: 0, padding: '4px 10px', borderRadius: 999, fontSize: 11, fontWeight: 600, cursor: 'pointer',
                           border: `1px solid ${active ? hex : BORDER}`,
                           background: active ? `${hex}18` : 'transparent',
                           color: active ? hex : MUTED,

@@ -179,7 +179,7 @@ export default function SetupsClient({
           </div>
           <div>
             <h1 className="text-xl font-bold" style={{ color: TEXT }}>סטאפים ותגיות</h1>
-            <p className="text-xs" style={{ color: MUTED }}>הגדר ועקוב אחרי הסטאפים שלך</p>
+            <p className="text-xs font-semibold" style={{ color: MUTED }}>הגדר ועקוב אחרי הסטאפים שלך</p>
           </div>
         </div>
         <button onClick={() => setView('create')} style={goldBtn}>
@@ -264,7 +264,7 @@ function SetupCard({ setup, stats, onClick }: {
 function StatBadge({ label, value, color = 'var(--color-tg-text)' }: { label: string; value: string; color?: string }) {
   return (
     <div className="flex flex-col items-center gap-0.5 rounded-xl px-3 py-1.5" style={{ background: SURF2 }}>
-      <span className="text-[10px]" style={{ color: MUTED }}>{label}</span>
+      <span className="text-[10px] font-semibold" style={{ color: MUTED }}>{label}</span>
       <span className="text-xs font-bold" style={{ color }}>{value}</span>
     </div>
   );
