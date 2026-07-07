@@ -231,7 +231,7 @@ export default function FeedbackPage() {
         <div className="flex flex-col gap-1.5">
           <label className="text-sm font-medium" style={{ color: TEXT2 }}>
             סקרינשוט / תמונה
-            <span className="text-[10px] font-normal mr-2" style={{ color: MUTED }}>
+            <span className="text-[10px] mr-2" style={{ color: MUTED, fontWeight: 500 }}>
               (אופציונלי · עד {MAX_IMG_MB}MB)
             </span>
           </label>

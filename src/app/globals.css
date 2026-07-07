@@ -4,6 +4,12 @@
   --font-sans: var(--font-rubik), system-ui, sans-serif;
   --font-mono: ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
 
+  /* Design decision: UI labels should read semibold, matching the sidebar.
+     font-medium is used across the app almost exclusively on labels/links/
+     chips, so the token itself is bumped 500 → 600 (same pattern as the
+     .text-* size scale overrides below). Base body weight is 500. */
+  --font-weight-medium: 600;
+
   --color-tg-bg: #292930;
   --color-tg-surface: #303036;
   --color-tg-surface-2: #383840;
@@ -90,6 +96,21 @@ body {
   color: var(--text-primary);
   min-height: 100dvh;
   transition: background 0.2s ease, color 0.2s ease;
+}
+
+/* Heavier base look: default text is medium (500) instead of 400, and
+   nav-like/form chrome (buttons, labels) defaults to semibold (600) to
+   match the sidebar. In @layer base so explicit font-* utilities and
+   inline styles still win. Rubik loads as a variable font (300-900),
+   so both weights are real glyphs, not synthesized. */
+@layer base {
+  body {
+    font-weight: 500;
+  }
+  button,
+  label {
+    font-weight: 600;
+  }
 }
 
 /* Sidebar active link: swap gold text → dark text in light mode for readability */
