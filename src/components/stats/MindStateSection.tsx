@@ -18,25 +18,26 @@ export interface ScalePanelData {
 const GRAY = 'rgba(128,128,128,0.45)';
 
 export default function MindStateSection({ panels }: { panels: ScalePanelData[] }) {
+  const legend = (
+    <span className="flex items-center flex-wrap gap-x-2 gap-y-1" style={{ fontSize: 11, color: MUTED }}>
+      גודל העיגול = כמות עסקאות · צבע = תוצאה ממוצעת
+      <span className="flex items-center gap-1">
+        <Dot color={GREEN_HEX} /> רווח
+      </span>
+      <span className="flex items-center gap-1">
+        <Dot color={RED_HEX} /> הפסד
+      </span>
+      <span className="flex items-center gap-1">
+        <Dot color={GRAY} /> ללא נתונים
+      </span>
+    </span>
+  );
+
   return (
-    <Section title="המצב הפנימי שלך" icon={<Brain size={18} />}>
+    <Section title="המצב הפנימי שלך" icon={<Brain size={18} />} aside={legend}>
       <div className={`grid grid-cols-1 ${panels.length > 1 ? 'lg:grid-cols-2' : ''} gap-4 items-start`}>
         {panels.map((p) => <ScalePanel key={p.title} {...p} />)}
       </div>
-
-      {/* Legend */}
-      <p className="flex items-center flex-wrap gap-x-2 gap-y-1" style={{ fontSize: 11, color: MUTED }}>
-        גודל העיגול = כמות עסקאות · צבע = תוצאה ממוצעת
-        <span className="flex items-center gap-1">
-          <Dot color={GREEN_HEX} /> רווח
-        </span>
-        <span className="flex items-center gap-1">
-          <Dot color={RED_HEX} /> הפסד
-        </span>
-        <span className="flex items-center gap-1">
-          <Dot color={GRAY} /> ללא נתונים
-        </span>
-      </p>
     </Section>
   );
 }

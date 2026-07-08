@@ -37,7 +37,7 @@ export default function RecordsGrid({
               <span className="flex items-center" style={{ color: r.data ? r.color : MUTED }}>{r.icon}</span>
               {r.label}
             </p>
-            <p className="stats-num" style={{ fontSize: 20, fontWeight: 700, lineHeight: 1.2, color: r.data ? r.color : MUTED }}>
+            <p className="stats-num" style={{ fontSize: 20, fontWeight: 700, lineHeight: 1.2, textAlign: 'right', color: r.data ? r.color : MUTED }}>
               {r.data ? r.data.value : '—'}
             </p>
             {r.data?.sub && <p className="truncate" style={{ fontSize: 11, color: MUTED }}>{r.data.sub}</p>}

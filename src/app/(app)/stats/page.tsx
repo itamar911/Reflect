@@ -301,7 +301,7 @@ export default async function StatsPage() {
 
       {/* ── Section 3: Strategy & symbol tables ────────────────── */}
       {(strategies.length > 0 || symbols.length > 0) && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+        <div className="grid grid-cols-1 lg:grid-cols-[3fr_2fr] gap-6 items-start">
           {strategies.length > 0 && (
             <PerformanceTable
               title="ביצועים לפי אסטרטגיה"
@@ -343,8 +343,8 @@ export default async function StatsPage() {
         <RecordsGrid
           maxWinStreak={maxW}
           maxLossStreak={maxL}
-          bestTrade={bestTrade ? { value: fmt(pnlIls(bestTrade), bestTrade.pnl_currency ?? '₪'), sub: bestTrade.strategy } : null}
-          worstTrade={worstTrade ? { value: fmt(pnlIls(worstTrade), worstTrade.pnl_currency ?? '₪'), sub: worstTrade.strategy } : null}
+          bestTrade={bestTrade ? { value: fmt(pnlIls(bestTrade)), sub: bestTrade.strategy } : null}
+          worstTrade={worstTrade ? { value: fmt(pnlIls(worstTrade)), sub: worstTrade.strategy } : null}
           bestDay={bestDay && bestDay.pnl > 0 ? { value: fmt(bestDay.pnl), sub: bestDay.label } : null}
           worstDay={worstDay && worstDay.pnl < 0 ? { value: fmt(worstDay.pnl), sub: worstDay.label } : null}
         />

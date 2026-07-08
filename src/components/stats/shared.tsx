@@ -33,16 +33,19 @@ export function pnlHex(v: number): string {
 }
 
 // ── Section header: icon + title 18px + optional count ──────────────────────
-export function Section({ title, icon, count, children }: {
-  title: string; icon?: ReactNode; count?: string; children: ReactNode;
+export function Section({ title, icon, count, aside, children }: {
+  title: string; icon?: ReactNode; count?: string; aside?: ReactNode; children: ReactNode;
 }) {
   return (
     <div className="flex flex-col gap-4">
-      <h2 className="flex items-center gap-2" style={{ fontSize: 18, fontWeight: 700, color: TEXT }}>
-        <span className="flex items-center" style={{ color: ACCENT }}>{icon}</span>
-        {title}
-        {count && <span style={{ fontSize: 12, fontWeight: 500, color: MUTED }}>· {count}</span>}
-      </h2>
+      <div className="flex items-center justify-between gap-x-4 gap-y-1.5 flex-wrap">
+        <h2 className="flex items-center gap-2" style={{ fontSize: 18, fontWeight: 700, color: TEXT }}>
+          <span className="flex items-center" style={{ color: ACCENT }}>{icon}</span>
+          {title}
+          {count && <span style={{ fontSize: 12, fontWeight: 500, color: MUTED }}>· {count}</span>}
+        </h2>
+        {aside}
+      </div>
       {children}
     </div>
   );

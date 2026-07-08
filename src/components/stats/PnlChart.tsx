@@ -120,7 +120,7 @@ export default function PnlChart({ daily, weekly, monthly }: Props) {
                 strokeWidth={2}
                 fill="url(#equity-fill)"
                 dot={false}
-                activeDot={{ r: 4, strokeWidth: 0 }}
+                activeDot={renderActiveDot}
               />
             </ComposedChart>
           </ResponsiveContainer>
@@ -133,6 +133,15 @@ export default function PnlChart({ daily, weekly, monthly }: Props) {
       )}
     </div>
   );
+}
+
+// Hover dot colored by the hovered period's own PnL sign, not the line color
+function renderActiveDot(props: { cx?: number; cy?: number; payload?: PeriodPoint }) {
+  const { cx, cy, payload } = props;
+  if (cx == null || cy == null) return <g />;
+  const pnl = payload?.pnl ?? 0;
+  const fill = pnl > 0 ? GREEN_HEX : pnl < 0 ? RED_HEX : '#94a3b8';
+  return <circle cx={cx} cy={cy} r={4} fill={fill} />;
 }
 
 function EquityTooltip({ active, payload, label }: TooltipContentProps<PeriodPoint & { cum: number }>) {

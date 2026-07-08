@@ -57,8 +57,9 @@ export default function DistributionSection({ dayBars, hourBars }: Props) {
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--color-tg-border-light)" vertical={false} />
                 <XAxis dataKey="label" tick={{ fontSize: 10, fill: MUTED }} axisLine={false} tickLine={false} />
                 <YAxis hide />
-                <Tooltip cursor={{ fill: 'rgba(255,255,255,0.05)' }} content={<DistTooltip />} />
-                <Bar dataKey="pnl" maxBarSize={18} radius={[3, 3, 0, 0]}>
+                <Tooltip cursor={false} content={<DistTooltip />} />
+                <Bar dataKey="pnl" maxBarSize={18} radius={[3, 3, 0, 0]}
+                  activeBar={{ opacity: 1, stroke: 'rgba(255,255,255,0.35)', strokeWidth: 1.5 }}>
                   {bars.map((b, i) => (
                     <Cell key={i}
                       fill={b.trades === 0 ? 'var(--color-tg-border-light)' : b.pnl >= 0 ? GREEN : RED}
