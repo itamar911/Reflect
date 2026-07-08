@@ -2,11 +2,16 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import PnlChart, { type PeriodPoint } from '@/components/stats/PnlChart';
 import DistributionSection, { type DistBar } from '@/components/stats/DistributionSection';
-import ScaleBreakdownSection, { type ScaleBucket } from '@/components/stats/ScaleBreakdownSection';
-import { SURF, ACCENT, GREEN, RED, MUTED, TEXT, fmt, pnlColor, Section, StatCard, BreakdownRow } from '@/components/stats/shared';
+import MindStateSection, { type ScaleBucket, type ScalePanelData } from '@/components/stats/MindStateSection';
+import KpiHero from '@/components/stats/KpiHero';
+import PerformanceTable from '@/components/stats/PerformanceTable';
+import BehaviorChips from '@/components/stats/BehaviorChips';
+import RecordsGrid from '@/components/stats/RecordsGrid';
+import { MUTED, TEXT, fmt, Section } from '@/components/stats/shared';
 import type { TradePlan } from '@/lib/types';
 import { tradePointsPnl, tradeMoneyPnl, hasMoneyPnl } from '@/lib/pnl';
-import { Zap, TrendingUp, BarChart2, Target, CandlestickChart, Trophy, Flame, Brain, ShieldAlert } from 'lucide-react';
+import { TrendingUp, BarChart2, Target, CandlestickChart } from 'lucide-react';
+import '@/components/stats/stats.css';
 
 export const metadata = { title: 'סטטיסטיקה — Reflect' };
 
@@ -35,7 +40,7 @@ export default async function StatsPage() {
   // ── Empty state ─────────────────────────────────────────────────────────────
   if (trades.length === 0) {
     return (
-      <div dir="rtl" className="min-h-screen px-4 py-6 flex flex-col gap-8">
+      <div dir="rtl" className="stats-page min-h-screen px-4 py-6 flex flex-col gap-8">
         <PageHeader />
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center py-16">
@@ -52,7 +57,6 @@ export default async function StatsPage() {
   const closedCount  = closed.length;
   const totalPnl     = closed.reduce((s, t) => s + pnlIls(t), 0);
   const wins         = closed.filter(t => pnlOf(t)! > 0);
-  const losses       = closed.filter(t => pnlOf(t)! <= 0);
   const winRate      = closedCount > 0 ? Math.round(wins.length / closedCount * 100) : 0;
   const avgRR        = trades.length > 0
     ? trades.reduce((s, t) => s + Number(t.rr_ratio), 0) / trades.length : 0;
@@ -116,7 +120,6 @@ export default async function StatsPage() {
   const strategies = [...stratMap.entries()]
     .map(([name, v]) => ({ name, ...v, avgRR: v.rr / v.trades }))
     .sort((a, b) => b.trades - a.trades);
-  const maxStratTrades = Math.max(...strategies.map(s => s.trades), 1);
 
   // ── Behavioral / discipline metrics ─────────────────────────────────────────
   const withFollowed = closed.filter(t => t.followed_plan !== null);
@@ -215,21 +218,22 @@ export default async function StatsPage() {
     }));
 
   // ── Symbol breakdown ─────────────────────────────────────────────────────────
-  const symbolMap = new Map<string, { trades: number; wins: number; closedN: number; pnl: number }>();
+  const symbolMap = new Map<string, { trades: number; wins: number; closedN: number; pnl: number; rr: number }>();
   for (const t of trades) {
     const sym = t.symbol?.trim().toUpperCase();
     if (!sym) continue;
-    const prev = symbolMap.get(sym) ?? { trades: 0, wins: 0, closedN: 0, pnl: 0 };
+    const prev = symbolMap.get(sym) ?? { trades: 0, wins: 0, closedN: 0, pnl: 0, rr: 0 };
     const p    = pnlOf(t);
     symbolMap.set(sym, {
       trades:  prev.trades + 1,
       closedN: prev.closedN + (p != null ? 1 : 0),
       wins:    prev.wins + (p != null && p > 0 ? 1 : 0),
       pnl:     prev.pnl + pnlIls(t),
+      rr:      prev.rr + Number(t.rr_ratio),
     });
   }
   const symbols = [...symbolMap.entries()]
-    .map(([name, v]) => ({ name, ...v }))
+    .map(([name, v]) => ({ name, ...v, avgRR: v.rr / v.trades }))
     .sort((a, b) => b.trades - a.trades);
 
   // ── Streaks ──────────────────────────────────────────────────────────────────
@@ -247,193 +251,103 @@ export default async function StatsPage() {
   const bestDay    = daily.length  ? daily.reduce((b, d)  => d.pnl > b.pnl ? d : b) : null;
   const worstDay   = daily.length  ? daily.reduce((b, d)  => d.pnl < b.pnl ? d : b) : null;
 
+  // ── Presentation-only mappings ──────────────────────────────────────────────
+  const strategyRows = strategies.map(s => ({
+    name: s.name,
+    trades: s.trades,
+    winRate: s.closedN > 0 ? Math.round(s.wins / s.closedN * 100) : null,
+    avgRR: s.avgRR,
+    pnl: s.pnl,
+  }));
+  const symbolRows = symbols.map(s => ({
+    name: s.name,
+    trades: s.trades,
+    winRate: s.closedN > 0 ? Math.round(s.wins / s.closedN * 100) : null,
+    avgRR: s.avgRR,
+    pnl: s.pnl,
+  }));
+
+  const mindPanels: ScalePanelData[] = [
+    ...(hasConfidenceData ? [{ title: 'רמת ביטחון', buckets: confidenceBuckets, insights: confidenceInsights }] : []),
+    ...(hasEmotionData ? [{ title: 'מצב רגשי', buckets: emotionBuckets, insights: emotionInsights }] : []),
+  ];
+
   return (
-    <div dir="rtl" className="min-h-screen px-4 py-6 flex flex-col gap-8">
+    <div dir="rtl" className="stats-page min-h-screen px-4 py-6 flex flex-col gap-8">
 
       {/* ── Header ─────────────────────────────────────────────── */}
       <PageHeader />
 
-      {/* ── KPI grid (3×3) ───────────────────────────────────── */}
-      <Section title="סטטיסטיקה כללית" icon={<BarChart2 size={18} />}>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-          <StatCard fixedHeight
-            label="רווח/הפסד כולל"
-            value={closedCount > 0 ? fmt(totalPnl) : '—'}
-            sub={`${closedCount} עסקאות סגורות`}
-            positive={closedCount === 0 || totalPnl >= 0}
-            valueColor={closedCount > 0 ? pnlColor(totalPnl) : undefined}
-          />
-          <StatCard fixedHeight
-            label="אחוז הצלחה"
-            value={closedCount > 0 ? `${winRate}%` : '—'}
-            sub={`${wins.length} מתוך ${closedCount}`}
-            positive={closedCount === 0 || winRate >= 50}
-          />
-          <StatCard fixedHeight
-            label="ממוצע R:R"
-            value={trades.length > 0 ? `1:${avgRR.toFixed(1)}` : '—'}
-            positive={true}
-          />
-          <StatCard fixedHeight
-            label="פקטור רווח"
-            value={profitFactor > 0 ? profitFactor.toFixed(2) : '—'}
-            sub="רווח ÷ הפסד"
-            positive={profitFactor === 0 || profitFactor >= 1}
-          />
-          <StatCard fixedHeight
-            label="ממוצע רווח"
-            value={fmt(avgWin)}
-            positive={true}
-            valueColor={GREEN}
-          />
-          <StatCard fixedHeight
-            label="ממוצע הפסד"
-            value={fmt(avgLoss)}
-            positive={avgLoss === 0}
-            valueColor={RED}
-          />
-          <StatCard fixedHeight
-            label="רצף נוכחי"
-            value={currentStreak ? `${currentStreak.count} ${currentStreak.type === 'win' ? 'רווחים' : 'הפסדים'}` : '—'}
-            positive={!currentStreak || currentStreak.type === 'win'}
-          />
-          <StatCard fixedHeight
-            label="ציון משמעת"
-            value={disciplineScore !== null ? `${disciplineScore}` : '—'}
-            sub="מתוך 100"
-            positive={disciplineScore === null || disciplineScore >= 70}
-          />
-        </div>
-      </Section>
+      {/* ── Section 1: KPI hero band ───────────────────────────── */}
+      <KpiHero
+        totalPnl={totalPnl}
+        closedCount={closedCount}
+        winRate={winRate}
+        winsCount={wins.length}
+        profitFactor={profitFactor}
+        avgRR={avgRR}
+        tradesCount={trades.length}
+        disciplineScore={disciplineScore}
+        avgWin={avgWin}
+        avgLoss={avgLoss}
+        currentStreak={currentStreak}
+        daily={daily}
+      />
 
-      {/* ── Behavioral metrics ─────────────────────────────────── */}
-      <Section title="מדדים התנהגותיים" icon={<ShieldAlert size={18} />}>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard fixedHeight
-            label="סטייה מהתוכנית"
-            value={deviatedPct !== null ? `${deviatedPct}%` : '—'}
-            positive={deviatedPct === null || deviatedPct <= 20}
-          />
-          <StatCard fixedHeight
-            label="הזזת Stop Loss"
-            value={movedSlPct !== null ? `${movedSlPct}%` : '—'}
-            positive={movedSlPct === null || movedSlPct <= 20}
-          />
-          <StatCard fixedHeight
-            label="עסקאות FOMO"
-            value={fomoPct !== null ? `${fomoPct}%` : '—'}
-            positive={fomoPct === null || fomoPct <= 10}
-          />
-          <StatCard fixedHeight
-            label="Revenge Trades"
-            value={revengePct !== null ? `${revengePct}%` : '—'}
-            positive={revengePct === null || revengePct <= 10}
-          />
-        </div>
-      </Section>
-
-      {/* ── P&L Chart ───────────────────────────────────────── */}
+      {/* ── Section 2: Equity curve ────────────────────────────── */}
       <Section title="רווח/הפסד לאורך זמן" icon={<TrendingUp size={18} />}>
-        <div className="rounded-xl p-3 sm:p-5" style={{ background: SURF, borderLeft: `4px solid ${ACCENT}`, borderRadius: 12 }}>
-          <PnlChart daily={daily} weekly={weekly} monthly={monthly} />
-        </div>
+        <PnlChart daily={daily} weekly={weekly} monthly={monthly} />
       </Section>
 
-      {/* ── Strategy breakdown ──────────────────────────────── */}
-      {strategies.length > 0 && (
-        <Section title="ביצועים לפי אסטרטגיה" icon={<Target size={18} />}>
-          <div className="flex flex-col gap-4">
-            {strategies.map(s => {
-              const wr = s.closedN > 0 ? Math.round(s.wins / s.closedN * 100) : null;
-              return (
-                <BreakdownRow key={s.name}
-                  name={s.name} pnl={s.pnl} trades={s.trades}
-                  winRate={wr} rr={s.avgRR} barPct={(s.trades / maxStratTrades) * 100}
-                />
-              );
-            })}
-          </div>
-        </Section>
+      {/* ── Section 3: Strategy & symbol tables ────────────────── */}
+      {(strategies.length > 0 || symbols.length > 0) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+          {strategies.length > 0 && (
+            <PerformanceTable
+              title="ביצועים לפי אסטרטגיה"
+              icon={<Target size={18} />}
+              unitLabel="אסטרטגיות"
+              rows={strategyRows}
+              showRR
+            />
+          )}
+          {symbols.length > 0 && (
+            <PerformanceTable
+              title="התפלגות לפי סמל"
+              icon={<CandlestickChart size={18} />}
+              unitLabel="סמלים"
+              rows={symbolRows}
+              showRR
+            />
+          )}
+        </div>
       )}
 
-      {/* ── Confidence-level breakdown ──────────────────────────── */}
-      {hasConfidenceData && (
-        <ScaleBreakdownSection
-          title="ביצועים לפי רמת ביטחון"
-          icon={<Target size={18} />}
-          buckets={confidenceBuckets}
-          insights={confidenceInsights}
-        />
-      )}
+      {/* ── Section 4: Inner state (confidence + emotion) ──────── */}
+      {mindPanels.length > 0 && <MindStateSection panels={mindPanels} />}
 
-      {/* ── Emotional-state breakdown ───────────────────────────── */}
-      {hasEmotionData && (
-        <ScaleBreakdownSection
-          title="ביצועים לפי מצב רגשי"
-          icon={<Brain size={18} />}
-          buckets={emotionBuckets}
-          insights={emotionInsights}
-        />
-      )}
+      {/* ── Section 5: Behavioral metrics ──────────────────────── */}
+      <BehaviorChips
+        deviatedPct={deviatedPct}
+        movedSlPct={movedSlPct}
+        fomoPct={fomoPct}
+        revengePct={revengePct}
+      />
 
-      {/* ── Day / hour distribution ───────────────────────────── */}
+      {/* ── Section 6: Day/hour distribution + records ─────────── */}
       {closedCount > 0 && (
         <DistributionSection dayBars={dayBars} hourBars={hourBars} />
       )}
 
-      {/* ── Symbol breakdown ─────────────────────────────── */}
-      {symbols.length > 0 && (
-        <Section title="התפלגות לפי סמל" icon={<CandlestickChart size={18} />}>
-          <div className="flex flex-col gap-4">
-            {symbols.map(s => {
-              const wr = s.closedN > 0 ? Math.round(s.wins / s.closedN * 100) : null;
-              return (
-                <BreakdownRow key={s.name}
-                  name={s.name} pnl={s.pnl} trades={s.trades}
-                  winRate={wr} barPct={wr ?? 0}
-                />
-              );
-            })}
-          </div>
-        </Section>
-      )}
-
-      {/* ── Streaks & records ────────────────────────────────── */}
       {closedCount > 0 && (
-        <Section title="רצפים ושיאים" icon={<Trophy size={18} />}>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <StatCard largeLabel label="רצף רווחים ארוך ביותר" value={String(maxW)} positive={true} icon={<Flame size={14} />} />
-            <StatCard largeLabel label="רצף הפסדים ארוך ביותר" value={String(maxL)} positive={false} icon={<Zap size={14} />} />
-          </div>
-
-          {/* Best / worst single trade */}
-          {(bestTrade || worstTrade) && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {bestTrade && (
-                <StatCard largeLabel label="עסקה טובה ביותר"
-                  value={fmt(pnlIls(bestTrade), bestTrade.pnl_currency ?? '₪')}
-                  sub={bestTrade.strategy} positive={true} />
-              )}
-              {worstTrade && (
-                <StatCard largeLabel label="עסקה גרועה ביותר"
-                  value={fmt(pnlIls(worstTrade), worstTrade.pnl_currency ?? '₪')}
-                  sub={worstTrade.strategy} positive={false} />
-              )}
-            </div>
-          )}
-
-          {/* Best / worst day */}
-          {(bestDay || worstDay) && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {bestDay && bestDay.pnl > 0 && (
-                <StatCard largeLabel label="יום טוב ביותר" value={fmt(bestDay.pnl)} sub={bestDay.label} positive={true} />
-              )}
-              {worstDay && worstDay.pnl < 0 && (
-                <StatCard largeLabel label="יום גרוע ביותר" value={fmt(worstDay.pnl)} sub={worstDay.label} positive={false} />
-              )}
-            </div>
-          )}
-        </Section>
+        <RecordsGrid
+          maxWinStreak={maxW}
+          maxLossStreak={maxL}
+          bestTrade={bestTrade ? { value: fmt(pnlIls(bestTrade), bestTrade.pnl_currency ?? '₪'), sub: bestTrade.strategy } : null}
+          worstTrade={worstTrade ? { value: fmt(pnlIls(worstTrade), worstTrade.pnl_currency ?? '₪'), sub: worstTrade.strategy } : null}
+          bestDay={bestDay && bestDay.pnl > 0 ? { value: fmt(bestDay.pnl), sub: bestDay.label } : null}
+          worstDay={worstDay && worstDay.pnl < 0 ? { value: fmt(worstDay.pnl), sub: worstDay.label } : null}
+        />
       )}
 
     </div>

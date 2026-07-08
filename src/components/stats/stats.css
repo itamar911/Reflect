@@ -1,0 +1,78 @@
+/* Stats page — "trading terminal" design language */
+
+.stats-page {
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-card {
+  background: var(--color-tg-surface);
+  border: 1px solid var(--color-tg-border-light);
+  border-radius: 14px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.stats-card:hover {
+  border-color: var(--color-tg-border);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
+}
+
+/* Segmented control */
+.stats-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--color-tg-surface-2);
+  border: 1px solid var(--color-tg-border-light);
+}
+.stats-seg button {
+  padding: 5px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-tg-text-2);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.stats-seg button.active {
+  background: var(--color-tg-surface);
+  color: var(--color-tg-primary);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+
+/* Compact data tables */
+.stats-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.stats-table th {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-tg-muted);
+  text-align: right;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--color-tg-border-light);
+  white-space: nowrap;
+}
+.stats-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-tg-border-light);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.stats-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.stats-table tbody tr {
+  transition: background 0.12s ease;
+}
+.stats-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+/* Number runs: aligned digits, stable direction inside RTL text */
+.stats-num {
+  font-variant-numeric: tabular-nums;
+  direction: ltr;
+  unicode-bidi: isolate;
+  display: inline-block;
+}
