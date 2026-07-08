@@ -1,5 +1,6 @@
 'use client';
 import { useState, useMemo } from 'react';
+import { tradeMoneyPnl, hasMoneyPnl } from '@/lib/pnl';
 
 interface Trade {
   id: string;
@@ -18,6 +19,7 @@ interface Trade {
   submitted_at: string;
   closed_at: string | null;
   plan_score: number | null;
+  pnl_amount: number | null;
   actual_pnl: number | null;
 }
 
@@ -71,11 +73,7 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
     for (const t of trades) {
       const key  = toDayKey(new Date(t.submitted_at));
       const prev = map.get(key) ?? { pnl: 0, tradeCount: 0, hasViolation: false };
-      const pnl  = t.actual_pnl != null
-        ? t.actual_pnl
-        : (t.status === 'closed' && t.exit_price != null
-            ? t.exit_price - t.entry_price
-            : 0);
+      const pnl  = tradeMoneyPnl(t);
       const violation =
         t.emotional_state <= 2 || (t.plan_score != null && t.plan_score < 70);
       map.set(key, {
@@ -99,8 +97,8 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
       totalCount++;
       tradingDays.add(toDayKey(d));
 
-      if (t.actual_pnl != null) {
-        const pnl = t.actual_pnl;
+      if (hasMoneyPnl(t)) {
+        const pnl = tradeMoneyPnl(t);
         totalPnl += pnl;
         closed++;
         if (pnl > 0)      { wins++;   winPnl  += pnl; }

@@ -39,6 +39,7 @@ export default async function TradesPage() {
     point_value:      t.point_value != null ? Number(t.point_value) : null,
     direction:        (t.direction as 'long' | 'short' | null) ?? null,
     pnl_amount:       t.pnl_amount != null ? Number(t.pnl_amount) : null,
+    actual_pnl:       t.actual_pnl != null ? Number(t.actual_pnl) : null,
     pnl_currency:     (t.pnl_currency as string | null) ?? null,
   }));
 

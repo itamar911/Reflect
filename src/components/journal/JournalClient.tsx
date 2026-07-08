@@ -8,6 +8,7 @@ import CloseTrade, { AIDebriefView, type AIDebriefResult } from '@/components/jo
 import EmotionalStateSlider from '@/components/trade/EmotionalStateSlider';
 import { createClient } from '@/lib/supabase/client';
 import { formatPnlIls, formatPnlPoints, calcRR } from '@/lib/utils';
+import { tradeMoneyPnl, hasMoneyPnl } from '@/lib/pnl';
 import type { PnlCurrency } from '@/lib/types';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
@@ -49,6 +50,7 @@ interface Trade {
   point_value: number | null;
   direction: 'long' | 'short' | null;
   pnl_amount: number | null;
+  actual_pnl: number | null;
   pnl_currency: string | null;
 }
 
@@ -117,9 +119,9 @@ function MobileTradeCard({ t, onView, onEdit, onDelete, onClose, onDebrief, hasD
         <div className="flex items-center justify-between">
           <span style={{ fontSize: 12, color: MUTED, fontWeight: 600 }}>{fmtDate(t.submitted_at)}</span>
           {pnl !== null ? (
-            t.pnl_amount != null ? (
-              <span style={{ fontSize: 14, fontWeight: 700, color: t.pnl_amount >= 0 ? GREEN : RED }}>
-                {formatPnlIls(t.pnl_amount, t.pnl_currency ?? '₪')}
+            hasMoneyPnl(t) ? (
+              <span style={{ fontSize: 14, fontWeight: 700, color: tradeMoneyPnl(t) >= 0 ? GREEN : RED }}>
+                {formatPnlIls(tradeMoneyPnl(t), t.pnl_currency ?? '₪')}
                 <span style={{ fontSize: 11, opacity: 0.6 }}> ({formatPnlPoints(pnl)})</span>
               </span>
             ) : (
@@ -194,20 +196,21 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
   const closed = useMemo(() =>
     trades.filter(t => t.status === 'closed' && t.exit_price != null), [trades]);
   const pnls        = useMemo(() => closed.map(t => calcPnl(t)!), [closed]);
-  const wins        = pnls.filter(p => p > 0);
-  const losses      = pnls.filter(p => p < 0);
-  const totalPnl    = pnls.reduce((s, p) => s + p, 0);
-  const winRate     = closed.length > 0 ? Math.round(wins.length / closed.length * 100) : 0;
-  const grossProfit = wins.reduce((s, p) => s + p, 0);
-  const grossLoss   = Math.abs(losses.reduce((s, p) => s + p, 0));
+  const totalPnl    = pnls.reduce((s, p) => s + p, 0); // points fallback when no money data
+  // Money aggregates via tradeMoneyPnl (actual_pnl ?? pnl_amount) — same logic as
+  // the stats page, so both pages show identical totals and profit factor.
+  const winRate     = closed.length > 0
+    ? Math.round(closed.filter(t => tradeMoneyPnl(t) > 0).length / closed.length * 100) : 0;
+  const moneyClosed = useMemo(() => closed.filter(hasMoneyPnl), [closed]);
+  const grossProfit = moneyClosed.filter(t => tradeMoneyPnl(t) > 0).reduce((s, t) => s + tradeMoneyPnl(t), 0);
+  const grossLoss   = Math.abs(moneyClosed.filter(t => tradeMoneyPnl(t) < 0).reduce((s, t) => s + tradeMoneyPnl(t), 0));
   const pfNum       = grossLoss > 0 ? grossProfit / grossLoss : null;
   const pfStr       = pfNum !== null ? pfNum.toFixed(2) : grossProfit > 0 ? '∞' : '—';
 
-  const closedWithAmount  = useMemo(() => closed.filter(t => t.pnl_amount != null), [closed]);
-  const pnlCurrencies     = useMemo(() => Array.from(new Set(closedWithAmount.map(t => t.pnl_currency ?? '₪'))), [closedWithAmount]);
-  const totalPnlAmount    = closedWithAmount.reduce((s, t) => s + (t.pnl_amount ?? 0), 0);
+  const pnlCurrencies     = useMemo(() => Array.from(new Set(moneyClosed.map(t => t.pnl_currency ?? '₪'))), [moneyClosed]);
+  const totalPnlAmount    = moneyClosed.reduce((s, t) => s + tradeMoneyPnl(t), 0);
   const pnlAmountCurrency = pnlCurrencies.length === 1 ? pnlCurrencies[0] : '₪';
-  const hasPnlAmount      = closedWithAmount.length > 0;
+  const hasPnlAmount      = moneyClosed.length > 0;
 
   // ── Filtered + sorted ─────────────────────────────────────────────────────
   const filtered = useMemo(() => {
@@ -503,9 +506,9 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
                     {/* P&L */}
                     <TD>
                       {pnl !== null ? (
-                        t.pnl_amount != null ? (
-                          <span style={{ color: t.pnl_amount >= 0 ? GREEN : RED }}>
-                            <span className="font-semibold">{formatPnlIls(t.pnl_amount, t.pnl_currency ?? '₪')}</span>
+                        hasMoneyPnl(t) ? (
+                          <span style={{ color: tradeMoneyPnl(t) >= 0 ? GREEN : RED }}>
+                            <span className="font-semibold">{formatPnlIls(tradeMoneyPnl(t), t.pnl_currency ?? '₪')}</span>
                             <span className="text-xs" style={{ opacity: 0.6 }}> ({formatPnlPoints(pnl)})</span>
                           </span>
                         ) : (
@@ -920,9 +923,9 @@ function TradeDetailModal({ trade, onClose, debriefResult, onDebrief }: {
           <p className="text-base font-bold flex items-center gap-2" style={{ color: 'var(--color-tg-text)' }}>
             {trade.symbol ?? trade.strategy}
             {pnlPoints !== null && (
-              trade.pnl_amount != null ? (
-                <span className="text-sm font-bold" style={{ color: trade.pnl_amount >= 0 ? '#22c55e' : '#ef4444' }}>
-                  {formatPnlIls(trade.pnl_amount, trade.pnl_currency ?? '₪')}
+              hasMoneyPnl(trade) ? (
+                <span className="text-sm font-bold" style={{ color: tradeMoneyPnl(trade) >= 0 ? '#22c55e' : '#ef4444' }}>
+                  {formatPnlIls(tradeMoneyPnl(trade), trade.pnl_currency ?? '₪')}
                   <span className="text-xs font-semibold" style={{ opacity: 0.6 }}> ({formatPnlPoints(pnlPoints)})</span>
                 </span>
               ) : (

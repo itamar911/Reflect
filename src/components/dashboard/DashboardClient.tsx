@@ -852,10 +852,10 @@ function TradeDetailPanel({ trade, onClose, aiReview, aiLoading, onAiReview }: {
               </div>
             </div>
             {pnl !== null && (
-              <p className="text-2xl font-bold" style={{ color: pnl >= 0 ? GREEN : RED }}>
-                {trade.pnl_amount != null ? (
+              <p className="text-2xl font-bold" style={{ color: (hasMoneyPnl(trade) ? tradeMoneyPnl(trade) : pnl) >= 0 ? GREEN : RED }}>
+                {hasMoneyPnl(trade) ? (
                   <>
-                    {formatPnlIls(trade.pnl_amount, trade.pnl_currency ?? '₪')}
+                    {formatPnlIls(tradeMoneyPnl(trade), trade.pnl_currency ?? '₪')}
                     <span className="text-sm font-semibold" style={{ opacity: 0.6 }}> ({formatPnlPoints(pnl)})</span>
                   </>
                 ) : fmtPnl(pnl)}
@@ -1692,10 +1692,10 @@ export default function DashboardClient({
                       {/* P&L (+ button on desktop only) */}
                       <div className="flex items-center gap-2 shrink-0">
                         {pnl !== null ? (
-                          <p className="text-[11px] sm:text-sm font-bold" style={{ color: pnl >= 0 ? GREEN : RED }}>
-                            {t.pnl_amount != null ? (
+                          <p className="text-[11px] sm:text-sm font-bold" style={{ color: (hasMoneyPnl(t) ? tradeMoneyPnl(t) : pnl) >= 0 ? GREEN : RED }}>
+                            {hasMoneyPnl(t) ? (
                               <>
-                                {formatPnlIls(t.pnl_amount, t.pnl_currency ?? '₪')}
+                                {formatPnlIls(tradeMoneyPnl(t), t.pnl_currency ?? '₪')}
                                 <span className="text-[8px] sm:text-xs font-semibold" style={{ opacity: 0.6 }}> ({formatPnlPoints(pnl)})</span>
                               </>
                             ) : fmtPnl(pnl)}

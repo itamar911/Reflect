@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getUserPlan } from '@/lib/plans/getUserPlan';
+import { tradeMoneyPnl } from '@/lib/pnl';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -40,7 +41,9 @@ interface TradeRow {
   stop_loss: number | string;
   emotional_state: number | string | null;
   plan_score: number | null;
+  status: string;
   pnl_amount: number | string | null;
+  actual_pnl: number | string | null;
   pnl_currency: string | null;
   closed_at: string | null;
   submitted_at: string;
@@ -48,7 +51,7 @@ interface TradeRow {
   post_trade_notes: string | null;
 }
 
-const TRADE_SELECT_FIELDS = 'strategy,entry_price,exit_price,take_profit,stop_loss,emotional_state,plan_score,pnl_amount,pnl_currency,closed_at,submitted_at,exit_reason,post_trade_notes';
+const TRADE_SELECT_FIELDS = 'strategy,entry_price,exit_price,take_profit,stop_loss,emotional_state,plan_score,status,pnl_amount,actual_pnl,pnl_currency,closed_at,submitted_at,exit_reason,post_trade_notes';
 
 function tradePoints(t: TradeRow): number {
   const entry = Number(t.entry_price);
@@ -106,7 +109,7 @@ function resolveWeekStart(now: Date, requested: string | null): {
 }
 
 function computeWeeklyStats(trades: TradeRow[], weekStart: Date): WeeklyStats {
-  const rows = trades.map(t => ({ trade: t, pnl: t.pnl_amount != null ? Number(t.pnl_amount) : 0, points: tradePoints(t) }));
+  const rows = trades.map(t => ({ trade: t, pnl: tradeMoneyPnl(t), points: tradePoints(t) }));
 
   const winning = rows.filter(r => r.points > 0);
   const losing = rows.filter(r => r.points < 0);

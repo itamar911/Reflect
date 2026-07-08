@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { computeTradeScore, type TradeScoreInput, type TradeScoreResult } from '@/lib/scoring/tradeScore';
+import { tradeMoneyPnl, hasMoneyPnl } from '@/lib/pnl';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -20,9 +21,16 @@ function computeOutcome(trade: Record<string, unknown>): Outcome | null {
   const direction: 'long' | 'short' = tp >= entry ? 'long' : 'short';
   const points = direction === 'long' ? exit - entry : entry - exit;
 
+  const moneyTrade = {
+    status:     String(trade.status ?? ''),
+    exit_price: trade.exit_price as number | string | null,
+    pnl_amount: trade.pnl_amount as number | string | null,
+    actual_pnl: trade.actual_pnl as number | string | null,
+  };
+
   return {
     points: Math.round(points * 100) / 100,
-    amount: trade.pnl_amount != null ? Number(trade.pnl_amount) : null,
+    amount: hasMoneyPnl(moneyTrade) ? tradeMoneyPnl(moneyTrade) : null,
     currency: typeof trade.pnl_currency === 'string' ? trade.pnl_currency : null,
   };
 }
