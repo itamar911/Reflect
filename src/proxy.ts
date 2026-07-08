@@ -23,7 +23,24 @@ export async function proxy(request: NextRequest) {
     }
   );
 
-  const { data: { user } } = await supabase.auth.getUser();
+  const hasAuthCookies = request.cookies
+    .getAll()
+    .some((c) => c.name.startsWith('sb-') && c.name.includes('-auth-token'));
+
+  // A transient getUser() failure (network error, Supabase 5xx) must not be
+  // treated as "logged out" — with auth cookies present we let the request
+  // through and rely on the page-level getUser() gates; the next request retries.
+  let user = null;
+  let authUnavailable = false;
+  try {
+    const { data, error } = await supabase.auth.getUser();
+    user = data.user;
+    if (error && hasAuthCookies) {
+      authUnavailable = error.status === undefined || error.status === 0 || error.status >= 500;
+    }
+  } catch {
+    authUnavailable = hasAuthCookies;
+  }
 
   const { pathname } = request.nextUrl;
 
@@ -42,12 +59,20 @@ export async function proxy(request: NextRequest) {
 
   const isPublicRoute = pathname === '/' || isAuthRoute || isApiRoute || isMarketingRoute;
 
-  if (!user && !isPublicRoute) {
-    return NextResponse.redirect(new URL('/login', request.url));
+  // Redirects must carry any auth cookies getUser() rotated onto supabaseResponse,
+  // otherwise the browser keeps a stale refresh token and the session dies later.
+  function redirectWithCookies(to: string) {
+    const response = NextResponse.redirect(new URL(to, request.url));
+    supabaseResponse.cookies.getAll().forEach((cookie) => response.cookies.set(cookie));
+    return response;
+  }
+
+  if (!user && !authUnavailable && !isPublicRoute) {
+    return redirectWithCookies('/login');
   }
 
   if (user && isAuthRoute && !pathname.startsWith('/auth/') && !pathname.startsWith('/reset-password')) {
-    return NextResponse.redirect(new URL('/dashboard', request.url));
+    return redirectWithCookies('/dashboard');
   }
 
   return supabaseResponse;

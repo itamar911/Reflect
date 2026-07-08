@@ -211,6 +211,19 @@ export default function AppShell({
     return () => window.removeEventListener('open-trade-form', handler);
   }, [userId]);
 
+  // Keep server components in sync with client-side session changes (token
+  // refresh in this or another tab, sign-out) instead of bouncing to /login
+  // on the next navigation with stale cookies.
+  useEffect(() => {
+    const { data: { subscription } } = createClient().auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED') {
+        router.refresh();
+      }
+    });
+    return () => subscription.unsubscribe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   function toggle() {
     const next = !expanded;
     setExpanded(next);

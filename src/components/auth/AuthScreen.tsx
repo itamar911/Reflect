@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Logo } from '@/components/ui/Logo';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -9,6 +9,11 @@ import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 
 type Mode = 'login' | 'signup';
+
+const CALLBACK_ERROR_MESSAGES: Record<string, string> = {
+  link_expired: 'הקישור פג תוקף או שכבר נעשה בו שימוש. נסה לשלוח קישור חדש.',
+  auth_callback_error: 'משהו השתבש באימות. נסה שוב או בקש קישור חדש.',
+};
 
 interface AuthScreenProps {
   mode: Mode;
@@ -21,15 +26,26 @@ export default function AuthScreen({ mode }: AuthScreenProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [callbackError, setCallbackError] = useState('');
 
   const supabase = createClient();
   const router = useRouter();
+
+  // Errors forwarded from /auth/callback (expired/used email links).
+  // Read after mount — the page is prerendered without query params.
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get('error');
+    if (code && CALLBACK_ERROR_MESSAGES[code]) {
+      setCallbackError(CALLBACK_ERROR_MESSAGES[code]);
+    }
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError('');
     setSuccess('');
+    setCallbackError('');
 
     if (mode === 'signup') {
       const { error } = await supabase.auth.signUp({
@@ -53,6 +69,7 @@ export default function AuthScreen({ mode }: AuthScreenProps) {
           : error.message);
       } else {
         router.push('/dashboard');
+        router.refresh();
         return;
       }
     }
@@ -76,6 +93,12 @@ export default function AuthScreen({ mode }: AuthScreenProps) {
       {/* Card */}
       <div className="rounded-2xl border border-tg-border p-6"
         style={{ background: 'var(--color-tg-surface)' }}>
+        {callbackError && (
+          <div className="text-sm text-tg-danger rounded-xl px-3 py-2 mb-3"
+            style={{ background: 'var(--color-tg-danger-muted)' }}>
+            {callbackError}
+          </div>
+        )}
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           {mode === 'signup' && (
             <Input
