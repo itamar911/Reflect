@@ -102,6 +102,7 @@ export default function CloseTrade({
   const [revengeTrade, setRevengeTrade] = useState(false);
   const [actualPnl, setActualPnl] = useState('');
   const [actualPnlCurrency, setActualPnlCurrency] = useState<'₪' | '$'>((pnlCurrency as '₪' | '$') ?? '₪');
+  const [postTradeNotes, setPostTradeNotes] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [debriefResult, setDebriefResult] = useState<AIDebriefResult | null>(null);
@@ -135,6 +136,7 @@ export default function CloseTrade({
 
     const pnlAmount = finalAmount;
     const pnlCurrencyValue = pnlAmount != null ? (finalCurrency ?? '₪') : null;
+    const notesValue = postTradeNotes.trim() || null;
 
     // kept_sl / proper_size are legacy columns retained for the AI-debrief score formula;
     // kept_sl mirrors the "moved SL" toggle. proper_size defaults to true since position
@@ -157,6 +159,7 @@ export default function CloseTrade({
       exited_early: exitedEarly,
       fomo_entry: fomoEntry,
       revenge_trade: revengeTrade,
+      post_trade_notes: notesValue,
     }).eq('id', tradeId);
 
     if (err) {
@@ -176,7 +179,7 @@ export default function CloseTrade({
         rr_ratio: rrRatio, emotional_state: emotionalState,
         trade_reason: tradeReason,
         exit_price: exit, exit_reason: exitReason,
-        post_trade_notes: '',
+        post_trade_notes: notesValue ?? '',
         followed_plan: followedPlan,
         kept_sl: keptSl,
         proper_size: properSize,
@@ -363,6 +366,27 @@ export default function CloseTrade({
           violation
         />
       </Card>
+
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center justify-between">
+          <label className="text-xs text-tg-muted">מהלך העסקה / הערות (אופציונלי)</label>
+          {postTradeNotes.length > 0 && (
+            <span className="text-[10px] text-tg-muted" style={{ fontWeight: 500 }}>
+              {postTradeNotes.length}/1500
+            </span>
+          )}
+        </div>
+        <textarea
+          dir="rtl"
+          rows={3}
+          maxLength={1500}
+          value={postTradeNotes}
+          onChange={(e) => setPostTradeNotes(e.target.value)}
+          placeholder="לדוגמה: העסקה נסגרה בסטופ אחרי ציוץ שהקריס את השוק..."
+          className="w-full px-3 py-2.5 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary resize-none leading-relaxed"
+          style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)', fontWeight: 500 }}
+        />
+      </div>
 
       {error && <p className="text-xs" style={{ color: 'var(--color-tg-danger)' }}>{error}</p>}
 
