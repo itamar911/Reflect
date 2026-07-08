@@ -37,8 +37,8 @@ export function SocialProofSection() {
                   )}
                 </div>
                 <div className="px-1">
-                  <p className="text-sm text-tg-text-2 leading-relaxed">&quot;{video.quote}&quot;</p>
-                  <p className="text-xs text-tg-muted mt-1">{video.name}</p>
+                  <p className="text-base text-tg-text-2 leading-relaxed">&quot;{video.quote}&quot;</p>
+                  <p className="text-sm text-tg-muted mt-1">{video.name}</p>
                 </div>
               </div>
             ))}

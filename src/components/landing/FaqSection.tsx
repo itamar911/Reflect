@@ -55,7 +55,7 @@ export function FaqSection() {
                     className="w-full flex items-center justify-between gap-4 p-5 text-start"
                     aria-expanded={isOpen}
                   >
-                    <span className="text-base font-bold text-white">{item.q}</span>
+                    <span className="font-bold text-white" style={{ fontSize: 17 }}>{item.q}</span>
                     <span className={`faq-toggle ${isOpen ? 'open' : ''}`} aria-hidden />
                   </button>
                   <div
@@ -67,7 +67,7 @@ export function FaqSection() {
                   >
                     <div className="overflow-hidden">
                       <p
-                        className="text-sm text-tg-muted leading-relaxed px-5 pb-5 transition-opacity duration-300"
+                        className="text-base text-tg-muted leading-relaxed px-5 pb-5 transition-opacity duration-300"
                         style={{ opacity: isOpen ? 1 : 0 }}
                       >
                         {item.a}

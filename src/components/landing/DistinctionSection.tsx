@@ -21,21 +21,21 @@ export function DistinctionSection() {
           {/* copy — first child = right column in RTL */}
           <div className="flex flex-col gap-6">
             <ScrollReveal delay={80}>
-              <p className="text-base text-tg-muted leading-relaxed">
+              <p className="text-tg-muted" style={{ fontSize: 17, lineHeight: 1.7 }}>
                 יומן טוב מראה לך אחרי: איפה טעית, מה עבד, אילו דפוסים חוזרים אצלך. זה שלב הכרחי —
                 השוק בוחן את האסטרטגיה שלך. בלי תיעוד, אף אחד לא בוחן אותך.
               </p>
             </ScrollReveal>
 
             <ScrollReveal delay={160}>
-              <p className="text-base text-tg-muted leading-relaxed">
+              <p className="text-tg-muted" style={{ fontSize: 17, lineHeight: 1.7 }}>
                 אבל יש רגע אחד שאף יומן בעולם לא מכסה: הרגע שלפני. האצבע על הכפתור, הלב דופק, וכל
                 מה שראית אתמול בסטטיסטיקות נעלם. שם, ברגע שהכי קובע — היומן שלך עוד לא יודע כלום.
               </p>
             </ScrollReveal>
 
             <ScrollReveal delay={240}>
-              <p className="text-base text-tg-muted leading-relaxed">
+              <p className="text-tg-muted" style={{ fontSize: 17, lineHeight: 1.7 }}>
                 Reflect בנוי על שני החצאים: יומן מלא שמנתח אותך לעומק אחרי כל עסקה — ומערכת
                 שנמצאת איתך לפני, ברגע ההחלטה, ואומרת לך בפרצוף כשאתה עומד להפר את החוקים של
                 עצמך.
@@ -70,16 +70,16 @@ export function DistinctionSection() {
                   <p className="text-xl font-extrabold" style={{ color: '#ef4444' }}>
                     -1,240 ₪
                   </p>
-                  <p className="text-xs mt-0.5" style={{ color: '#94a3b8' }}>
+                  <p className="text-sm mt-0.5" style={{ color: '#94a3b8' }}>
                     מה קרה אתמול
                   </p>
                 </div>
                 <div className="rounded-lg px-3 py-2" style={{ background: 'rgba(148,163,184,0.08)' }}>
                   <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-[11px]" style={{ color: '#94a3b8' }}>
+                    <span className="text-sm" style={{ color: '#94a3b8' }}>
                       סיכום שבועי
                     </span>
-                    <span className="text-[11px] font-semibold" style={{ color: '#94a3b8' }}>
+                    <span className="text-sm font-semibold" style={{ color: '#94a3b8' }}>
                       3 ימים אדומים מתוך 5
                     </span>
                   </div>
@@ -120,15 +120,15 @@ export function DistinctionSection() {
                 </div>
                 <div className="flex items-center gap-2">
                   <Check size={15} className="shrink-0" style={{ color: '#22c55e' }} />
-                  <span className="text-white/85" style={{ fontSize: 13 }}>
+                  <span className="text-white/85" style={{ fontSize: 14 }}>
                     סטופ מוגדר · יחס 1:2.5
                   </span>
                 </div>
                 <div className="flex items-center justify-between rounded-lg px-2.5 py-1.5" style={{ background: 'rgba(255,255,255,0.04)' }}>
-                  <span className="text-white/60" style={{ fontSize: 12 }}>
+                  <span className="text-white/60" style={{ fontSize: 14 }}>
                     סטופ
                   </span>
-                  <span className="text-white/85 font-semibold" style={{ fontSize: 12.5 }}>
+                  <span className="text-white/85 font-semibold" style={{ fontSize: 14 }}>
                     29,340
                   </span>
                 </div>
@@ -137,7 +137,7 @@ export function DistinctionSection() {
                   style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)' }}
                 >
                   <AlertTriangle size={15} className="shrink-0" style={{ color: '#f59e0b' }} />
-                  <span style={{ fontSize: 13, color: '#f59e0b' }}>עסקה שלישית היום — חוק שלך מופר</span>
+                  <span style={{ fontSize: 14, color: '#f59e0b' }}>עסקה שלישית היום — חוק שלך מופר</span>
                 </div>
               </div>
             </div>
@@ -162,7 +162,7 @@ export function DistinctionSection() {
                   >
                     <Icon size={18} style={{ color: chip.color }} />
                   </span>
-                  <span className="text-sm font-semibold text-white/85 leading-snug">{chip.text}</span>
+                  <span className="text-[15px] font-semibold text-white/85 leading-snug">{chip.text}</span>
                 </div>
               );
             })}

@@ -5,6 +5,17 @@ import Link from 'next/link';
 
 type FeatureItem = { text: string; type: 'check' | 'cross' | 'dash' };
 
+// Monthly price vs. per-month price on annual billing — savings are computed, not hardcoded.
+const PLAN_PRICES = {
+  basic: { monthly: 59, yearly: 55 },
+  pro: { monthly: 99, yearly: 89 },
+} as const;
+
+function yearlySavings(plan: keyof typeof PLAN_PRICES) {
+  const { monthly, yearly } = PLAN_PRICES[plan];
+  return monthly * 12 - yearly * 12;
+}
+
 const BASIC_FEATURES: FeatureItem[] = [
   { text: 'יומן חודשי עם רווח והפסד אוטומטי', type: 'check' },
   { text: 'גרף TradingView מובנה בתוך כל עסקה', type: 'check' },
@@ -34,11 +45,8 @@ const PRO_FEATURES: FeatureItem[] = [
 export function MarketingPricing() {
   const [billing, setBilling] = useState<'monthly' | 'yearly'>('monthly');
 
-  const basicPrice = billing === 'monthly' ? '₪59' : '₪55';
-  const proPrice = billing === 'monthly' ? '₪99' : '₪89';
-
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-6">
       <div className="flex justify-center">
         <div className="flex rounded-full p-0.5" style={{ background: 'var(--color-tg-surface-2)' }}>
           {(['monthly', 'yearly'] as const).map((b) => (
@@ -57,68 +65,101 @@ export function MarketingPricing() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 max-w-[1200px] mx-auto w-full items-start">
-        {/* Basic */}
-        <div className="glass-card card-hover rounded-2xl p-8 lg:p-10 flex flex-col">
-          <div className="mb-6">
-            <h3 className="text-2xl lg:text-3xl font-bold text-tg-text mb-2">Basic</h3>
-            <div className="flex items-baseline gap-1.5">
-              <span className="text-4xl lg:text-5xl font-extrabold text-tg-text">{basicPrice}</span>
-              <span className="text-base text-tg-muted">/חודש</span>
-            </div>
-            {billing === 'yearly' && <p className="text-sm text-tg-muted mt-1">לחיוב שנתי</p>}
-          </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 max-w-[1200px] mx-auto w-full items-stretch">
+        <PlanCard
+          name="Basic"
+          plan="basic"
+          billing={billing}
+          features={BASIC_FEATURES}
+        />
+        <PlanCard
+          name="Pro"
+          plan="pro"
+          billing={billing}
+          features={PRO_FEATURES}
+          highlighted
+        />
+      </div>
+    </div>
+  );
+}
 
-          <FeatureList features={BASIC_FEATURES} />
+function PlanCard({
+  name,
+  plan,
+  billing,
+  features,
+  highlighted = false,
+}: {
+  name: string;
+  plan: keyof typeof PLAN_PRICES;
+  billing: 'monthly' | 'yearly';
+  features: FeatureItem[];
+  highlighted?: boolean;
+}) {
+  const price = PLAN_PRICES[plan][billing];
 
-          <Link
-            href="/signup"
-            className="landing-cta mt-8 w-full py-4 rounded-xl text-base font-semibold text-black text-center"
+  return (
+    <div
+      className={`${highlighted ? 'pricing-pro-card' : 'card-hover'} glass-card rounded-2xl p-7 flex flex-col relative h-full`}
+      style={
+        highlighted
+          ? {
+              borderColor: 'rgba(0,210,210,0.5)',
+              boxShadow: '0 0 0 1px rgba(0,210,210,0.15), 0 20px 50px rgba(0,0,0,0.35), 0 0 40px rgba(0,210,210,0.15)',
+            }
+          : undefined
+      }
+    >
+      {highlighted && (
+        <div className="absolute -top-3.5 left-1/2 -translate-x-1/2">
+          <span
+            className="px-4 py-1 rounded-full text-sm font-bold whitespace-nowrap"
+            style={{ background: '#00d2d2', color: '#000' }}
           >
-            התחל ניסיון חינם 5 ימים
-          </Link>
+            המומלץ
+          </span>
         </div>
+      )}
 
-        {/* Pro */}
-        <div
-          className="pricing-pro-card glass-card rounded-2xl p-8 lg:p-10 flex flex-col relative"
-          style={{ borderColor: 'rgba(0,210,210,0.5)', boxShadow: '0 0 0 1px rgba(0,210,210,0.15), 0 20px 50px rgba(0,0,0,0.35), 0 0 40px rgba(0,210,210,0.15)' }}
-        >
-          <div className="absolute -top-3.5 left-1/2 -translate-x-1/2">
+      <div className="mb-5">
+        <h3 className="text-2xl font-bold text-tg-text mb-1.5">{name}</h3>
+        <div className="flex items-baseline gap-1.5">
+          <span className="text-4xl lg:text-[44px] font-extrabold text-tg-text">₪{price}</span>
+          <span className="text-base text-tg-muted">/חודש</span>
+        </div>
+        {billing === 'yearly' && (
+          <div className="flex items-center gap-2.5 mt-2">
+            <p className="text-sm text-tg-muted">לחיוב שנתי</p>
             <span
-              className="px-4 py-1 rounded-full text-xs font-bold whitespace-nowrap"
-              style={{ background: '#00d2d2', color: '#000' }}
+              className="inline-flex items-center rounded-full px-2.5 py-0.5 text-sm font-bold"
+              style={{
+                background: 'rgba(34,197,94,0.14)',
+                border: '1px solid rgba(34,197,94,0.4)',
+                color: '#4ade80',
+              }}
             >
-              המומלץ
+              חיסכון של ₪{yearlySavings(plan)} בשנה
             </span>
           </div>
-
-          <div className="mb-6">
-            <h3 className="text-2xl lg:text-3xl font-bold text-tg-text mb-2">Pro</h3>
-            <div className="flex items-baseline gap-1.5">
-              <span className="text-4xl lg:text-5xl font-extrabold text-tg-text">{proPrice}</span>
-              <span className="text-base text-tg-muted">/חודש</span>
-            </div>
-            {billing === 'yearly' && <p className="text-sm text-tg-muted mt-1">לחיוב שנתי</p>}
-          </div>
-
-          <FeatureList features={PRO_FEATURES} />
-
-          <Link
-            href="/signup"
-            className="landing-cta mt-8 w-full py-4 rounded-xl text-base font-semibold text-black text-center"
-          >
-            התחל ניסיון חינם 5 ימים
-          </Link>
-        </div>
+        )}
       </div>
+
+      <FeatureList features={features} />
+
+      <Link
+        href="/signup"
+        className="landing-cta mt-auto w-full py-3.5 rounded-xl text-base font-semibold text-black text-center"
+      >
+        התחל ניסיון חינם 5 ימים
+      </Link>
     </div>
   );
 }
 
 function FeatureList({ features }: { features: FeatureItem[] }) {
   return (
-    <ul className="flex flex-col gap-3 flex-1">
+    <ul className="flex flex-col gap-2.5 flex-1 mb-6">
       {features.map((f) => (
         <li key={f.text} className="flex items-start gap-2.5">
           {f.type === 'check' && <CheckIcon />}
@@ -129,7 +170,7 @@ function FeatureList({ features }: { features: FeatureItem[] }) {
             </span>
           )}
           <span
-            className={`text-base leading-relaxed ${f.type === 'dash' ? 'text-tg-muted' : f.type === 'cross' ? 'text-tg-muted' : 'text-tg-text-2'}`}
+            className={`text-base leading-normal ${f.type === 'dash' ? 'text-tg-muted' : f.type === 'cross' ? 'text-tg-muted' : 'text-tg-text-2'}`}
           >
             {f.text}
           </span>

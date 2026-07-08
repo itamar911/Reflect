@@ -1,3 +1,4 @@
+import Image from 'next/image';
 import { Lock, Check, AlertTriangle } from 'lucide-react';
 
 const CHIPS = ['NQ1', 'Long', '5m'];
@@ -12,7 +13,7 @@ export function HeroMock() {
       />
 
       <div
-        className="hero-float-1 z-20 flex absolute -top-4 -right-3 sm:-top-6 sm:-right-5 lg:-top-8 lg:-right-8 items-center gap-1.5 rounded-full px-2.5 py-1 sm:px-3 sm:py-1.5 text-[10px] sm:text-xs font-bold"
+        className="hero-float-1 z-20 flex absolute -top-4 -right-3 sm:-top-6 sm:-right-5 lg:-top-8 lg:-right-8 items-center gap-1.5 rounded-full px-2.5 py-1 sm:px-3 sm:py-1.5 text-sm font-bold"
         style={{
           background: 'rgba(0,210,210,0.16)',
           border: '1px solid rgba(0,210,210,0.45)',
@@ -24,7 +25,7 @@ export function HeroMock() {
         ציון משמעת 87
       </div>
       <div
-        className="hero-float-2 z-20 flex absolute -bottom-4 -left-3 sm:-bottom-6 sm:-left-5 lg:-bottom-8 lg:-left-8 items-center gap-1.5 rounded-full px-2.5 py-1 sm:px-3 sm:py-1.5 text-[10px] sm:text-xs font-bold"
+        className="hero-float-2 z-20 flex absolute -bottom-4 -left-3 sm:-bottom-6 sm:-left-5 lg:-bottom-8 lg:-left-8 items-center gap-1.5 rounded-full px-2.5 py-1 sm:px-3 sm:py-1.5 text-sm font-bold"
         style={{
           background: 'rgba(239,68,68,0.14)',
           border: '1px solid rgba(239,68,68,0.4)',
@@ -48,13 +49,7 @@ export function HeroMock() {
       >
         <div className="flex items-center justify-between mb-5">
           <div className="flex items-center gap-2.5">
-            <span
-              className="flex items-center justify-center w-7 h-7 rounded-md text-sm font-extrabold shrink-0"
-              style={{ background: 'linear-gradient(135deg, #00d2d2, #0891b2)', color: '#0b0f14' }}
-              aria-hidden
-            >
-              R
-            </span>
+            <Image src="/icon.svg" alt="" width={26} height={26} unoptimized className="shrink-0" aria-hidden />
             <span className="text-base font-bold text-white">תוכנית עסקה</span>
           </div>
           <span

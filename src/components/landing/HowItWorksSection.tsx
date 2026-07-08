@@ -27,27 +27,27 @@ const STEPS: { icon: LucideIcon; title: string; body: string }[] = [
 function RuleSliderMock() {
   return (
     <div
-      className="mt-3 rounded-xl border p-3.5 flex flex-col gap-3"
+      className="mt-4 rounded-xl border p-5 flex flex-col gap-4"
       style={{ borderColor: 'rgba(255,255,255,0.1)', background: 'rgba(0,0,0,0.28)' }}
       aria-hidden
     >
-      <div className="flex items-center justify-between text-xs text-tg-muted">
+      <div className="flex items-center justify-between text-sm text-tg-muted">
         <span>מקסימום עסקאות ביום</span>
-        <span className="font-bold text-white">3</span>
+        <span className="font-bold text-white text-base">3</span>
       </div>
-      <div className="relative h-1.5 rounded-full" style={{ background: 'rgba(255,255,255,0.08)' }}>
+      <div className="relative h-2 rounded-full" style={{ background: 'rgba(255,255,255,0.08)' }}>
         <span
-          className="rule-slider-thumb absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full"
+          className="rule-slider-thumb absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-full"
           style={{ left: '55%', background: '#00d2d2', boxShadow: '0 0 8px #00d2d2' }}
         />
       </div>
-      <div className="flex items-center justify-between text-xs text-tg-muted">
+      <div className="flex items-center justify-between text-sm text-tg-muted">
         <span>הפסד יומי מקסימלי</span>
-        <span className="font-bold text-white">2%</span>
+        <span className="font-bold text-white text-base">2%</span>
       </div>
-      <div className="relative h-1.5 rounded-full" style={{ background: 'rgba(255,255,255,0.08)' }}>
+      <div className="relative h-2 rounded-full" style={{ background: 'rgba(255,255,255,0.08)' }}>
         <span
-          className="rule-slider-thumb-alt absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full"
+          className="rule-slider-thumb-alt absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-full"
           style={{ left: '30%', background: '#00d2d2', boxShadow: '0 0 8px #00d2d2' }}
         />
       </div>
@@ -59,24 +59,24 @@ function RuleSliderMock() {
 function TradeCheckMock() {
   return (
     <div
-      className="mt-3 rounded-xl border p-3.5 flex flex-col gap-2.5"
+      className="mt-4 rounded-xl border p-5 flex flex-col gap-3"
       style={{ borderColor: 'rgba(255,255,255,0.1)', background: 'rgba(0,0,0,0.28)' }}
       aria-hidden
     >
-      <div className="flex items-center gap-2">
-        <Check size={15} className="shrink-0" style={{ color: '#22c55e' }} />
-        <span className="text-white/80" style={{ fontSize: 13 }}>סטופ מוגדר · יחס 1:2.5</span>
+      <div className="flex items-center gap-2.5">
+        <Check size={17} className="shrink-0" style={{ color: '#22c55e' }} />
+        <span className="text-white/80" style={{ fontSize: 15 }}>סטופ מוגדר · יחס 1:2.5</span>
       </div>
-      <div className="flex items-center gap-2">
-        <Check size={15} className="shrink-0" style={{ color: '#22c55e' }} />
-        <span className="text-white/80" style={{ fontSize: 13 }}>מתאים לאסטרטגיה שלך</span>
+      <div className="flex items-center gap-2.5">
+        <Check size={17} className="shrink-0" style={{ color: '#22c55e' }} />
+        <span className="text-white/80" style={{ fontSize: 15 }}>מתאים לאסטרטגיה שלך</span>
       </div>
       <div
-        className="flex items-center gap-2 rounded-lg px-2 py-1.5 -mx-1"
+        className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 -mx-1"
         style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)' }}
       >
-        <AlertTriangle size={15} className="shrink-0" style={{ color: '#f59e0b' }} />
-        <span style={{ fontSize: 13, color: '#f59e0b' }}>עסקה שלישית היום — חוק שלך מופר</span>
+        <AlertTriangle size={17} className="shrink-0" style={{ color: '#f59e0b' }} />
+        <span style={{ fontSize: 15, color: '#f59e0b' }}>עסקה שלישית היום — חוק שלך מופר</span>
       </div>
     </div>
   );
@@ -111,24 +111,24 @@ function ScoreCounterMock({ active }: { active: boolean }) {
 
   return (
     <div
-      className="mt-3 rounded-xl border p-3.5 flex items-center gap-3"
+      className="mt-4 rounded-xl border p-5 flex items-center gap-4"
       style={{ borderColor: 'rgba(255,255,255,0.1)', background: 'rgba(0,0,0,0.28)' }}
       aria-hidden
     >
       <div
-        className="relative w-12 h-12 rounded-full shrink-0 flex items-center justify-center"
+        className="relative w-16 h-16 rounded-full shrink-0 flex items-center justify-center"
         style={{ background: `conic-gradient(#00d2d2 ${value}%, rgba(255,255,255,0.1) ${value}% 100%)` }}
       >
         <div
-          className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-extrabold text-white"
+          className="w-12 h-12 rounded-full flex items-center justify-center text-base font-extrabold text-white"
           style={{ background: '#15181e' }}
         >
           {value}
         </div>
       </div>
       <div>
-        <p className="text-sm font-bold text-white">ציון משמעת</p>
-        <p className="text-xs text-tg-muted">מתוך 100</p>
+        <p className="text-base font-bold text-white">ציון משמעת</p>
+        <p className="text-sm text-tg-muted">מתוך 100</p>
       </div>
     </div>
   );
@@ -202,15 +202,15 @@ export function HowItWorksSection() {
                           </div>
                         </div>
                       </div>
-                      <div className="glass-card tilt-hover step-card-accent rounded-2xl p-6 flex flex-col gap-3 flex-1 w-full">
+                      <div className="glass-card tilt-hover step-card-accent rounded-2xl p-7 flex flex-col gap-3.5 flex-1 w-full">
                         <div
-                          className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0"
+                          className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0"
                           style={{ background: 'rgba(0,210,210,0.12)' }}
                         >
-                          <Icon size={22} style={{ color: '#00d2d2' }} />
+                          <Icon size={24} style={{ color: '#00d2d2' }} />
                         </div>
-                        <h3 className="text-lg font-bold text-white">{step.title}</h3>
-                        <p className="text-sm text-tg-muted leading-relaxed">{step.body}</p>
+                        <h3 className="text-xl font-bold text-white">{step.title}</h3>
+                        <p className="text-tg-muted" style={{ fontSize: 17, lineHeight: 1.7 }}>{step.body}</p>
                         {i === 0 && <RuleSliderMock />}
                         {i === 1 && <TradeCheckMock />}
                         {i === 2 && <ScoreCounterMock active={inView} />}

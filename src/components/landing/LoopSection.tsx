@@ -46,6 +46,24 @@ function buildLoopPath() {
 
 const LOOP_PATH = buildLoopPath();
 
+/** Horizontal pill badge marking the loop restarting — replaces the old rotated side label. */
+function LoopRestartPill({ className = '' }: { className?: string }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-bold whitespace-nowrap ${className}`}
+      style={{
+        color: '#f87171',
+        background: 'rgba(239,68,68,0.12)',
+        border: '1px solid rgba(239,68,68,0.45)',
+        boxShadow: '0 0 14px rgba(239,68,68,0.15)',
+      }}
+    >
+      <RefreshCw size={14} aria-hidden />
+      והלופ מתחיל מחדש
+    </span>
+  );
+}
+
 export function LoopSection() {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [inView, setInView] = useState(false);
@@ -74,14 +92,14 @@ export function LoopSection() {
   }, []);
 
   return (
-    <section className="section-alt relative py-20 px-4 md:px-8 lg:px-10 overflow-hidden">
+    <section className="section-alt relative py-14 px-4 md:px-8 lg:px-10 overflow-hidden">
       <div className="section-glow" aria-hidden />
       <div className="max-w-[1360px] mx-auto relative">
-        <SectionHeading>אתה מכיר את הלופ הזה בעל פה.</SectionHeading>
+        <SectionHeading compact>אתה מכיר את הלופ הזה בעל פה.</SectionHeading>
 
         <div ref={wrapRef} className={inView ? 'loop-in' : ''}>
           {/* ── Desktop: full-width winding descent curve ── */}
-          <div className="hidden lg:block relative pe-16">
+          <div className="hidden lg:block relative">
             <svg
               className="absolute inset-0 w-full h-full"
               viewBox={`0 0 ${VB_W} ${VB_H}`}
@@ -117,63 +135,38 @@ export function LoopSection() {
               />
             </svg>
 
-            <ol className="relative flex flex-col gap-4">
+            <ol className="relative flex flex-col gap-2.5">
               {LOOP_STEPS.map((step, i) => {
                 const tone = TONE_STYLES[step.tone];
                 const onStart = SIDE_PATTERN[i] === 1;
                 const rotate = i % 2 === 0 ? '-1.1deg' : '1.1deg';
+                const isLast = i === LOOP_STEPS.length - 1;
                 return (
                   <ScrollReveal key={step.text} delay={i * 70}>
-                    <li className={`relative flex ${onStart ? 'justify-start' : 'justify-end'}`} style={{ minHeight: 76 }}>
+                    <li className={`relative flex ${onStart ? 'justify-start' : 'justify-end'}`} style={{ minHeight: 60 }}>
                       <span
                         className="loop-node-dot absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-3.5 h-3.5 rounded-full z-10"
                         style={{ background: tone.dot, boxShadow: `0 0 12px ${tone.dot}` }}
                         aria-hidden
                       />
                       <div
-                        className="loop-glass-card w-full max-w-[440px] rounded-2xl px-5 py-4"
+                        className="loop-glass-card w-full max-w-[460px] rounded-2xl px-5 py-3"
                         style={{
                           borderColor: tone.border,
                           boxShadow: `inset 0 0 24px ${tone.glow}, 0 10px 28px rgba(0,0,0,0.35)`,
                           transform: `rotate(${rotate})`,
                         }}
                       >
-                        <p className="text-white/95" style={{ fontSize: 15.5, lineHeight: 1.55 }}>
+                        <p className="text-white/95" style={{ fontSize: 16, lineHeight: 1.55 }}>
                           {step.text}
                         </p>
+                        {isLast && <LoopRestartPill className="mt-2" />}
                       </div>
                     </li>
                   </ScrollReveal>
                 );
               })}
             </ol>
-
-            {/* bold dashed loop-back arrow: first and last steps both sit on the start side */}
-            <svg className="absolute inset-y-0 end-0 w-16 h-full" viewBox="0 0 64 800" preserveAspectRatio="none" aria-hidden>
-              <path
-                d="M 24 30 C 56 160, 56 640, 24 770"
-                fill="none"
-                stroke="#ef4444"
-                strokeWidth={3}
-                strokeDasharray="6 8"
-                strokeLinecap="round"
-                opacity={0.85}
-              />
-              <path
-                d="M 24 30 l -8 -4 M 24 30 l -2 9"
-                fill="none"
-                stroke="#ef4444"
-                strokeWidth={3}
-                strokeLinecap="round"
-                opacity={0.85}
-              />
-            </svg>
-            <span
-              className="absolute text-xs font-bold whitespace-nowrap"
-              style={{ color: '#ef4444', insetInlineEnd: 0, top: '44%', writingMode: 'vertical-rl' }}
-            >
-              והלופ מתחיל מחדש
-            </span>
           </div>
 
           {/* ── Mobile / tablet: glass-card rail on the start side ── */}
@@ -198,7 +191,7 @@ export function LoopSection() {
                         className="loop-glass-card rounded-2xl px-4 py-3.5"
                         style={{ borderColor: tone.border, boxShadow: `inset 0 0 20px ${tone.glow}` }}
                       >
-                        <p className="text-white/95" style={{ fontSize: 14.5, lineHeight: 1.5 }}>
+                        <p className="text-white/95" style={{ fontSize: 15, lineHeight: 1.55 }}>
                           {step.text}
                         </p>
                       </div>
@@ -207,15 +200,14 @@ export function LoopSection() {
                 );
               })}
             </ol>
-            <div className="flex items-center gap-1.5 mt-3 ps-7 text-xs font-bold" style={{ color: '#ef4444' }}>
-              <RefreshCw size={13} />
-              <span>והלופ מתחיל מחדש</span>
+            <div className="mt-4 ps-7">
+              <LoopRestartPill />
             </div>
           </div>
         </div>
 
         <ScrollReveal delay={160}>
-          <div className="callout-strip max-w-2xl mx-auto mt-14 px-6 py-5">
+          <div className="callout-strip max-w-2xl mx-auto mt-10 px-6 py-5">
             <p className="text-lg md:text-xl font-bold text-white text-center leading-relaxed">
               עוד קורס, עוד אינדיקטור, עוד מנטור — וחזרת לאותו לופ. כי אף אחד מהם לא נמצא שם ברגע
               שאתה שובר את החוקים.

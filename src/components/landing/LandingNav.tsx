@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Menu, X } from 'lucide-react';
+import { Menu, X, Sparkles } from 'lucide-react';
 import { Logo } from '@/components/ui/Logo';
 
 const NAV_LINKS = [
@@ -10,6 +10,23 @@ const NAV_LINKS = [
   { href: '#pricing', label: 'מחירים' },
   { href: '#faq', label: 'שאלות נפוצות' },
 ];
+
+function NewBadge() {
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-bold whitespace-nowrap"
+      style={{
+        color: '#00d2d2',
+        background: 'rgba(0,210,210,0.1)',
+        border: '1px solid rgba(0,210,210,0.35)',
+        boxShadow: '0 0 14px rgba(0,210,210,0.12)',
+      }}
+    >
+      <Sparkles size={13} aria-hidden />
+      חדש: תחקירי AI
+    </span>
+  );
+}
 
 export function LandingNav() {
   const [scrolled, setScrolled] = useState(false);
@@ -26,36 +43,42 @@ export function LandingNav() {
 
   return (
     <header
-      className="fixed top-0 inset-x-0 z-50 transition-colors duration-300"
+      className="fixed top-0 inset-x-0 z-50 transition-all duration-300"
       style={{
-        background: scrolled ? 'rgba(8,8,16,0.85)' : 'rgba(8,8,16,0.4)',
-        borderBottom: scrolled ? '1px solid var(--color-tg-border)' : '1px solid transparent',
-        backdropFilter: 'blur(12px)',
+        background: scrolled ? 'rgba(10,13,20,0.85)' : 'rgba(10,13,20,0.45)',
+        backdropFilter: 'blur(18px) saturate(1.4)',
+        WebkitBackdropFilter: 'blur(18px) saturate(1.4)',
+        boxShadow: scrolled ? '0 10px 34px rgba(0,0,0,0.4)' : 'none',
       }}
     >
-      <nav className="max-w-[1360px] mx-auto px-4 md:px-8 lg:px-10 h-16 flex items-center justify-between">
+      <nav className="max-w-[1360px] mx-auto px-4 md:px-8 lg:px-10 h-[76px] flex items-center justify-between">
         <Link href="/" className="flex items-center gap-2 shrink-0">
-          <Logo />
+          <span className="inline-block" style={{ transform: 'scale(1.08)', transformOrigin: 'center' }}>
+            <Logo />
+          </span>
         </Link>
 
         <div className="hidden md:flex items-center gap-8">
           {NAV_LINKS.map((link) => (
-            <a key={link.href} href={link.href} className="text-sm font-medium text-tg-muted hover:text-white transition-colors">
+            <a key={link.href} href={link.href} className="nav-link text-base font-medium text-tg-text-2 hover:text-white transition-colors">
               {link.label}
             </a>
           ))}
+          <span className="hidden lg:inline-flex">
+            <NewBadge />
+          </span>
         </div>
 
         <div className="hidden md:flex items-center gap-3">
           <Link
             href="/login"
-            className="px-4 py-2 rounded-xl text-sm font-semibold border border-tg-border text-tg-text-2 hover:border-tg-primary hover:text-tg-primary transition-colors"
+            className="px-4 py-2.5 rounded-xl text-sm font-semibold border border-tg-border text-tg-text-2 hover:border-tg-primary hover:text-tg-primary transition-colors"
           >
             כניסה
           </Link>
           <Link
             href="/signup"
-            className="landing-cta px-4 py-2 rounded-xl text-sm font-semibold text-black"
+            className="landing-cta cta-shine px-5 py-2.5 rounded-xl text-[15px] font-bold text-black"
           >
             התחל ניסיון חינם
           </Link>
@@ -67,15 +90,35 @@ export function LandingNav() {
           className="md:hidden p-2 text-tg-text-2"
           aria-label={open ? 'סגור תפריט' : 'פתח תפריט'}
         >
-          {open ? <X size={24} /> : <Menu size={24} />}
+          {open ? <X size={26} /> : <Menu size={26} />}
         </button>
       </nav>
 
+      {/* bottom hairline: turquoise gradient fading to transparent */}
+      <div
+        className="absolute bottom-0 inset-x-0 h-px pointer-events-none"
+        style={{
+          background: 'linear-gradient(90deg, transparent 0%, rgba(0,210,210,0.55) 50%, transparent 100%)',
+          opacity: scrolled ? 1 : 0.6,
+          transition: 'opacity 0.3s ease',
+        }}
+        aria-hidden
+      />
+
       {open && (
         <div
-          className="md:hidden px-4 pb-6 pt-2 flex flex-col gap-4 border-b border-tg-border"
-          style={{ background: 'rgba(8,8,16,0.97)' }}
+          className="md:hidden px-5 pb-7 pt-3 flex flex-col gap-5"
+          style={{
+            background: 'rgba(10,13,20,0.97)',
+            backdropFilter: 'blur(18px)',
+            WebkitBackdropFilter: 'blur(18px)',
+            borderBottom: '1px solid rgba(0,210,210,0.25)',
+            boxShadow: '0 18px 40px rgba(0,0,0,0.45)',
+          }}
         >
+          <div className="pt-1">
+            <NewBadge />
+          </div>
           {NAV_LINKS.map((link) => (
             <a
               key={link.href}
@@ -86,18 +129,18 @@ export function LandingNav() {
               {link.label}
             </a>
           ))}
-          <div className="flex flex-col gap-3 mt-2">
+          <div className="flex flex-col gap-3 mt-1">
             <Link
               href="/login"
               onClick={() => setOpen(false)}
-              className="px-4 py-2.5 rounded-xl text-sm font-semibold border border-tg-border text-tg-text-2 text-center"
+              className="px-4 py-3 rounded-xl text-sm font-semibold border border-tg-border text-tg-text-2 text-center"
             >
               כניסה
             </Link>
             <Link
               href="/signup"
               onClick={() => setOpen(false)}
-              className="landing-cta px-4 py-2.5 rounded-xl text-sm font-semibold text-black text-center"
+              className="landing-cta cta-shine px-4 py-3 rounded-xl text-[15px] font-bold text-black text-center"
             >
               התחל ניסיון חינם
             </Link>

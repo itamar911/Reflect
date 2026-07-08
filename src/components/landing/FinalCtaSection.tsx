@@ -28,7 +28,7 @@ export function FinalCtaSection() {
         </ScrollReveal>
 
         <ScrollReveal delay={160}>
-          <p className="text-base text-tg-muted leading-relaxed max-w-xl mx-auto">
+          <p className="text-lg text-tg-muted leading-relaxed max-w-xl mx-auto">
             עוד חודש מעכשיו תהיה באחד משני מקומות: בתוך הלופ — או בפעם הראשונה מחוץ לו. ההבדל הוא
             לא עוד קורס. הוא ההחלטה שאף עסקה לא נכנסת יותר בלי לעבור דרכך קודם.
           </p>

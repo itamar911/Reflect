@@ -63,7 +63,7 @@ export function LightboxImage({ id, label, src, objectPosition, aspect, classNam
           aria-hidden
         >
           <span
-            className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold text-white"
+            className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-semibold text-white"
             style={{ background: 'rgba(10,12,16,0.7)', border: '1px solid rgba(255,255,255,0.2)' }}
           >
             <ZoomIn size={14} />

@@ -15,7 +15,7 @@ export function LandingFooter() {
       <div className="max-w-[1360px] mx-auto flex flex-col items-center gap-6 text-center">
         <Logo />
 
-        <p className="text-sm text-tg-muted max-w-md">
+        <p className="text-base text-tg-muted max-w-md">
           השוק בוחן את האסטרטגיה שלך. Reflect בוחן אותך.
         </p>
 
@@ -28,15 +28,15 @@ export function LandingFooter() {
         </nav>
 
         <div className="flex flex-wrap justify-center gap-x-6 gap-y-2">
-          <Link href="/terms" className="text-xs text-tg-muted hover:text-tg-primary transition-colors">
+          <Link href="/terms" className="text-sm text-tg-muted hover:text-tg-primary transition-colors">
             תנאי שימוש
           </Link>
-          <Link href="/privacy" className="text-xs text-tg-muted hover:text-tg-primary transition-colors">
+          <Link href="/privacy" className="text-sm text-tg-muted hover:text-tg-primary transition-colors">
             מדיניות פרטיות
           </Link>
         </div>
 
-        <p className="text-xs text-tg-muted max-w-xl leading-relaxed">
+        <p className="text-sm text-tg-muted max-w-xl leading-relaxed">
           מסחר בשוקי ההון והקריפטו כרוך בסיכון משמעותי ועלול להוביל לאובדן מלוא ההון המושקע.
           Reflect הינו כלי לניהול משמעת ותיעוד מסחר בלבד, ואינו מהווה ייעוץ השקעות מכל סוג שהוא.
         </p>
