@@ -360,8 +360,12 @@ function SemiGauge({ segments, width = 140, strokeWidth = 12 }: {
   const height = cy + strokeWidth / 2;
   const total  = segments.reduce((s, sg) => s + Math.max(sg.value, 0), 0);
 
+  // Scales with its container (viewBox keeps the aspect ratio); `width` is the
+  // maximum — in a tight card the gauge shrinks instead of clipping siblings.
+  const svgStyle: React.CSSProperties = { width: '100%', maxWidth: width, height: 'auto', display: 'block' };
+
   if (total <= 0) {
-    return <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ flexShrink: 0, display: 'block' }} />;
+    return <svg viewBox={`0 0 ${width} ${height}`} style={svgStyle} />;
   }
 
   const validSegs = segments.filter(sg => Math.max(sg.value, 0) > 0);
@@ -382,8 +386,7 @@ function SemiGauge({ segments, width = 140, strokeWidth = 12 }: {
   }));
 
   return (
-    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}
-      style={{ flexShrink: 0, display: 'block' }}>
+    <svg viewBox={`0 0 ${width} ${height}`} style={svgStyle}>
       {layers.map((l, i) => (
         <path key={i} d={l.d} fill="none" stroke={l.color}
           strokeWidth={strokeWidth} strokeLinecap="butt" />
@@ -1468,15 +1471,16 @@ export default function DashboardClient({
 
       {trades.length > 0 && (
         <>
-          {/* ── Top 4 stat cards ─────────────────────────────────────────── */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {/* ── Top 4 stat cards — 4-across only from lg: at md widths four
+              columns leave cards narrower than the gauge itself ───────────── */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
 
             {/* Card 1: Profitable Days */}
             <Card>
               <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: 'center', gap: 12 }}>
-                <div style={{ flex: isMobile ? undefined : 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4, width: isMobile ? '100%' : undefined }}>
+                <div style={{ flex: isMobile ? undefined : 1, minWidth: isMobile ? 0 : 88, display: "flex", flexDirection: "column", gap: 4, width: isMobile ? "100%" : undefined }}>
                   <p style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: TEXT2 }}>ימים רווחיים</p>
-                  <p style={{ fontSize: 26, fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums', color: stats.profitDays >= stats.lossDays ? GREEN : RED }}>
+                  <p style={{ fontSize: isMobile ? 26 : 'clamp(20px, 1.9vw, 26px)', fontWeight: 800, lineHeight: 1, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', color: stats.profitDays >= stats.lossDays ? GREEN : RED }}>
                     {stats.profitDayPct}%
                   </p>
                   <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 5 }}>
@@ -1487,7 +1491,7 @@ export default function DashboardClient({
                     <span style={{ fontSize: 14, fontWeight: 800, color: RED, fontVariantNumeric: 'tabular-nums' }}>{stats.lossDays}</span>
                   </div>
                 </div>
-                <div style={{ flexShrink: 0 }}>
+                <div style={{ flex: isMobile ? undefined : "0 1 140px", minWidth: isMobile ? undefined : 72 }}>
                   <SemiGauge width={isMobile ? 88 : 140} strokeWidth={12} segments={[
                     { value: stats.profitDays, color: GREEN },
                     { value: stats.lossDays,   color: RED },
@@ -1499,9 +1503,9 @@ export default function DashboardClient({
             {/* Card 2: Win Rate */}
             <Card>
               <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: 'center', gap: 12 }}>
-                <div style={{ flex: isMobile ? undefined : 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4, width: isMobile ? '100%' : undefined }}>
+                <div style={{ flex: isMobile ? undefined : 1, minWidth: isMobile ? 0 : 88, display: "flex", flexDirection: "column", gap: 4, width: isMobile ? "100%" : undefined }}>
                   <p style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: TEXT2 }}>אחוזי הצלחה</p>
-                  <p style={{ fontSize: 26, fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums', color: stats.winPct >= 50 ? GREEN : RED }}>
+                  <p style={{ fontSize: isMobile ? 26 : 'clamp(20px, 1.9vw, 26px)', fontWeight: 800, lineHeight: 1, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', color: stats.winPct >= 50 ? GREEN : RED }}>
                     {stats.winPct}%
                   </p>
                   <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 5 }}>
@@ -1510,7 +1514,7 @@ export default function DashboardClient({
                     <span style={{ fontSize: 14, fontWeight: 800, color: RED, fontVariantNumeric: 'tabular-nums' }}>{stats.lossTrades}</span>
                   </div>
                 </div>
-                <div style={{ flexShrink: 0 }}>
+                <div style={{ flex: isMobile ? undefined : "0 1 140px", minWidth: isMobile ? undefined : 72 }}>
                   <SemiGauge width={isMobile ? 88 : 140} strokeWidth={12} segments={[
                     { value: stats.winPct,       color: GREEN },
                     { value: 100 - stats.winPct, color: RED },
@@ -1557,7 +1561,10 @@ export default function DashboardClient({
                 ))}
               </div>
               <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: isMobile ? 20 : 36, fontWeight: 800, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums', color: selPeriodPnl >= 0 ? GREEN : RED }}>
+                {/* LTR isolation keeps the leading +/- glued to the amount inside
+                    the RTL card (bidi otherwise strands it on its own line), and
+                    the clamp lets long ₪ amounts fit narrow cards without clipping */}
+                <span style={{ fontSize: isMobile ? 20 : 'clamp(20px, 2.4vw, 36px)', fontWeight: 800, letterSpacing: '-0.02em', whiteSpace: 'nowrap', direction: 'ltr', unicodeBidi: 'isolate', fontVariantNumeric: 'tabular-nums', color: selPeriodPnl >= 0 ? GREEN : RED }}>
                   {selPeriodDisplay}
                 </span>
                 <span style={{ fontSize: 12, fontWeight: 600, color: TEXT2 }}>
