@@ -2,8 +2,11 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import { usePathname, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { triggerDemoUpsell } from '@/lib/demo/demoDb';
+import '@/lib/demo/fetchGuard';
 import TradePlanForm from '@/components/trade/TradePlanForm';
 import RuleBlockedModal from '@/components/rules/RuleBlockedModal';
 import { fetchActiveRuleViolation, type RuleViolationResult } from '@/lib/rules/fetchActiveRuleViolation';
@@ -13,6 +16,10 @@ import { Logo } from '@/components/ui/Logo';
 import { PageTransition } from '@/components/layout/PageTransition';
 import { getPlanLimits, type PlanTier } from '@/lib/plans/config';
 import { SIDEBAR_TRANSITION } from '@/lib/motion';
+
+// Demo-only chrome (fetch interception + upsell modal) — loaded only on /demo
+// so the fixtures never enter the regular app bundle.
+const DemoGuard = dynamic(() => import('@/components/demo/DemoGuard'), { ssr: false });
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const ACCENT = '#00d2d2';
@@ -151,6 +158,11 @@ export default function AppShell({
   const router   = useRouter();
   const limits   = getPlanLimits(plan);
 
+  // Demo mode — same shell, but nav stays under /demo, account actions are
+  // hidden, and anything mutating raises the signup upsell instead.
+  const isDemo    = pathname.startsWith('/demo');
+  const navPrefix = isDemo ? '/demo' : '';
+
   const [formOpen,  setFormOpen]  = useState(false);
   const [expanded,  setExpanded]  = useState(false);
   const [isMobile,  setIsMobile]  = useState(false);
@@ -158,6 +170,12 @@ export default function AppShell({
   const [ruleWarning, setRuleWarning] = useState<string | null>(null);
 
   async function tryOpenTradeForm() {
+    // read the path live — this also runs from the window event handler below,
+    // whose closure may predate the current route
+    if (window.location.pathname.startsWith('/demo')) {
+      triggerDemoUpsell();
+      return;
+    }
     const violation = await fetchActiveRuleViolation(userId, limits.realTimeBlocking);
     if (violation && (violation.actionType === 'block_day' || violation.actionType === 'block_timer')) {
       setRuleBlock(violation);
@@ -366,12 +384,26 @@ export default function AppShell({
             exactly, regardless of collapsed/expanded state. */}
         <nav className="flex-1 overflow-y-auto overflow-x-hidden py-2 flex flex-col gap-0.5 pl-2 [scrollbar-gutter:stable]">
           {PRIMARY_NAV.map(item => (
-            <NavLink key={item.href} item={item} expanded={expanded} active={isActive(item.href)} />
+            <NavLink
+              key={item.href}
+              item={{ ...item, href: navPrefix + item.href }}
+              expanded={expanded}
+              active={isActive(navPrefix + item.href)}
+            />
           ))}
 
           {/* Separator */}
           <div className="my-2 mx-1" style={{ height: 1, background: SEP }} />
 
+          {isDemo ? (
+            /* Demo: no settings/feedback/sign-out — a single signup CTA instead */
+            <NavLink
+              item={{ href: '/signup', label: 'הרשמה חינם', icon: <IconPlus /> }}
+              expanded={expanded}
+              active={false}
+            />
+          ) : (
+          <>
           {SECONDARY_NAV.map(item => (
             <NavLink key={item.href} item={item} expanded={expanded} active={isActive(item.href)} />
           ))}
@@ -413,6 +445,8 @@ export default function AppShell({
               התנתק
             </span>
           </button>
+          </>
+          )}
         </nav>
 
         {/* User area + CTA — no right padding, matching nav rows above, so the
@@ -510,11 +544,35 @@ export default function AppShell({
           transition: `margin-right ${SIDEBAR_TRANSITION}`,
         }}
       >
+        {isDemo && (
+          <div
+            className="sticky top-0 z-20 flex items-center justify-center gap-3 px-4 py-2"
+            style={{
+              background: 'rgba(0,210,210,0.10)',
+              borderBottom: '1px solid rgba(0,210,210,0.25)',
+              backdropFilter: 'blur(8px)',
+            }}
+          >
+            <span className="text-xs font-semibold" style={{ color: 'var(--color-tg-text)' }}>
+              מצב דמו — כל הנתונים לדוגמה
+            </span>
+            <Link
+              href="/signup"
+              className="text-xs font-bold px-3 py-1 rounded-full transition-opacity hover:opacity-85"
+              style={{ background: ACCENT, color: '#0a0a0f' }}
+            >
+              הרשמה חינם
+            </Link>
+          </div>
+        )}
         <PageTransition>
           {children}
         </PageTransition>
       </div>
 
+      {isDemo && <DemoGuard />}
+
+      {!isDemo && (
       <TradePlanForm
         userId={userId}
         plan={plan}
@@ -523,6 +581,7 @@ export default function AppShell({
         onSuccess={() => router.refresh()}
         initialWarning={ruleWarning}
       />
+      )}
 
       {ruleBlock && (
         <RuleBlockedModal

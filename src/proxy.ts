@@ -1,7 +1,43 @@
 ﻿import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
+// App sections browsable in demo mode (everything else under /demo bounces home)
+const DEMO_SECTIONS = new Set([
+  'dashboard', 'journal', 'trades', 'stats', 'setups',
+  'notebook', 'coach', 'rules', 'strategies',
+]);
+
 export async function proxy(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  // x-demo-mode is set exclusively by the /demo rewrite below. Reject it on
+  // any incoming request — otherwise a client could spoof it to make server
+  // code (including AI route auth) treat them as the demo user.
+  if (request.headers.has('x-demo-mode')) {
+    return new NextResponse('Bad Request', { status: 400 });
+  }
+
+  // /demo/* — public, fixture-backed view of the real app. The URL keeps the
+  // /demo prefix in the browser; the request is rewritten to the real page
+  // with the demo header so the server data layer serves fixtures.
+  if (pathname === '/demo' || pathname === '/demo/') {
+    return NextResponse.redirect(new URL('/demo/dashboard', request.url));
+  }
+  if (pathname.startsWith('/demo/')) {
+    const target = pathname.slice('/demo'.length);
+    if (!DEMO_SECTIONS.has(target.split('/')[1])) {
+      return NextResponse.redirect(new URL('/demo/dashboard', request.url));
+    }
+    const requestHeaders = new Headers(request.headers);
+    requestHeaders.set('x-demo-mode', '1');
+    const response = NextResponse.rewrite(
+      new URL(target + request.nextUrl.search, request.url),
+      { request: { headers: requestHeaders } },
+    );
+    response.headers.set('X-Robots-Tag', 'noindex, nofollow');
+    return response;
+  }
+
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -41,8 +77,6 @@ export async function proxy(request: NextRequest) {
   } catch {
     authUnavailable = hasAuthCookies;
   }
-
-  const { pathname } = request.nextUrl;
 
   const isAuthRoute =
     pathname.startsWith('/login') ||
