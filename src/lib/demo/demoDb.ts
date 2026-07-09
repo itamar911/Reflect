@@ -25,8 +25,10 @@ export const DEMO_WRITE_ERROR = {
   code: 'DEMO',
 };
 
+type Rows = Record<string, unknown>[];
+
 export function createDemoQuery(
-  rows: Record<string, unknown>[] | undefined,
+  rows: Rows | (() => Promise<Rows>) | undefined,
   onWrite?: () => void,
 ): PromiseLike<QueryResult> {
   let isWrite = false;
@@ -34,12 +36,12 @@ export function createDemoQuery(
   let order: { col: string; asc: boolean } | null = null;
   let limit: number | null = null;
 
-  function exec(): QueryResult {
+  async function exec(): Promise<QueryResult> {
     if (isWrite) {
       onWrite?.();
       return { data: null, error: DEMO_WRITE_ERROR, count: null };
     }
-    let data = [...(rows ?? [])];
+    let data = [...(typeof rows === 'function' ? await rows() : rows ?? [])];
     if (order) {
       const { col, asc } = order;
       data.sort((a, b) => {
@@ -65,7 +67,7 @@ export function createDemoQuery(
         return (
           resolve: (r: QueryResult) => unknown,
           reject?: (e: unknown) => unknown,
-        ) => Promise.resolve(exec()).then(resolve, reject);
+        ) => exec().then(resolve, reject);
       }
       if (prop === 'single' || prop === 'maybeSingle') {
         return () => { single = true; return proxy; };

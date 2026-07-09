@@ -5,6 +5,8 @@
 // All dates are computed relative to "now" at request time, so the calendar
 // and stats always look current without reseeding.
 
+import { isWinningTrade, tradeMoneyPnl } from '@/lib/pnl';
+
 // ── Demo user ─────────────────────────────────────────────────────────────────
 
 export const DEMO_USER_ID = 'demo-user-00000000-0000-0000-0000-000000000000';
@@ -379,10 +381,30 @@ export const DEMO_DEBRIEF_RESULT = {
   documented: true,
 };
 
+// Numbers below are DERIVED from DEMO_TRADES with the app's canonical pnl
+// helpers, so the coach content can never contradict the dashboard/stats.
+const CLOSED = DEMO_TRADES.filter(t => t.status === 'closed' && t.exit_price != null);
+const DEMO_WIN_RATE = Math.round(
+  (CLOSED.filter(t => isWinningTrade(t)).length / Math.max(CLOSED.length, 1)) * 100,
+);
+const avgScore = (rows: typeof DEMO_TRADES) => {
+  const scored = rows.filter(t => t.plan_score != null);
+  return scored.length > 0
+    ? Math.round(scored.reduce((s, t) => s + Number(t.plan_score), 0) / scored.length)
+    : 0;
+};
+const DEMO_SCORE_FOLLOWED = avgScore(CLOSED.filter(t => t.followed_plan !== false));
+const DEMO_SCORE_IMPULSIVE = avgScore(CLOSED.filter(t => t.followed_plan === false));
+const stratPnl = (name: string) =>
+  CLOSED.filter(t => t.strategy === name).reduce((s, t) => s + tradeMoneyPnl(t), 0);
+const DEMO_TOP_STRATEGY = stratPnl(STRAT_NAMES[0]) >= stratPnl(STRAT_NAMES[1]) ? STRAT_NAMES[0] : STRAT_NAMES[1];
+const DEMO_VIOLATION_COUNT = DEMO_RULE_VIOLATIONS.length;
+const DEMO_ORB_COUNT = CLOSED.filter(t => t.strategy === STRAT_NAMES[0]).length;
+
 export const DEMO_COACH_INSIGHTS = [
-  { type: 'time', text: 'בין 16:30 ל-18:00 אחוז ההצלחה שלך הוא 78% — כמעט כפול מהשעות המאוחרות. רוב היתרון שלך נמצא בשעה הראשונה של המסחר.' },
-  { type: 'discipline', text: 'בעסקאות שבהן עקבת אחרי התוכנית ציון התהליך הממוצע הוא 85, לעומת 45 בעסקאות אימפולסיביות. המשמעת שלך שווה כסף אמיתי.' },
-  { type: 'performance', text: 'אסטרטגיית פריצת הפתיחה מניבה את הרווח הגבוה ביותר לעסקה. שקול להקצות לה משקל גדול יותר בתוכנית השבועית.' },
+  { type: 'time', text: 'רוב הרווח שלך נוצר בשעה הראשונה של המסחר — בשעות המאוחרות אחוז ההצלחה יורד משמעותית. שקול לרכז את הכניסות החדשות בשעה הראשונה בלבד.' },
+  { type: 'discipline', text: `בעסקאות שבוצעו לפי התוכנית ציון התהליך הממוצע שלך הוא ${DEMO_SCORE_FOLLOWED}, לעומת ${DEMO_SCORE_IMPULSIVE} בעסקאות האימפולסיביות. עם אחוז הצלחה כולל של ${DEMO_WIN_RATE}% — המשמעת שלך שווה כסף אמיתי.` },
+  { type: 'performance', text: `אסטרטגיית "${DEMO_TOP_STRATEGY}" מניבה את הרווח הכולל הגבוה ביותר. שקול להקצות לה משקל גדול יותר בתוכנית השבועית.` },
 ];
 
 export const DEMO_PATTERNS = [
@@ -390,14 +412,14 @@ export const DEMO_PATTERNS = [
     type: 'emotional', severity: 'medium',
     title: 'כניסות אימפולסיביות אחרי הפסד',
     description: 'זוהו עסקאות שנפתחו זמן קצר אחרי סטופ, עם ציון תהליך נמוך משמעותית מהממוצע שלך.',
-    occurrences: 2,
+    occurrences: DEMO_VIOLATION_COUNT,
     recommendation: 'חוק העצירה אחרי 2 הפסדים כבר פעיל — ההמלצה היא להוריד את הסף להפסד אחד ביום תנודתי.',
   },
   {
     type: 'positive', severity: 'low',
     title: 'עקביות גבוהה בסטאפ הפריצה',
-    description: 'עסקאות ORB מבוצעות כמעט תמיד לפי הכללים: אישור ווליום, סטופ קבוע ויעד מוגדר מראש.',
-    occurrences: 9,
+    description: 'עסקאות פריצת הפתיחה מבוצעות כמעט תמיד לפי הכללים: אישור ווליום, סטופ קבוע ויעד מוגדר מראש.',
+    occurrences: DEMO_ORB_COUNT,
     recommendation: 'המשך לתעד כל פריצה — הדאטה מראה שזה הסטאפ החזק ביותר שלך.',
   },
 ];

@@ -15,12 +15,19 @@ export function createClient() {
 
   if (!isDemoPath()) return client;
 
-  // Demo mode: no Supabase traffic leaves the browser. Reads resolve empty
-  // (pages get their data server-side from fixtures), writes raise the signup
-  // upsell, realtime channels never connect.
+  // Demo mode: no Supabase traffic leaves the browser. Reads resolve from the
+  // SAME fixture set the server renders (lazy-loaded so it stays out of the
+  // main bundle) — a client-side refetch can never diverge from the SSR data.
+  // Writes raise the signup upsell, realtime channels never connect.
   return new Proxy(client, {
     get(target, prop, receiver) {
-      if (prop === 'from') return () => createDemoQuery([], triggerDemoUpsell);
+      if (prop === 'from') {
+        return (table: string) =>
+          createDemoQuery(
+            () => import('@/lib/demo/fixtures').then(m => m.DEMO_TABLES[table] ?? []),
+            triggerDemoUpsell,
+          );
+      }
       if (prop === 'channel') return () => createDemoChannel();
       if (prop === 'removeChannel') return () => {};
       return Reflect.get(target, prop, receiver);
