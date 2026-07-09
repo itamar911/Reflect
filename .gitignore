@@ -43,5 +43,6 @@ next-env.d.ts
 .vercel
 .env*.local
 
-# Claude Code local config
-.claude/
+# Claude Code local config (shared skills are committed)
+.claude/*
+!.claude/skills/
