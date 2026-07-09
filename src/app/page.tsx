@@ -6,6 +6,7 @@ import { HeroSection } from '@/components/landing/HeroSection';
 import { LoopSection } from '@/components/landing/LoopSection';
 import { DistinctionSection } from '@/components/landing/DistinctionSection';
 import { HowItWorksSection } from '@/components/landing/HowItWorksSection';
+import { TryDemoSection } from '@/components/landing/TryDemoSection';
 import { FeaturesSection } from '@/components/landing/FeaturesSection';
 import { SocialProofSection } from '@/components/landing/SocialProofSection';
 import { PricingSection } from '@/components/landing/PricingSection';
@@ -36,6 +37,7 @@ export default async function HomePage() {
         <LoopSection />
         <DistinctionSection />
         <HowItWorksSection />
+        <TryDemoSection />
         <FeaturesSection />
         <SocialProofSection />
         <PricingSection />
