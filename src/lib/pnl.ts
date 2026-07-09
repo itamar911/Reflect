@@ -42,3 +42,16 @@ export function tradeMoneyPnl(t: MoneyPnlTrade): number {
   const v = t.actual_pnl ?? t.pnl_amount;
   return v != null ? Number(v) : 0;
 }
+
+/**
+ * Canonical win test — the single definition shared by the stats page, the
+ * journal (All Trades), and the dashboard so every page shows the same win
+ * rate. A trade is a win when its effective money P&L is positive; a trade
+ * with no money data at all falls back to points. Null while still open.
+ */
+export function isWinningTrade(t: MoneyPnlTrade & PointsPnlTrade): boolean | null {
+  if (t.status !== 'closed' || t.exit_price == null) return null;
+  if (hasMoneyPnl(t)) return tradeMoneyPnl(t) > 0;
+  const pts = tradePointsPnl(t);
+  return pts != null && pts > 0;
+}

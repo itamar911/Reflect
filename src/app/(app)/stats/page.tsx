@@ -9,7 +9,7 @@ import BehaviorChips from '@/components/stats/BehaviorChips';
 import RecordsGrid from '@/components/stats/RecordsGrid';
 import { MUTED, TEXT, fmt, Section } from '@/components/stats/shared';
 import type { TradePlan } from '@/lib/types';
-import { tradePointsPnl, tradeMoneyPnl, hasMoneyPnl } from '@/lib/pnl';
+import { tradePointsPnl, tradeMoneyPnl, hasMoneyPnl, isWinningTrade } from '@/lib/pnl';
 import { TrendingUp, BarChart2, Target, CandlestickChart } from 'lucide-react';
 import '@/components/stats/stats.css';
 
@@ -56,7 +56,7 @@ export default async function StatsPage() {
   // ── Core stats ──────────────────────────────────────────────────────────────
   const closedCount  = closed.length;
   const totalPnl     = closed.reduce((s, t) => s + pnlIls(t), 0);
-  const wins         = closed.filter(t => pnlOf(t)! > 0);
+  const wins         = closed.filter(t => isWinningTrade(t));
   const winRate      = closedCount > 0 ? Math.round(wins.length / closedCount * 100) : 0;
   const avgRR        = trades.length > 0
     ? trades.reduce((s, t) => s + Number(t.rr_ratio), 0) / trades.length : 0;
@@ -78,7 +78,7 @@ export default async function StatsPage() {
 
   for (const t of closed) {
     const p    = pnlIls(t);
-    const win  = pnlOf(t)! > 0 ? 1 : 0;
+    const win  = isWinningTrade(t) ? 1 : 0;
     const date = new Date(t.submitted_at);
 
     const dKey = t.submitted_at.slice(0, 10);
@@ -112,7 +112,7 @@ export default async function StatsPage() {
     stratMap.set(s, {
       trades:  prev.trades + 1,
       closedN: prev.closedN + (p != null ? 1 : 0),
-      wins:    prev.wins + (p != null && p > 0 ? 1 : 0),
+      wins:    prev.wins + (isWinningTrade(t) ? 1 : 0),
       pnl:     prev.pnl + pnlIls(t),
       rr:      prev.rr + Number(t.rr_ratio),
     });
@@ -152,7 +152,7 @@ export default async function StatsPage() {
     return [1, 2, 3, 4, 5].map((level) => {
       const allAtLevel = trades.filter(t => Number(t[field]) === level);
       const closedAtLevel = closed.filter(t => Number(t[field]) === level);
-      const wins = closedAtLevel.filter(t => pnlOf(t)! > 0).length;
+      const wins = closedAtLevel.filter(t => isWinningTrade(t)).length;
       return {
         level,
         trades: allAtLevel.length,
@@ -189,7 +189,7 @@ export default async function StatsPage() {
   // ── Day / hour distribution ─────────────────────────────────────────────────
   const dayBars: DistBar[] = HE_DAYS.map((label, i) => {
     const dayT  = closed.filter(t => new Date(t.submitted_at).getDay() === i);
-    const winsN = dayT.filter(t => pnlOf(t)! > 0).length;
+    const winsN = dayT.filter(t => isWinningTrade(t)).length;
     return {
       label,
       pnl: dayT.reduce((s, t) => s + pnlIls(t), 0),
@@ -205,7 +205,7 @@ export default async function StatsPage() {
     hourMap.set(h, {
       pnl:    prev.pnl + pnlIls(t),
       trades: prev.trades + 1,
-      wins:   prev.wins + (pnlOf(t)! > 0 ? 1 : 0),
+      wins:   prev.wins + (isWinningTrade(t) ? 1 : 0),
     });
   }
   const hourBars: DistBar[] = [...hourMap.entries()]
@@ -227,7 +227,7 @@ export default async function StatsPage() {
     symbolMap.set(sym, {
       trades:  prev.trades + 1,
       closedN: prev.closedN + (p != null ? 1 : 0),
-      wins:    prev.wins + (p != null && p > 0 ? 1 : 0),
+      wins:    prev.wins + (isWinningTrade(t) ? 1 : 0),
       pnl:     prev.pnl + pnlIls(t),
       rr:      prev.rr + Number(t.rr_ratio),
     });
@@ -239,7 +239,7 @@ export default async function StatsPage() {
   // ── Streaks ──────────────────────────────────────────────────────────────────
   let curW = 0, maxW = 0, curL = 0, maxL = 0;
   for (const t of closed) {
-    if (pnlOf(t)! > 0) { curW++; maxW = Math.max(maxW, curW); curL = 0; }
+    if (isWinningTrade(t)) { curW++; maxW = Math.max(maxW, curW); curL = 0; }
     else                { curL++; maxL = Math.max(maxL, curL); curW = 0; }
   }
   const currentStreak = curW > 0 ? { type: 'win' as const, count: curW }

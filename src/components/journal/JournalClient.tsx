@@ -8,7 +8,7 @@ import CloseTrade, { AIDebriefView, type AIDebriefResult } from '@/components/jo
 import EmotionalStateSlider from '@/components/trade/EmotionalStateSlider';
 import { createClient } from '@/lib/supabase/client';
 import { formatPnlIls, formatPnlPoints, calcRR } from '@/lib/utils';
-import { tradeMoneyPnl, hasMoneyPnl } from '@/lib/pnl';
+import { tradeMoneyPnl, hasMoneyPnl, isWinningTrade } from '@/lib/pnl';
 import type { PnlCurrency } from '@/lib/types';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
@@ -90,7 +90,7 @@ function MobileTradeCard({ t, onView, onEdit, onDelete, onClose, onDebrief, hasD
 }) {
   const pnl = calcPnl(t);
   const dir = inferDirection(t);
-  const isWin = pnl !== null ? pnl > 0 : null;
+  const isWin = isWinningTrade(t);
   const isClosed = t.status === 'closed';
 
   return (
@@ -200,7 +200,7 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
   // Money aggregates via tradeMoneyPnl (actual_pnl ?? pnl_amount) — same logic as
   // the stats page, so both pages show identical totals and profit factor.
   const winRate     = closed.length > 0
-    ? Math.round(closed.filter(t => tradeMoneyPnl(t) > 0).length / closed.length * 100) : 0;
+    ? Math.round(closed.filter(t => isWinningTrade(t)).length / closed.length * 100) : 0;
   const moneyClosed = useMemo(() => closed.filter(hasMoneyPnl), [closed]);
   const grossProfit = moneyClosed.filter(t => tradeMoneyPnl(t) > 0).reduce((s, t) => s + tradeMoneyPnl(t), 0);
   const grossLoss   = Math.abs(moneyClosed.filter(t => tradeMoneyPnl(t) < 0).reduce((s, t) => s + tradeMoneyPnl(t), 0));
@@ -437,7 +437,7 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
               ) : pageTrades.map((t, i) => {
                 const pnl      = calcPnl(t);
                 const dir      = inferDirection(t);
-                const isWin    = pnl !== null ? pnl > 0 : null;
+                const isWin    = isWinningTrade(t);
                 const isClosed = t.status === 'closed';
                 const isChecked = selected.has(t.id);
 

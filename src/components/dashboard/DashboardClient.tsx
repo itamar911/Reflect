@@ -6,7 +6,7 @@ import { formatPnlIls, formatPnlPoints } from '@/lib/utils';
 import { createClient } from '@/lib/supabase/client';
 import { DASH_TRADE_SELECT, mapDashTrade } from '@/lib/dashboard/trades';
 import type { DashTrade } from '@/lib/dashboard/trades';
-import { tradeMoneyPnl, hasMoneyPnl } from '@/lib/pnl';
+import { tradeMoneyPnl, hasMoneyPnl, isWinningTrade } from '@/lib/pnl';
 import { getPlanLimits, type PlanTier } from '@/lib/plans/config';
 import UpgradeModal from '@/components/plans/UpgradeModal';
 
@@ -46,6 +46,11 @@ function tradeDir(t: DashTrade): 'long' | 'short' {
 function calcPnl(t: DashTrade): number | null {
   if (t.status !== 'closed' || t.exit_price == null) return null;
   return tradeDir(t) === 'long' ? t.exit_price - t.entry_price : t.entry_price - t.exit_price;
+}
+// Effective P&L for loss/neutral classification — money when available, points
+// otherwise; the win side of the same rule is the shared isWinningTrade helper.
+function effectivePnl(t: DashTrade): number {
+  return hasMoneyPnl(t) ? tradeMoneyPnl(t) : calcPnl(t) ?? 0;
 }
 function dayKey(iso: string) { return iso.slice(0, 10); }
 function fmtPnl(v: number) { return `${v >= 0 ? '+' : ''}${v.toFixed(2)}`; }
@@ -124,8 +129,8 @@ function windowAvgScores(wClosed: DashTrade[]): { disc: number; perf: number } {
   const disc = Math.round(discArr.reduce((s, v) => s + v, 0) / discArr.length);
 
   // Performance
-  const wins   = wClosed.filter(t => (calcPnl(t) ?? 0) > 0);
-  const losses = wClosed.filter(t => (calcPnl(t) ?? 0) < 0);
+  const wins   = wClosed.filter(t => isWinningTrade(t));
+  const losses = wClosed.filter(t => effectivePnl(t) < 0);
   const wc = wins.length; const lc = losses.length;
   const wMoneyWins   = wClosed.map(tradeMoneyPnl).filter(v => v > 0);
   const wMoneyLosses = wClosed.map(tradeMoneyPnl).filter(v => v < 0);
@@ -169,14 +174,14 @@ function windowAvgScores(wClosed: DashTrade[]): { disc: number; perf: number } {
 function computeAll(trades: DashTrade[], now: Date) {
   const closed = trades.filter(t => t.status === 'closed' && t.exit_price != null);
   const pnls   = closed.map(t => calcPnl(t)!);
-  // Win/loss classification is sign-based, so it's identical whether derived from
-  // points or from ₪ — keep it on points since that's always available.
-  const winTrades  = closed.filter(t => calcPnl(t)! > 0);
-  const lossTrades = closed.filter(t => calcPnl(t)! < 0);
+  // Win/loss classification via the canonical isWinningTrade rule (money P&L
+  // first, points fallback) so the dashboard matches stats and the journal.
+  const winTrades  = closed.filter(t => isWinningTrade(t));
+  const lossTrades = closed.filter(t => effectivePnl(t) < 0);
 
   const winCount      = winTrades.length;
   const lossCount     = lossTrades.length;
-  const neutralTrades = pnls.filter(p => p === 0).length;
+  const neutralTrades = closed.length - winCount - lossCount;
   // Monetary (₪/$) aggregates — driven by actual_pnl (falling back to pnl_amount),
   // classified by the money value's own sign so buckets match the amounts averaged
   const moneyWins     = closed.filter(t => tradeMoneyPnl(t) > 0);
@@ -241,7 +246,7 @@ function computeAll(trades: DashTrade[], now: Date) {
   const ddCtrl = maxDD === 0 ? 100 : peak > 0.001 ? Math.max(100 - (maxDD / peak) * 100, 0) : 0;
 
   const totalDays = profitDays + lossDays + neutralDays;
-  const winRate   = (winCount + lossCount) > 0 ? winCount / (winCount + lossCount) * 100 : 0;
+  const winRate   = totalCount > 0 ? winCount / totalCount * 100 : 0;
   const pf        = Math.abs(grossLoss) > 0.001 ? grossProfit / Math.abs(grossLoss) : grossProfit > 0 ? 3 : 0;
   const consist   = totalDays > 0 ? profitDays / totalDays * 100 : 0;
   const wlRatio   = Math.abs(avgLoss) > 0.001 ? avgWin / Math.abs(avgLoss) : avgWin > 0 ? 2 : 0;
@@ -317,7 +322,7 @@ function computeAll(trades: DashTrade[], now: Date) {
   const performanceTrend = rW && pW ? rW.perf - pW.perf : null;
 
   const profitDayPct = totalDays > 0 ? Math.round(profitDays / totalDays * 100) : 0;
-  const winPct       = (winCount + lossCount) > 0 ? Math.round(winCount / (winCount + lossCount) * 100) : 0;
+  const winPct       = totalCount > 0 ? Math.round(winCount / totalCount * 100) : 0;
 
   return {
     profitDays, lossDays, neutralDays, profitDayPct,
