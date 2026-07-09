@@ -887,9 +887,30 @@ function PgBtn({ children, onClick, disabled, active }: {
 
 // ── Modals ────────────────────────────────────────────────────────────────────
 
+// Open-modal stack — Escape closes only the topmost dialog.
+const modalStack: (() => void)[] = [];
+
 function Modal({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
   const [mounted, setMounted] = useState(false);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+
   useEffect(() => { setMounted(true); }, []);
+
+  useEffect(() => {
+    const entry = () => closeRef.current();
+    modalStack.push(entry);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && modalStack[modalStack.length - 1] === entry) entry();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      const i = modalStack.indexOf(entry);
+      if (i !== -1) modalStack.splice(i, 1);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, []);
+
   if (!mounted) return null;
 
   // Rendered via portal so the fixed overlay covers the full viewport — an
@@ -972,68 +993,58 @@ function TradeDetailModal({ trade, onClose, debriefResult, onDebrief }: {
   ];
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl p-5 flex flex-col gap-4"
-        style={{ background: 'var(--color-tg-surface)', border: '1px solid var(--color-tg-border)', boxShadow: '0 24px 64px rgba(0,0,0,0.8)' }}
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between">
-          <p className="text-base font-bold flex items-center gap-2" style={{ color: 'var(--color-tg-text)' }}>
-            {trade.symbol ?? trade.strategy}
-            {pnlPoints !== null && (
-              hasMoneyPnl(trade) ? (
-                <span className="text-sm font-bold" style={{ color: tradeMoneyPnl(trade) >= 0 ? '#22c55e' : '#ef4444' }}>
-                  {formatPnlIls(tradeMoneyPnl(trade), trade.pnl_currency ?? '₪')}
-                  <span className="text-xs font-semibold" style={{ opacity: 0.6 }}> ({formatPnlPoints(pnlPoints)})</span>
-                </span>
-              ) : (
-                <span className="text-sm font-bold" style={{ color: pnlPoints >= 0 ? '#22c55e' : '#ef4444' }}>
-                  {pnlPoints >= 0 ? '+' : ''}{pnlPoints.toFixed(2)} נק׳
-                </span>
-              )
-            )}
-          </p>
-          <button onClick={onClose} style={{ color: 'var(--color-tg-muted)', fontSize: 20, lineHeight: 1, fontWeight: 600 }}>×</button>
-        </div>
-
-        <div className="flex flex-col gap-0">
-          {rows.map(([label, value], i) => (
-            <div key={label}
-              className="flex items-start justify-between gap-4 py-2.5"
-              style={{ borderBottom: i < rows.length - 1 ? '1px solid var(--color-tg-border)' : 'none' }}>
-              <span className="text-xs font-semibold shrink-0" style={{ color: 'var(--color-tg-muted)', minWidth: 90 }}>{label}</span>
-              <span className="text-xs text-right" style={{ color: 'var(--color-tg-text)', wordBreak: 'break-word' }}>{String(value ?? '—')}</span>
-            </div>
-          ))}
-        </div>
-
-        {trade.status === 'closed' && (
-          <div className="pt-1 border-t" style={{ borderColor: 'var(--color-tg-border)' }}>
-            {result ? (
-              <div className="pt-3"><AIDebriefView result={result} /></div>
-            ) : analyzing ? (
-              <div className="pt-4 flex flex-col items-center gap-3">
-                <div className="w-7 h-7 rounded-full border-2 border-t-transparent animate-spin"
-                  style={{ borderColor: 'var(--color-tg-primary)', borderTopColor: 'transparent' }} />
-                <p className="text-xs text-tg-text-2">מנתח את העסקה עם AI...</p>
-              </div>
+    <Modal onClose={onClose}>
+      <div className="flex items-center justify-between">
+        <p className="text-base font-bold flex items-center gap-2" style={{ color: 'var(--color-tg-text)' }}>
+          {trade.symbol ?? trade.strategy}
+          {pnlPoints !== null && (
+            hasMoneyPnl(trade) ? (
+              <span className="text-sm font-bold" style={{ color: tradeMoneyPnl(trade) >= 0 ? '#22c55e' : '#ef4444' }}>
+                {formatPnlIls(tradeMoneyPnl(trade), trade.pnl_currency ?? '₪')}
+                <span className="text-xs font-semibold" style={{ opacity: 0.6 }}> ({formatPnlPoints(pnlPoints)})</span>
+              </span>
             ) : (
-              <button
-                onClick={(e) => { e.stopPropagation(); runAnalysis(); }}
-                className="w-full mt-3 py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-1.5"
-                style={{ background: 'var(--color-tg-primary-muted)', color: 'var(--color-tg-primary)', border: '1px solid rgba(0,210,210,0.3)' }}>
-                <Bot size={14} /> נתח עסקה עם AI
-              </button>
-            )}
-          </div>
-        )}
+              <span className="text-sm font-bold" style={{ color: pnlPoints >= 0 ? '#22c55e' : '#ef4444' }}>
+                {pnlPoints >= 0 ? '+' : ''}{pnlPoints.toFixed(2)} נק׳
+              </span>
+            )
+          )}
+        </p>
+        <button onClick={onClose} style={{ color: 'var(--color-tg-muted)', fontSize: 20, lineHeight: 1, fontWeight: 600 }}>×</button>
       </div>
-    </div>
+
+      <div className="flex flex-col gap-0">
+        {rows.map(([label, value], i) => (
+          <div key={label}
+            className="flex items-start justify-between gap-4 py-2.5"
+            style={{ borderBottom: i < rows.length - 1 ? '1px solid var(--color-tg-border)' : 'none' }}>
+            <span className="text-xs font-semibold shrink-0" style={{ color: 'var(--color-tg-muted)', minWidth: 90 }}>{label}</span>
+            <span className="text-xs text-right" style={{ color: 'var(--color-tg-text)', wordBreak: 'break-word' }}>{String(value ?? '—')}</span>
+          </div>
+        ))}
+      </div>
+
+      {trade.status === 'closed' && (
+        <div className="pt-1 border-t" style={{ borderColor: 'var(--color-tg-border)' }}>
+          {result ? (
+            <div className="pt-3"><AIDebriefView result={result} /></div>
+          ) : analyzing ? (
+            <div className="pt-4 flex flex-col items-center gap-3">
+              <div className="w-7 h-7 rounded-full border-2 border-t-transparent animate-spin"
+                style={{ borderColor: 'var(--color-tg-primary)', borderTopColor: 'transparent' }} />
+              <p className="text-xs text-tg-text-2">מנתח את העסקה עם AI...</p>
+            </div>
+          ) : (
+            <button
+              onClick={(e) => { e.stopPropagation(); runAnalysis(); }}
+              className="w-full mt-3 py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-1.5"
+              style={{ background: 'var(--color-tg-primary-muted)', color: 'var(--color-tg-primary)', border: '1px solid rgba(0,210,210,0.3)' }}>
+              <Bot size={14} /> נתח עסקה עם AI
+            </button>
+          )}
+        </div>
+      )}
+    </Modal>
   );
 }
 
