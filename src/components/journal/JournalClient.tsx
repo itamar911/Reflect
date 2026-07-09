@@ -1,18 +1,20 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
-import { Bot, DollarSign, Pencil, Trash2 } from 'lucide-react';
+import { AlertTriangle, Bot, Eye, Inbox, MoreHorizontal, Pencil, Trash2, X } from 'lucide-react';
 import CloseTrade, { AIDebriefView, type AIDebriefResult } from '@/components/journal/CloseTrade';
 import EmotionalStateSlider from '@/components/trade/EmotionalStateSlider';
 import { createClient } from '@/lib/supabase/client';
 import { formatPnlIls, formatPnlPoints, calcRR } from '@/lib/utils';
 import { tradeMoneyPnl, hasMoneyPnl, isWinningTrade } from '@/lib/pnl';
 import type { PnlCurrency } from '@/lib/types';
+import './journal.css';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const GOLD   = '#00d2d2';
+const AMBER  = '#f59e0b';
 const SURF   = 'var(--color-tg-surface)';
 const SURF2  = 'var(--color-tg-surface-2)';
 const BORDER = 'var(--color-tg-border)';
@@ -52,6 +54,7 @@ interface Trade {
   pnl_amount: number | null;
   actual_pnl: number | null;
   pnl_currency: string | null;
+  has_rule_violation?: boolean;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -76,6 +79,12 @@ function fmtPnl(v: number) {
   return `${v >= 0 ? '+' : ''}${v.toFixed(2)}`;
 }
 
+// Thousands separators, no trailing .00 on whole numbers (29,450 not 29450.00)
+const PRICE_FMT = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
+function fmtPrice(v: number) {
+  return PRICE_FMT.format(v);
+}
+
 const PAGE_SIZES = [15, 30, 50, 100];
 
 // ── Mobile trade card (shown instead of table on small screens) ───────────────
@@ -93,77 +102,68 @@ function MobileTradeCard({ t, onView, onEdit, onDelete, onClose, onDebrief, hasD
   const isWin = isWinningTrade(t);
   const isClosed = t.status === 'closed';
 
+  const menuItems: KebabItem[] = [
+    { label: 'צפייה', icon: <Eye size={13} />, onClick: onView },
+    { label: 'עריכה', icon: <Pencil size={13} />, onClick: onEdit },
+    ...(t.status === 'open' ? [{ label: 'סגור עסקה', icon: <X size={13} />, onClick: onClose }] : []),
+    ...(hasDebrief ? [{ label: 'ניתוח AI', icon: <Bot size={13} />, color: GOLD, onClick: onDebrief }] : []),
+    { label: 'מחיקה', icon: <Trash2 size={13} />, color: RED, onClick: onDelete },
+  ];
+
   return (
     <div
       onClick={onView}
       style={{ background: SURF, border: `1px solid ${BORDER}`, borderRadius: 14, cursor: 'pointer' }}
     >
-      <div className="p-3 flex flex-col gap-2">
-        {/* Row 1: asset + status */}
+      <div className="p-3 flex flex-col gap-2.5">
+        {/* Row 1: asset + status + kebab */}
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="flex items-center gap-1.5 min-w-0">
             <AssetDot symbol={t.symbol} />
             <span className="font-semibold truncate" style={{ fontSize: 14, color: TEXT }}>
               {t.symbol ?? t.strategy}
             </span>
             <Chip
-              bg={dir === 'long' ? 'rgba(74,222,128,0.12)' : 'rgba(248,113,113,0.12)'}
+              bg={dir === 'long' ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.1)'}
               color={dir === 'long' ? GREEN : RED}>
               {dir === 'long' ? 'לונג' : 'שורט'}
             </Chip>
           </div>
-          {isClosed ? <StatusBadge win={isWin} /> : <Chip bg="rgba(0,210,210,0.12)" color={GOLD}>פתוח</Chip>}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {isClosed ? <StatusBadge win={isWin} /> : <Chip bg="rgba(0,210,210,0.1)" color={GOLD}>פתוח</Chip>}
+            <KebabMenu items={menuItems} />
+          </div>
         </div>
 
-        {/* Row 2: date + P&L */}
+        {/* Row 2: date + score | P&L */}
         <div className="flex items-center justify-between">
-          <span style={{ fontSize: 12, color: MUTED, fontWeight: 600 }}>{fmtDate(t.submitted_at)}</span>
+          <div className="flex items-center gap-2">
+            <span style={{ fontSize: 12, color: MUTED, fontWeight: 600 }}>{fmtDate(t.submitted_at)}</span>
+            {isClosed && <ScoreRing score={t.plan_score} size={26} />}
+            {t.has_rule_violation && (
+              <span title="חוק הופר" className="flex items-center">
+                <AlertTriangle size={13} color={AMBER} />
+              </span>
+            )}
+          </div>
           {pnl !== null ? (
             hasMoneyPnl(t) ? (
-              <span style={{ fontSize: 14, fontWeight: 700, color: tradeMoneyPnl(t) >= 0 ? GREEN : RED }}>
-                {formatPnlIls(tradeMoneyPnl(t), t.pnl_currency ?? '₪')}
-                <span style={{ fontSize: 11, opacity: 0.6 }}> ({formatPnlPoints(pnl)})</span>
+              <span className="flex items-baseline gap-1.5">
+                <span className="jr-num" style={{ fontSize: 14, fontWeight: 700, color: tradeMoneyPnl(t) >= 0 ? GREEN : RED }}>
+                  {formatPnlIls(tradeMoneyPnl(t), t.pnl_currency ?? '₪')}
+                </span>
+                <span className="jr-num" style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>
+                  {formatPnlPoints(pnl)}
+                </span>
               </span>
             ) : (
-              <span style={{ fontSize: 14, fontWeight: 700, color: pnl >= 0 ? GREEN : RED }}>
+              <span className="jr-num" style={{ fontSize: 14, fontWeight: 700, color: pnl >= 0 ? GREEN : RED }}>
                 {fmtPnl(pnl)}
               </span>
             )
           ) : (
             <span style={{ fontSize: 12, color: GOLD, fontWeight: 600 }}>פתוח</span>
           )}
-        </div>
-
-        {/* Row 3: action buttons */}
-        <div className="flex gap-2 pt-2" style={{ borderTop: `1px solid ${BORDER}` }}>
-          <button
-            onClick={e => { e.stopPropagation(); onEdit(); }}
-            className="flex-1 flex items-center justify-center rounded-xl text-xs font-semibold h-11"
-            style={{ background: SURF2, color: TEXT2 }}>
-            ערוך
-          </button>
-          {t.status === 'open' && (
-            <button
-              onClick={e => { e.stopPropagation(); onClose(); }}
-              className="flex-1 flex items-center justify-center rounded-xl text-xs font-semibold h-11"
-              style={{ background: 'var(--color-tg-danger-muted)', color: 'var(--color-tg-danger)', border: '1px solid rgba(239,68,68,0.3)' }}>
-              סגור עסקה
-            </button>
-          )}
-          {hasDebrief && (
-            <button
-              onClick={e => { e.stopPropagation(); onDebrief(); }}
-              className="flex-1 flex items-center justify-center rounded-xl text-xs font-semibold h-11"
-              style={{ background: 'var(--color-tg-primary-muted)', color: 'var(--color-tg-primary)', border: '1px solid rgba(0,210,210,0.3)' }}>
-              ניתוח AI
-            </button>
-          )}
-          <button
-            onClick={e => { e.stopPropagation(); onDelete(); }}
-            className="w-11 h-11 flex items-center justify-center rounded-xl shrink-0"
-            style={{ background: 'rgba(248,113,113,0.1)', color: RED }}>
-            <Trash2 size={16} />
-          </button>
         </div>
       </div>
     </div>
@@ -285,20 +285,16 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
   return (
     <div dir="rtl" className="flex flex-col gap-4">
 
-      {/* Stats strip */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatCard label="סה״כ עסקאות"   value={String(trades.length)} icon={<BarChartIcon />} />
-        <StatCard label="אחוז הצלחה"    value={`${winRate}%`}
-          icon={<TrendUpIcon />}
+      {/* Summary strip — one slim card, internal dividers */}
+      <div className="jr-summary">
+        <SummaryStat label="סה״כ עסקאות" value={String(trades.length)} />
+        <SummaryStat label="אחוז הצלחה" value={`${winRate}%`}
           color={winRate >= 50 ? GREEN : RED} />
-        <StatCard label="רווח / הפסד"
+        <SummaryStat label="רווח/הפסד כולל"
           value={hasPnlAmount ? formatPnlIls(totalPnlAmount, pnlAmountCurrency) : fmtPnl(totalPnl)}
-          icon={<DollarSign size={14} color={GOLD} strokeWidth={2} />}
           color={(hasPnlAmount ? totalPnlAmount : totalPnl) >= 0 ? GREEN : RED}
-          className="min-w-0"
-          valueClassName="text-base sm:text-2xl font-bold break-all" />
-        <StatCard label="פקטור רווח" value={pfStr}
-          icon={<TargetIcon />}
+          big />
+        <SummaryStat label="פקטור רווח" value={pfStr}
           color={pfNum !== null ? (pfNum >= 1.5 ? GREEN : pfNum >= 1 ? GOLD : RED) : MUTED} />
       </div>
 
@@ -379,8 +375,8 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
             value={search}
             onChange={e => { setSearch(e.target.value); setPage(1); }}
             placeholder="חפש לפי נכס..."
-            className="w-full pr-8 pl-3 py-2 rounded-xl text-sm outline-none"
-            style={{ background: SURF, border: `1px solid ${BORDER}`, color: TEXT, direction: 'rtl' }}
+            className="jr-input w-full pr-8 pl-3 py-2 rounded-xl text-sm outline-none"
+            style={{ background: SURF2, border: `1px solid ${BORDER}`, color: TEXT, direction: 'rtl' }}
           />
         </div>
       </div>
@@ -388,7 +384,7 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
       {/* Mobile card list */}
       <div className="md:hidden flex flex-col gap-2">
         {pageTrades.length === 0 ? (
-          <div className="text-center py-14 text-sm" style={{ color: MUTED, fontWeight: 600 }}>לא נמצאו עסקאות</div>
+          <EmptyState />
         ) : pageTrades.map(t => (
           <MobileTradeCard
             key={t.id}
@@ -404,11 +400,12 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
       </div>
 
       {/* Desktop table */}
-      <div className="hidden md:block rounded-2xl overflow-hidden" style={{ border: `1px solid ${BORDER}` }}>
-        <div className="overflow-x-auto">
-          <table className="w-full" style={{ borderCollapse: 'collapse' }}>
+      <div className="hidden md:block rounded-2xl overflow-hidden"
+        style={{ border: `1px solid ${BORDER}`, background: SURF }}>
+        <div className="overflow-auto" style={{ maxHeight: '70vh' }}>
+          <table className="jr-table">
             <thead>
-              <tr style={{ background: SURF, borderBottom: `1px solid ${BORDER}` }}>
+              <tr>
                 <TH>
                   <input type="checkbox" checked={allOnPage} onChange={toggleAll}
                     className="w-3.5 h-3.5 cursor-pointer" style={{ accentColor: GOLD }} />
@@ -420,38 +417,43 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
                 <TH>נכס</TH>
                 <TH>סוג</TH>
                 <TH>תאריך פתיחה</TH>
-                <TH>כמות</TH>
                 <TH>תוצאה</TH>
+                <TH>ציון</TH>
                 <TH>מחיר כניסה</TH>
                 <TH>אסטרטגיה</TH>
-                <TH>פעולות</TH>
+                <TH>{''}</TH>
               </tr>
             </thead>
             <tbody>
               {pageTrades.length === 0 ? (
-                <tr>
-                  <td colSpan={11} className="text-center py-14 text-sm" style={{ color: MUTED, fontWeight: 600 }}>
-                    לא נמצאו עסקאות
+                <tr style={{ cursor: 'default' }}>
+                  <td colSpan={11}>
+                    <EmptyState />
                   </td>
                 </tr>
-              ) : pageTrades.map((t, i) => {
+              ) : pageTrades.map(t => {
                 const pnl      = calcPnl(t);
                 const dir      = inferDirection(t);
                 const isWin    = isWinningTrade(t);
                 const isClosed = t.status === 'closed';
                 const isChecked = selected.has(t.id);
 
+                const menuItems: KebabItem[] = [
+                  { label: 'צפייה', icon: <Eye size={13} />, onClick: () => { setClosingTradeId(null); setViewTradeId(t.id); } },
+                  { label: 'עריכה', icon: <Pencil size={13} />, onClick: () => setEditingTradeId(t.id) },
+                  ...(t.status === 'open'
+                    ? [{ label: 'סגור עסקה', icon: <X size={13} />, onClick: () => { setViewTradeId(null); setClosingTradeId(t.id); } }]
+                    : []),
+                  ...(debriefResults[t.id]
+                    ? [{ label: 'ניתוח AI', icon: <Bot size={13} />, color: GOLD, onClick: () => setViewDebriefId(t.id) }]
+                    : []),
+                  { label: 'מחיקה', icon: <Trash2 size={13} />, color: RED, onClick: () => { setDeletingTradeId(t.id); setDeleteError(''); } },
+                ];
+
                 return (
                   <tr key={t.id}
                     onClick={() => { setClosingTradeId(null); setViewTradeId(t.id); }}
-                    style={{
-                      background: isChecked
-                        ? 'rgba(0,210,210,0.06)'
-                        : i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.015)',
-                      borderBottom: `1px solid ${BORDER}`,
-                      cursor: 'pointer',
-                      transition: 'background 0.1s',
-                    }}>
+                    style={isChecked ? { background: 'rgba(0,210,210,0.06)' } : undefined}>
 
                     {/* Checkbox */}
                     <TD>
@@ -463,7 +465,7 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
 
                     {/* Close date */}
                     <TD>
-                      <span style={{ color: TEXT2, fontWeight: 600 }}>
+                      <span className="jr-num" style={{ color: TEXT2, fontWeight: 600 }}>
                         {isClosed && t.closed_at ? fmtDate(t.closed_at) : '—'}
                       </span>
                     </TD>
@@ -472,13 +474,13 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
                     <TD>
                       {isClosed
                         ? <StatusBadge win={isWin} />
-                        : <Chip bg="rgba(0,210,210,0.12)" color={GOLD}>פתוח</Chip>
+                        : <Chip bg="rgba(0,210,210,0.1)" color={GOLD}>פתוח</Chip>
                       }
                     </TD>
 
                     {/* Asset */}
                     <TD>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5">
                         <AssetDot symbol={t.symbol} />
                         <span className="font-semibold text-sm" style={{ color: TEXT }}>
                           {t.symbol ?? '—'}
@@ -489,7 +491,7 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
                     {/* Direction */}
                     <TD>
                       <Chip
-                        bg={dir === 'long' ? 'rgba(74,222,128,0.12)' : 'rgba(248,113,113,0.12)'}
+                        bg={dir === 'long' ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.1)'}
                         color={dir === 'long' ? GREEN : RED}>
                         {dir === 'long' ? 'לונג' : 'שורט'}
                       </Chip>
@@ -497,22 +499,23 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
 
                     {/* Open date */}
                     <TD>
-                      <span style={{ color: TEXT2, fontWeight: 600 }}>{fmtDate(t.submitted_at)}</span>
+                      <span className="jr-num" style={{ color: TEXT2, fontWeight: 600 }}>{fmtDate(t.submitted_at)}</span>
                     </TD>
 
-                    {/* Quantity — not in schema */}
-                    <TD><span style={{ color: MUTED, fontWeight: 600 }}>—</span></TD>
-
-                    {/* P&L */}
+                    {/* P&L — money primary, points sub-value */}
                     <TD>
                       {pnl !== null ? (
                         hasMoneyPnl(t) ? (
-                          <span style={{ color: tradeMoneyPnl(t) >= 0 ? GREEN : RED }}>
-                            <span className="font-semibold">{formatPnlIls(tradeMoneyPnl(t), t.pnl_currency ?? '₪')}</span>
-                            <span className="text-xs" style={{ opacity: 0.6 }}> ({formatPnlPoints(pnl)})</span>
-                          </span>
+                          <div className="flex flex-col gap-0.5">
+                            <span className="jr-num" style={{ fontSize: 13.5, fontWeight: 700, color: tradeMoneyPnl(t) >= 0 ? GREEN : RED }}>
+                              {formatPnlIls(tradeMoneyPnl(t), t.pnl_currency ?? '₪')}
+                            </span>
+                            <span className="jr-num" style={{ fontSize: 10.5, color: MUTED, fontWeight: 600 }}>
+                              {formatPnlPoints(pnl)}
+                            </span>
+                          </div>
                         ) : (
-                          <span className="font-semibold" style={{ color: pnl >= 0 ? GREEN : RED }}>
+                          <span className="jr-num" style={{ fontWeight: 700, color: pnl >= 0 ? GREEN : RED }}>
                             {fmtPnl(pnl)}
                           </span>
                         )
@@ -521,10 +524,22 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
                       )}
                     </TD>
 
+                    {/* Score + rule-violation flag */}
+                    <TD>
+                      <div className="flex items-center gap-1.5">
+                        <ScoreRing score={isClosed ? t.plan_score : null} />
+                        {t.has_rule_violation && (
+                          <span title="חוק הופר" className="flex items-center">
+                            <AlertTriangle size={13} color={AMBER} />
+                          </span>
+                        )}
+                      </div>
+                    </TD>
+
                     {/* Entry price */}
                     <TD>
-                      <span className="font-mono text-xs" style={{ color: TEXT }}>
-                        {t.entry_price.toFixed(2)}
+                      <span className="jr-num" style={{ fontSize: 12.5, color: TEXT }}>
+                        {fmtPrice(t.entry_price)}
                       </span>
                     </TD>
 
@@ -535,49 +550,10 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
                       </span>
                     </TD>
 
-                    {/* Actions */}
+                    {/* Kebab menu — revealed on row hover */}
                     <TD>
-                      <div className="flex items-center gap-1.5 justify-end">
-                        <button
-                          onClick={e => { e.stopPropagation(); setEditingTradeId(t.id); }}
-                          className="w-9 h-9 flex items-center justify-center rounded-lg transition-colors hover:opacity-80"
-                          style={{ background: SURF2, color: MUTED }}
-                          title="ערוך עסקה">
-                          <Pencil size={14} />
-                        </button>
-                        <button
-                          onClick={e => { e.stopPropagation(); setDeletingTradeId(t.id); setDeleteError(''); }}
-                          className="w-9 h-9 flex items-center justify-center rounded-lg transition-colors hover:opacity-80"
-                          style={{ background: 'rgba(248,113,113,0.1)', color: RED }}
-                          title="מחק עסקה">
-                          <Trash2 size={14} />
-                        </button>
-                        {t.status === 'open' && (
-                          <button
-                            onClick={e => { e.stopPropagation(); setViewTradeId(null); setClosingTradeId(t.id); }}
-                            className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
-                            style={{
-                              background: 'var(--color-tg-danger-muted)',
-                              color: 'var(--color-tg-danger)',
-                              border: '1px solid rgba(239,68,68,0.3)',
-                              whiteSpace: 'nowrap',
-                            }}>
-                            סגור עסקה
-                          </button>
-                        )}
-                        {debriefResults[t.id] && (
-                          <button
-                            onClick={e => { e.stopPropagation(); setViewDebriefId(t.id); }}
-                            className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
-                            style={{
-                              background: 'var(--color-tg-primary-muted)',
-                              color: 'var(--color-tg-primary)',
-                              border: '1px solid rgba(0,210,210,0.3)',
-                              whiteSpace: 'nowrap',
-                            }}>
-                            ניתוח AI
-                          </button>
-                        )}
+                      <div className="flex justify-end">
+                        <KebabMenu items={menuItems} className="jr-kebab" />
                       </div>
                     </TD>
                   </tr>
@@ -724,20 +700,15 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
 
 // ── Atoms ─────────────────────────────────────────────────────────────────────
 
-function StatCard({ label, value, icon, color = TEXT, className = '', valueClassName = 'text-2xl font-bold' }: {
-  label: string; value: string; icon: React.ReactNode; color?: string; className?: string; valueClassName?: string;
+function SummaryStat({ label, value, color = TEXT, big }: {
+  label: string; value: string; color?: string; big?: boolean;
 }) {
   return (
-    <div className={`rounded-2xl p-4 flex flex-col gap-2 ${className}`}
-      style={{ background: SURF, border: `1px solid ${BORDER}` }}>
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold" style={{ color: MUTED, fontWeight: 600 }}>{label}</span>
-        <div className="w-7 h-7 rounded-lg flex items-center justify-center"
-          style={{ background: 'rgba(0,210,210,0.1)' }}>
-          {icon}
-        </div>
-      </div>
-      <span className={valueClassName} style={{ color }}>{value}</span>
+    <div className="flex flex-col justify-center gap-0.5 px-4 py-3 min-w-0" style={{ minHeight: 74 }}>
+      <span style={{ fontSize: 11, fontWeight: 600, color: MUTED }}>{label}</span>
+      <span className="jr-num truncate" style={{ fontSize: big ? 20 : 17, fontWeight: 700, lineHeight: 1.2, color }}>
+        {value}
+      </span>
     </div>
   );
 }
@@ -751,21 +722,113 @@ function TH({ children, sortable, onSort, sortDir }: {
   const inner = sortable ? (
     <button onClick={onSort}
       className="flex items-center gap-1 hover:opacity-80 transition-opacity"
-      style={{ color: MUTED, fontWeight: 600 }}>
+      style={{ color: 'inherit', fontWeight: 600 }}>
       {children}
       <span style={{ color: GOLD, fontSize: 11 }}>{sortDir === 'desc' ? '↓' : '↑'}</span>
     </button>
   ) : children;
-  return (
-    <th className="px-3 py-3 text-right text-xs font-semibold whitespace-nowrap"
-      style={{ color: MUTED, fontWeight: 600 }}>
-      {inner}
-    </th>
-  );
+  return <th>{inner}</th>;
 }
 
 function TD({ children }: { children: React.ReactNode }) {
-  return <td className="px-3 py-3 text-right whitespace-nowrap">{children}</td>;
+  return <td>{children}</td>;
+}
+
+/** Post-trade score (0-100) as a small colored ring; muted — when no score. */
+function ScoreRing({ score, size = 30 }: { score: number | null; size?: number }) {
+  if (score == null) return <span style={{ color: MUTED, fontWeight: 600 }}>—</span>;
+  const clamped = Math.min(Math.max(Math.round(score), 0), 100);
+  const color = clamped >= 80 ? GREEN : clamped >= 60 ? AMBER : RED;
+  const c = size / 2;
+  const r = c - 3;
+  const circ = 2 * Math.PI * r;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-label={`ציון ${clamped}`} className="shrink-0">
+      <circle cx={c} cy={c} r={r} fill="none" stroke="rgba(128,128,128,0.22)" strokeWidth={2.5} />
+      <circle cx={c} cy={c} r={r} fill="none" stroke={color} strokeWidth={2.5}
+        strokeDasharray={`${(clamped / 100) * circ} ${circ}`}
+        strokeLinecap="round" transform={`rotate(-90 ${c} ${c})`} />
+      <text x={c} y={c + 3.5} textAnchor="middle" fontSize={size * 0.32} fontWeight={700} fill={color}
+        style={{ fontVariantNumeric: 'tabular-nums' }}>
+        {clamped}
+      </text>
+    </svg>
+  );
+}
+
+interface KebabItem {
+  label: string;
+  onClick: () => void;
+  icon?: React.ReactNode;
+  color?: string;
+}
+
+/** ⋯ row menu — portal-positioned so the table's overflow can't clip it. */
+function KebabMenu({ items, className = '' }: { items: KebabItem[]; className?: string }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  function toggle(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (open) { setOpen(false); return; }
+    const r = btnRef.current!.getBoundingClientRect();
+    const menuW = 160;
+    const menuH = items.length * 36 + 12;
+    const top = r.bottom + menuH + 8 > window.innerHeight ? r.top - menuH - 4 : r.bottom + 4;
+    const left = Math.min(Math.max(8, r.right - menuW), window.innerWidth - menuW - 8);
+    setPos({ top, left });
+    setOpen(true);
+  }
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        onClick={toggle}
+        data-open={open || undefined}
+        className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors hover:opacity-80 ${className}`}
+        style={{ background: SURF2, color: MUTED }}
+        title="פעולות"
+        aria-haspopup="menu"
+        aria-expanded={open}>
+        <MoreHorizontal size={16} />
+      </button>
+      {open && createPortal(
+        <div className="fixed inset-0 z-50" onClick={e => { e.stopPropagation(); setOpen(false); }}>
+          <div dir="rtl"
+            className="absolute rounded-xl p-1.5 flex flex-col gap-0.5"
+            style={{
+              top: pos.top, left: pos.left, width: 160,
+              background: SURF, border: `1px solid ${BORDER}`,
+              boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+            }}
+            onClick={e => e.stopPropagation()}>
+            {items.map(item => (
+              <button key={item.label}
+                onClick={e => { e.stopPropagation(); setOpen(false); item.onClick(); }}
+                className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-right transition-all hover:opacity-80"
+                style={{ color: item.color ?? TEXT2, fontWeight: 600 }}>
+                {item.icon}
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
+  );
+}
+
+function EmptyState() {
+  return (
+    <div className="flex flex-col items-center gap-2 py-16">
+      <Inbox size={28} color={MUTED} strokeWidth={1.5} />
+      <p className="text-sm" style={{ color: TEXT, fontWeight: 700 }}>לא נמצאו עסקאות</p>
+      <p className="text-xs" style={{ color: MUTED, fontWeight: 600 }}>נסה לשנות את החיפוש או הסינון</p>
+    </div>
+  );
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -779,8 +842,8 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function Chip({ children, bg, color }: { children: React.ReactNode; bg: string; color: string }) {
   return (
-    <span className="text-xs px-2 py-0.5 rounded-md font-semibold"
-      style={{ background: bg, color }}>
+    <span className="px-2.5 py-0.5 rounded-full font-semibold whitespace-nowrap"
+      style={{ background: bg, color, fontSize: 11 }}>
       {children}
     </span>
   );
@@ -788,7 +851,7 @@ function Chip({ children, bg, color }: { children: React.ReactNode; bg: string; 
 
 function StatusBadge({ win }: { win: boolean | null }) {
   if (win === null) return <Chip bg={SURF2} color={MUTED}>סגור</Chip>;
-  return <Chip bg={win ? 'rgba(74,222,128,0.12)' : 'rgba(248,113,113,0.12)'} color={win ? GREEN : RED}>
+  return <Chip bg={win ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.1)'} color={win ? GREEN : RED}>
     {win ? 'רווח' : 'הפסד'}
   </Chip>;
 }
@@ -1147,38 +1210,6 @@ function EditTradeModal({ trade, onClose, onSaved }: {
 }
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
-
-function BarChartIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={GOLD} strokeWidth="2"
-      strokeLinecap="round" strokeLinejoin="round">
-      <line x1="18" y1="20" x2="18" y2="10"/>
-      <line x1="12" y1="20" x2="12" y2="4"/>
-      <line x1="6"  y1="20" x2="6"  y2="14"/>
-    </svg>
-  );
-}
-
-function TrendUpIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={GOLD} strokeWidth="2"
-      strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
-      <polyline points="17 6 23 6 23 12"/>
-    </svg>
-  );
-}
-
-function TargetIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={GOLD} strokeWidth="2"
-      strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="10"/>
-      <circle cx="12" cy="12" r="6"/>
-      <circle cx="12" cy="12" r="2"/>
-    </svg>
-  );
-}
 
 function FilterIcon() {
   return (

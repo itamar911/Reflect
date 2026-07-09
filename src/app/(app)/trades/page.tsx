@@ -9,12 +9,21 @@ export default async function TradesPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const { data: trades } = await supabase
-    .from('trade_plans')
-    .select('*')
-    .eq('user_id', user.id)
-    .order('submitted_at', { ascending: false })
-    .limit(1000);
+  const [{ data: trades }, { data: violations }] = await Promise.all([
+    supabase
+      .from('trade_plans')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('submitted_at', { ascending: false })
+      .limit(1000),
+    supabase
+      .from('rule_violations')
+      .select('trade_plan_id')
+      .eq('user_id', user.id)
+      .not('trade_plan_id', 'is', null),
+  ]);
+
+  const violatedIds = new Set((violations ?? []).map((v) => v.trade_plan_id as string));
 
   const allTrades = (trades ?? []).map((t) => ({
     id:               t.id               as string,
@@ -41,6 +50,7 @@ export default async function TradesPage() {
     pnl_amount:       t.pnl_amount != null ? Number(t.pnl_amount) : null,
     actual_pnl:       t.actual_pnl != null ? Number(t.actual_pnl) : null,
     pnl_currency:     (t.pnl_currency as string | null) ?? null,
+    has_rule_violation: violatedIds.has(t.id as string),
   }));
 
   const exportTrades = allTrades.map((t) => ({

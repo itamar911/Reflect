@@ -1,0 +1,100 @@
+/* All Trades — "trading terminal" design language (shared with the stats page) */
+
+/* Number runs: aligned digits, stable direction inside RTL text */
+.jr-num {
+  font-variant-numeric: tabular-nums;
+  direction: ltr;
+  unicode-bidi: isolate;
+  display: inline-block;
+}
+
+/* Slim summary strip: one card, internal dividers (2×2 on mobile, 1×4 on md+) */
+.jr-summary {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  background: var(--color-tg-surface);
+  border: 1px solid var(--color-tg-border-light);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.jr-summary > *:nth-child(even) {
+  border-inline-start: 1px solid var(--color-tg-border-light);
+}
+.jr-summary > *:nth-child(n + 3) {
+  border-top: 1px solid var(--color-tg-border-light);
+}
+@media (min-width: 768px) {
+  .jr-summary {
+    grid-template-columns: repeat(4, 1fr);
+  }
+  .jr-summary > *:nth-child(n + 2) {
+    border-inline-start: 1px solid var(--color-tg-border-light);
+  }
+  .jr-summary > *:nth-child(n + 3) {
+    border-top: none;
+  }
+}
+
+/* Terminal inputs: dark field, subtle border, turquoise focus ring */
+.jr-input {
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.jr-input:focus {
+  border-color: var(--color-tg-primary) !important;
+  box-shadow: 0 0 0 3px rgba(0, 210, 210, 0.12);
+}
+
+/* Trades table: sticky header, comfortable rows, subtle dividers, no zebra */
+.jr-table {
+  width: 100%;
+  border-collapse: separate; /* keeps the th border attached while sticky */
+  border-spacing: 0;
+  font-size: 13px;
+}
+.jr-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--color-tg-bg);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-tg-muted);
+  text-align: right;
+  padding: 12px;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--color-tg-border);
+}
+.jr-table td {
+  height: 56px;
+  padding: 6px 12px;
+  text-align: right;
+  white-space: nowrap;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--color-tg-border-light);
+}
+.jr-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.jr-table tbody tr {
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.jr-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+/* Kebab: hidden until row hover on the desktop table, always visible on touch */
+.jr-table .jr-kebab {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.jr-table tr:hover .jr-kebab,
+.jr-table tr:focus-within .jr-kebab,
+.jr-table .jr-kebab[data-open='true'] {
+  opacity: 1;
+}
+@media (hover: none) {
+  .jr-table .jr-kebab {
+    opacity: 1;
+  }
+}
