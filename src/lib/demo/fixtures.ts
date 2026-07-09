@@ -211,7 +211,7 @@ const DEMO_TRADES = TRADE_SPECS
 const DEMO_PROFILE = {
   id: DEMO_USER_ID,
   email: DEMO_USER.email,
-  display_name: 'חשבון דמו',
+  display_name: 'סוחר דמו',
   trading_type: ['day', 'futures'],
   experience_level: 'intermediate',
   default_market: ['futures'],

@@ -80,11 +80,22 @@ const SECONDARY_NAV: NavItem[] = [
 // label's width. The active-state highlight is two separate pills (full-row
 // vs rail-only) that cross-fade via opacity instead of one pill trying to be
 // both sizes, so nothing needs to resize/reflow during the collapse motion.
-function NavLink({ item, expanded, active }: { item: NavItem; expanded: boolean; active: boolean }) {
+function NavLink({ item, expanded, active, hardNav }: {
+  item: NavItem;
+  expanded: boolean;
+  active: boolean;
+  /** Demo mode: full-page <a> navigation. Soft (client-router) navigations
+      through the /demo middleware rewrite can desync the router's pathname
+      from the browser URL, which strips the /demo prefix off subsequent nav
+      and silently drops the visitor into the real app. A hard load always
+      goes through the middleware and always stays inside /demo. */
+  hardNav?: boolean;
+}) {
+  const LinkOrAnchor = hardNav ? 'a' : Link;
   return (
-    <Link
+    <LinkOrAnchor
       href={item.href}
-      prefetch={true}
+      {...(hardNav ? {} : { prefetch: true })}
       title={!expanded ? item.label : undefined}
       className="relative flex items-center rounded-xl select-none"
       style={{
@@ -138,7 +149,7 @@ function NavLink({ item, expanded, active }: { item: NavItem; expanded: boolean;
       >
         {item.label}
       </span>
-    </Link>
+    </LinkOrAnchor>
   );
 }
 
@@ -160,7 +171,14 @@ export default function AppShell({
 
   // Demo mode — same shell, but nav stays under /demo, account actions are
   // hidden, and anything mutating raises the signup upsell instead.
-  const isDemo    = pathname.startsWith('/demo');
+  // window.location is the fallback source of truth: after a soft navigation
+  // through the /demo rewrite the router's pathname can report the rewritten
+  // internal route (no /demo prefix) while the browser URL is still /demo/*.
+  const [browserDemo, setBrowserDemo] = useState(false);
+  useEffect(() => {
+    setBrowserDemo(window.location.pathname.startsWith('/demo'));
+  }, [pathname]);
+  const isDemo    = pathname.startsWith('/demo') || browserDemo;
   const navPrefix = isDemo ? '/demo' : '';
 
   const [formOpen,  setFormOpen]  = useState(false);
@@ -389,6 +407,7 @@ export default function AppShell({
               item={{ ...item, href: navPrefix + item.href }}
               expanded={expanded}
               active={isActive(navPrefix + item.href)}
+              hardNav={isDemo}
             />
           ))}
 
@@ -398,9 +417,10 @@ export default function AppShell({
           {isDemo ? (
             /* Demo: no settings/feedback/sign-out — a single signup CTA instead */
             <NavLink
-              item={{ href: '/signup', label: 'הרשמה חינם', icon: <IconPlus /> }}
+              item={{ href: '/signup', label: 'התחילו עכשיו', icon: <IconPlus /> }}
               expanded={expanded}
               active={false}
+              hardNav
             />
           ) : (
           <>
@@ -556,13 +576,13 @@ export default function AppShell({
             <span className="text-xs font-semibold" style={{ color: 'var(--color-tg-text)' }}>
               מצב דמו — כל הנתונים לדוגמה
             </span>
-            <Link
+            <a
               href="/signup"
               className="text-xs font-bold px-3 py-1 rounded-full transition-opacity hover:opacity-85"
               style={{ background: ACCENT, color: '#0a0a0f' }}
             >
-              הרשמה חינם
-            </Link>
+              התחילו עכשיו
+            </a>
           </div>
         )}
         <PageTransition>

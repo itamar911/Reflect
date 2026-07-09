@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import Link from 'next/link';
 import { Lock } from 'lucide-react';
 import { DEMO_UPSELL_EVENT } from '@/lib/demo/demoDb';
 
@@ -66,19 +65,19 @@ export default function DemoGuard() {
           <Lock size={20} color="#00d2d2" />
         </div>
         <p className="text-base font-bold" style={{ color: 'var(--color-tg-text)' }}>
-          בדמו אי אפשר לשמור — הירשמו חינם כדי להתחיל לתעד
+          בדמו אי אפשר לשמור — התחילו לתעד בחשבון משלכם
         </p>
         <p className="text-sm" style={{ color: 'var(--color-tg-text-2)' }}>
           כל מה שאתם רואים כאן עובד בדיוק כך בחשבון אמיתי — עם הנתונים שלכם.
         </p>
         <div className="w-full flex flex-col gap-2 pt-1">
-          <Link
+          <a
             href="/signup"
             className="w-full py-2.5 rounded-xl text-sm font-bold transition-opacity hover:opacity-85"
             style={{ background: '#00d2d2', color: '#0a0a0f' }}
           >
-            הרשמה חינם
-          </Link>
+            התחילו 5 ימי ניסיון
+          </a>
           <button
             onClick={() => setUpsellOpen(false)}
             className="w-full py-2.5 rounded-xl text-sm font-semibold transition-opacity hover:opacity-80"

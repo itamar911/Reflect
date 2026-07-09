@@ -748,9 +748,11 @@ function MonthCalendar({
         </button>
       </div>
 
-      {/* Day headers + Weeks — horizontally scrollable on mobile */}
-      <div className="overflow-x-auto md:overflow-visible" style={{ WebkitOverflowScrolling: 'touch' }}>
-        <div style={{ minWidth: 480 }}>
+      {/* Day headers + Weeks — 8 equal columns squeeze to fit any viewport;
+          a forced min-width made the grid clip its left columns (week summary,
+          שישי/שבת) behind an RTL horizontal scroll on narrow screens */}
+      <div>
+        <div>
           {/* Day headers */}
           <div className="grid gap-0.5" style={{ gridTemplateColumns: 'repeat(8, 1fr)' }}>
             {DAYS_SH.map(d => (
