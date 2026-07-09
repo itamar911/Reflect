@@ -21,6 +21,7 @@ interface Trade {
   plan_score: number | null;
   pnl_amount: number | null;
   actual_pnl: number | null;
+  pnl_currency: string | null;
 }
 
 interface DayData {
@@ -53,9 +54,9 @@ function toDayKey(d: Date): string {
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
 }
 
-function pnlLabel(pnl: number, decimals = 1): string {
-  if (pnl === 0) return '$0';
-  return `${pnl > 0 ? '+' : '−'}$${Math.abs(pnl).toFixed(decimals)}`;
+function pnlLabel(pnl: number, decimals = 1, currency = '₪'): string {
+  if (pnl === 0) return `${currency}0`;
+  return `${pnl > 0 ? '+' : '−'}${currency}${Math.abs(pnl).toFixed(decimals)}`;
 }
 
 function pnlColor(pnl: number): string {
@@ -67,6 +68,13 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
   const [year, setYear]   = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
   const [view, setView]   = useState<'monthly' | 'yearly'>('monthly');
+
+  // Display currency — same rule as the All Trades summary: a single uniform
+  // trade currency wins, anything mixed (or no money data) falls back to ₪.
+  const currency = useMemo(() => {
+    const set = new Set(trades.filter(hasMoneyPnl).map(t => t.pnl_currency ?? '₪'));
+    return set.size === 1 ? [...set][0] : '₪';
+  }, [trades]);
 
   const dailyMap = useMemo<Map<string, DayData>>(() => {
     const map = new Map<string, DayData>();
@@ -153,7 +161,7 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
     : monthStats.profitFactor.toFixed(2);
 
   const headerStats = [
-    { label: 'רווח/הפסד כולל', value: pnlLabel(monthStats.totalPnl, 2), color: pnlColor(monthStats.totalPnl) },
+    { label: 'רווח/הפסד כולל', value: pnlLabel(monthStats.totalPnl, 2, currency), color: pnlColor(monthStats.totalPnl) },
     { label: 'סה"כ עסקאות',    value: String(monthStats.totalCount),   color: 'var(--color-tg-text)' },
     { label: 'ימי מסחר',       value: String(monthStats.tradingDays),  color: 'var(--color-tg-text)' },
     { label: 'אחוז הצלחה',     value: `${monthStats.winRate.toFixed(0)}%`, color: 'var(--color-tg-text)' },
@@ -332,7 +340,7 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
                     {data && (
                       <div className="flex flex-col items-center gap-0.5">
                         <span className="text-sm font-extrabold leading-tight" style={{ color: pnlColor(data.pnl) }}>
-                          {pnlLabel(data.pnl, 1)}
+                          {pnlLabel(data.pnl, 1, currency)}
                         </span>
                         <span className="text-[10px]" style={{ color: 'var(--color-tg-muted)' }}>
                           {data.tradeCount} עסקאות
@@ -362,7 +370,7 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
                 {week.trades > 0 ? (
                   <>
                     <span className="text-[11px] font-bold leading-tight text-center" style={{ color: pnlColor(week.pnl) }}>
-                      {pnlLabel(week.pnl, 0)}
+                      {pnlLabel(week.pnl, 0, currency)}
                     </span>
                     <span className="text-[9px] leading-none text-center" style={{ color: 'var(--color-tg-muted)' }}>
                       {week.trades} עסקאות

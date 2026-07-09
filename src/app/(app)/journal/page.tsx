@@ -36,6 +36,7 @@ export default async function JournalPage() {
     plan_score:       t.plan_score       as number | null,
     pnl_amount:       t.pnl_amount != null ? Number(t.pnl_amount) : null,
     actual_pnl:       t.actual_pnl != null ? Number(t.actual_pnl) : null,
+    pnl_currency:     (t.pnl_currency as string | null) ?? null,
   }));
 
   const exportTrades = allTrades.map((t) => ({
