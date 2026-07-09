@@ -49,14 +49,14 @@
   width: 100%;
   border-collapse: separate; /* keeps the th border attached while sticky */
   border-spacing: 0;
-  font-size: 13px;
+  font-size: 15px;
 }
 .jr-table thead th {
   position: sticky;
   top: 0;
   z-index: 2;
   background: var(--color-tg-bg);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--color-tg-muted);
   text-align: right;
@@ -65,8 +65,8 @@
   border-bottom: 1px solid var(--color-tg-border);
 }
 .jr-table td {
-  height: 56px;
-  padding: 6px 12px;
+  height: 64px;
+  padding: 8px 12px;
   text-align: right;
   white-space: nowrap;
   vertical-align: middle;

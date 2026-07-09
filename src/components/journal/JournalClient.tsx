@@ -120,7 +120,7 @@ function MobileTradeCard({ t, onView, onEdit, onDelete, onClose, onDebrief, hasD
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5 min-w-0">
             <AssetDot symbol={t.symbol} />
-            <span className="font-semibold truncate" style={{ fontSize: 14, color: TEXT }}>
+            <span className="font-semibold truncate" style={{ fontSize: 16, color: TEXT }}>
               {t.symbol ?? t.strategy}
             </span>
             <Chip
@@ -138,31 +138,31 @@ function MobileTradeCard({ t, onView, onEdit, onDelete, onClose, onDebrief, hasD
         {/* Row 2: date + score | P&L */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span style={{ fontSize: 12, color: MUTED, fontWeight: 600 }}>{fmtDate(t.submitted_at)}</span>
-            {isClosed && <ScoreRing score={t.plan_score} size={26} />}
+            <span style={{ fontSize: 13, color: MUTED, fontWeight: 600 }}>{fmtDate(t.submitted_at)}</span>
+            {isClosed && <ScoreRing score={t.plan_score} size={30} />}
             {t.has_rule_violation && (
               <span title="חוק הופר" className="flex items-center">
-                <AlertTriangle size={13} color={AMBER} />
+                <AlertTriangle size={14} color={AMBER} />
               </span>
             )}
           </div>
           {pnl !== null ? (
             hasMoneyPnl(t) ? (
               <span className="flex items-baseline gap-1.5">
-                <span className="jr-num" style={{ fontSize: 14, fontWeight: 700, color: tradeMoneyPnl(t) >= 0 ? GREEN : RED }}>
+                <span className="jr-num" style={{ fontSize: 16, fontWeight: 700, color: tradeMoneyPnl(t) >= 0 ? GREEN : RED }}>
                   {formatPnlIls(tradeMoneyPnl(t), t.pnl_currency ?? '₪')}
                 </span>
-                <span className="jr-num" style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>
+                <span className="jr-num" style={{ fontSize: 13, color: MUTED, fontWeight: 600 }}>
                   {formatPnlPoints(pnl)}
                 </span>
               </span>
             ) : (
-              <span className="jr-num" style={{ fontSize: 14, fontWeight: 700, color: pnl >= 0 ? GREEN : RED }}>
+              <span className="jr-num" style={{ fontSize: 16, fontWeight: 700, color: pnl >= 0 ? GREEN : RED }}>
                 {fmtPnl(pnl)}
               </span>
             )
           ) : (
-            <span style={{ fontSize: 12, color: GOLD, fontWeight: 600 }}>פתוח</span>
+            <span style={{ fontSize: 13, color: GOLD, fontWeight: 600 }}>פתוח</span>
           )}
         </div>
       </div>
@@ -306,7 +306,7 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
           <div className="relative">
             <button
               onClick={() => { setShowFilter(v => !v); setShowActions(false); }}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium"
+              className="flex items-center gap-1.5 px-4 h-11 rounded-xl text-[15px] font-medium"
               style={{ background: SURF, border: `1px solid ${BORDER}`, color: TEXT2, fontWeight: 600 }}>
               <FilterIcon />
               סינון
@@ -337,7 +337,7 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
           <div className="relative">
             <button
               onClick={() => { setShowActions(v => !v); setShowFilter(false); }}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium"
+              className="flex items-center gap-1.5 px-4 h-11 rounded-xl text-[15px] font-medium"
               style={{ background: SURF, border: `1px solid ${BORDER}`, color: TEXT2, fontWeight: 600 }}>
               פעולות
               <ChevronIcon />
@@ -366,7 +366,7 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
 
         {/* Search */}
         <div className="relative flex-1 max-w-xs">
-          <svg className="absolute right-3 top-1/2 -translate-y-1/2" width="13" height="13"
+          <svg className="absolute right-3 top-1/2 -translate-y-1/2" width="15" height="15"
             viewBox="0 0 24 24" fill="none" stroke={MUTED} strokeWidth="2"
             strokeLinecap="round" strokeLinejoin="round">
             <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
@@ -375,7 +375,7 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
             value={search}
             onChange={e => { setSearch(e.target.value); setPage(1); }}
             placeholder="חפש לפי נכס..."
-            className="jr-input w-full pr-8 pl-3 py-2 rounded-xl text-sm outline-none"
+            className="jr-input w-full pr-9 pl-3 h-11 rounded-xl text-[15px] outline-none"
             style={{ background: SURF2, border: `1px solid ${BORDER}`, color: TEXT, direction: 'rtl' }}
           />
         </div>
@@ -465,7 +465,7 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
 
                     {/* Close date */}
                     <TD>
-                      <span className="jr-num" style={{ color: TEXT2, fontWeight: 600 }}>
+                      <span className="jr-num" style={{ fontSize: 16, color: TEXT2, fontWeight: 600 }}>
                         {isClosed && t.closed_at ? fmtDate(t.closed_at) : '—'}
                       </span>
                     </TD>
@@ -480,9 +480,9 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
 
                     {/* Asset */}
                     <TD>
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-2">
                         <AssetDot symbol={t.symbol} />
-                        <span className="font-semibold text-sm" style={{ color: TEXT }}>
+                        <span className="font-semibold text-base" style={{ color: TEXT }}>
                           {t.symbol ?? '—'}
                         </span>
                       </div>
@@ -507,15 +507,15 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
                       {pnl !== null ? (
                         hasMoneyPnl(t) ? (
                           <div className="flex flex-col gap-0.5">
-                            <span className="jr-num" style={{ fontSize: 13.5, fontWeight: 700, color: tradeMoneyPnl(t) >= 0 ? GREEN : RED }}>
+                            <span className="jr-num" style={{ fontSize: 16, fontWeight: 700, color: tradeMoneyPnl(t) >= 0 ? GREEN : RED }}>
                               {formatPnlIls(tradeMoneyPnl(t), t.pnl_currency ?? '₪')}
                             </span>
-                            <span className="jr-num" style={{ fontSize: 10.5, color: MUTED, fontWeight: 600 }}>
+                            <span className="jr-num" style={{ fontSize: 13, color: MUTED, fontWeight: 600 }}>
                               {formatPnlPoints(pnl)}
                             </span>
                           </div>
                         ) : (
-                          <span className="jr-num" style={{ fontWeight: 700, color: pnl >= 0 ? GREEN : RED }}>
+                          <span className="jr-num" style={{ fontSize: 16, fontWeight: 700, color: pnl >= 0 ? GREEN : RED }}>
                             {fmtPnl(pnl)}
                           </span>
                         )
@@ -530,7 +530,7 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
                         <ScoreRing score={isClosed ? t.plan_score : null} />
                         {t.has_rule_violation && (
                           <span title="חוק הופר" className="flex items-center">
-                            <AlertTriangle size={13} color={AMBER} />
+                            <AlertTriangle size={14} color={AMBER} />
                           </span>
                         )}
                       </div>
@@ -538,14 +538,14 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
 
                     {/* Entry price */}
                     <TD>
-                      <span className="jr-num" style={{ fontSize: 12.5, color: TEXT }}>
+                      <span className="jr-num" style={{ fontSize: 15, color: TEXT }}>
                         {fmtPrice(t.entry_price)}
                       </span>
                     </TD>
 
                     {/* Strategy */}
                     <TD>
-                      <span className="text-xs truncate max-w-[120px] block" style={{ color: TEXT2, fontWeight: 600 }}>
+                      <span className="truncate max-w-[140px] block" style={{ fontSize: 15, color: TEXT2, fontWeight: 600 }}>
                         {t.strategy}
                       </span>
                     </TD>
@@ -704,9 +704,9 @@ function SummaryStat({ label, value, color = TEXT, big }: {
   label: string; value: string; color?: string; big?: boolean;
 }) {
   return (
-    <div className="flex flex-col justify-center gap-0.5 px-4 py-3 min-w-0" style={{ minHeight: 74 }}>
-      <span style={{ fontSize: 11, fontWeight: 600, color: MUTED }}>{label}</span>
-      <span className="jr-num truncate" style={{ fontSize: big ? 20 : 17, fontWeight: 700, lineHeight: 1.2, color }}>
+    <div className="flex flex-col justify-center gap-0.5 px-4 py-3 min-w-0" style={{ minHeight: 78 }}>
+      <span style={{ fontSize: 14, fontWeight: 600, color: MUTED }}>{label}</span>
+      <span className="jr-num truncate" style={{ fontSize: big ? 24 : 21, fontWeight: 700, lineHeight: 1.2, color }}>
         {value}
       </span>
     </div>
@@ -735,7 +735,7 @@ function TD({ children }: { children: React.ReactNode }) {
 }
 
 /** Post-trade score (0-100) as a small colored ring; muted — when no score. */
-function ScoreRing({ score, size = 30 }: { score: number | null; size?: number }) {
+function ScoreRing({ score, size = 34 }: { score: number | null; size?: number }) {
   if (score == null) return <span style={{ color: MUTED, fontWeight: 600 }}>—</span>;
   const clamped = Math.min(Math.max(Math.round(score), 0), 100);
   const color = clamped >= 80 ? GREEN : clamped >= 60 ? AMBER : RED;
@@ -748,7 +748,7 @@ function ScoreRing({ score, size = 30 }: { score: number | null; size?: number }
       <circle cx={c} cy={c} r={r} fill="none" stroke={color} strokeWidth={2.5}
         strokeDasharray={`${(clamped / 100) * circ} ${circ}`}
         strokeLinecap="round" transform={`rotate(-90 ${c} ${c})`} />
-      <text x={c} y={c + 3.5} textAnchor="middle" fontSize={size * 0.32} fontWeight={700} fill={color}
+      <text x={c} y={c + size * 0.14} textAnchor="middle" fontSize={size * 0.4} fontWeight={700} fill={color}
         style={{ fontVariantNumeric: 'tabular-nums' }}>
         {clamped}
       </text>
@@ -842,8 +842,8 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function Chip({ children, bg, color }: { children: React.ReactNode; bg: string; color: string }) {
   return (
-    <span className="px-2.5 py-0.5 rounded-full font-semibold whitespace-nowrap"
-      style={{ background: bg, color, fontSize: 11 }}>
+    <span className="px-3 py-1 rounded-full font-semibold whitespace-nowrap"
+      style={{ background: bg, color, fontSize: 13.5 }}>
       {children}
     </span>
   );
@@ -859,7 +859,7 @@ function StatusBadge({ win }: { win: boolean | null }) {
 function AssetDot({ symbol }: { symbol: string | null }) {
   const s = (symbol ?? '?').slice(0, 2).toUpperCase();
   return (
-    <div className="w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold shrink-0"
+    <div className="w-8 h-8 rounded-full flex items-center justify-center text-[13px] font-bold shrink-0"
       style={{ background: 'rgba(0,210,210,0.12)', color: GOLD }}>
       {s}
     </div>
