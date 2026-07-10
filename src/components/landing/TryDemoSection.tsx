@@ -68,7 +68,7 @@ export function TryDemoSection() {
             <div className="relative" style={{ height: 'clamp(420px, 70vh, 720px)', background: '#0a0e14' }}>
               {load && (
                 <iframe
-                  src="/demo/dashboard"
+                  src="/demo/dashboard?embed=1"
                   title="דמו חי של Reflect"
                   loading="lazy"
                   className="w-full h-full border-0 block"
@@ -107,7 +107,7 @@ export function TryDemoSection() {
                 href="/demo"
                 target="_blank"
                 rel="noopener"
-                className="absolute top-12 end-3 z-20 flex items-center gap-1.5 px-3 h-8 rounded-lg text-xs font-bold transition-opacity hover:opacity-85"
+                className="absolute top-3 end-3 z-20 flex items-center gap-1.5 px-3 h-8 rounded-lg text-xs font-bold transition-opacity hover:opacity-85"
                 style={{
                   background: 'rgba(13,17,23,0.82)',
                   color: '#00d2d2',

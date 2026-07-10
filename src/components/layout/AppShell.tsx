@@ -181,6 +181,18 @@ export default function AppShell({
   const isDemo    = pathname.startsWith('/demo') || browserDemo;
   const navPrefix = isDemo ? '/demo' : '';
 
+  // Embedded demo (landing iframe loads /demo/dashboard?embed=1) hides the
+  // demo banner — the surrounding frame provides its own chrome. Demo nav is
+  // hardNav and drops the query param, so also treat being inside an iframe
+  // as embedded; standalone tabs (מסך מלא, direct links) keep the banner.
+  const [embedded, setEmbedded] = useState(false);
+  useEffect(() => {
+    setEmbedded(
+      new URLSearchParams(window.location.search).get('embed') === '1' ||
+      window.self !== window.top,
+    );
+  }, [pathname]);
+
   const [formOpen,  setFormOpen]  = useState(false);
   const [expanded,  setExpanded]  = useState(false);
   const [isMobile,  setIsMobile]  = useState(false);
@@ -564,7 +576,7 @@ export default function AppShell({
           transition: `margin-right ${SIDEBAR_TRANSITION}`,
         }}
       >
-        {isDemo && (
+        {isDemo && !embedded && (
           <div
             className="sticky top-0 z-20 flex items-center justify-center gap-3 px-4 py-2"
             style={{
