@@ -37,7 +37,7 @@ export default function PerformanceTable({ title, icon, unitLabel, rows, showRR 
           <tbody>
             {sorted.map((r) => (
               <tr key={r.name}>
-                <td style={{ width: '38%', minWidth: 130, whiteSpace: 'normal' }}>
+                <td className="stats-name-cell" style={{ width: '38%', whiteSpace: 'normal' }}>
                   <div className="flex flex-col gap-1.5">
                     <span className="truncate" style={{ fontSize: 13, fontWeight: 700, color: TEXT, maxWidth: 180 }}>
                       {r.name}

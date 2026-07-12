@@ -63,6 +63,7 @@ export default function NotebookPageList({
                 </span>
                 <button
                   onClick={e => { e.stopPropagation(); onDelete(page.id); }}
+                  className="hit-40 relative"
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: MUTED, flexShrink: 0, padding: 2, borderRadius: 4 }}
                 >
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

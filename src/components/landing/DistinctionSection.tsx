@@ -45,7 +45,9 @@ export function DistinctionSection() {
 
           {/* split-panel illustration: "אחרי" (the journal's mirror) vs "לפני" (Reflect's edge) */}
           <ScrollReveal delay={200}>
-            <div className="relative flex items-stretch gap-4" aria-hidden>
+            {/* Stacked below sm — side-by-side the panels need ~380px min content
+                width and force page-level horizontal scroll on narrow phones */}
+            <div className="relative flex flex-col sm:flex-row items-stretch gap-4" aria-hidden>
               {/* אחרי — muted stats look-back mock */}
               <div
                 className="mini-mock-hover flex-1 rounded-2xl border p-5 lg:p-6 flex flex-col gap-3.5 min-h-[280px]"

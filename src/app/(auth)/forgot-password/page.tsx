@@ -35,7 +35,7 @@ export default function ForgotPasswordPage() {
     <AuthShell
       subtitle="שחזור סיסמא"
       footer={
-        <Link href="/login" className="text-tg-primary font-medium">
+        <Link href="/login" className="hit-40 relative inline-block text-tg-primary font-medium">
           חזרה להתחברות
         </Link>
       }

@@ -75,7 +75,7 @@ export default function PatternDetection({ trades }: { trades: Trade[] }) {
         </div>
         {!loading && (
           <button onClick={fetchPatterns}
-            className="text-xs px-2 py-1 rounded-lg"
+            className="hit-40 relative text-xs px-2 py-1 rounded-lg"
             style={{ color: 'var(--color-tg-primary)', background: 'var(--color-tg-primary-muted)' }}>
             רענן
           </button>

@@ -31,16 +31,20 @@ export default async function SettingsPage() {
       <Card>
         <h2 className="text-sm font-semibold text-tg-text mb-3">פרופיל</h2>
         <div className="flex flex-col gap-2">
-          {[
-            ['אימייל', user.email ?? '—'],
-            ['שם', profile?.display_name ?? '—'],
-            ['סגנון מסחר', tradingTypeLabel(profile?.trading_type)],
-            ['שוק עיקרי', marketLabel(profile?.default_market)],
-            ['רמת ניסיון', experienceLabel(profile?.experience_level)],
-          ].map(([label, value]) => (
-            <div key={label} className="flex justify-between items-center py-1.5 border-b border-tg-border last:border-0">
-              <span className="text-sm text-tg-text-2">{label}</span>
-              <span className="text-sm font-medium text-tg-text">{value}</span>
+          {([
+            ['אימייל', user.email ?? '—', true],
+            ['שם', profile?.display_name ?? '—', false],
+            ['סגנון מסחר', tradingTypeLabel(profile?.trading_type), false],
+            ['שוק עיקרי', marketLabel(profile?.default_market), false],
+            ['רמת ניסיון', experienceLabel(profile?.experience_level), false],
+          ] as const).map(([label, value, ltr]) => (
+            <div key={label} className="flex justify-between items-center gap-3 py-1.5 border-b border-tg-border last:border-0">
+              <span className="text-sm text-tg-text-2 shrink-0">{label}</span>
+              {/* dir="ltr" keeps the ellipsis direction-safe for LTR values
+                  (email) truncating inside the RTL row */}
+              <span className="text-sm font-medium text-tg-text truncate min-w-0" dir={ltr ? 'ltr' : undefined}>
+                {value}
+              </span>
             </div>
           ))}
         </div>

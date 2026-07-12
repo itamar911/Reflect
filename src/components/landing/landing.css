@@ -103,7 +103,9 @@
 .nav-link::after {
   content: '';
   position: absolute;
-  bottom: -6px;
+  /* 4px from the padding-box bottom ≈ the old 6px below the text, now that
+     the links carry vertical padding for a ≥40px touch target */
+  bottom: 4px;
   inset-inline-start: 0;
   width: 100%;
   height: 2px;

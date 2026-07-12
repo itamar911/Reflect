@@ -704,6 +704,15 @@ function LineChart({ data }: { data: BarItem[] }) {
 const MONTHS_HE = ['ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר'];
 const DAYS_SH   = ['א','ב','ג','ד','ה','ו','ש'];
 
+// Compact cell figures: the 8-column grid leaves ~40px per cell, so
+// thousands render as "82.6k"/"83k" instead of overflowing the cell
+function fmtCellPnl(pnl: number): string {
+  const sign = pnl > 0 ? '+' : '';
+  if (Math.abs(pnl) >= 10000) return `${sign}${Math.round(pnl / 1000)}k`;
+  if (Math.abs(pnl) >= 1000) return `${sign}${(pnl / 1000).toFixed(1)}k`;
+  return `${sign}${pnl.toFixed(0)}`;
+}
+
 function MonthCalendar({
   dayMap, calDate, onPrev, onNext,
 }: {
@@ -782,7 +791,7 @@ function MonthCalendar({
                           {has && (
                             <span className="text-[8px] font-semibold leading-none mt-0.5"
                               style={{ color: pnl >= 0 ? GREEN : RED }}>
-                              {pnl > 0 ? '+' : ''}{pnl.toFixed(0)}
+                              {fmtCellPnl(pnl)}
                             </span>
                           )}
                         </>
@@ -794,7 +803,7 @@ function MonthCalendar({
                   style={{ background: SURF2, minHeight: 30 }}>
                   <span className="text-[9px] font-bold"
                     style={{ color: weekPnl > 0 ? GREEN : weekPnl < 0 ? RED : MUTED }}>
-                    {weekPnl > 0 ? '+' : ''}{weekPnl.toFixed(0)}
+                    {fmtCellPnl(weekPnl)}
                   </span>
                 </div>
               </div>
@@ -1546,6 +1555,7 @@ export default function DashboardClient({
               <div style={{ display: 'flex', flexDirection: 'row', gap: 4, flexWrap: 'wrap', marginBottom: 10 }}>
                 {(['total', 'monthly', 'weekly', 'daily'] as const).map(p => (
                   <button key={p} onClick={() => setPnlPeriod(p)}
+                    className="hit-40 relative"
                     style={{
                       background: pnlPeriod === p ? 'rgba(0,210,210,0.12)' : 'transparent',
                       color: pnlPeriod === p ? ACCENT : TEXT2,
@@ -1564,7 +1574,7 @@ export default function DashboardClient({
                 {/* LTR isolation keeps the leading +/- glued to the amount inside
                     the RTL card (bidi otherwise strands it on its own line), and
                     the clamp lets long ₪ amounts fit narrow cards without clipping */}
-                <span style={{ fontSize: isMobile ? 20 : 'clamp(20px, 2.4vw, 36px)', fontWeight: 800, letterSpacing: '-0.02em', whiteSpace: 'nowrap', direction: 'ltr', unicodeBidi: 'isolate', fontVariantNumeric: 'tabular-nums', color: selPeriodPnl >= 0 ? GREEN : RED }}>
+                <span style={{ fontSize: isMobile ? 'clamp(15px, 5.6vw, 20px)' : 'clamp(20px, 2.4vw, 36px)', fontWeight: 800, letterSpacing: '-0.02em', whiteSpace: 'nowrap', direction: 'ltr', unicodeBidi: 'isolate', fontVariantNumeric: 'tabular-nums', color: selPeriodPnl >= 0 ? GREEN : RED }}>
                   {selPeriodDisplay}
                 </span>
                 <span style={{ fontSize: 12, fontWeight: 600, color: TEXT2 }}>
@@ -1607,7 +1617,7 @@ export default function DashboardClient({
                 <div className="flex gap-1">
                   {(['daily', 'weekly', 'monthly'] as const).map(m => (
                     <button key={m} onClick={() => setBarMode(m)}
-                      className="transition-all"
+                      className="hit-40 relative transition-all"
                       style={{
                         background: barMode === m ? 'rgba(0,210,210,0.12)' : 'transparent',
                         color: barMode === m ? ACCENT : MUTED,
@@ -1632,7 +1642,7 @@ export default function DashboardClient({
                 <div className="flex gap-1">
                   {(['cumulative', 'daily'] as const).map(m => (
                     <button key={m} onClick={() => setLineMode(m)}
-                      className="transition-all"
+                      className="hit-40 relative transition-all"
                       style={{
                         background: lineMode === m ? 'rgba(0,210,210,0.12)' : 'transparent',
                         color: lineMode === m ? ACCENT : MUTED,
@@ -1698,9 +1708,18 @@ export default function DashboardClient({
                             {dir === 'long' ? '↑ לונג' : '↓ שורט'}
                           </span>
                         </div>
+                        {/* Each field is a no-break unit so narrow screens wrap
+                            between fields, never stranding a bare price */}
                         <p className="text-[10px] mt-0.5" style={{ color: MUTED, fontWeight: 600 }}>
-                          {fmtDateTime(t.submitted_at)} · כניסה {t.entry_price.toFixed(2)}
-                          {t.exit_price != null ? ` · יציאה ${t.exit_price.toFixed(2)}` : ''}
+                          <span className="whitespace-nowrap">{fmtDateTime(t.submitted_at)}</span>
+                          {' · '}
+                          <span className="whitespace-nowrap">כניסה {t.entry_price.toFixed(2)}</span>
+                          {t.exit_price != null && (
+                            <>
+                              {' · '}
+                              <span className="whitespace-nowrap">יציאה {t.exit_price.toFixed(2)}</span>
+                            </>
+                          )}
                         </p>
                       </div>
                       {/* P&L (+ button on desktop only) */}

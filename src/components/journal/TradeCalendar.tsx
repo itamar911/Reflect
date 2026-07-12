@@ -56,7 +56,12 @@ function toDayKey(d: Date): string {
 
 function pnlLabel(pnl: number, decimals = 1, currency = '₪'): string {
   if (pnl === 0) return `${currency}0`;
-  return `${pnl > 0 ? '+' : '−'}${currency}${Math.abs(pnl).toFixed(decimals)}`;
+  const abs = Math.abs(pnl);
+  // Large values drop the fraction and gain thousands separators — otherwise
+  // they overflow the fixed-width day cells and the header stat slots
+  const d = abs >= 1000 ? 0 : decimals;
+  const num = abs.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+  return `${pnl > 0 ? '+' : '−'}${currency}${num}`;
 }
 
 function pnlColor(pnl: number): string {
@@ -175,7 +180,7 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
         <div className="flex rounded-full p-0.5" style={{ background: 'var(--color-tg-surface)' }}>
           <button
             onClick={() => setView('monthly')}
-            className="px-3 py-1.5 rounded-full text-xs font-semibold transition-colors"
+            className="hit-40 relative px-3 py-1.5 rounded-full text-xs font-semibold transition-colors"
             style={{
               background: view === 'monthly' ? 'var(--color-tg-primary)' : 'transparent',
               color:      view === 'monthly' ? '#fff' : 'var(--color-tg-muted)',
@@ -185,7 +190,7 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
           </button>
           <button
             onClick={() => setView('yearly')}
-            className="px-3 py-1.5 rounded-full text-xs font-semibold transition-colors"
+            className="hit-40 relative px-3 py-1.5 rounded-full text-xs font-semibold transition-colors"
             style={{
               background: view === 'yearly' ? 'var(--color-tg-primary)' : 'transparent',
               color:      view === 'yearly' ? '#fff' : 'var(--color-tg-muted)',
@@ -198,7 +203,7 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
         <div className="flex items-center gap-2" style={{ direction: 'ltr' }}>
           <button
             onClick={() => navMonth(-1)}
-            className="w-9 h-9 flex items-center justify-center rounded-xl text-base font-bold transition-opacity hover:opacity-60 active:scale-95"
+            className="hit-40 relative w-9 h-9 flex items-center justify-center rounded-xl text-base font-bold transition-opacity hover:opacity-60 active:scale-95"
             style={{ background: 'var(--color-tg-surface)', color: 'var(--color-tg-text-2)' }}
           >
             «
@@ -211,7 +216,7 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
           </h2>
           <button
             onClick={() => navMonth(1)}
-            className="w-9 h-9 flex items-center justify-center rounded-xl text-base font-bold transition-opacity hover:opacity-60 active:scale-95"
+            className="hit-40 relative w-9 h-9 flex items-center justify-center rounded-xl text-base font-bold transition-opacity hover:opacity-60 active:scale-95"
             style={{ background: 'var(--color-tg-surface)', color: 'var(--color-tg-text-2)' }}
           >
             »
@@ -220,8 +225,10 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
       </div>
 
       {/* ── Header stats bar ────────────────────────────────── */}
+      {/* 3-per-row below sm — six columns squeeze to ~60px on phones and the
+          overflow-hidden container clips long ₪ totals mid-digit */}
       <div
-        className="grid grid-cols-6 rounded-2xl overflow-hidden"
+        className="grid grid-cols-3 sm:grid-cols-6 rounded-2xl overflow-hidden"
         style={{ background: 'var(--color-tg-surface)' }}
       >
         {headerStats.map(({ label, value, color }, i) => (

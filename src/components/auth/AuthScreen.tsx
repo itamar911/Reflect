@@ -86,7 +86,7 @@ export default function AuthScreen({ mode }: AuthScreenProps) {
           {mode === 'login' ? 'אין לך חשבון?' : 'כבר יש לך חשבון?'}{' '}
           <Link
             href={mode === 'login' ? '/signup' : '/login'}
-            className="text-tg-primary font-medium"
+            className="hit-40 relative inline-block text-tg-primary font-medium"
           >
             {mode === 'login' ? 'הירשם עכשיו' : 'התחבר'}
           </Link>
@@ -134,7 +134,7 @@ export default function AuthScreen({ mode }: AuthScreenProps) {
             {mode === 'login' && (
               <div className="flex justify-end">
                 <Link href="/forgot-password"
-                  className="text-xs text-tg-muted hover:text-tg-primary transition-colors">
+                  className="hit-40 relative inline-block text-xs text-tg-muted hover:text-tg-primary transition-colors">
                   שכחתי סיסמא
                 </Link>
               </div>

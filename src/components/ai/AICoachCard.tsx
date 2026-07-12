@@ -80,7 +80,7 @@ export default function AICoachCard({ trades }: { trades: Trade[] }) {
         </div>
         {!loading && (
           <button onClick={fetchInsights}
-            className="text-xs font-medium px-2 py-1 rounded-lg transition-colors"
+            className="hit-40 relative text-xs font-medium px-2 py-1 rounded-lg transition-colors"
             style={{ color: 'var(--color-tg-primary)', background: 'var(--color-tg-primary-muted)' }}>
             רענן
           </button>

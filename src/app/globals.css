@@ -124,6 +124,21 @@ body {
   }
 }
 
+/* Invisible touch-target expansion: stretches a small control's effective
+   hit area to at least 40×40px without changing its visual size. The element
+   must be its own positioning context (relative/absolute/fixed — pair with
+   the `relative` utility on statically-positioned controls). Don't use on
+   elements that already rely on ::after (e.g. landing .nav-link). */
+.hit-40::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max(100%, 40px);
+  height: max(100%, 40px);
+  transform: translate(-50%, -50%);
+}
+
 /* Sidebar active link: swap gold text → dark text in light mode for readability */
 html.light .sidebar-link-active {
   color: var(--text-primary) !important;

@@ -321,7 +321,7 @@ export default function AppShell({
       <button
         onClick={toggle}
         aria-label={expanded ? 'כווץ סרגל' : 'הרחב סרגל'}
-        className="fixed z-50 flex items-center justify-center w-5 h-9"
+        className="hit-40 fixed z-50 flex items-center justify-center w-5 h-9"
         style={
           isMobile
             ? expanded

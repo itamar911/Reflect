@@ -94,7 +94,7 @@ export default function NotebookEditor({
           {customTags.map(tag => (
             <span key={tag} style={{ ...tagChipStyle(tag), display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 9px', borderRadius: 999, fontSize: 11, fontWeight: 600 }}>
               {tag}
-              <button onClick={() => onToggleTag(tag)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', padding: 0, lineHeight: 1 }}>×</button>
+              <button onClick={() => onToggleTag(tag)} className="hit-40 relative" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', padding: 0, lineHeight: 1 }}>×</button>
             </span>
           ))}
 

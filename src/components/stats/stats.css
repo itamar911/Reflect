@@ -15,6 +15,21 @@
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
 }
 
+/* Segmented buttons: expand the effective touch target vertically to ≥40px
+   (horizontal stays exact — adjacent segments must not steal each other's taps) */
+.stats-seg button {
+  position: relative;
+}
+.stats-seg button::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 100%;
+  height: max(100%, 40px);
+  transform: translateY(-50%);
+}
+
 /* Segmented control */
 .stats-seg {
   display: inline-flex;
@@ -67,6 +82,22 @@
 }
 .stats-table tbody tr:hover {
   background: rgba(255, 255, 255, 0.03);
+}
+
+/* Name column keeps room for the micro-bar; narrower on phones so all five
+   columns fit the viewport instead of resting mid-digit in the scroll crop */
+.stats-name-cell {
+  min-width: 130px;
+}
+
+@media (max-width: 480px) {
+  .stats-table th,
+  .stats-table td {
+    padding-inline: 6px;
+  }
+  .stats-name-cell {
+    min-width: 92px;
+  }
 }
 
 /* Number runs: aligned digits, stable direction inside RTL text */

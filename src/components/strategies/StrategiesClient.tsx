@@ -545,12 +545,12 @@ export default function StrategiesClient({
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
                   <button onClick={() => openEdit(s)}
-                    className="p-1.5 rounded-lg transition-colors"
+                    className="hit-40 relative p-1.5 rounded-lg transition-colors"
                     style={{ background: SURF2, color: MUTED }}>
                     <PencilIcon />
                   </button>
                   <button onClick={() => handleDelete(s.id)} disabled={deletingId === s.id}
-                    className="p-1.5 rounded-lg transition-colors disabled:opacity-40"
+                    className="hit-40 relative p-1.5 rounded-lg transition-colors disabled:opacity-40"
                     style={{ background: 'rgba(248,113,113,0.1)', color: RED }}>
                     <TrashIcon />
                   </button>

@@ -21,17 +21,17 @@ export function LandingFooter() {
 
         <nav className="flex flex-wrap justify-center gap-x-6 gap-y-2">
           {FOOTER_LINKS.map((link) => (
-            <a key={link.label} href={link.href} className="text-sm text-tg-muted hover:text-tg-primary transition-colors">
+            <a key={link.label} href={link.href} className="inline-block py-2 -my-2 text-sm text-tg-muted hover:text-tg-primary transition-colors">
               {link.label}
             </a>
           ))}
         </nav>
 
         <div className="flex flex-wrap justify-center gap-x-6 gap-y-2">
-          <Link href="/terms" className="text-sm text-tg-muted hover:text-tg-primary transition-colors">
+          <Link href="/terms" className="inline-block py-2 -my-2 text-sm text-tg-muted hover:text-tg-primary transition-colors">
             תנאי שימוש
           </Link>
-          <Link href="/privacy" className="text-sm text-tg-muted hover:text-tg-primary transition-colors">
+          <Link href="/privacy" className="inline-block py-2 -my-2 text-sm text-tg-muted hover:text-tg-primary transition-colors">
             מדיניות פרטיות
           </Link>
         </div>

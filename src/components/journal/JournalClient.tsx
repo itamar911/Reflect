@@ -787,7 +787,7 @@ function KebabMenu({ items, className = '' }: { items: KebabItem[]; className?: 
         ref={btnRef}
         onClick={toggle}
         data-open={open || undefined}
-        className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors hover:opacity-80 ${className}`}
+        className={`hit-40 relative w-8 h-8 flex items-center justify-center rounded-lg transition-colors hover:opacity-80 ${className}`}
         style={{ background: SURF2, color: MUTED }}
         title="פעולות"
         aria-haspopup="menu"
@@ -874,7 +874,7 @@ function PgBtn({ children, onClick, disabled, active }: {
 }) {
   return (
     <button onClick={onClick} disabled={disabled}
-      className="w-7 h-7 rounded-lg text-xs font-semibold flex items-center justify-center transition-all disabled:opacity-30"
+      className="hit-40 relative w-7 h-7 rounded-lg text-xs font-semibold flex items-center justify-center transition-all disabled:opacity-30"
       style={{
         background: active ? GOLD : SURF2,
         color:      active ? '#0a0a0f' : TEXT2,

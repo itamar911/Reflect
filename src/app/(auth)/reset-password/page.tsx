@@ -103,7 +103,7 @@ export default function ResetPasswordPage() {
             <p className="text-sm font-semibold text-tg-text mb-1">הלינק לא תקין או פג תוקף</p>
             <p className="text-xs text-tg-muted mb-4">לינקים לאיפוס סיסמא תקפים למשך שעה אחת</p>
             <a href="/forgot-password"
-              className="text-sm font-medium underline"
+              className="hit-40 relative inline-block text-sm font-medium underline"
               style={{ color: 'var(--color-tg-primary)' }}>
               שלח לינק חדש
             </a>
@@ -150,7 +150,7 @@ export default function ResetPasswordPage() {
                     style={{ background: 'var(--color-tg-danger-muted)' }}>
                     {error}
                     {error.includes('פג תוקף') && (
-                      <a href="/forgot-password" className="block mt-1 text-xs underline"
+                      <a href="/forgot-password" className="hit-40 relative block mt-1 text-xs underline"
                         style={{ color: 'var(--color-tg-primary)' }}>
                         שלח לינק חדש
                       </a>

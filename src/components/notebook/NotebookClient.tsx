@@ -192,6 +192,7 @@ export default function NotebookClient({
                 {tagsInUse.length > 0 && (
                   <button
                     onClick={() => setMobileFiltersOpen(v => !v)}
+                    className="hit-40 relative"
                     style={{ flexShrink: 0, padding: '5px 10px', borderRadius: 999, fontSize: 11.5, cursor: 'pointer', border: `1px solid ${BORDER}`, background: 'transparent', color: MUTED }}
                   >תגים {mobileFiltersOpen ? '▲' : '▼'}</button>
                 )}

@@ -195,7 +195,7 @@ export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: Prese
             <button
               key={n}
               onClick={() => !readOnly && setForm({ ...form, min_emotional_state: n })}
-              className="w-9 h-9 rounded-xl text-sm font-medium border transition-all duration-150"
+              className="hit-40 relative w-9 h-9 rounded-xl text-sm font-medium border transition-all duration-150"
               style={{
                 background: form.min_emotional_state === n ? 'var(--color-tg-primary)' : 'var(--color-tg-surface-2)',
                 borderColor: form.min_emotional_state === n ? 'var(--color-tg-primary)' : 'var(--color-tg-border)',

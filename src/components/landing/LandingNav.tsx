@@ -62,14 +62,16 @@ export function LandingNav() {
 
       <nav className="max-w-[1360px] mx-auto px-4 md:px-8 lg:px-10 h-[76px] flex items-center justify-between">
         <Link href="/" className="flex items-center gap-2 shrink-0">
-          <span className="inline-block" style={{ transform: 'scale(1.08)', transformOrigin: 'center' }}>
+          {/* Scale-up only from md — at ≤360 the enlarged mark visually
+              overflows its box into the edge padding and clips */}
+          <span className="inline-block md:scale-[1.08]">
             <Logo />
           </span>
         </Link>
 
         <div className="hidden md:flex items-center gap-8">
           {NAV_LINKS.map((link) => (
-            <a key={link.href} href={link.href} className="nav-link text-base font-medium text-tg-text-2 hover:text-white transition-colors">
+            <a key={link.href} href={link.href} className="nav-link py-2.5 text-base font-medium text-tg-text-2 hover:text-white transition-colors">
               {link.label}
             </a>
           ))}
@@ -133,7 +135,7 @@ export function LandingNav() {
               key={link.href}
               href={link.href}
               onClick={() => setOpen(false)}
-              className="text-base font-medium text-tg-text-2"
+              className="py-2 -my-2 text-base font-medium text-tg-text-2"
             >
               {link.label}
             </a>

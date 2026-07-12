@@ -208,6 +208,13 @@ export default function TradingBot() {
     <div className="flex flex-col h-full">
       {/* Messages */}
       <div className="relative flex-1" style={{ minHeight: 0 }}>
+        {/* Bottom fade — hints that the area (intro chips / messages) scrolls
+            instead of content just cutting off at the boundary */}
+        <div
+          className="pointer-events-none absolute bottom-0 inset-x-0 h-6 z-10"
+          style={{ background: 'linear-gradient(to top, var(--color-tg-surface), transparent)' }}
+          aria-hidden
+        />
         <div ref={containerRef} onScroll={handleScroll} className="h-full overflow-y-auto px-1 pb-2">
           {messages.length === 0 ? (
             <div className="flex flex-col gap-4 pt-2">

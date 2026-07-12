@@ -17,7 +17,7 @@ export function ThemeToggle({ className }: { className?: string }) {
     <button
       onClick={() => setTheme(isDark ? 'light' : 'dark')}
       aria-label={isDark ? 'עבור למצב בהיר' : 'עבור למצב כהה'}
-      className={className}
+      className={`hit-40 relative ${className ?? ''}`}
       style={{ color: 'var(--color-tg-muted)' }}
     >
       {isDark ? <IconSun /> : <IconMoon />}

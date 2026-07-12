@@ -6,8 +6,10 @@ const CHIPS = ['NQ1', 'Long', '5m'];
 export function HeroMock() {
   return (
     <div className="hero-mock-wrap relative mx-auto w-full max-w-md sm:max-w-lg lg:max-w-[560px] my-6">
+      {/* Tighter bleed on phones — at -inset-10 the halo pokes ~24px past the
+          viewport edges on narrow screens */}
       <div
-        className="absolute -inset-10 rounded-[2rem] pointer-events-none"
+        className="absolute -inset-3 md:-inset-10 rounded-[2rem] pointer-events-none"
         style={{ background: 'radial-gradient(60% 60% at 50% 40%, rgba(0,210,210,0.16), transparent 70%)' }}
         aria-hidden
       />
