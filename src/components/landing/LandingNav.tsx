@@ -51,6 +51,15 @@ export function LandingNav() {
         boxShadow: scrolled ? '0 10px 34px rgba(0,0,0,0.4)' : 'none',
       }}
     >
+      {/* Letterhead mark — pinned to the page's top-right (start edge in RTL),
+          outside the nav flow; fixed light tone since the landing is always dark */}
+      <span
+        className="absolute top-1 right-2.5 text-[11px] font-medium pointer-events-none select-none"
+        style={{ color: 'rgba(226, 236, 244, 0.5)' }}
+      >
+        בס״ד
+      </span>
+
       <nav className="max-w-[1360px] mx-auto px-4 md:px-8 lg:px-10 h-[76px] flex items-center justify-between">
         <Link href="/" className="flex items-center gap-2 shrink-0">
           <span className="inline-block" style={{ transform: 'scale(1.08)', transformOrigin: 'center' }}>
