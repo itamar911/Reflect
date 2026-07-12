@@ -6,6 +6,19 @@
   /* Font inherits from the root — Rubik is the app-wide font (layout.tsx). */
   --landing-bg-base: #1e222a;
   --landing-bg-alt: #242832;
+
+  /* The landing is dark by design in both app themes, but its components
+     (nav links, Logo wordmark, borders, cards) read the theme tokens, which
+     html.light flips to dark-on-light values — pin them to the dark set so
+     the page renders identically in both themes. */
+  --color-tg-text: #f1f5f9;
+  --color-tg-text-2: #ffffff;
+  --color-tg-muted: #ffffff;
+  --color-tg-border: #42424a;
+  --color-tg-surface: #303036;
+  --color-tg-surface-2: #383840;
+  --color-tg-success: #22c55e;
+  --color-tg-danger: #ef4444;
   background:
     radial-gradient(1000px 600px at 85% -150px, rgba(0, 210, 210, 0.075), transparent 65%),
     radial-gradient(800px 500px at 8% 30%, rgba(8, 145, 178, 0.06), transparent 60%),
