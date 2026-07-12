@@ -2,9 +2,11 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
 // App sections browsable in demo mode (everything else under /demo bounces home)
+// phone-showcase is internal tooling: the fixture-fed composition Playwright
+// captures for the auth-page phone mockup (not linked anywhere in the UI).
 const DEMO_SECTIONS = new Set([
   'dashboard', 'journal', 'trades', 'stats', 'setups',
-  'notebook', 'coach', 'rules', 'strategies',
+  'notebook', 'coach', 'rules', 'strategies', 'phone-showcase',
 ]);
 
 export async function proxy(request: NextRequest) {

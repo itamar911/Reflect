@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
-import { AuthShell, AuthCard } from '@/components/auth/AuthShell';
+import { AuthShell } from '@/components/auth/AuthShell';
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
@@ -41,7 +41,7 @@ export default function ForgotPasswordPage() {
       }
     >
       {sent ? (
-        <AuthCard className="text-center">
+        <div className="text-center">
           <div className="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4"
             style={{ background: 'var(--color-tg-success-muted)' }}>
             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--color-tg-success)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -54,9 +54,9 @@ export default function ForgotPasswordPage() {
             <br />ולחץ על הלינק לאיפוס הסיסמא.
           </p>
           <p className="text-xs text-tg-muted">לא קיבלת? בדוק תיקיית ספאם.</p>
-        </AuthCard>
+        </div>
       ) : (
-        <AuthCard>
+        <div>
           <p className="text-xs text-tg-text-2 mb-4">
             הזן את כתובת האימייל שלך ונשלח לך לינק לאיפוס הסיסמא.
           </p>
@@ -82,7 +82,7 @@ export default function ForgotPasswordPage() {
               שלח לינק לאיפוס
             </Button>
           </form>
-        </AuthCard>
+        </div>
       )}
     </AuthShell>
   );

@@ -14,7 +14,6 @@
   background:
     radial-gradient(900px 520px at 78% -140px, rgba(0, 210, 210, 0.15), transparent 62%),
     radial-gradient(700px 480px at -10% 108%, rgba(8, 145, 178, 0.2), transparent 60%),
-    radial-gradient(520px 300px at 50% 55%, rgba(0, 210, 210, 0.05), transparent 70%),
     linear-gradient(160deg, #232630 0%, #1c212a 45%, #151f28 100%);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.06),
@@ -39,7 +38,7 @@
   height: 380px;
   top: -110px;
   inset-inline-end: -80px;
-  background: rgba(0, 210, 210, 0.15);
+  background: rgba(0, 210, 210, 0.13);
 }
 
 .auth-orb-2 {
@@ -47,15 +46,7 @@
   height: 340px;
   bottom: -90px;
   inset-inline-start: -110px;
-  background: rgba(8, 145, 178, 0.18);
-}
-
-.auth-orb-3 {
-  width: 240px;
-  height: 240px;
-  top: 42%;
-  inset-inline-start: 56%;
-  background: rgba(103, 232, 249, 0.07);
+  background: rgba(8, 145, 178, 0.16);
 }
 
 .auth-grid {
@@ -64,15 +55,15 @@
   pointer-events: none;
   background-image: radial-gradient(rgba(255, 255, 255, 0.09) 1px, transparent 1px);
   background-size: 26px 26px;
-  -webkit-mask-image: radial-gradient(ellipse 75% 60% at 50% 28%, black 25%, transparent 78%);
-  mask-image: radial-gradient(ellipse 75% 60% at 50% 28%, black 25%, transparent 78%);
+  -webkit-mask-image: radial-gradient(ellipse 75% 62% at 50% 45%, black 25%, transparent 78%);
+  mask-image: radial-gradient(ellipse 75% 62% at 50% 45%, black 25%, transparent 78%);
 }
 
-/* ── Copy block above the phone ────────────────────────────── */
+/* ── Copy block above the scene ────────────────────────────── */
 
 .auth-showcase-tagline {
   color: #eef4f8;
-  font-size: 1.35rem;
+  font-size: 1.3rem;
   font-weight: 700;
   letter-spacing: -0.02em;
 }
@@ -82,90 +73,208 @@
   font-size: 0.9rem;
 }
 
-/* ── Phone mockup ──────────────────────────────────────────── */
+/* ── Illustrated scene: glow circle, phone on podium, shapes ──
+   The phone is a compact centerpiece (~half the panel height),
+   always fully visible, standing straight on a 3D-ish pedestal. */
 
-/* Stage fills the leftover panel height; the phone hangs from its top and
-   any overflow is cropped by the panel's rounded edge, so the composition
-   survives short viewports instead of squashing. */
-.auth-phone-stage {
+.auth-scene {
   position: relative;
   flex: 1;
   min-height: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
 }
 
-.auth-phone-wrap {
+/* Large soft glowing circle behind the phone */
+.auth-scene-circle {
   position: absolute;
-  top: 8px;
-  inset-inline-start: 50%;
-  width: clamp(240px, 22vw, 300px);
-  transform: translateX(-50%);
-}
-
-[dir='rtl'] .auth-phone-wrap {
-  transform: translateX(50%);
-}
-
-.auth-phone-glow {
-  position: absolute;
-  inset: -14% -20%;
-  background: radial-gradient(closest-side, rgba(0, 210, 210, 0.3), rgba(0, 210, 210, 0.08) 55%, transparent 78%);
-  filter: blur(28px);
+  top: 50%;
+  left: 50%;
+  width: min(56vh, 520px);
+  aspect-ratio: 1;
+  transform: translate(-50%, -54%);
+  border-radius: 9999px;
+  background: radial-gradient(circle, rgba(0, 210, 210, 0.16) 0%, rgba(0, 210, 210, 0.07) 45%, transparent 70%);
+  border: 1px solid rgba(0, 210, 210, 0.14);
+  box-shadow: inset 0 0 60px rgba(0, 210, 210, 0.08);
   pointer-events: none;
 }
 
+.auth-scene-stack {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* ── Phone (straight, small, fully visible) ────────────────── */
+
 .auth-phone {
   position: relative;
-  border-radius: 46px;
-  padding: 10px;
+  z-index: 3;
+  width: clamp(170px, 22vh, 205px);
+  border-radius: 32px;
+  padding: 8px;
   background: linear-gradient(160deg, #3a3f4a, #23262e 30%, #16181e);
   border: 1px solid rgba(255, 255, 255, 0.14);
   box-shadow:
-    0 40px 80px rgba(0, 0, 0, 0.55),
-    0 16px 34px rgba(0, 0, 0, 0.4),
-    0 0 60px rgba(0, 210, 210, 0.12),
+    0 30px 60px rgba(0, 0, 0, 0.5),
+    0 10px 24px rgba(0, 0, 0, 0.38),
+    0 0 46px rgba(0, 210, 210, 0.14),
     inset 0 1px 1px rgba(255, 255, 255, 0.12);
-  transform: rotate(-2.5deg);
 }
 
 .auth-phone-screen {
   position: relative;
-  border-radius: 36px;
+  border-radius: 25px;
   overflow: hidden;
-  /* Matches the screenshot's page background so the app bar blends in */
+  aspect-ratio: 390 / 844;
+  /* Matches the screenshot's page background */
   background: #292930;
 }
 
-/* Status-bar row with a dynamic-island hint */
-.auth-phone-island {
-  display: flex;
-  justify-content: center;
-  padding-top: 10px;
+.auth-phone-shot {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
-.auth-phone-island::before {
-  content: '';
-  width: 74px;
-  height: 18px;
+/* Dynamic-island hardware hint over the screenshot's app bar */
+.auth-phone-island {
+  position: absolute;
+  top: 7px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 54px;
+  height: 13px;
   border-radius: 999px;
   background: #101014;
+  z-index: 1;
 }
 
-/* Slim app bar carrying the Reflect logo above the screenshot */
-.auth-phone-appbar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 44px;
-  overflow: hidden;
+/* ── Podium the phone stands on ────────────────────────────── */
+
+.auth-podium {
+  position: relative;
+  z-index: 1;
+  width: min(310px, 40vh);
+  height: 78px;
+  margin-top: -30px;
 }
 
-.auth-phone-appbar > span {
-  display: inline-block;
-  transform: scale(0.55);
+/* Contact shadow under the phone, cast on the podium deck */
+.auth-podium::before {
+  content: '';
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 58%;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.5);
+  filter: blur(9px);
+  z-index: 2;
 }
 
-.auth-phone-shot {
-  display: block;
+/* Deck — top ellipse of the cylinder */
+.auth-podium-deck {
+  position: absolute;
+  top: 0;
+  left: 0;
   width: 100%;
-  height: auto;
+  height: 52px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #313947 0%, #232a35 70%);
+  border: 1px solid rgba(0, 210, 210, 0.22);
+  box-shadow: inset 0 2px 10px rgba(255, 255, 255, 0.06);
+}
+
+/* Cylinder side wall */
+.auth-podium-side {
+  position: absolute;
+  top: 26px;
+  left: 0;
+  width: 100%;
+  height: 36px;
+  border-radius: 0 0 50% 50% / 0 0 26px 26px;
+  background: linear-gradient(180deg, #1e242e 0%, #151a22 100%);
+  border: 1px solid rgba(0, 210, 210, 0.12);
+  border-top: none;
+}
+
+/* Soft ground shadow + glow pool under the pedestal */
+.auth-podium-ground {
+  position: absolute;
+  bottom: -26px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 150%;
+  height: 40px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(0, 0, 0, 0.5) 0%, rgba(0, 210, 210, 0.06) 55%, transparent 72%);
+  filter: blur(10px);
+}
+
+/* ── Floating decorative shapes ────────────────────────────── */
+
+.auth-shape {
+  position: absolute;
+  pointer-events: none;
+}
+
+.auth-sphere {
+  border-radius: 9999px;
+  background: radial-gradient(circle at 32% 30%, #9ff5f5 0%, #00d2d2 38%, #076d78 78%, #054852 100%);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.4), 0 0 18px rgba(0, 210, 210, 0.35);
+}
+
+.auth-sphere-1 {
+  width: 26px;
+  height: 26px;
+  top: 16%;
+  inset-inline-start: 16%;
+  animation: auth-float 7s ease-in-out infinite;
+}
+
+.auth-sphere-2 {
+  width: 14px;
+  height: 14px;
+  top: 40%;
+  inset-inline-end: 14%;
+  opacity: 0.85;
+  animation: auth-float 9s ease-in-out infinite 1.4s;
+}
+
+.auth-ring {
+  width: 42px;
+  height: 42px;
+  border-radius: 9999px;
+  border: 2px solid rgba(0, 210, 210, 0.4);
+  bottom: 18%;
+  inset-inline-start: 10%;
+  animation: auth-float 8s ease-in-out infinite 0.8s;
+}
+
+.auth-cube {
+  top: 62%;
+  inset-inline-end: 12%;
+  animation: auth-float 10s ease-in-out infinite 2s;
+  filter: drop-shadow(0 10px 14px rgba(0, 0, 0, 0.4));
+}
+
+@keyframes auth-float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-10px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-shape {
+    animation: none !important;
+  }
 }

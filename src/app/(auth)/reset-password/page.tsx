@@ -6,7 +6,7 @@ import { Ban } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
-import { AuthShell, AuthCard } from '@/components/auth/AuthShell';
+import { AuthShell } from '@/components/auth/AuthShell';
 
 type PageStatus = 'loading' | 'ready' | 'invalid';
 
@@ -87,7 +87,7 @@ export default function ResetPasswordPage() {
 
   return (
     <AuthShell subtitle="בחר סיסמא חדשה">
-      <AuthCard>
+      <div>
 
         {status === 'loading' && (
           <div className="text-center py-8">
@@ -165,7 +165,7 @@ export default function ResetPasswordPage() {
             )}
           </>
         )}
-      </AuthCard>
+      </div>
     </AuthShell>
   );
 }

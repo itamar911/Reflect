@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
-import { AuthShell, AuthCard } from '@/components/auth/AuthShell';
+import { AuthShell } from '@/components/auth/AuthShell';
 
 type Mode = 'login' | 'signup';
 
@@ -93,7 +93,7 @@ export default function AuthScreen({ mode }: AuthScreenProps) {
         </>
       }
     >
-      <AuthCard>
+      <div>
         {callbackError && (
           <div className="text-sm text-tg-danger rounded-xl px-3 py-2 mb-3"
             style={{ background: 'var(--color-tg-danger-muted)' }}>
@@ -159,7 +159,7 @@ export default function AuthScreen({ mode }: AuthScreenProps) {
             {mode === 'login' ? 'התחבר' : 'צור חשבון'}
           </Button>
         </form>
-      </AuthCard>
+      </div>
     </AuthShell>
   );
 }
