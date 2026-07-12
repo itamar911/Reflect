@@ -163,12 +163,13 @@
   z-index: 1;
 }
 
-/* Camera lens hint inside the island */
+/* Camera lens hint inside the island — physically right, like the real
+   hardware; inline-end would flip it to the left in this RTL document */
 .auth-phone-island::after {
   content: '';
   position: absolute;
   top: 50%;
-  inset-inline-end: 4px;
+  right: 4px;
   transform: translateY(-50%);
   width: 9px;
   height: 9px;
