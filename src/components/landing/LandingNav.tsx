@@ -74,7 +74,7 @@ export function LandingNav() {
             href="/login"
             className="px-4 py-2.5 rounded-xl text-sm font-semibold border border-tg-border text-tg-text-2 hover:border-tg-primary hover:text-tg-primary transition-colors"
           >
-            כניסה
+            כניסה למערכת
           </Link>
           <Link
             href="/signup"
@@ -135,7 +135,7 @@ export function LandingNav() {
               onClick={() => setOpen(false)}
               className="px-4 py-3 rounded-xl text-sm font-semibold border border-tg-border text-tg-text-2 text-center"
             >
-              כניסה
+              כניסה למערכת
             </Link>
             <Link
               href="/signup"

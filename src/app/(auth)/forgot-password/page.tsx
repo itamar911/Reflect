@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
-import { Logo } from '@/components/ui/Logo';
+import { AuthShell, AuthCard } from '@/components/auth/AuthShell';
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
@@ -32,18 +32,16 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <div className="w-full max-w-sm animate-fade-in">
-      {/* Logo */}
-      <div className="text-center mb-8">
-        <div className="flex justify-center mb-3">
-          <Logo />
-        </div>
-        <p className="text-sm text-tg-text-2 mt-1">שחזור סיסמא</p>
-      </div>
-
+    <AuthShell
+      subtitle="שחזור סיסמא"
+      footer={
+        <Link href="/login" className="text-tg-primary font-medium">
+          חזרה להתחברות
+        </Link>
+      }
+    >
       {sent ? (
-        <div className="rounded-2xl border border-tg-border p-6 text-center"
-          style={{ background: 'var(--color-tg-surface)' }}>
+        <AuthCard className="text-center">
           <div className="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4"
             style={{ background: 'var(--color-tg-success-muted)' }}>
             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--color-tg-success)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -56,10 +54,9 @@ export default function ForgotPasswordPage() {
             <br />ולחץ על הלינק לאיפוס הסיסמא.
           </p>
           <p className="text-xs text-tg-muted">לא קיבלת? בדוק תיקיית ספאם.</p>
-        </div>
+        </AuthCard>
       ) : (
-        <div className="rounded-2xl border border-tg-border p-6"
-          style={{ background: 'var(--color-tg-surface)' }}>
+        <AuthCard>
           <p className="text-xs text-tg-text-2 mb-4">
             הזן את כתובת האימייל שלך ונשלח לך לינק לאיפוס הסיסמא.
           </p>
@@ -85,14 +82,8 @@ export default function ForgotPasswordPage() {
               שלח לינק לאיפוס
             </Button>
           </form>
-        </div>
+        </AuthCard>
       )}
-
-      <p className="text-center text-sm text-tg-text-2 mt-4">
-        <Link href="/login" className="text-tg-primary font-medium">
-          חזרה להתחברות
-        </Link>
-      </p>
-    </div>
+    </AuthShell>
   );
 }

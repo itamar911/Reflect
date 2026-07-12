@@ -1,0 +1,171 @@
+/* ══════════════════════════════════════════════════════════════
+   Auth pages — decorative showcase panel. Self-contained: no
+   dependency on landing.css / .landing. The panel is dark by
+   design in both app themes, so every color here is a fixed hex,
+   never a theme token.
+   ══════════════════════════════════════════════════════════════ */
+
+.auth-showcase {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 28px;
+  border: 1px solid rgba(0, 210, 210, 0.16);
+  background:
+    radial-gradient(900px 520px at 78% -140px, rgba(0, 210, 210, 0.15), transparent 62%),
+    radial-gradient(700px 480px at -10% 108%, rgba(8, 145, 178, 0.2), transparent 60%),
+    radial-gradient(520px 300px at 50% 55%, rgba(0, 210, 210, 0.05), transparent 70%),
+    linear-gradient(160deg, #232630 0%, #1c212a 45%, #151f28 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 24px 60px rgba(0, 0, 0, 0.35);
+
+  /* The Logo wordmark reads var(--color-tg-text); the panel is always dark,
+     so pin the token light here regardless of the app theme. */
+  --color-tg-text: #f1f5f9;
+}
+
+/* ── Ambience: soft glow orbs + masked dot grid ─────────────── */
+
+.auth-orb {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(90px);
+  pointer-events: none;
+}
+
+.auth-orb-1 {
+  width: 380px;
+  height: 380px;
+  top: -110px;
+  inset-inline-end: -80px;
+  background: rgba(0, 210, 210, 0.15);
+}
+
+.auth-orb-2 {
+  width: 340px;
+  height: 340px;
+  bottom: -90px;
+  inset-inline-start: -110px;
+  background: rgba(8, 145, 178, 0.18);
+}
+
+.auth-orb-3 {
+  width: 240px;
+  height: 240px;
+  top: 42%;
+  inset-inline-start: 56%;
+  background: rgba(103, 232, 249, 0.07);
+}
+
+.auth-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.09) 1px, transparent 1px);
+  background-size: 26px 26px;
+  -webkit-mask-image: radial-gradient(ellipse 75% 60% at 50% 28%, black 25%, transparent 78%);
+  mask-image: radial-gradient(ellipse 75% 60% at 50% 28%, black 25%, transparent 78%);
+}
+
+/* ── Copy block above the phone ────────────────────────────── */
+
+.auth-showcase-tagline {
+  color: #eef4f8;
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.auth-showcase-sub {
+  color: rgba(226, 236, 244, 0.62);
+  font-size: 0.9rem;
+}
+
+/* ── Phone mockup ──────────────────────────────────────────── */
+
+/* Stage fills the leftover panel height; the phone hangs from its top and
+   any overflow is cropped by the panel's rounded edge, so the composition
+   survives short viewports instead of squashing. */
+.auth-phone-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.auth-phone-wrap {
+  position: absolute;
+  top: 8px;
+  inset-inline-start: 50%;
+  width: clamp(240px, 22vw, 300px);
+  transform: translateX(-50%);
+}
+
+[dir='rtl'] .auth-phone-wrap {
+  transform: translateX(50%);
+}
+
+.auth-phone-glow {
+  position: absolute;
+  inset: -14% -20%;
+  background: radial-gradient(closest-side, rgba(0, 210, 210, 0.3), rgba(0, 210, 210, 0.08) 55%, transparent 78%);
+  filter: blur(28px);
+  pointer-events: none;
+}
+
+.auth-phone {
+  position: relative;
+  border-radius: 46px;
+  padding: 10px;
+  background: linear-gradient(160deg, #3a3f4a, #23262e 30%, #16181e);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow:
+    0 40px 80px rgba(0, 0, 0, 0.55),
+    0 16px 34px rgba(0, 0, 0, 0.4),
+    0 0 60px rgba(0, 210, 210, 0.12),
+    inset 0 1px 1px rgba(255, 255, 255, 0.12);
+  transform: rotate(-2.5deg);
+}
+
+.auth-phone-screen {
+  position: relative;
+  border-radius: 36px;
+  overflow: hidden;
+  /* Matches the screenshot's page background so the app bar blends in */
+  background: #292930;
+}
+
+/* Status-bar row with a dynamic-island hint */
+.auth-phone-island {
+  display: flex;
+  justify-content: center;
+  padding-top: 10px;
+}
+
+.auth-phone-island::before {
+  content: '';
+  width: 74px;
+  height: 18px;
+  border-radius: 999px;
+  background: #101014;
+}
+
+/* Slim app bar carrying the Reflect logo above the screenshot */
+.auth-phone-appbar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 44px;
+  overflow: hidden;
+}
+
+.auth-phone-appbar > span {
+  display: inline-block;
+  transform: scale(0.55);
+}
+
+.auth-phone-shot {
+  display: block;
+  width: 100%;
+  height: auto;
+}

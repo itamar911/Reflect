@@ -1,12 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Logo } from '@/components/ui/Logo';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
+import { AuthShell, AuthCard } from '@/components/auth/AuthShell';
 
 type Mode = 'login' | 'signup';
 
@@ -78,21 +78,22 @@ export default function AuthScreen({ mode }: AuthScreenProps) {
   }
 
   return (
-    <div className="w-full max-w-sm animate-fade-in">
-      {/* Logo */}
-      <div className="text-center mb-8">
-        <div className="flex justify-center mb-3">
-          <Logo />
-        </div>
-        <p className="text-xs text-tg-muted mt-0.5 mb-1">השוק בוחן את האסטרטגיה שלך. Reflect בוחן אותך.</p>
-        <p className="text-sm text-tg-text-2 mt-1">
-          {mode === 'login' ? 'ברוך הבא! התחבר לחשבונך' : 'צור חשבון חדש'}
-        </p>
-      </div>
-
-      {/* Card */}
-      <div className="rounded-2xl border border-tg-border p-6"
-        style={{ background: 'var(--color-tg-surface)' }}>
+    <AuthShell
+      tagline="השוק בוחן את האסטרטגיה שלך. Reflect בוחן אותך."
+      subtitle={mode === 'login' ? 'ברוך הבא! התחבר לחשבונך' : 'צור חשבון חדש'}
+      footer={
+        <>
+          {mode === 'login' ? 'אין לך חשבון?' : 'כבר יש לך חשבון?'}{' '}
+          <Link
+            href={mode === 'login' ? '/signup' : '/login'}
+            className="text-tg-primary font-medium"
+          >
+            {mode === 'login' ? 'הירשם עכשיו' : 'התחבר'}
+          </Link>
+        </>
+      }
+    >
+      <AuthCard>
         {callbackError && (
           <div className="text-sm text-tg-danger rounded-xl px-3 py-2 mb-3"
             style={{ background: 'var(--color-tg-danger-muted)' }}>
@@ -158,18 +159,7 @@ export default function AuthScreen({ mode }: AuthScreenProps) {
             {mode === 'login' ? 'התחבר' : 'צור חשבון'}
           </Button>
         </form>
-      </div>
-
-      {/* Toggle */}
-      <p className="text-center text-sm text-tg-text-2 mt-4">
-        {mode === 'login' ? 'אין לך חשבון?' : 'כבר יש לך חשבון?'}{' '}
-        <Link
-          href={mode === 'login' ? '/signup' : '/login'}
-          className="text-tg-primary font-medium"
-        >
-          {mode === 'login' ? 'הירשם עכשיו' : 'התחבר'}
-        </Link>
-      </p>
-    </div>
+      </AuthCard>
+    </AuthShell>
   );
 }
