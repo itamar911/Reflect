@@ -48,10 +48,17 @@ export function HeroJoinStat() {
   }, []);
 
   return (
-    <span ref={ref} className="flex items-center gap-2.5 text-sm text-tg-muted">
+    <span
+      ref={ref}
+      className="inline-flex items-center gap-2.5 rounded-full px-4 py-1.5 text-sm text-tg-muted"
+      style={{
+        background: 'rgba(0, 210, 210, 0.07)',
+        border: '1px solid rgba(0, 210, 210, 0.25)',
+      }}
+    >
       <span className="hero-live-dot" aria-hidden />
       <span
-        className="text-lg font-extrabold"
+        className="text-base font-extrabold"
         style={{
           color: '#00d2d2',
           // Fixed-width LTR box sized for the final "+367" so the count-up

@@ -18,6 +18,11 @@ export function HeroSection() {
       <div className="hero-orb hero-orb-2" aria-hidden />
 
       <div className="relative max-w-[1360px] mx-auto">
+        {/* Social proof — centered between the nav and the headline */}
+        <ScrollReveal className="flex justify-center mb-10">
+          <HeroJoinStat />
+        </ScrollReveal>
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-14 lg:gap-16 items-center">
           {/* text column — first in DOM = right column in RTL */}
           <div className="flex flex-col items-center lg:items-start text-center lg:text-start gap-7">
@@ -45,9 +50,6 @@ export function HeroSection() {
                   התחל 5 ימי ניסיון — בלי כרטיס אשראי
                 </Link>
                 <span className="text-sm text-tg-muted">פחות מ-2 דקות ואתה בפנים</span>
-                <div className="mt-1.5">
-                  <HeroJoinStat />
-                </div>
               </div>
             </ScrollReveal>
 
