@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { MonitorSmartphone, Languages, Users } from 'lucide-react';
 import { ScrollReveal } from './ScrollReveal';
 import { HeroMock } from './HeroMock';
+import { HeroJoinStat } from './HeroJoinStat';
 
 const TRUST_ITEMS = [
   { icon: MonitorSmartphone, text: 'עובד לצד כל פלטפורמת מסחר' },
@@ -44,6 +45,9 @@ export function HeroSection() {
                   התחל 5 ימי ניסיון — בלי כרטיס אשראי
                 </Link>
                 <span className="text-sm text-tg-muted">פחות מ-2 דקות ואתה בפנים</span>
+                <div className="mt-1.5">
+                  <HeroJoinStat />
+                </div>
               </div>
             </ScrollReveal>
 

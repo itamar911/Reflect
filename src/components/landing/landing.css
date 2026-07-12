@@ -269,6 +269,23 @@
   background: radial-gradient(640px 320px at 50% 0%, rgba(0, 210, 210, 0.065), transparent 70%);
 }
 
+/* ── Hero: live social-proof dot ───────────────────────────── */
+
+.hero-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  background: #00d2d2;
+  box-shadow: 0 0 8px rgba(0, 210, 210, 0.7);
+  animation: hero-live-pulse 2s ease-in-out infinite;
+}
+
+@keyframes hero-live-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.55; transform: scale(0.82); }
+}
+
 /* ── Hero: floating orbs + dot grid ────────────────────────── */
 
 .hero-orb {
