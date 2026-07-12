@@ -42,20 +42,26 @@ export function AuthShowcase() {
 
           <div className="auth-scene-stack">
             <div className="auth-phone">
-              <div className="auth-phone-screen">
-                <div className="auth-phone-island" />
-                <Image
-                  src="/auth/phone-demo.png"
-                  alt=""
-                  width={780}
-                  height={1688}
-                  priority
-                  // The optimizer caches by URL and served us a stale copy after
-                  // the capture was regenerated; the mockup renders ~200px wide,
-                  // so optimization buys little — serve the file as-is.
-                  unoptimized
-                  className="auth-phone-shot"
-                />
+              <span className="auth-phone-btn auth-phone-btn-action" />
+              <span className="auth-phone-btn auth-phone-btn-volup" />
+              <span className="auth-phone-btn auth-phone-btn-voldn" />
+              <span className="auth-phone-btn auth-phone-btn-power" />
+              <div className="auth-phone-body">
+                <div className="auth-phone-screen">
+                  <div className="auth-phone-island" />
+                  <Image
+                    src="/auth/phone-demo.png"
+                    alt=""
+                    width={780}
+                    height={1688}
+                    priority
+                    // The optimizer caches by URL and served us a stale copy after
+                    // the capture was regenerated; the mockup renders ~200px wide,
+                    // so optimization buys little — serve the file as-is.
+                    unoptimized
+                    className="auth-phone-shot"
+                  />
+                </div>
               </div>
             </div>
             <div className="auth-podium">

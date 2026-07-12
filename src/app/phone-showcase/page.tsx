@@ -129,14 +129,18 @@ export default function PhoneShowcasePage() {
     <div dir="rtl" className="min-h-screen" style={{ background: 'var(--color-tg-bg)' }}>
       <div className="mx-auto flex flex-col" style={{ maxWidth: 390, minHeight: 844 }}>
 
+        {/* Status-bar safe zone — keeps content clear of the mockup's Dynamic
+            Island overlay and the screen's rounded corners */}
+        <div style={{ height: 44 }} />
+
         {/* App bar — logo small, aligned to the start edge like the real shell */}
-        <header className="flex items-center px-4" style={{ height: 60, borderBottom: `1px solid ${BORDER}` }}>
-          <span className="inline-block" style={{ transform: 'scale(0.62)', transformOrigin: 'right center' }}>
+        <header className="flex items-center" style={{ height: 48, paddingInline: 20, borderBottom: `1px solid ${BORDER}` }}>
+          <span className="inline-block" style={{ transform: 'scale(0.55)', transformOrigin: 'right center' }}>
             <Logo />
           </span>
         </header>
 
-        <main className="flex flex-col gap-4 px-3 pt-5 pb-6">
+        <main className="flex flex-col gap-3 px-3 pt-4 pb-5">
           {/* Greeting — same as the dashboard header */}
           <div className="px-1">
             <p style={{ fontSize: 12, fontWeight: 600, color: MUTED }}>
@@ -217,7 +221,7 @@ export default function PhoneShowcasePage() {
                 const dir = tradeDirection(t);
                 const pts = tradePointsPnl(t);
                 return (
-                  <div key={t.id} className="flex items-center gap-2 py-3.5"
+                  <div key={t.id} className="flex items-center gap-2 py-3"
                     style={{ borderTop: i > 0 ? `1px solid ${BORDER}` : undefined }}>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5 flex-wrap">
