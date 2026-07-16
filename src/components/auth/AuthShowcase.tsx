@@ -24,7 +24,7 @@ export function AuthShowcase() {
       <div className="auth-grid" />
 
       <div className="relative h-full flex flex-col items-center px-10 pt-11 pb-8">
-        <span className="inline-block mb-4" style={{ transform: 'scale(1.15)', transformOrigin: 'center' }}>
+        <span className="auth-showcase-logo inline-block mb-4" style={{ transform: 'scale(1.15)', transformOrigin: 'center' }}>
           <Logo />
         </span>
         <p className="auth-showcase-tagline text-center">היומן שהופך כל עסקה לשיעור</p>

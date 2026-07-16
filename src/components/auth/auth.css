@@ -70,19 +70,37 @@
   font-size: 0.9rem;
 }
 
+/* Safety net: the copy must stay readable even if the scene ever
+   overflows upward again — paint it above the phone (z-index 3). */
+.auth-showcase-logo,
+.auth-showcase-tagline,
+.auth-showcase-sub {
+  position: relative;
+  z-index: 4;
+}
+
 /* ── Illustrated scene: glow circle, phone on podium, shapes ──
    The phone is a compact centerpiece (~half the panel height),
-   always fully visible, standing straight on a 3D-ish pedestal. */
+   standing straight on a 3D-ish pedestal. The whole composition
+   is sized from --phone-w so it keeps shrinking on short laptop
+   viewports (768p minus browser chrome ⇒ ~600-660px) instead of
+   hitting a fixed floor and climbing over the tagline. */
 
 .auth-scene {
   position: relative;
   flex: 1;
   min-height: 0;
   width: 100%;
+  /* Guaranteed breathing room between the sub-tagline and the phone,
+     even when the stack is pinned to the top on very short viewports. */
+  padding-top: 12px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  /* One knob for the whole composition: phone width tracks viewport
+     height down to a 140px floor; podium, radii and island derive
+     from it so the mockup stays proportional at every size. */
+  --phone-w: clamp(140px, 23vh, 212px);
 }
 
 /* Large soft glowing circle behind the phone */
@@ -105,6 +123,11 @@
   display: flex;
   flex-direction: column;
   align-items: center;
+  /* Safe centering: auto margins center the stack when it fits, but
+     collapse to 0 when space runs out — unlike justify-content: center,
+     overflow then goes DOWN (clipped by the panel's overflow: hidden),
+     never up over the logo/tagline block. */
+  margin-block: auto;
 }
 
 /* ── iPhone mockup ──────────────────────────────────────────
@@ -115,8 +138,11 @@
 .auth-phone {
   position: relative;
   z-index: 3;
-  width: clamp(184px, 23vh, 212px);
-  border-radius: 34px;
+  width: var(--phone-w);
+  /* Radii/paddings are fractions of the width (tuned at 212px:
+     34/31/24px radii, 7px bezel) so corners keep iPhone proportions
+     as the phone scales. */
+  border-radius: calc(var(--phone-w) * 0.16);
   /* Titanium edge — a thin gradient ring around the black bezel */
   padding: 3px;
   background: linear-gradient(150deg, #8b93a0 0%, #3a3f47 24%, #5b636e 52%, #2c3138 78%, #757d89 100%);
@@ -128,14 +154,14 @@
 
 /* Black bezel — thin and even on all four sides */
 .auth-phone-body {
-  border-radius: 31px;
-  padding: 7px;
+  border-radius: calc(var(--phone-w) * 0.146);
+  padding: calc(var(--phone-w) * 0.033);
   background: #060709;
 }
 
 .auth-phone-screen {
   position: relative;
-  border-radius: 24px;
+  border-radius: calc(var(--phone-w) * 0.113);
   overflow: hidden;
   aspect-ratio: 390 / 844;
   /* Matches the screenshot's page background */
@@ -153,11 +179,11 @@
 /* Dynamic Island — floating pill, not a notch bar */
 .auth-phone-island {
   position: absolute;
-  top: 7px;
+  top: calc(var(--phone-w) * 0.033);
   left: 50%;
   transform: translateX(-50%);
   width: 31%;
-  height: 16px;
+  height: calc(var(--phone-w) * 0.0755);
   border-radius: 999px;
   background: #060709;
   z-index: 1;
@@ -169,10 +195,10 @@
   content: '';
   position: absolute;
   top: 50%;
-  right: 4px;
+  right: calc(var(--phone-w) * 0.019);
   transform: translateY(-50%);
-  width: 9px;
-  height: 9px;
+  width: calc(var(--phone-w) * 0.0425);
+  height: calc(var(--phone-w) * 0.0425);
   border-radius: 50%;
   background: radial-gradient(circle at 35% 35%, #2a3038, #101318 70%);
 }
@@ -190,25 +216,28 @@
 .auth-phone-btn-voldn  { left: -3px;  top: 34%; height: 7%; }
 .auth-phone-btn-power  { right: -3px; top: 27%; height: 11%; }
 
-/* ── Podium the phone stands on ────────────────────────────── */
+/* ── Podium the phone stands on ────────────────────────────────
+   Sized from --phone-w (1.5× phone width, capped at the original
+   310×78) with all internals as percentages of the box, so the
+   pedestal shrinks in step with the phone on short viewports. */
 
 .auth-podium {
   position: relative;
   z-index: 1;
-  width: min(310px, 40vh);
-  height: 78px;
-  margin-top: -30px;
+  width: min(310px, calc(var(--phone-w) * 1.5));
+  aspect-ratio: 310 / 78;
+  margin-top: calc(var(--phone-w) * -0.14);
 }
 
 /* Contact shadow under the phone, cast on the podium deck */
 .auth-podium::before {
   content: '';
   position: absolute;
-  top: 14px;
+  top: 18%;
   left: 50%;
   transform: translateX(-50%);
   width: 58%;
-  height: 20px;
+  height: 26%;
   border-radius: 50%;
   background: rgba(0, 0, 0, 0.5);
   filter: blur(9px);
@@ -221,7 +250,7 @@
   top: 0;
   left: 0;
   width: 100%;
-  height: 52px;
+  height: 66.7%;
   border-radius: 50%;
   background: linear-gradient(180deg, #313947 0%, #232a35 70%);
   border: 1px solid rgba(0, 210, 210, 0.22);
@@ -231,11 +260,11 @@
 /* Cylinder side wall */
 .auth-podium-side {
   position: absolute;
-  top: 26px;
+  top: 33.3%;
   left: 0;
   width: 100%;
-  height: 36px;
-  border-radius: 0 0 50% 50% / 0 0 26px 26px;
+  height: 46.2%;
+  border-radius: 0 0 50% 50% / 0 0 72% 72%;
   background: linear-gradient(180deg, #1e242e 0%, #151a22 100%);
   border: 1px solid rgba(0, 210, 210, 0.12);
   border-top: none;
@@ -244,11 +273,11 @@
 /* Soft ground shadow + glow pool under the pedestal */
 .auth-podium-ground {
   position: absolute;
-  bottom: -26px;
+  bottom: -33%;
   left: 50%;
   transform: translateX(-50%);
   width: 150%;
-  height: 40px;
+  height: 51%;
   border-radius: 50%;
   background: radial-gradient(ellipse, rgba(0, 0, 0, 0.5) 0%, rgba(0, 210, 210, 0.06) 55%, transparent 72%);
   filter: blur(10px);
