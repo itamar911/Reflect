@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // One-off root-level export copies of app components (not imported by
+    // the app) — kept for sharing, out of lint scope.
+    "stats_page_export.tsx",
+    "PnlChart_export.tsx",
   ]),
 ]);
 

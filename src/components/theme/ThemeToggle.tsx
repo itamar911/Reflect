@@ -1,14 +1,13 @@
 'use client';
 
 import { useTheme } from 'next-themes';
-import { useEffect, useState } from 'react';
+import { useHydrated } from '@/lib/hooks';
 
 export function ThemeToggle({ className }: { className?: string }) {
   const { theme, setTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
 
   // Avoid hydration mismatch — render only after mount
-  useEffect(() => setMounted(true), []);
+  const mounted = useHydrated();
   if (!mounted) return <div className="w-8 h-8" />;
 
   const isDark = theme === 'dark';

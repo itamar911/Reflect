@@ -72,6 +72,7 @@ export default function ChartAnalysis() {
         </button>
       ) : (
         <div className="relative mb-3">
+          {/* eslint-disable-next-line @next/next/no-img-element -- local data-URL preview of the uploaded chart; next/image can't optimize data URLs */}
           <img src={preview} alt="chart" className="w-full rounded-xl object-contain max-h-52" />
           <button onClick={reset}
             className="absolute top-2 left-2 w-7 h-7 rounded-full flex items-center justify-center text-white font-bold"

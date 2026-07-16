@@ -37,8 +37,8 @@ function withinTolerance(a: number, b: number): boolean {
  */
 export function computeTradeScore(input: TradeScoreInput): TradeScoreResult {
   const correctedFlags: string[] = [];
-  let { moved_sl, exited_early } = input;
-  const { stop_loss, take_profit, rr_ratio, required_min_rr, strategy_conditions_checked, fomo_entry, revenge_trade, exit_price } = input;
+  let { exited_early } = input;
+  const { moved_sl, stop_loss, take_profit, rr_ratio, required_min_rr, strategy_conditions_checked, fomo_entry, revenge_trade, exit_price } = input;
 
   // ── Contradiction correction ────────────────────────────────────────────
   if (exit_price !== null && take_profit !== null && withinTolerance(exit_price, take_profit)) {

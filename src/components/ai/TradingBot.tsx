@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import Button from '@/components/ui/Button';
 import { Bot, ArrowDown } from 'lucide-react';
 import UpgradeModal from '@/components/plans/UpgradeModal';
 

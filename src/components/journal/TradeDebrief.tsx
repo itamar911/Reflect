@@ -124,6 +124,7 @@ export default function TradeDebrief({ trade, existingAnswer }: TradeDebriefProp
               </button>
             ) : (
               <div className="relative">
+                {/* eslint-disable-next-line @next/next/no-img-element -- local data-URL preview of the uploaded trade image; next/image can't optimize data URLs */}
                 <img src={imagePreview} alt="trade" className="w-full rounded-xl object-contain max-h-32" />
                 <button onClick={() => { setImage(null); setImagePreview(null); }}
                   className="absolute top-1 left-1 w-5 h-5 rounded-full text-white flex items-center justify-center text-xs"

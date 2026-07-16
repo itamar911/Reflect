@@ -23,7 +23,6 @@ const BORDER = 'var(--color-tg-border)';
 const TEXT   = 'var(--color-tg-text)';
 const TEXT2  = 'var(--color-tg-text-2)';
 const MUTED  = 'var(--color-tg-muted)';
-const GOLD   = '#00d2d2';
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
@@ -240,6 +239,7 @@ export default function FeedbackPage() {
 
           {imgDataUrl ? (
             <div className="relative rounded-xl overflow-hidden">
+              {/* eslint-disable-next-line @next/next/no-img-element -- local data-URL preview of the user's screenshot; next/image can't optimize data URLs */}
               <img src={imgDataUrl} alt="Screenshot preview"
                 className="w-full max-h-52 object-contain"
                 style={{ background: SURF2 }} />

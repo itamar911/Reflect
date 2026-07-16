@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useEffectEvent, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { usePathname, useRouter } from 'next/navigation';
@@ -20,6 +20,24 @@ import { SIDEBAR_TRANSITION } from '@/lib/motion';
 // Demo-only chrome (fetch interception + upsell modal) — loaded only on /demo
 // so the fixtures never enter the regular app bundle.
 const DemoGuard = dynamic(() => import('@/components/demo/DemoGuard'), { ssr: false });
+
+// ── Browser-state stores ──────────────────────────────────────────────────────
+// Client-only facts read during render via useSyncExternalStore (false on the
+// server / during hydration). getSnapshot re-runs on every render, so values
+// that follow the URL stay fresh across soft navigations, which re-render via
+// usePathname.
+const emptySubscribe = () => () => {};
+const getServerFalse = () => false;
+const getBrowserDemo = () => window.location.pathname.startsWith('/demo');
+const getEmbedded = () =>
+  new URLSearchParams(window.location.search).get('embed') === '1' ||
+  window.self !== window.top;
+const getSavedExpanded = () => localStorage.getItem('sidebar-expanded') === 'true';
+const subscribeWindowResize = (onChange: () => void) => {
+  window.addEventListener('resize', onChange);
+  return () => window.removeEventListener('resize', onChange);
+};
+const getIsMobile = () => window.innerWidth < 768;
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const ACCENT = '#00d2d2';
@@ -174,10 +192,7 @@ export default function AppShell({
   // window.location is the fallback source of truth: after a soft navigation
   // through the /demo rewrite the router's pathname can report the rewritten
   // internal route (no /demo prefix) while the browser URL is still /demo/*.
-  const [browserDemo, setBrowserDemo] = useState(false);
-  useEffect(() => {
-    setBrowserDemo(window.location.pathname.startsWith('/demo'));
-  }, [pathname]);
+  const browserDemo = useSyncExternalStore(emptySubscribe, getBrowserDemo, getServerFalse);
   const isDemo    = pathname.startsWith('/demo') || browserDemo;
   const navPrefix = isDemo ? '/demo' : '';
 
@@ -185,17 +200,14 @@ export default function AppShell({
   // demo banner — the surrounding frame provides its own chrome. Demo nav is
   // hardNav and drops the query param, so also treat being inside an iframe
   // as embedded; standalone tabs (מסך מלא, direct links) keep the banner.
-  const [embedded, setEmbedded] = useState(false);
-  useEffect(() => {
-    setEmbedded(
-      new URLSearchParams(window.location.search).get('embed') === '1' ||
-      window.self !== window.top,
-    );
-  }, [pathname]);
+  const embedded = useSyncExternalStore(emptySubscribe, getEmbedded, getServerFalse);
 
   const [formOpen,  setFormOpen]  = useState(false);
-  const [expanded,  setExpanded]  = useState(false);
-  const [isMobile,  setIsMobile]  = useState(false);
+  // Saved desktop preference applies until the user toggles in this session
+  const savedExpanded = useSyncExternalStore(emptySubscribe, getSavedExpanded, getServerFalse);
+  const [expandedOverride, setExpandedOverride] = useState<boolean | null>(null);
+  const expanded = expandedOverride ?? savedExpanded;
+  const isMobile = useSyncExternalStore(subscribeWindowResize, getIsMobile, getServerFalse);
   const [ruleBlock,   setRuleBlock]   = useState<RuleViolationResult | null>(null);
   const [ruleWarning, setRuleWarning] = useState<string | null>(null);
 
@@ -237,27 +249,15 @@ export default function AppShell({
   }
 
   // Detect mobile viewport
+  // External trigger (other components can dispatch 'open-trade-form').
+  // useEffectEvent keeps the handler on the latest state without
+  // resubscribing the listener.
+  const onOpenTradeForm = useEffectEvent(() => { tryOpenTradeForm(); });
   useEffect(() => {
-    const check = () => setIsMobile(window.innerWidth < 768);
-    check();
-    window.addEventListener('resize', check);
-    return () => window.removeEventListener('resize', check);
-  }, []);
-
-  // Restore desktop saved state
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('sidebar-expanded');
-      if (saved === 'true') setExpanded(true);
-    }
-  }, []);
-
-  // External trigger (other components can dispatch 'open-trade-form')
-  useEffect(() => {
-    const handler = () => { tryOpenTradeForm(); };
+    const handler = () => { onOpenTradeForm(); };
     window.addEventListener('open-trade-form', handler);
     return () => window.removeEventListener('open-trade-form', handler);
-  }, [userId]);
+  }, []);
 
   // Keep server components in sync with client-side session changes (token
   // refresh in this or another tab, sign-out) instead of bouncing to /login
@@ -274,7 +274,7 @@ export default function AppShell({
 
   function toggle() {
     const next = !expanded;
-    setExpanded(next);
+    setExpandedOverride(next);
     if (!isMobile) localStorage.setItem('sidebar-expanded', String(next));
   }
 
@@ -314,7 +314,7 @@ export default function AppShell({
           pointerEvents: isMobile && expanded ? 'auto' : 'none',
           transition:    `opacity ${SIDEBAR_TRANSITION}`,
         }}
-        onClick={() => setExpanded(false)}
+        onClick={() => setExpandedOverride(false)}
       />
 
       {/* ── Toggle handle ────────────────────────────────────────── */}

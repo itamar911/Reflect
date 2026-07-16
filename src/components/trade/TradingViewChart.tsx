@@ -80,7 +80,9 @@ export default function TradingViewChart({ symbol, timeframe }: Props) {
   const widgetRef = useRef<TvWidget | null>(null);
   const idRef = useRef<string | null>(null);
 
-  if (!idRef.current) {
+  // Lazy one-time init — the `== null` check is the sanctioned pattern for
+  // initializing a ref during render.
+  if (idRef.current == null) {
     idRef.current = `tv_chart_${++_counter}`;
   }
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useEffectEvent, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { AlertTriangle, Bot, Eye, Inbox, MoreHorizontal, Pencil, Trash2, X } from 'lucide-react';
@@ -10,6 +10,7 @@ import { createClient } from '@/lib/supabase/client';
 import { formatPnlIls, formatPnlPoints, calcRR } from '@/lib/utils';
 import { tradeMoneyPnl, hasMoneyPnl, isWinningTrade } from '@/lib/pnl';
 import type { PnlCurrency } from '@/lib/types';
+import { useHydrated } from '@/lib/hooks';
 import './journal.css';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
@@ -238,12 +239,18 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
   function toggleAll() {
     setSelected(prev => {
       const n = new Set(prev);
-      allOnPage ? pageTrades.forEach(t => n.delete(t.id)) : pageTrades.forEach(t => n.add(t.id));
+      if (allOnPage) pageTrades.forEach(t => n.delete(t.id));
+      else pageTrades.forEach(t => n.add(t.id));
       return n;
     });
   }
   function toggleOne(id: string) {
-    setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+    setSelected(prev => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
   }
 
   // ── Delete / edit ─────────────────────────────────────────────────────────
@@ -891,14 +898,12 @@ function PgBtn({ children, onClick, disabled, active }: {
 const modalStack: (() => void)[] = [];
 
 function Modal({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
-  const [mounted, setMounted] = useState(false);
-  const closeRef = useRef(onClose);
-  closeRef.current = onClose;
-
-  useEffect(() => { setMounted(true); }, []);
+  const mounted = useHydrated();
+  // Always calls the latest onClose without resubscribing the key handler
+  const close = useEffectEvent(() => onClose());
 
   useEffect(() => {
-    const entry = () => closeRef.current();
+    const entry = () => close();
     modalStack.push(entry);
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && modalStack[modalStack.length - 1] === entry) entry();
@@ -935,7 +940,7 @@ function Modal({ onClose, children }: { onClose: () => void; children: React.Rea
 }
 
 function TradeDetailModal({ trade, onClose, debriefResult, onDebrief }: {
-  trade: any;
+  trade: Trade;
   onClose: () => void;
   debriefResult?: AIDebriefResult;
   onDebrief?: (result: AIDebriefResult) => void;

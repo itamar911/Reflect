@@ -210,7 +210,7 @@ export default function StrategiesClient({
     });
     setSaveError(null); setShowForm(true);
   }
-  function useTemplate(t: typeof FORM_TEMPLATES[0]) {
+  function applyTemplate(t: typeof FORM_TEMPLATES[0]) {
     setForm({ ...EMPTY_FORM, name: t.name, description: t.description });
     setEditId(null); setSaveError(null); setShowForm(true);
   }
@@ -522,7 +522,6 @@ export default function StrategiesClient({
         const isOpen  = expandTrades[s.id];
         const aiText  = aiReviews[s.id];
         const aiLoad  = aiLoading[s.id];
-        const pnlColor = stats.totalPnl > 0 ? GREEN : stats.totalPnl < 0 ? RED : MUTED;
 
         return (
           <div key={s.id} className="rounded-2xl flex flex-col"
@@ -712,7 +711,7 @@ export default function StrategiesClient({
           <p className="text-xs font-semibold" style={{ color: MUTED }}>תבניות מובנות — לחץ להוסיף</p>
           <div className="flex flex-wrap gap-1.5">
             {FORM_TEMPLATES.map(t => (
-              <button key={t.name} onClick={() => useTemplate(t)}
+              <button key={t.name} onClick={() => applyTemplate(t)}
                 className="px-3 py-1.5 rounded-full text-xs border transition-all hover:opacity-80"
                 style={{ background: SURF2, borderColor: BORDER, color: TEXT2 }}>
                 {t.name}

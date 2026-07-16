@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
-import Input from '@/components/ui/Input';
 import { COOLDOWN_MINUTE_OPTIONS } from '@/lib/validators/RulesetValidator';
 import type { PresetRules, TradeStrategy } from '@/lib/types';
 import type { PlanTier } from '@/lib/plans/config';

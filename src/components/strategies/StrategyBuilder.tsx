@@ -64,7 +64,7 @@ const EMPTY_FORM = {
   max_daily_trades: '',
 };
 
-export default function StrategyBuilder({ userId, initialStrategies, plan }: StrategyBuilderProps) {
+export default function StrategyBuilder({ initialStrategies, plan }: StrategyBuilderProps) {
   const limits = getPlanLimits(plan);
   const [strategies, setStrategies] = useState<PersonalStrategy[]>(initialStrategies);
   const [showForm, setShowForm] = useState(false);
@@ -105,7 +105,7 @@ export default function StrategyBuilder({ userId, initialStrategies, plan }: Str
     setShowForm(true);
   }
 
-  function useTemplate(t: typeof BUILTIN_TEMPLATES[0]) {
+  function applyTemplate(t: typeof BUILTIN_TEMPLATES[0]) {
     setForm({ ...EMPTY_FORM, name: t.name, description: t.description });
     setEditId(null);
     setSaveError(null);
@@ -318,7 +318,7 @@ export default function StrategyBuilder({ userId, initialStrategies, plan }: Str
           <p className="text-xs font-semibold text-tg-muted">אסטרטגיות מובנות — לחץ להוסיף</p>
           <div className="flex flex-wrap gap-1.5">
             {BUILTIN_TEMPLATES.map((t) => (
-              <button key={t.name} onClick={() => useTemplate(t)}
+              <button key={t.name} onClick={() => applyTemplate(t)}
                 className="px-3 py-1.5 rounded-full text-xs border transition-all"
                 style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)', color: 'var(--color-tg-text-2)' }}>
                 {t.name}

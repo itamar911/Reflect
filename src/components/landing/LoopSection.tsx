@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { ScrollReveal } from './ScrollReveal';
 import { SectionHeading } from './SectionHeading';
+import { usePrefersReducedMotion } from '@/lib/hooks';
 
 type Tone = 'cool' | 'amber' | 'red';
 
@@ -66,21 +67,19 @@ function LoopRestartPill({ className = '' }: { className?: string }) {
 
 export function LoopSection() {
   const wrapRef = useRef<HTMLDivElement>(null);
-  const [inView, setInView] = useState(false);
+  const [intersected, setIntersected] = useState(false);
+  const reducedMotion = usePrefersReducedMotion();
+  // Reduced motion skips the scroll trigger and shows the settled state
+  const inView = reducedMotion || intersected;
 
   useEffect(() => {
     const el = wrapRef.current;
-    if (!el) return;
-
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      setInView(true);
-      return;
-    }
+    if (!el || reducedMotion) return;
 
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
-          setInView(true);
+          setIntersected(true);
           observer.disconnect();
         }
       },
@@ -89,7 +88,7 @@ export function LoopSection() {
 
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [reducedMotion]);
 
   return (
     <section className="section-alt relative py-14 px-4 md:px-8 lg:px-10 overflow-hidden">

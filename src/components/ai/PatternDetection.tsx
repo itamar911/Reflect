@@ -35,6 +35,9 @@ export default function PatternDetection({ trades }: { trades: Trade[] }) {
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState<number | null>(null);
 
+  // Keyed to trades.length on purpose: `trades` gets a fresh identity every
+  // parent render, so canonical deps would refetch the AI patterns per render.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { if (trades.length >= 5) fetchPatterns(); }, [trades.length]);
 
   async function fetchPatterns() {

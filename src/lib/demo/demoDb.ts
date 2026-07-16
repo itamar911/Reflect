@@ -82,7 +82,7 @@ export function createDemoQuery(
         return (n: number) => { limit = n; return proxy; };
       }
       // select/eq/neq/not/in/gte/lte/filter/… — and the write methods
-      return (..._args: unknown[]) => {
+      return () => {
         if (WRITE_METHODS.has(prop)) isWrite = true;
         return proxy;
       };

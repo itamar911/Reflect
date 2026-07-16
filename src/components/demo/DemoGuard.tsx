@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Lock } from 'lucide-react';
 import { DEMO_UPSELL_EVENT } from '@/lib/demo/demoDb';
+import { useHydrated } from '@/lib/hooks';
 
 /**
  * Mounted (only) on /demo pages. Hosts the signup-upsell modal raised by
@@ -13,9 +14,7 @@ import { DEMO_UPSELL_EVENT } from '@/lib/demo/demoDb';
  */
 export default function DemoGuard() {
   const [upsellOpen, setUpsellOpen] = useState(false);
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => { setMounted(true); }, []);
+  const mounted = useHydrated();
 
   // noindex meta
   useEffect(() => {

@@ -19,7 +19,6 @@ export function SocialProofSection() {
                   className="glass-card card-hover relative w-full aspect-[9/16] rounded-2xl overflow-hidden flex items-center justify-center"
                 >
                   {video.videoUrl ? (
-                    // eslint-disable-next-line jsx-a11y/media-has-caption
                     <video src={video.videoUrl} poster={video.poster} controls className="w-full h-full object-cover" />
                   ) : (
                     <>

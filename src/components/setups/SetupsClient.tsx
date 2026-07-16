@@ -37,7 +37,6 @@ type View = 'list' | 'create' | 'detail';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const GOLD   = '#00d2d2';
-const BG     = 'var(--color-tg-bg)';
 const SURF   = 'var(--color-tg-surface)';
 const SURF2  = 'var(--color-tg-surface-2)';
 const BORDER = 'var(--color-tg-border)';
@@ -238,6 +237,7 @@ function SetupCard({ setup, stats, onClick }: {
           )}
         </div>
         {setup.image_url && (
+          // eslint-disable-next-line @next/next/no-img-element -- user-uploaded Supabase-storage thumbnail; host isn't in the optimizer allowlist and the render is tiny
           <img src={setup.image_url} alt="" className="w-14 h-10 rounded-lg object-cover shrink-0" />
         )}
       </div>
@@ -316,6 +316,7 @@ function DetailView({ setup, stats, linked, unlinked, aiReview, aiLoading, onBac
             )}
           </div>
           {setup.image_url && (
+            // eslint-disable-next-line @next/next/no-img-element -- user-uploaded Supabase-storage thumbnail; host isn't in the optimizer allowlist and the render is tiny
             <img src={setup.image_url} alt="" className="w-24 h-16 rounded-xl object-cover shrink-0" />
           )}
         </div>
@@ -591,6 +592,7 @@ function CreateForm({ userId, supabase, onSave, onCancel }: {
           <input ref={fileRef} type="file" accept="image/*" onChange={onFileChange} className="hidden" />
           {imgPreview ? (
             <div className="relative">
+              {/* eslint-disable-next-line @next/next/no-img-element -- local data-URL preview of the uploaded setup image; next/image can't optimize data URLs */}
               <img src={imgPreview} alt="Preview" className="w-full max-h-48 rounded-xl object-cover" />
               <button onClick={() => { setImgFile(null); setImgPreview(null); }}
                 className="absolute top-2 left-2 w-7 h-7 rounded-full flex items-center justify-center"

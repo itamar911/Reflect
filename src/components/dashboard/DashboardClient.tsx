@@ -9,6 +9,7 @@ import type { DashTrade } from '@/lib/dashboard/trades';
 import { tradeMoneyPnl, hasMoneyPnl, isWinningTrade } from '@/lib/pnl';
 import { getPlanLimits, type PlanTier } from '@/lib/plans/config';
 import UpgradeModal from '@/components/plans/UpgradeModal';
+import { useMediaQuery } from '@/lib/hooks';
 
 export type { DashTrade } from '@/lib/dashboard/trades';
 
@@ -369,13 +370,14 @@ function SemiGauge({ segments, width = 140, strokeWidth = 12 }: {
   }
 
   const validSegs = segments.filter(sg => Math.max(sg.value, 0) > 0);
+  const segsWithEnd: { color: string; end: number }[] = [];
   let cursor = 180;
-  const segsWithEnd = validSegs.map((sg, idx) => {
+  for (const [idx, sg] of validSegs.entries()) {
     const span = (Math.max(sg.value, 0) / total) * 180;
     const end  = idx === validSegs.length - 1 ? 0 : cursor - span;
     cursor = end;
-    return { color: sg.color, end };
-  });
+    segsWithEnd.push({ color: sg.color, end });
+  }
 
   // Painter's algorithm: draw last segment first as a full 180°→0° arc, then each
   // preceding segment paints over from 180° to its own end angle. Any sub-pixel gap
@@ -1235,15 +1237,8 @@ export default function DashboardClient({
   const [isCurrentWeek, setIsCurrentWeek] = useState(false);
   const [latestWeekStart, setLatestWeekStart] = useState<string | null>(null);
   const [previousStats, setPreviousStats] = useState<WeeklyStats | null>(null);
-  const [isMobile, setIsMobile] = useState(true);
-
-  useEffect(() => {
-    const media = window.matchMedia('(max-width: 767px)');
-    setIsMobile(media.matches);
-    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
-    media.addEventListener('change', handler);
-    return () => media.removeEventListener('change', handler);
-  }, []);
+  // Mobile-first: assume mobile during SSR/hydration, like the old state init
+  const isMobile = useMediaQuery('(max-width: 767px)', true);
 
   // "Now" is null during SSR and the first client render (matching), then
   // becomes a real Date once mounted — avoids hydration mismatches from

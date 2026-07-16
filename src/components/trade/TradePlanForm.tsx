@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, useSyncExternalStore } from 'react';
 import { Check, AlertTriangle } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { validateTradePlan, DEFAULT_PRESET_RULES } from '@/lib/validators/RulesetValidator';
@@ -18,6 +18,19 @@ import { getPlanLimits, isPro, type PlanTier } from '@/lib/plans/config';
 import UpgradeModal from '@/components/plans/UpgradeModal';
 import { fetchActiveRuleViolation } from '@/lib/rules/fetchActiveRuleViolation';
 import { logRuleViolations, overrideRuleViolations, type RuleViolationLogInput } from '@/lib/rules/logRuleViolation';
+
+// Saved TP/SL input unit preference, read during render via
+// useSyncExternalStore (null on the server / until a valid value is saved).
+const emptySubscribe = () => () => {};
+const getServerNull = () => null;
+const getSavedPnlMode = (): 'points' | 'percent' | null => {
+  const saved = localStorage.getItem('trade-plan-pnl-mode');
+  return saved === 'points' || saved === 'percent' ? saved : null;
+};
+const getSavedCurrency = (): PnlCurrency | null => {
+  const saved = localStorage.getItem('trade-plan-pnl-currency');
+  return saved === '₪' || saved === '$' ? saved : null;
+};
 
 // Monday 00:00 UTC of the current week — matches Postgres date_trunc('week', ...).
 function getWeekStartUTC(now: Date = new Date()): Date {
@@ -131,21 +144,29 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
   const [submitLoading, setSubmitLoading] = useState(false);
   const [todayLossAmount, setTodayLossAmount] = useState(0);
   const [personalStrategyRows, setPersonalStrategyRows] = useState<PersonalStrategy[]>([]);
-  const [pnlMode, setPnlMode] = useState<'points' | 'percent'>('points');
-  const [currency, setCurrency] = useState<PnlCurrency>('₪');
+  // Session override wins over the saved preference, which wins over the default
+  const [pnlModeOverride, setPnlModeOverride] = useState<'points' | 'percent' | null>(null);
+  const [currencyOverride, setCurrencyOverride] = useState<PnlCurrency | null>(null);
   const [pnlFieldsError, setPnlFieldsError] = useState(false);
   const [slInput, setSlInput] = useState('');
   const [tpInput, setTpInput] = useState('');
   const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set());
   const [strategyConditionsChecked, setStrategyConditionsChecked] = useState<Record<string, boolean>>({});
-  const [todayStrategyTradeCount, setTodayStrategyTradeCount] = useState(0);
+  const [fetchedStrategyTradeCount, setFetchedStrategyTradeCount] = useState(0);
   const [chartSymbol, setChartSymbol] = useState('');
   const [chartTimeframe, setChartTimeframe] = useState('');
   const [chartEntry, setChartEntry] = useState<number | null>(null);
   const [chartSL, setChartSL] = useState<number | null>(null);
   const [chartTP, setChartTP] = useState<number | null>(null);
 
-  const supabase = createClient();
+  // Stable client identity so it can appear in hook deps without refiring
+  // them every render (in demo mode createClient returns a fresh Proxy).
+  const supabase = useMemo(() => createClient(), []);
+
+  const savedPnlMode = useSyncExternalStore(emptySubscribe, getSavedPnlMode, getServerNull);
+  const savedCurrency = useSyncExternalStore(emptySubscribe, getSavedCurrency, getServerNull);
+  const pnlMode = pnlModeOverride ?? savedPnlMode ?? 'points';
+  const currency = currencyOverride ?? savedCurrency ?? '₪';
 
   function toggleChecklistItem(item: string) {
     setCheckedItems((prev) => {
@@ -163,21 +184,13 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     setStrategyConditionsChecked((prev) => ({ ...prev, [condition]: !prev[condition] }));
   }
 
-  // Restore saved TP/SL input unit preference
-  useEffect(() => {
-    const saved = localStorage.getItem('trade-plan-pnl-mode');
-    if (saved === 'points' || saved === 'percent') setPnlMode(saved);
-    const savedCurrency = localStorage.getItem('trade-plan-pnl-currency');
-    if (savedCurrency === '₪' || savedCurrency === '$') setCurrency(savedCurrency);
-  }, []);
-
   function changePnlMode(mode: 'points' | 'percent') {
-    setPnlMode(mode);
+    setPnlModeOverride(mode);
     localStorage.setItem('trade-plan-pnl-mode', mode);
   }
 
   function changeCurrency(c: PnlCurrency) {
-    setCurrency(c);
+    setCurrencyOverride(c);
     localStorage.setItem('trade-plan-pnl-currency', c);
   }
 
@@ -270,9 +283,12 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     }
 
     setLoading(false);
-  }, [userId]);
+  }, [supabase, userId]);
 
   useEffect(() => {
+    // loadContext flips the loading flag synchronously to mark the fetch this
+    // effect itself starts — deferring it would blank the spinner for a frame.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- marks the in-flight state of the fetch started here
     if (isOpen) loadContext();
   }, [isOpen, loadContext]);
 
@@ -296,23 +312,31 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     [personalStrategyRows, form.strategy],
   );
 
-  // Reset checklist state whenever the selected strategy (or its condition set) changes —
-  // every condition is explicitly seeded to false, never true, so a freshly selected
-  // strategy always starts fully unchecked.
-  useEffect(() => {
+  // Reset checklist state whenever the selected strategy changes — every
+  // condition is explicitly seeded to false, never true, so a freshly selected
+  // strategy always starts fully unchecked. Adjusted during render (the
+  // documented compare-and-set pattern) instead of an effect, so the seeded
+  // checklist and the strategy land in the same commit.
+  const [seededStrategyId, setSeededStrategyId] = useState<string | null | undefined>(undefined);
+  if (seededStrategyId !== (selectedStrategy?.id ?? null)) {
+    setSeededStrategyId(selectedStrategy?.id ?? null);
     const initial: Record<string, boolean> = {};
     for (const condition of selectedStrategy?.entry_conditions ?? []) {
       initial[condition] = false;
     }
     setStrategyConditionsChecked(initial);
-  }, [selectedStrategy?.id]);
+  }
 
-  // Live count of today's trades logged under this strategy (for the daily-trade-limit check)
+  // Live count of today's trades logged under this strategy (for the
+  // daily-trade-limit check). The fetched number only applies while a
+  // limit-bearing strategy is selected; otherwise the count is 0 by definition.
+  const todayStrategyTradeCount =
+    !selectedStrategy || selectedStrategy.max_daily_trades == null
+      ? 0
+      : fetchedStrategyTradeCount;
+
   useEffect(() => {
-    if (!selectedStrategy || selectedStrategy.max_daily_trades == null) {
-      setTodayStrategyTradeCount(0);
-      return;
-    }
+    if (!selectedStrategy || selectedStrategy.max_daily_trades == null) return;
     const todayStart = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
     let cancelled = false;
     supabase
@@ -322,10 +346,10 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
       .eq('strategy', selectedStrategy.name)
       .gte('submitted_at', todayStart)
       .then(({ count }) => {
-        if (!cancelled) setTodayStrategyTradeCount(count ?? 0);
+        if (!cancelled) setFetchedStrategyTradeCount(count ?? 0);
       });
     return () => { cancelled = true; };
-  }, [selectedStrategy, userId]);
+  }, [selectedStrategy, userId, supabase]);
 
   const complianceChecks = useMemo(() => {
     if (!selectedStrategy) return [];
@@ -392,10 +416,6 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
   useEffect(() => () => {
     if (highlightTimeoutRef.current) clearTimeout(highlightTimeoutRef.current);
   }, []);
-
-  function setFieldRef(key: RequiredFieldKey) {
-    return (el: HTMLDivElement | null) => { fieldRefs.current[key] = el; };
-  }
 
   function fieldHighlightStyle(key: RequiredFieldKey): React.CSSProperties {
     return {
@@ -705,7 +725,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
 
             {/* Step 1 — Asset, direction & strategy */}
             <FormSection step={1} label="נכס ואסטרטגיה" active={activeStep === 1} done={activeStep > 1}>
-              <div ref={setFieldRef('symbol')} style={fieldHighlightStyle('symbol')}>
+              <div ref={(el) => { fieldRefs.current.symbol = el; }} style={fieldHighlightStyle('symbol')}>
                 <input
                   type="text"
                   placeholder="סימול נייר (SPY, EURUSD, AAPL...)"
@@ -715,7 +735,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                   style={{ background: 'var(--color-tg-surface-2)' }}
                 />
               </div>
-              <div ref={setFieldRef('direction')} style={fieldHighlightStyle('direction')} className="grid grid-cols-2 gap-2">
+              <div ref={(el) => { fieldRefs.current.direction = el; }} style={fieldHighlightStyle('direction')} className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
                   onClick={() => { setForm({ ...form, direction: 'long' }); setValidationResult(null); }}
@@ -741,7 +761,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                   Short ▼
                 </button>
               </div>
-              <div ref={setFieldRef('strategy')} style={fieldHighlightStyle('strategy')} className="flex flex-wrap gap-2">
+              <div ref={(el) => { fieldRefs.current.strategy = el; }} style={fieldHighlightStyle('strategy')} className="flex flex-wrap gap-2">
                 {STRATEGIES.map((s) => (
                   <StrategyChip
                     key={s}
@@ -810,14 +830,14 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                 </div>
               </div>
               <div className="grid grid-cols-3 gap-2">
-                <div ref={setFieldRef('entry_price')} style={fieldHighlightStyle('entry_price')}>
+                <div ref={(el) => { fieldRefs.current.entry_price = el; }} style={fieldHighlightStyle('entry_price')}>
                   <PriceInput
                     label="כניסה"
                     value={form.entry_price}
                     onChange={(v) => { setForm({ ...form, entry_price: v }); setValidationResult(null); }}
                   />
                 </div>
-                <div ref={setFieldRef('stop_loss')} style={fieldHighlightStyle('stop_loss')}>
+                <div ref={(el) => { fieldRefs.current.stop_loss = el; }} style={fieldHighlightStyle('stop_loss')}>
                   <PriceInput
                     label={`Stop Loss (${pnlMode === 'points' ? 'נק׳' : '%'})`}
                     value={slInput}
@@ -830,7 +850,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                     }
                   />
                 </div>
-                <div ref={setFieldRef('take_profit')} style={fieldHighlightStyle('take_profit')}>
+                <div ref={(el) => { fieldRefs.current.take_profit = el; }} style={fieldHighlightStyle('take_profit')}>
                   <PriceInput
                     label={`Take Profit (${pnlMode === 'points' ? 'נק׳' : '%'})`}
                     value={tpInput}
@@ -870,7 +890,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  <div ref={setFieldRef('units')} style={fieldHighlightStyle('units')} className="flex flex-col gap-1">
+                  <div ref={(el) => { fieldRefs.current.units = el; }} style={fieldHighlightStyle('units')} className="flex flex-col gap-1">
                     <label className="text-xs font-medium text-tg-muted">יחידות/חוזים</label>
                     <input
                       type="number"
@@ -1024,7 +1044,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                       </button>
                     ))}
                   </div>
-                  <div ref={setFieldRef('trade_reason')} style={fieldHighlightStyle('trade_reason')}>
+                  <div ref={(el) => { fieldRefs.current.trade_reason = el; }} style={fieldHighlightStyle('trade_reason')}>
                     <textarea
                       rows={2}
                       placeholder="תאר מה אתה רואה בגרף..."

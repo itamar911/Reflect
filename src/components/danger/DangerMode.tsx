@@ -15,7 +15,6 @@ export default function DangerMode({
   consecutiveLosses,
   emotionalState,
   dailyLossExceeded,
-  maxDailyLoss,
   currentLoss,
 }: DangerModeProps) {
   const [dismissed, setDismissed] = useState(false);

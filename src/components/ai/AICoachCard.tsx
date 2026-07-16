@@ -53,7 +53,14 @@ export default function AICoachCard({ trades }: { trades: Trade[] }) {
   }
 
   useEffect(() => {
+    // Fetch-once-per-dataset effect: setLoading(true) flags the request this
+    // effect itself starts — deferring it would blank the spinner for a frame.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- marks the in-flight state of the fetch started here
     if (trades.length >= 3 && !loaded) fetchInsights();
+    // Keyed to trades.length on purpose: `trades` gets a fresh identity every
+    // parent render and `loaded` only flips inside this flow — canonical deps
+    // would refetch the AI insights on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trades.length]);
 
   if (trades.length < 3) {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
@@ -19,6 +19,15 @@ interface AuthScreenProps {
   mode: Mode;
 }
 
+// Errors forwarded from /auth/callback (expired/used email links) arrive as
+// an ?error= query param. The URL never changes during the screen's life, so
+// expose it as an external store: empty during SSR/hydration (the page is
+// prerendered without query params), read once on the client.
+const emptySubscribe = () => () => {};
+const getCallbackErrorCode = () =>
+  new URLSearchParams(window.location.search).get('error') ?? '';
+const getServerCallbackErrorCode = () => '';
+
 export default function AuthScreen({ mode }: AuthScreenProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -26,26 +35,27 @@ export default function AuthScreen({ mode }: AuthScreenProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [callbackError, setCallbackError] = useState('');
+  const [callbackErrorDismissed, setCallbackErrorDismissed] = useState(false);
 
   const supabase = createClient();
   const router = useRouter();
 
-  // Errors forwarded from /auth/callback (expired/used email links).
-  // Read after mount — the page is prerendered without query params.
-  useEffect(() => {
-    const code = new URLSearchParams(window.location.search).get('error');
-    if (code && CALLBACK_ERROR_MESSAGES[code]) {
-      setCallbackError(CALLBACK_ERROR_MESSAGES[code]);
-    }
-  }, []);
+  const callbackErrorCode = useSyncExternalStore(
+    emptySubscribe,
+    getCallbackErrorCode,
+    getServerCallbackErrorCode,
+  );
+  const callbackError =
+    !callbackErrorDismissed && callbackErrorCode
+      ? (CALLBACK_ERROR_MESSAGES[callbackErrorCode] ?? '')
+      : '';
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError('');
     setSuccess('');
-    setCallbackError('');
+    setCallbackErrorDismissed(true);
 
     if (mode === 'signup') {
       const { error } = await supabase.auth.signUp({

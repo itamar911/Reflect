@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { SlidersHorizontal, ShieldAlert, GraduationCap, Check, AlertTriangle, type LucideIcon } from 'lucide-react';
 import { ScrollReveal } from './ScrollReveal';
 import { SectionHeading } from './SectionHeading';
+import { usePrefersReducedMotion } from '@/lib/hooks';
 
 const STEPS: { icon: LucideIcon; title: string; body: string }[] = [
   {
@@ -84,15 +85,13 @@ function TradeCheckMock() {
 
 /** Step 3 micro-mock: discipline score ticking up once the section is in view. */
 function ScoreCounterMock({ active }: { active: boolean }) {
-  const [value, setValue] = useState(0);
+  const [animatedValue, setAnimatedValue] = useState(0);
+  const reducedMotion = usePrefersReducedMotion();
+  // Reduced motion shows the final score immediately instead of counting up
+  const value = reducedMotion ? (active ? 88 : 0) : animatedValue;
 
   useEffect(() => {
-    if (!active) return;
-
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      setValue(88);
-      return;
-    }
+    if (!active || reducedMotion) return;
 
     const duration = 1200;
     const target = 88;
@@ -101,13 +100,13 @@ function ScoreCounterMock({ active }: { active: boolean }) {
 
     const tick = (now: number) => {
       const progress = Math.min(1, (now - start) / duration);
-      setValue(Math.round(progress * target));
+      setAnimatedValue(Math.round(progress * target));
       if (progress < 1) raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
 
     return () => cancelAnimationFrame(raf);
-  }, [active]);
+  }, [active, reducedMotion]);
 
   return (
     <div
@@ -136,21 +135,19 @@ function ScoreCounterMock({ active }: { active: boolean }) {
 
 export function HowItWorksSection() {
   const ref = useRef<HTMLDivElement>(null);
-  const [inView, setInView] = useState(false);
+  const [intersected, setIntersected] = useState(false);
+  const reducedMotion = usePrefersReducedMotion();
+  // Reduced motion skips the scroll trigger and shows the settled state
+  const inView = reducedMotion || intersected;
 
   useEffect(() => {
     const el = ref.current;
-    if (!el) return;
-
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      setInView(true);
-      return;
-    }
+    if (!el || reducedMotion) return;
 
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
-          setInView(true);
+          setIntersected(true);
           observer.disconnect();
         }
       },
@@ -159,7 +156,7 @@ export function HowItWorksSection() {
 
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [reducedMotion]);
 
   return (
     <section className="section-alt relative py-24 px-4 md:px-8 lg:px-10">
