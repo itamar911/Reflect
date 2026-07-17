@@ -139,6 +139,35 @@ body {
   transform: translate(-50%, -50%);
 }
 
+/* ── Sidebar toggle handle ────────────────────────────────
+   Solid accent pill attached to the sidebar's edge (RTL: rounded on the
+   left, flat against the panel). Visual styling lives here; positioning
+   stays inline in AppShell since it differs per state/viewport. */
+.sidebar-handle {
+  background: #00d2d2;
+  color: #0a0a0f;
+  border-radius: 10px 0 0 10px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35), 0 0 12px rgba(0, 210, 210, 0.4);
+  transition: filter 0.15s ease, box-shadow 0.15s ease;
+}
+.sidebar-handle:hover {
+  filter: brightness(1.12);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35), 0 0 18px rgba(0, 210, 210, 0.55);
+}
+.sidebar-handle:active { filter: brightness(0.95); }
+.sidebar-handle-icon { transition: transform 0.15s ease; }
+.sidebar-handle:hover  .sidebar-handle-icon { transform: scale(1.12); }
+.sidebar-handle:active .sidebar-handle-icon { transform: scale(0.9); }
+
+/* Slow beckoning glow until the user toggles the sidebar once (ever —
+   flagged in localStorage). Disabled under prefers-reduced-motion by the
+   .sidebar-motion override below. */
+@keyframes handle-beckon {
+  0%, 100% { box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35), 0 0 12px rgba(0, 210, 210, 0.4); }
+  50%      { box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35), 0 0 24px rgba(0, 210, 210, 0.8); }
+}
+.sidebar-handle-pulse { animation: handle-beckon 2.4s ease-in-out infinite; }
+
 /* Sidebar active link: swap gold text → dark text in light mode for readability */
 html.light .sidebar-link-active {
   color: var(--text-primary) !important;

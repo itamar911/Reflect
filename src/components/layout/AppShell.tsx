@@ -33,6 +33,7 @@ const getEmbedded = () =>
   new URLSearchParams(window.location.search).get('embed') === '1' ||
   window.self !== window.top;
 const getSavedExpanded = () => localStorage.getItem('sidebar-expanded') === 'true';
+const getHandleUsed = () => localStorage.getItem('sidebar-handle-used') === 'true';
 const subscribeWindowResize = (onChange: () => void) => {
   window.addEventListener('resize', onChange);
   return () => window.removeEventListener('resize', onChange);
@@ -208,6 +209,11 @@ export default function AppShell({
   const [expandedOverride, setExpandedOverride] = useState<boolean | null>(null);
   const expanded = expandedOverride ?? savedExpanded;
   const isMobile = useSyncExternalStore(subscribeWindowResize, getIsMobile, getServerFalse);
+  // First-use attention pulse on the toggle handle — stops (forever) once the
+  // user has toggled the sidebar once.
+  const savedHandleUsed = useSyncExternalStore(emptySubscribe, getHandleUsed, getServerFalse);
+  const [handleUsedNow, setHandleUsedNow] = useState(false);
+  const handleUsed = savedHandleUsed || handleUsedNow;
   const [ruleBlock,   setRuleBlock]   = useState<RuleViolationResult | null>(null);
   const [ruleWarning, setRuleWarning] = useState<string | null>(null);
 
@@ -276,6 +282,8 @@ export default function AppShell({
     const next = !expanded;
     setExpandedOverride(next);
     if (!isMobile) localStorage.setItem('sidebar-expanded', String(next));
+    setHandleUsedNow(true);
+    localStorage.setItem('sidebar-handle-used', 'true');
   }
 
   async function handleSignOut() {
@@ -317,60 +325,43 @@ export default function AppShell({
         onClick={() => setExpandedOverride(false)}
       />
 
-      {/* ── Toggle handle ────────────────────────────────────────── */}
+      {/* ── Toggle handle ────────────────────────────────────────────
+          Visual styling (solid accent pill + glow + hover/active) lives in
+          .sidebar-handle in globals.css; only positioning differs per state
+          and stays inline. */}
       <button
         onClick={toggle}
         aria-label={expanded ? 'כווץ סרגל' : 'הרחב סרגל'}
-        className="hit-40 fixed z-50 flex items-center justify-center w-5 h-9"
+        className={`sidebar-handle hit-40 fixed z-50 flex items-center justify-center w-7 h-14${handleUsed ? '' : ' sidebar-handle-pulse'}`}
         style={
           isMobile
-            ? expanded
-              ? {
-                  // Open: vertically centered on the drawer's now-visible edge,
-                  // same placement the handle has always used when there's an
-                  // edge to sit on.
-                  right:        W_OPEN,
-                  top:          '50%',
-                  transform:    'translateY(-50%)',
-                  background:   NAV_BG,
-                  border:       `1px solid ${SEP}`,
-                  borderRight:  'none',
-                  borderRadius: '6px 0 0 6px',
-                  color:        'rgba(0,210,210,0.55)',
-                }
-              : {
-                  // Closed: the drawer is fully off-canvas, so there's no
-                  // panel edge to attach to — sit flush on the screen edge
-                  // instead, vertically centered like the open handle is.
-                  right:        0,
-                  top:          '50%',
-                  transform:    'translateY(-50%)',
-                  background:   NAV_BG,
-                  border:       `1px solid ${SEP}`,
-                  borderRight:  'none',
-                  borderRadius: '6px 0 0 6px',
-                  color:        'rgba(0,210,210,0.55)',
-                }
+            ? {
+                // Open: vertically centered on the drawer's visible edge.
+                // Closed: the drawer is fully off-canvas, so there's no panel
+                // edge to attach to — sit flush on the screen edge instead.
+                right:     expanded ? W_OPEN : 0,
+                top:       '50%',
+                transform: 'translateY(-50%)',
+              }
             : {
                 // Tracks the sidebar's visible edge via transform only (isolated
-                // fixed element — moving it doesn't reflow any sibling).
-                right:        W_SHUT,
-                top:          '50%',
-                transform:    `translate(${expanded ? -RAIL_INSET : 0}px, -50%)`,
-                transition:   `transform ${SIDEBAR_TRANSITION}`,
-                background:   NAV_BG,
-                border:       `1px solid ${SEP}`,
-                borderRight:  'none',
-                borderRadius: '6px 0 0 6px',
-                color:        'rgba(0,210,210,0.55)',
+                // fixed element — moving it doesn't reflow any sibling). The
+                // inline transition replaces the class's, so restate the
+                // hover-feedback properties alongside transform.
+                right:      W_SHUT,
+                top:        '50%',
+                transform:  `translate(${expanded ? -RAIL_INSET : 0}px, -50%)`,
+                transition: `transform ${SIDEBAR_TRANSITION}, filter 0.15s ease, box-shadow 0.15s ease`,
               }
         }
       >
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-          strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-          style={{ transform: expanded ? 'rotate(0deg)' : 'rotate(180deg)', transition: `transform ${SIDEBAR_TRANSITION}` }}>
-          <polyline points="9 18 15 12 9 6"/>
-        </svg>
+        <span className="sidebar-handle-icon flex items-center justify-center">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
+            style={{ transform: expanded ? 'rotate(0deg)' : 'rotate(180deg)', transition: `transform ${SIDEBAR_TRANSITION}` }}>
+            <polyline points="9 18 15 12 9 6"/>
+          </svg>
+        </span>
       </button>
 
       {/* ── Right sidebar ─────────────────────────────────────────── */}
