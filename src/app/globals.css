@@ -321,6 +321,17 @@ input[type="button"] {
 .page-enter > * > :nth-child(14) { animation-delay: 1950ms; }
 .page-enter > * > :nth-child(15) { animation-delay: 2100ms; }
 
+/* Applied by AppShell until just after hydration: the server always renders
+   the sidebar collapsed, so a saved-open sidebar corrects itself on the first
+   client render — this makes that correction instant instead of a full
+   sidebar/content slide on every hard load. Transitions only: the handle's
+   first-use pulse animation may keep running. */
+.sidebar-motion-hold,
+.sidebar-motion-hold * {
+  transition-duration: 0ms !important;
+  transition-delay: 0ms !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .page-enter,
   .page-enter > * { animation: none; }

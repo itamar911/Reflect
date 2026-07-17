@@ -214,6 +214,26 @@ export default function AppShell({
   const savedHandleUsed = useSyncExternalStore(emptySubscribe, getHandleUsed, getServerFalse);
   const [handleUsedNow, setHandleUsedNow] = useState(false);
   const handleUsed = savedHandleUsed || handleUsedNow;
+
+  // Hold all sidebar transitions until the rendered state matches the saved
+  // preference. The server always renders the sidebar collapsed (localStorage
+  // is client-only), so a saved-open sidebar corrects itself shortly after
+  // hydration — without this hold that correction plays as a 300ms slide of
+  // the whole content area on every hard load ("the page jumps on its own").
+  // The equality guard (not frame timing) decides the release: the correction
+  // render can land several frames after hydration.
+  const [motionReady, setMotionReady] = useState(false);
+  useEffect(() => {
+    if (motionReady || expanded !== getSavedExpanded()) return;
+    let raf2: number | null = null;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => setMotionReady(true));
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      if (raf2 !== null) cancelAnimationFrame(raf2);
+    };
+  }, [motionReady, expanded]);
   const [ruleBlock,   setRuleBlock]   = useState<RuleViolationResult | null>(null);
   const [ruleWarning, setRuleWarning] = useState<string | null>(null);
 
@@ -284,6 +304,9 @@ export default function AppShell({
     if (!isMobile) localStorage.setItem('sidebar-expanded', String(next));
     setHandleUsedNow(true);
     localStorage.setItem('sidebar-handle-used', 'true');
+    // A user-initiated toggle always animates — ends the post-hydration hold
+    // even if the saved-state equality guard hasn't released it yet.
+    setMotionReady(true);
   }
 
   async function handleSignOut() {
@@ -311,7 +334,7 @@ export default function AppShell({
   const contentMr = isMobile ? 0 : (expanded ? W_OPEN : W_SHUT);
 
   return (
-    <div dir="rtl" className="min-h-screen sidebar-motion">
+    <div dir="rtl" className={`min-h-screen sidebar-motion${motionReady ? '' : ' sidebar-motion-hold'}`}>
 
       {/* Mobile backdrop — always mounted, fades so it never pops in/out */}
       <div
