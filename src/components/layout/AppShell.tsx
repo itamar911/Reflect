@@ -326,13 +326,13 @@ export default function AppShell({
       />
 
       {/* ── Toggle handle ────────────────────────────────────────────
-          Visual styling (solid accent pill + glow + hover/active) lives in
-          .sidebar-handle in globals.css; only positioning differs per state
-          and stays inline. */}
+          The button owns positioning (differs per state/viewport, inline)
+          and the hit area; the inner .sidebar-handle span owns every visual
+          (gradient half-pill + glow + hover lift) — see globals.css. */}
       <button
         onClick={toggle}
         aria-label={expanded ? 'כווץ סרגל' : 'הרחב סרגל'}
-        className={`sidebar-handle hit-40 fixed z-50 flex items-center justify-center w-7 h-14${handleUsed ? '' : ' sidebar-handle-pulse'}`}
+        className="sidebar-handle-btn hit-40 fixed z-50 w-7 h-14"
         style={
           isMobile
             ? {
@@ -345,22 +345,27 @@ export default function AppShell({
               }
             : {
                 // Tracks the sidebar's visible edge via transform only (isolated
-                // fixed element — moving it doesn't reflow any sibling). The
-                // inline transition replaces the class's, so restate the
-                // hover-feedback properties alongside transform.
+                // fixed element — moving it doesn't reflow any sibling).
                 right:      W_SHUT,
                 top:        '50%',
                 transform:  `translate(${expanded ? -RAIL_INSET : 0}px, -50%)`,
-                transition: `transform ${SIDEBAR_TRANSITION}, filter 0.15s ease, box-shadow 0.15s ease`,
+                transition: `transform ${SIDEBAR_TRANSITION}`,
               }
         }
       >
-        <span className="sidebar-handle-icon flex items-center justify-center">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
-            style={{ transform: expanded ? 'rotate(0deg)' : 'rotate(180deg)', transition: `transform ${SIDEBAR_TRANSITION}` }}>
-            <polyline points="9 18 15 12 9 6"/>
-          </svg>
+        <span className={`sidebar-handle${handleUsed ? '' : ' sidebar-handle-pulse'}`}>
+          <span className="sidebar-handle-icon flex items-center justify-center">
+            {/* translateX(1px) = optical centering, nudged toward the point;
+                it rides inside the rotation, so it flips with the chevron. */}
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
+              style={{
+                transform: `rotate(${expanded ? 0 : 180}deg) translateX(1px)`,
+                transition: `transform ${SIDEBAR_TRANSITION}`,
+              }}>
+              <polyline points="9 18 15 12 9 6"/>
+            </svg>
+          </span>
         </span>
       </button>
 

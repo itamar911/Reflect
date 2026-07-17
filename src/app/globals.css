@@ -140,31 +140,60 @@ body {
 }
 
 /* ── Sidebar toggle handle ────────────────────────────────
-   Solid accent pill attached to the sidebar's edge (RTL: rounded on the
-   left, flat against the panel). Visual styling lives here; positioning
-   stays inline in AppShell since it differs per state/viewport. */
+   Half-pill tab attached to the sidebar's edge (RTL: rounded on the left,
+   flat against the panel). The outer button (.sidebar-handle-btn, inline
+   styles in AppShell) owns positioning + hit area; this inner layer owns
+   every visual — so hover lift / press transforms never collide with the
+   button's positioning transforms. Depth comes from a vertical gradient,
+   a 1px top highlight (glass catching light), an inner bottom shade, a
+   soft drop shadow, and a tight accent halo. */
 .sidebar-handle {
-  background: #00d2d2;
-  color: #0a0a0f;
-  border-radius: 10px 0 0 10px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35), 0 0 12px rgba(0, 210, 210, 0.4);
-  transition: filter 0.15s ease, box-shadow 0.15s ease;
+  /* Shadow stack pieces as variables so hover, the light-theme override and
+     the pulse keyframes recompose the same layers instead of drifting. The
+     diagonal insets trace the upper-left curve (rim light) and lower inner
+     edge (shade) of the RTL half-pill. */
+  --h-inset:
+    inset 1px 1.5px 1px rgba(255, 255, 255, 0.5),
+    inset -0.5px -1.5px 1px rgba(0, 70, 74, 0.32);
+  --h-drop:       0 3px 8px rgba(0, 0, 0, 0.3);
+  --h-drop-hover: 0 5px 12px rgba(0, 0, 0, 0.32);
+  --h-glow:       0 0 9px rgba(0, 210, 210, 0.38);
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, #3ee6e4 0%, #00d2d2 48%, #00aeb2 100%);
+  color: #053338;
+  border-radius: 28px 0 0 28px;
+  box-shadow: var(--h-inset), var(--h-drop), var(--h-glow);
+  transition: transform 0.18s ease, filter 0.18s ease, box-shadow 0.18s ease;
 }
-.sidebar-handle:hover {
-  filter: brightness(1.12);
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35), 0 0 18px rgba(0, 210, 210, 0.55);
+/* Light surfaces: a near-black drop shadow reads as a heavy crescent —
+   soften it toward a deep teal. */
+html.light .sidebar-handle {
+  --h-drop:       0 3px 8px rgba(10, 60, 64, 0.2);
+  --h-drop-hover: 0 5px 12px rgba(10, 60, 64, 0.24);
 }
-.sidebar-handle:active { filter: brightness(0.95); }
-.sidebar-handle-icon { transition: transform 0.15s ease; }
-.sidebar-handle:hover  .sidebar-handle-icon { transform: scale(1.12); }
-.sidebar-handle:active .sidebar-handle-icon { transform: scale(0.9); }
+.sidebar-handle-btn:hover .sidebar-handle {
+  transform: translateY(-1px);
+  filter: brightness(1.08);
+  box-shadow: var(--h-inset), var(--h-drop-hover), 0 0 13px rgba(0, 210, 210, 0.6);
+}
+.sidebar-handle-btn:active .sidebar-handle {
+  transform: translateY(0) scale(0.97);
+  filter: brightness(0.96);
+}
+.sidebar-handle-icon { transition: transform 0.18s ease; }
+.sidebar-handle-btn:hover  .sidebar-handle-icon { transform: scale(1.08); }
+.sidebar-handle-btn:active .sidebar-handle-icon { transform: scale(0.92); }
 
 /* Slow beckoning glow until the user toggles the sidebar once (ever —
    flagged in localStorage). Disabled under prefers-reduced-motion by the
-   .sidebar-motion override below. */
+   .sidebar-motion override below. Only the halo layer breathes. */
 @keyframes handle-beckon {
-  0%, 100% { box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35), 0 0 12px rgba(0, 210, 210, 0.4); }
-  50%      { box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35), 0 0 24px rgba(0, 210, 210, 0.8); }
+  0%, 100% { box-shadow: var(--h-inset), var(--h-drop), var(--h-glow); }
+  50%      { box-shadow: var(--h-inset), var(--h-drop), 0 0 16px rgba(0, 210, 210, 0.8); }
 }
 .sidebar-handle-pulse { animation: handle-beckon 2.4s ease-in-out infinite; }
 
