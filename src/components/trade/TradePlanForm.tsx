@@ -128,9 +128,10 @@ interface TradePlanFormProps {
   onSuccess: () => void;
   /** A "warn"-action personal rule that's currently triggered — shown as a persistent banner, doesn't block submission. */
   initialWarning?: string | null;
+  disciplineAlertsEnabled: boolean;
 }
 
-export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess, initialWarning }: TradePlanFormProps) {
+export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess, initialWarning, disciplineAlertsEnabled }: TradePlanFormProps) {
   const limits = getPlanLimits(plan);
   const [weekTradeCount, setWeekTradeCount] = useState(0);
   const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
@@ -521,8 +522,11 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     // normally only evaluated once, when the form opens (fetchActiveRuleViolation), and
     // can go stale by the time the user actually submits. Reuses that same check as-is;
     // the generic (non-custom) preset branch it can also return is ignored here since
-    // validateTradePlan above already covers preset rules.
-    const activeCheck = await fetchActiveRuleViolation(userId, limits.realTimeBlocking);
+    // validateTradePlan above already covers preset rules. Skipped when the user has
+    // turned off discipline alerts — matches the gate at form-open time in AppShell.
+    const activeCheck = disciplineAlertsEnabled
+      ? await fetchActiveRuleViolation(userId, limits.realTimeBlocking)
+      : null;
     const customViolation = activeCheck?.customRule ? activeCheck : null;
     const customBlocked = customViolation !== null
       && (customViolation.actionType === 'block_day' || customViolation.actionType === 'block_timer');

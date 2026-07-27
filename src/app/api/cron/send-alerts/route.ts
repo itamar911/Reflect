@@ -255,6 +255,15 @@ async function dispatchAlert(
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+// Parses a saved "HH:MM" setting into just the hour, matched against the
+// Israel wall-clock hour of the current cron invocation. Falls back to the
+// column's own default when the value is missing/malformed.
+function parseHour(time: string | null | undefined, fallback: string): number {
+  const raw = time || fallback;
+  const hour = Number(raw.split(':')[0]);
+  return Number.isFinite(hour) ? hour : Number(fallback.split(':')[0]);
+}
+
 export async function GET(request: Request) {
   // Verify Vercel cron secret
   const authHeader = request.headers.get('authorization');
@@ -263,46 +272,47 @@ export async function GET(request: Request) {
   }
 
   const supabase = createAdminClient();
+  const now = new Date();
 
-  // Determine run type from UTC hour:
-  //   morning run  → 0 5 * * *  (5 AM UTC ≈ 7–8 AM Israel): pre_market + weekly_summary
-  //   evening run  → 0 17 * * * (5 PM UTC ≈ 7–8 PM Israel): end_of_day
-  const now       = new Date();
-  const utcHour   = now.getUTCHours();
-  const isMorning = utcHour < 12;
-
-  // Israel weekday — used for Sunday-only weekly summary
-  const ilParts  = new Intl.DateTimeFormat('en-US', {
+  // vercel.json defines 24 cron entries (one per UTC hour, each still firing
+  // only once/day — required on Vercel's Hobby plan) so this route runs every
+  // Israel wall-clock hour. Deriving the Israel hour/weekday directly from
+  // `now` handles DST automatically instead of hardcoding a UTC offset. Each
+  // user's saved *_time is matched at hour granularity — the finest
+  // resolution available without a per-user timezone/minute scheduling system.
+  const ilParts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'Asia/Jerusalem',
     weekday: 'short',
+    hour: 'numeric',
+    hourCycle: 'h23',
   }).formatToParts(now);
+  const ilHour   = Number(ilParts.find((p) => p.type === 'hour')?.value ?? '0');
   const dayOfWeek = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
     .indexOf(ilParts.find((p) => p.type === 'weekday')?.value ?? '');
-  const isSunday  = dayOfWeek === 0;
+  const isSunday = dayOfWeek === 0;
 
-  const currentUTC = `${String(utcHour).padStart(2,'0')}:${String(now.getUTCMinutes()).padStart(2,'0')} UTC`;
-
-  // Fetch all alert settings
+  // Fetch all alert settings, including the per-user send times
   const { data: settings, error } = await supabase
     .from('alert_settings')
-    .select('user_id, pre_market_enabled, end_of_day_enabled, weekly_summary_enabled');
+    .select(
+      'user_id, pre_market_enabled, pre_market_time, end_of_day_enabled, end_of_day_time, weekly_summary_enabled, weekly_summary_time'
+    );
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  if (!settings || settings.length === 0) return NextResponse.json({ sent: 0, utc: currentUTC });
+  if (!settings || settings.length === 0) return NextResponse.json({ sent: 0, ilHour });
 
   const results = await Promise.allSettled(
     settings.flatMap((s) => {
       const jobs: Promise<void>[] = [];
 
-      if (isMorning) {
-        if (s.pre_market_enabled)
-          jobs.push(dispatchAlert(supabase, s.user_id, 'pre_market'));
-        if (s.weekly_summary_enabled && isSunday)
-          jobs.push(dispatchAlert(supabase, s.user_id, 'weekly_summary'));
-      } else {
-        if (s.end_of_day_enabled)
-          jobs.push(dispatchAlert(supabase, s.user_id, 'end_of_day'));
-      }
+      if (s.pre_market_enabled && parseHour(s.pre_market_time, '08:30') === ilHour)
+        jobs.push(dispatchAlert(supabase, s.user_id, 'pre_market'));
+
+      if (s.end_of_day_enabled && parseHour(s.end_of_day_time, '21:00') === ilHour)
+        jobs.push(dispatchAlert(supabase, s.user_id, 'end_of_day'));
+
+      if (s.weekly_summary_enabled && isSunday && parseHour(s.weekly_summary_time, '09:00') === ilHour)
+        jobs.push(dispatchAlert(supabase, s.user_id, 'weekly_summary'));
 
       return jobs;
     })
@@ -313,5 +323,5 @@ export async function GET(request: Request) {
     .filter((r) => r.status === 'rejected')
     .map((r) => (r as PromiseRejectedResult).reason?.message ?? 'unknown');
 
-  return NextResponse.json({ sent, failed, utc: currentUTC, run: isMorning ? 'morning' : 'evening' });
+  return NextResponse.json({ sent, failed, ilHour, isSunday });
 }

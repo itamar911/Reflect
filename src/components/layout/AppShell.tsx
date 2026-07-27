@@ -178,11 +178,13 @@ export default function AppShell({
   userId,
   displayName,
   plan,
+  disciplineAlertsEnabled,
 }: {
   children: React.ReactNode;
   userId: string;
   displayName: string;
   plan: PlanTier;
+  disciplineAlertsEnabled: boolean;
 }) {
   const pathname = usePathname();
   const router   = useRouter();
@@ -242,6 +244,10 @@ export default function AppShell({
     // whose closure may predate the current route
     if (window.location.pathname.startsWith('/demo')) {
       triggerDemoUpsell();
+      return;
+    }
+    if (!disciplineAlertsEnabled) {
+      setFormOpen(true);
       return;
     }
     const violation = await fetchActiveRuleViolation(userId, limits.realTimeBlocking);
@@ -631,6 +637,7 @@ export default function AppShell({
         onClose={() => setFormOpen(false)}
         onSuccess={() => router.refresh()}
         initialWarning={ruleWarning}
+        disciplineAlertsEnabled={disciplineAlertsEnabled}
       />
       )}
 

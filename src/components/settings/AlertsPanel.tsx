@@ -75,15 +75,9 @@ export default function AlertsPanel({ plan, userId, initialSettings }: AlertsPan
     };
 
     const supabase = createClient();
-    const { data: existing } = await supabase
+    const { error } = await supabase
       .from('alert_settings')
-      .select('id')
-      .eq('user_id', userId)
-      .single();
-
-    const { error } = existing
-      ? await supabase.from('alert_settings').update(payload).eq('user_id', userId)
-      : await supabase.from('alert_settings').insert({ user_id: userId, ...payload });
+      .upsert({ user_id: userId, ...payload }, { onConflict: 'user_id' });
 
     setSaving(false);
     if (error) {
@@ -95,8 +89,6 @@ export default function AlertsPanel({ plan, userId, initialSettings }: AlertsPan
   }, [canCustomize, userId]);
 
   function toggleAlert(id: string) {
-    const isLocked = ALERTS.find((a) => a.id === id)?.proOnly && plan !== 'pro';
-    if (!canCustomize || isLocked) return;
     const newEnabled = { ...enabled, [id]: !enabled[id] };
     setEnabled(newEnabled);
     save(newEnabled, times);
@@ -114,10 +106,16 @@ export default function AlertsPanel({ plan, userId, initialSettings }: AlertsPan
         const isLocked = alert.proOnly && plan !== 'pro';
         const isDisabled = !canCustomize || isLocked;
 
+        const lockCaption = isLocked
+          ? 'שדרג ל-Pro כדי להפעיל התראה זו'
+          : !canCustomize
+          ? 'שדרג לחשבון Basic ומעלה כדי להפעיל התראה זו'
+          : undefined;
+
         return (
           <div key={alert.id}
             className={`flex items-start justify-between gap-3 py-4 ${i < ALERTS.length - 1 ? 'border-b border-tg-border' : ''}`}
-            style={{ opacity: isLocked ? 0.55 : 1 }}>
+            style={{ opacity: isDisabled ? 0.55 : 1 }}>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <p className="text-sm font-medium text-tg-text">{alert.label}</p>
@@ -131,6 +129,9 @@ export default function AlertsPanel({ plan, userId, initialSettings }: AlertsPan
                 )}
               </div>
               <p className="text-xs text-tg-text-2 mt-0.5">{alert.description}</p>
+              {lockCaption && (
+                <p className="text-[11px] mt-1" style={{ color: 'var(--color-tg-muted)' }}>{lockCaption}</p>
+              )}
               {alert.hasTime && canCustomize && !isLocked && enabled[alert.id] && (
                 <div className="flex items-center gap-2 mt-2">
                   <span className="text-xs text-tg-muted">שעת שליחה:</span>
@@ -147,10 +148,13 @@ export default function AlertsPanel({ plan, userId, initialSettings }: AlertsPan
 
             <button
               onClick={() => toggleAlert(alert.id)}
-              className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 mt-0.5"
+              disabled={isDisabled}
+              title={lockCaption}
+              aria-disabled={isDisabled}
+              className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 mt-0.5 disabled:cursor-not-allowed"
               style={{
                 background: enabled[alert.id] && !isLocked ? 'var(--color-tg-primary)' : 'var(--color-tg-border)',
-                cursor: isDisabled ? 'default' : 'pointer',
+                cursor: isDisabled ? 'not-allowed' : 'pointer',
               }}>
               <span
                 className="inline-block h-4 w-4 transform rounded-full bg-white transition-transform shadow-sm"
