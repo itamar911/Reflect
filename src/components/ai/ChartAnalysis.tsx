@@ -5,6 +5,16 @@ import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import { AlertTriangle, BarChart2, Upload } from 'lucide-react';
 
+const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+const MAX_SIZE_BYTES = 5 * 1024 * 1024;
+
+const ERROR_MESSAGES: Record<string, string> = {
+  timeout: 'הניתוח לוקח יותר מדי זמן. נסה שוב עם תמונה קטנה יותר.',
+  api_error: 'שירות הניתוח עמוס כרגע. נסה שוב בעוד רגע.',
+  generic: 'שגיאה בתקשורת — נסה שוב',
+};
+const NETWORK_ERROR_MESSAGE = 'החיבור נכשל. בדוק את החיבור לאינטרנט ונסה שוב.';
+
 export default function ChartAnalysis() {
   const [image, setImage] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -17,6 +27,16 @@ export default function ChartAnalysis() {
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
+    if (!ALLOWED_TYPES.includes(f.type)) {
+      setError('סוג קובץ לא נתמך. יש להעלות PNG, JPG או WEBP בלבד.');
+      e.target.value = '';
+      return;
+    }
+    if (f.size > MAX_SIZE_BYTES) {
+      setError('הקובץ גדול מדי. הגודל המקסימלי הוא 5MB.');
+      e.target.value = '';
+      return;
+    }
     setImage(f);
     setAnalysis(null);
     setError(null);
@@ -36,12 +56,14 @@ export default function ChartAnalysis() {
       const res = await fetch('/api/ai-chart', { method: 'POST', body: fd });
       const data = await res.json();
       if (data.error) {
-        setError(data.error);
+        console.error('ai-chart error:', data.error, data.message);
+        setError(ERROR_MESSAGES[data.error] ?? ERROR_MESSAGES.generic);
       } else {
         setAnalysis(data.analysis);
       }
-    } catch {
-      setError('שגיאה בתקשורת — נסה שוב');
+    } catch (err) {
+      console.error('ai-chart request failed:', err);
+      setError(NETWORK_ERROR_MESSAGE);
     } finally {
       setLoading(false);
     }
@@ -82,7 +104,7 @@ export default function ChartAnalysis() {
         </div>
       )}
 
-      <input ref={fileRef} type="file" accept="image/*,image/jpeg,image/png,image/webp" className="hidden" onChange={handleFile} />
+      <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={handleFile} />
 
       {preview && !analysis && (
         <div className="flex flex-col gap-2">
