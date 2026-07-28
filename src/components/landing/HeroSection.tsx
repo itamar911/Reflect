@@ -5,7 +5,7 @@ import { HeroMock } from './HeroMock';
 import { HeroJoinStat } from './HeroJoinStat';
 
 const TRUST_ITEMS = [
-  { icon: MonitorSmartphone, text: 'עובד לצד כל פלטפורמת מסחר' },
+  { icon: MonitorSmartphone, text: 'לא תלוי בברוקר' },
   { icon: Languages, text: 'עברית מלאה' },
   { icon: Users, text: 'נבנה על ידי סוחרים' },
 ];
