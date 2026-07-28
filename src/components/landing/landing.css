@@ -667,10 +667,108 @@
   50%      { opacity: 1; transform: scale(1); }
 }
 
-/* PlanCheckMock / DebriefMock: reuse the hero's row-reveal keyframe at a
-   different cadence per mock, staggered per row via animation-delay. */
-.plan-check-row { opacity: 0; animation: hero-row-in 4s ease-in-out infinite; }
-.debrief-line   { opacity: 0; animation: hero-row-in 5s ease-in-out infinite; }
+/* DebriefMock: reuses the hero's row-reveal keyframe at its own cadence,
+   staggered per row via animation-delay. */
+.debrief-line { opacity: 0; animation: hero-row-in 5s ease-in-out infinite; }
+
+/* PlanCheckMock: mini trade-planning walkthrough — abstract candle chart +
+   3 price lines drawing in sequence, synced with the checklist below.
+   Everything shares one 7.5s cycle expressed as absolute keyframe
+   percentages (not animation-delay): each line's "hold" window differs in
+   length, so delay-shifting one shared shape wouldn't land them all in the
+   same hold/reset phase together. transform/opacity/stroke-dashoffset only
+   — the one "width" a viewer might worry about lives inside a <clipPath>,
+   which doesn't render anything itself, so animating it never touches page
+   layout. Reset happens 86.7%-100% (~1s) so everything cross-fades back to
+   start together instead of an abrupt cut. */
+
+@keyframes plan-chart-fade {
+  0%     { opacity: 0; }
+  6.7%   { opacity: 1; }
+  86.7%  { opacity: 1; }
+  100%   { opacity: 0; }
+}
+.plan-candles { animation: plan-chart-fade 7.5s ease-in-out infinite; }
+
+/* Entry — solid line, genuinely "grows" via stroke-dashoffset since its
+   dasharray is one dash spanning the whole path. */
+@keyframes plan-line-draw-entry {
+  0%, 6.7%   { stroke-dashoffset: 280; }
+  20%, 86.7% { stroke-dashoffset: 0; }
+  100%       { stroke-dashoffset: 280; }
+}
+.plan-line-entry {
+  animation: plan-line-draw-entry 7.5s ease-in-out infinite, plan-entry-glow-pulse 7.5s ease-in-out infinite;
+}
+
+/* Stop/target — dashed lines. stroke-dashoffset only shifts a repeating
+   pattern's phase; it can't reveal it progressively the way it can a single
+   long dash, so these draw via an animated clip-path rect instead. */
+@keyframes plan-clip-draw-stop {
+  0%, 20%     { transform: scaleX(0); }
+  33.3%, 86.7% { transform: scaleX(1); }
+  100%        { transform: scaleX(0); }
+}
+@keyframes plan-clip-draw-target {
+  0%, 33.3%   { transform: scaleX(0); }
+  46.7%, 86.7% { transform: scaleX(1); }
+  100%        { transform: scaleX(0); }
+}
+.plan-clip-rect-stop   { animation: plan-clip-draw-stop 7.5s ease-in-out infinite; }
+.plan-clip-rect-target { animation: plan-clip-draw-target 7.5s ease-in-out infinite; }
+
+/* Price label + checklist row for each line, popping in once that line
+   finishes drawing — same class reused by both elements. */
+@keyframes plan-appear-entry-kf {
+  0%, 20%    { opacity: 0; transform: scale(0.5); }
+  26%, 86.7% { opacity: 1; transform: scale(1); }
+  100%       { opacity: 0; transform: scale(0.5); }
+}
+@keyframes plan-appear-stop-kf {
+  0%, 33.3%  { opacity: 0; transform: scale(0.5); }
+  39.3%, 86.7% { opacity: 1; transform: scale(1); }
+  100%       { opacity: 0; transform: scale(0.5); }
+}
+@keyframes plan-appear-target-kf {
+  0%, 46.7%  { opacity: 0; transform: scale(0.5); }
+  52.7%, 86.7% { opacity: 1; transform: scale(1); }
+  100%       { opacity: 0; transform: scale(0.5); }
+}
+.plan-appear-entry  { animation: plan-appear-entry-kf 7.5s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+.plan-appear-stop   { animation: plan-appear-stop-kf 7.5s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+.plan-appear-target { animation: plan-appear-target-kf 7.5s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+
+/* Compound selector (higher specificity than .plan-appear-entry alone) so
+   the entry label gets both its appear animation and the glow pulse below,
+   without the second declaration clobbering the first — the check icon
+   next to "סטופ מוגדר" only carries .plan-appear-entry, so it's unaffected. */
+.plan-appear-entry.plan-entry-label-glow {
+  animation: plan-appear-entry-kf 7.5s ease-in-out infinite, plan-entry-label-glow-pulse 7.5s ease-in-out infinite;
+}
+
+/* Final beat: approval pill flashes in with a soft overshoot bounce once
+   all three lines have landed. */
+@keyframes plan-approved-in {
+  0%, 46.7%  { opacity: 0; transform: scale(0.7) translateY(4px); }
+  53%        { opacity: 1; transform: scale(1.08) translateY(0); }
+  58%, 86.7% { opacity: 1; transform: scale(1) translateY(0); }
+  100%       { opacity: 0; transform: scale(0.7) translateY(4px); }
+}
+.plan-approved-pill { animation: plan-approved-in 7.5s ease-in-out infinite; }
+
+/* Entry glow pulse — draws the eye back to the entry line/label twice
+   during the hold phase, before the cycle resets. */
+@keyframes plan-entry-glow-pulse {
+  0%, 46.7%, 100% { filter: drop-shadow(0 0 3px rgba(0, 210, 210, 0.4)); }
+  56.7%, 76.7%    { filter: drop-shadow(0 0 12px rgba(0, 210, 210, 0.9)); }
+  66.7%, 86.7%    { filter: drop-shadow(0 0 3px rgba(0, 210, 210, 0.4)); }
+}
+@keyframes plan-entry-label-glow-pulse {
+  0%, 46.7%, 100% { box-shadow: 0 0 6px rgba(0, 210, 210, 0.15); }
+  56.7%, 76.7%    { box-shadow: 0 0 16px rgba(0, 210, 210, 0.55); }
+  66.7%, 86.7%    { box-shadow: 0 0 6px rgba(0, 210, 210, 0.15); }
+}
+.plan-entry-label-glow { animation: plan-entry-label-glow-pulse 7.5s ease-in-out infinite; }
 
 /* CoachMock: typing dots and the resolved message are stacked in the same
    grid cell (no layout shift) and crossfade on a shared 6s loop — typing
@@ -727,10 +825,45 @@
     opacity: 0;
   }
 
-  .landing .plan-check-row,
   .landing .debrief-line {
     opacity: 1;
     transform: none;
+  }
+
+  .landing .plan-candles {
+    animation: none;
+    opacity: 1;
+  }
+
+  .landing .plan-line-entry {
+    animation: none;
+    stroke-dashoffset: 0;
+    filter: drop-shadow(0 0 6px rgba(0, 210, 210, 0.6));
+  }
+
+  .landing .plan-clip-rect-stop,
+  .landing .plan-clip-rect-target {
+    animation: none;
+    transform: scaleX(1);
+  }
+
+  .landing .plan-appear-entry,
+  .landing .plan-appear-stop,
+  .landing .plan-appear-target {
+    animation: none;
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  .landing .plan-entry-label-glow {
+    animation: none;
+    box-shadow: 0 0 10px rgba(0, 210, 210, 0.35);
+  }
+
+  .landing .plan-approved-pill {
+    animation: none;
+    opacity: 1;
+    transform: scale(1) translateY(0);
   }
 
   .landing .coach-typing {
