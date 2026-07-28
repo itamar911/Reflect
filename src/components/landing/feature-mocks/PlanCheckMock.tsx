@@ -23,25 +23,45 @@ function pctX(x: number) {
   return `${((x / CHART_W) * 100).toFixed(2)}%`;
 }
 
+// Trend-line anchors: 3 candle indices (roughly 10%, 50%, 85% through the
+// sequence) whose LOW values are deliberately made collinear, so a straight
+// line through anchor1/anchor3 also passes exactly through anchor2 — real
+// coordinate math, not a visual approximation. Anchor2's low is *derived*
+// (not hand-picked) so the 3 points stay exactly collinear even if the
+// anchor indices/values above are ever edited again.
+const ANCHOR_IDX = { a1: 2, a2: 10, a3: 17 };
+const ANCHOR_LOW = { a1: 45, a3: 90 };
+const ANCHOR2_LOW = ANCHOR_LOW.a1 + ((ANCHOR_LOW.a3 - ANCHOR_LOW.a1) * (ANCHOR_IDX.a2 - ANCHOR_IDX.a1)) / (ANCHOR_IDX.a3 - ANCHOR_IDX.a1);
+
 // A believable but entirely made-up price silhouette — no longer tied to any
 // entry/stop/target value (those moved to the ladder), just needs to read as
-// real, slightly noisy price action: mixed body sizes (3 small-bodied/
-// doji-like bars among the trend moves), wicks that vary from tight
-// (strong-bodied trend candles) to long relative to their body (rejection
-// candles), overall drifting up to match the Long/Trend Follow framing.
+// real, slightly noisy price action: 3 small-bodied/doji-like bars and 2
+// long-wick rejection candles mixed among the trend moves, overall drifting
+// up to match the Long/Trend Follow framing. Every non-anchor candle's low
+// sits strictly above the trend line at its own x-position (never below —
+// it's acting as respected support), so the 3 anchors read as the only real
+// touches.
 const CANDLES = [
-  { o: 48, h: 55, l: 46, c: 53 },
-  { o: 53, h: 54, l: 48, c: 50 },
-  { o: 50, h: 53, l: 47, c: 51 }, // doji-like
-  { o: 51, h: 62, l: 50, c: 60 },
-  { o: 60, h: 64, l: 56, c: 58 }, // small body, long upper wick — rejection
-  { o: 58, h: 70, l: 57, c: 68 },
-  { o: 68, h: 72, l: 64, c: 66 }, // doji-like
-  { o: 66, h: 78, l: 65, c: 76 },
-  { o: 76, h: 80, l: 70, c: 73 },
-  { o: 73, h: 85, l: 72, c: 82 },
-  { o: 82, h: 86, l: 76, c: 79 }, // small body, long upper wick — rejection near highs
-  { o: 79, h: 87, l: 77, c: 84 },
+  { o: 52, h: 56, l: 50, c: 54 },
+  { o: 51, h: 52, l: 47, c: 48 },
+  { o: 48, h: 52, l: ANCHOR_LOW.a1, c: 51 }, // ANCHOR1 — hammer reversal at the swing low
+  { o: 54, h: 59, l: 53, c: 57 },
+  { o: 55, h: 59, l: 54, c: 56 }, // doji-like
+  { o: 61, h: 68, l: 60, c: 66 },
+  { o: 67, h: 68, l: 61, c: 63 },
+  { o: 66, h: 74, l: 65, c: 72 },
+  { o: 68, h: 72, l: 66, c: 67 }, // doji-like
+  { o: 72, h: 78, l: 71, c: 74 }, // long upper wick — rejection
+  { o: 71, h: 74, l: ANCHOR2_LOW, c: 73 }, // ANCHOR2 — bounces exactly off the line
+  { o: 79, h: 86, l: 78, c: 84 },
+  { o: 80, h: 81, l: 78, c: 79 }, // doji-like
+  { o: 86, h: 93, l: 85, c: 91 },
+  { o: 88, h: 93, l: 85, c: 86 }, // long upper wick — rejection
+  { o: 91, h: 97, l: 90, c: 95 },
+  { o: 94, h: 94, l: 90, c: 91 },
+  { o: 92, h: 97, l: ANCHOR_LOW.a3, c: 95 }, // ANCHOR3 — final touch before breaking higher
+  { o: 94, h: 99, l: 93, c: 98 },
+  { o: 98, h: 99, l: 95, c: 96 },
 ];
 const CANDLE_SPACING = CHART_W / CANDLES.length;
 const CANDLE_BODY_W = CANDLE_SPACING * 0.6; // ~60% body / ~40% gap, standard chart proportions
@@ -57,44 +77,26 @@ const CANDLE_DOWN_BORDER = '#b33e3c';
 const GRID_LINES_H = [0.2, 0.4, 0.6, 0.8].map((f) => PAD_Y + f * (CHART_H - PAD_Y * 2));
 const GRID_LINES_V = [0.2, 0.4, 0.6, 0.8].map((f) => f * CHART_W);
 
-// Uniform Catmull-Rom -> cubic Bezier conversion so the trend curve flows
-// through every point with no visible segment joints (standard 1/6-tension
-// construction; endpoints clamp by reusing the nearest real point in place
-// of the missing neighbor).
-function smoothPath(points: { x: number; y: number }[]) {
-  const d = [`M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)}`];
-  for (let i = 0; i < points.length - 1; i++) {
-    const p0 = points[i - 1] ?? points[i];
-    const p1 = points[i];
-    const p2 = points[i + 1];
-    const p3 = points[i + 2] ?? p2;
-    const cp1x = p1.x + (p2.x - p0.x) / 6;
-    const cp1y = p1.y + (p2.y - p0.y) / 6;
-    const cp2x = p2.x - (p3.x - p1.x) / 6;
-    const cp2y = p2.y - (p3.y - p1.y) / 6;
-    d.push(`C ${cp1x.toFixed(2)} ${cp1y.toFixed(2)}, ${cp2x.toFixed(2)} ${cp2y.toFixed(2)}, ${p2.x.toFixed(2)} ${p2.y.toFixed(2)}`);
-  }
-  return d.join(' ');
-}
-
-// Trend curve — a moving-average-style line smoothed through every candle's
-// CLOSE across the whole range (not just a few swing lows), so it reads as a
-// real indicator instead of a hand-drawn line. Draws left-to-right via
-// pathLength=100 on the <path> (see plan-trend-draw in landing.css) so the
-// dash math is plain 0-100 regardless of the curve's real length.
-const TREND_CURVE_PTS = CANDLES.map((k, i) => ({ x: (i + 0.5) * CANDLE_SPACING, y: toY(k.c) }));
-const TREND_CURVE_D = smoothPath(TREND_CURVE_PTS);
-const TREND_CURVE_END = TREND_CURVE_PTS[TREND_CURVE_PTS.length - 1];
-// Pulled back from the curve's exact endpoint (near the chart's right edge)
+// Trend line — a genuine straight line (not a smoothed curve) from anchor1
+// to anchor3. toY() is an affine transform of price, and the x-per-candle
+// spacing is affine in index too, so anchor2's collinearity in (index,
+// price) space carries through unchanged into (x, y) pixel space — the
+// rendered line passes through all 3 candles' exact low pixel, guaranteed by
+// the linear algebra, not just by eye. Draws left-to-right via pathLength=100
+// on the <line> (see plan-trend-draw in landing.css) so the dash math is
+// plain 0-100 regardless of the line's real length.
+const TREND_LINE_P1 = { x: (ANCHOR_IDX.a1 + 0.5) * CANDLE_SPACING, y: toY(ANCHOR_LOW.a1) };
+const TREND_LINE_P3 = { x: (ANCHOR_IDX.a3 + 0.5) * CANDLE_SPACING, y: toY(ANCHOR_LOW.a3) };
+// Pulled back from the line's exact endpoint (near the chart's right edge)
 // so the label has room to breathe instead of overflowing the column, and
 // parked just under the lowest point of any candle so it reads as attached
-// to the curve instead of floating alone. The label's own width is fixed
+// to the line instead of floating alone. The label's own width is fixed
 // CSS px while its x position is a percentage of the column, so the same
 // pullback reads as much less physical clearance on a narrow column (e.g.
 // the md breakpoint, where column 1 is only ~35% of a already-narrow card)
 // than on a wide one — capping at 80% of the chart width keeps it clear of
 // the right edge at every breakpoint, not just the widest.
-const TREND_LABEL_X = Math.min(TREND_CURVE_END.x - CANDLE_SPACING, CHART_W * 0.8);
+const TREND_LABEL_X = Math.min(TREND_LINE_P3.x - CANDLE_SPACING, CHART_W * 0.8);
 const TREND_LABEL_Y = Math.max(...CANDLES.map((k) => toY(k.l))) + 16;
 
 // Column 2 — vertical price ladder. Values chosen so (target-entry) is
@@ -248,14 +250,16 @@ export function PlanCheckMock() {
                 })}
               </g>
 
-              {/* Nothing else draws on this chart — the trend curve is the
+              {/* Nothing else draws on this chart — the trend line is the
                   clear visual focus with no price lines competing against
-                  it. pathLength=100 keeps the draw-in math simple regardless
-                  of the smoothed curve's real length. */}
-              <path
+                  it. A real ascending support line, anchored exactly to 3
+                  candle lows (see ANCHOR_IDX above), not a curve. */}
+              <line
                 className="plan-trend-draw"
-                d={TREND_CURVE_D}
-                fill="none"
+                x1={TREND_LINE_P1.x}
+                y1={TREND_LINE_P1.y}
+                x2={TREND_LINE_P3.x}
+                y2={TREND_LINE_P3.y}
                 stroke="#00d2d2"
                 strokeWidth={2.2}
                 strokeDasharray="100"

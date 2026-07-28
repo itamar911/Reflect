@@ -689,11 +689,10 @@
 }
 .plan-candles { animation: plan-chart-fade 7.5s ease-in-out infinite; }
 
-/* Trend curve — genuine left-to-right draw. pathLength=100 on the smoothed
-   <path> (see component) makes stroke-dasharray/-dashoffset plain 0-100
-   numbers regardless of the curve's real length in user units. Draws
-   26%-39.3%, landing exactly when checklist row 2 (מתאים לאסטרטגיה) appears
-   below. */
+/* Trend line — genuine left-to-right draw. pathLength=100 on the <line>
+   (see component) makes stroke-dasharray/-dashoffset plain 0-100 numbers
+   regardless of the line's real length in user units. Draws 26%-39.3%,
+   landing exactly when checklist row 2 (מתאים לאסטרטגיה) appears below. */
 @keyframes plan-trend-draw {
   0%, 26%      { stroke-dashoffset: 100; }
   39.3%, 86.7% { stroke-dashoffset: 0; }
