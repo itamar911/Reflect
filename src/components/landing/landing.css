@@ -576,6 +576,57 @@
   to   { transform: translate(calc(50% + 24px), calc(-50% - 16px)) scale(1.12); }
 }
 
+/* DisciplineScoreMock: radar/pentagon chart. The breathing polygon animates
+   transform + filter together so the glow stays in sync with the scale by
+   construction. The vertex pulse only ever touches opacity — transform is
+   left free so it never fights the hover scale-up below. */
+@keyframes radar-breathe {
+  0%, 100% { transform: scale(1);    filter: drop-shadow(0 0 6px rgba(0, 210, 210, 0.35)); }
+  50%      { transform: scale(1.03); filter: drop-shadow(0 0 12px rgba(0, 210, 210, 0.55)); }
+}
+
+.radar-polygon { animation: radar-breathe 4s ease-in-out infinite; }
+
+@keyframes radar-dot-pulse {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
+}
+
+.radar-dot-pulse { animation: radar-dot-pulse 3s ease-in-out infinite; }
+
+/* Hover bonus layer: :has() reaches from the chart root into the SVG spoke/
+   dot from an HTML hit-area hover elsewhere in the tree, so no JS state is
+   needed for a chart this static. Gated on (hover: hover) so touch taps
+   never trigger it — the ambient motion above carries the card there. */
+.radar-tooltip { opacity: 0; transition: opacity 0.2s ease; }
+
+@media (hover: hover) {
+  .radar-wrap:has(.radar-hit-0:hover) .radar-spoke-0,
+  .radar-wrap:has(.radar-hit-1:hover) .radar-spoke-1,
+  .radar-wrap:has(.radar-hit-2:hover) .radar-spoke-2,
+  .radar-wrap:has(.radar-hit-3:hover) .radar-spoke-3,
+  .radar-wrap:has(.radar-hit-4:hover) .radar-spoke-4 {
+    stroke: rgba(0, 210, 210, 0.9);
+    stroke-width: 2;
+  }
+
+  .radar-wrap:has(.radar-hit-0:hover) .radar-dot-0,
+  .radar-wrap:has(.radar-hit-1:hover) .radar-dot-1,
+  .radar-wrap:has(.radar-hit-2:hover) .radar-dot-2,
+  .radar-wrap:has(.radar-hit-3:hover) .radar-dot-3,
+  .radar-wrap:has(.radar-hit-4:hover) .radar-dot-4 {
+    transform: scale(1.35);
+  }
+
+  .radar-wrap:has(.radar-hit-0:hover) .radar-tooltip-0,
+  .radar-wrap:has(.radar-hit-1:hover) .radar-tooltip-1,
+  .radar-wrap:has(.radar-hit-2:hover) .radar-tooltip-2,
+  .radar-wrap:has(.radar-hit-3:hover) .radar-tooltip-3,
+  .radar-wrap:has(.radar-hit-4:hover) .radar-tooltip-4 {
+    opacity: 1;
+  }
+}
+
 /* RulesMock: amber halo around the locked-button icon — transform/opacity
    only (compositor-only), same pattern as the sidebar handle pulse. */
 .mock-lock-halo {
@@ -666,6 +717,17 @@
   .landing .coach-message {
     opacity: 1;
     transform: none;
+  }
+
+  .landing .radar-polygon {
+    animation: none;
+    transform: scale(1);
+    filter: drop-shadow(0 0 8px rgba(0, 210, 210, 0.4));
+  }
+
+  .landing .radar-dot-pulse {
+    animation: none;
+    opacity: 1;
   }
 
   /* The lightbox portals to document.body, outside .landing — needs its own override. */
