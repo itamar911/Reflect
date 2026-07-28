@@ -19,27 +19,6 @@ function pctX(x: number) {
   return `${((x / CHART_W) * 100).toFixed(2)}%`;
 }
 
-// A believable but entirely made-up price silhouette — not real data. Mixed
-// body sizes (a couple of near-doji bars alongside two large-body moves) and
-// varied wick lengths so it reads as price action, not a repeating pattern.
-const CANDLES = [
-  { o: 25, c: 33, h: 36, l: 22 },
-  { o: 33, c: 29, h: 35, l: 26 },
-  { o: 29, c: 28, h: 32, l: 25 },
-  { o: 28, c: 42, h: 44, l: 27 },
-  { o: 42, c: 38, h: 45, l: 36 },
-  { o: 38, c: 50, h: 52, l: 37 },
-  { o: 50, c: 48, h: 54, l: 46 },
-  { o: 48, c: 58, h: 60, l: 47 },
-];
-const CANDLE_SPACING = CHART_W / CANDLES.length;
-const CANDLE_BODY_W = CANDLE_SPACING * 0.58; // ~58% body / ~42% gap, standard chart proportions
-
-// Last 3 candles — the "matches strategy" highlight region (Task 3)
-const HIGHLIGHT_START_X = (CANDLES.length - 3) * CANDLE_SPACING;
-
-const GRID_LINES = [0.2, 0.4, 0.6, 0.8].map((f) => PAD_Y + f * (CHART_H - PAD_Y * 2));
-
 // entry/stop/target values chosen so (target-entry) is exactly 2.5x
 // (entry-stop) — the R:R bracket's ratio needs to be geometrically true, not
 // just claimed in the label text. The price strings below match that same
@@ -50,8 +29,47 @@ const LINES = {
   stop: { value: 46, label: 'סטופ: 29,350', textColor: '#f87171' },
 };
 
+// A believable but entirely made-up price silhouette — not real data. Spans
+// ~50-84 (81% of the 46-88 stop→target range), approaching but not touching
+// either line, with real body-size and wick variety (a near-doji, two big
+// moves) instead of a tight wiggle near the entry line.
+const CANDLES = [
+  { o: 52, c: 61, h: 64, l: 50 },
+  { o: 61, c: 57, h: 63, l: 55 },
+  { o: 57, c: 56, h: 60, l: 54 },
+  { o: 56, c: 72, h: 75, l: 55 },
+  { o: 72, c: 67, h: 76, l: 64 },
+  { o: 67, c: 81, h: 84, l: 66 },
+  { o: 81, c: 74, h: 83, l: 70 },
+  { o: 74, c: 65, h: 76, l: 63 },
+];
+const CANDLE_SPACING = CHART_W / CANDLES.length;
+const CANDLE_BODY_W = CANDLE_SPACING * 0.58; // ~58% body / ~42% gap, standard chart proportions
+
+const GRID_LINES = [0.2, 0.4, 0.6, 0.8].map((f) => PAD_Y + f * (CHART_H - PAD_Y * 2));
+
+// Trend line — connects the swing lows of 4 candles (indices 0,2,4,6), all
+// ascending, matching the Long direction. Derived from CANDLES so it stays
+// correct if the price data ever changes again.
+const TREND_LINE_INDICES = [0, 2, 4, 6];
+const TREND_LINE_PTS = TREND_LINE_INDICES.map((i) => ({
+  x: (i + 0.5) * CANDLE_SPACING,
+  y: toY(CANDLES[i].l),
+}));
+const TREND_LINE_POINTS = TREND_LINE_PTS.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+const TREND_LABEL_X = 190;
+
 const BRACKET_X = CHART_W - 14;
 const BRACKET_TICK = 5;
+
+// The entry/stop price pills sit only ~13px apart (their values are 12 apart
+// on the 0-100 scale) while each pill is ~19-21px tall — centered exactly on
+// their line they overlap by ~7-8px at every breakpoint (pixel gap doesn't
+// scale with viewport width). Nudge each pill a few px off its line, entry up
+// and stop down, just enough to clear; small enough that each still reads as
+// "at" its line.
+const ENTRY_LABEL_NUDGE = -5;
+const STOP_LABEL_NUDGE = 6;
 
 // Row text stays exactly as given; each row's reveal is synced to a specific
 // line above (row 1 with entry, row 2 with stop, row 3 with target) — not a
@@ -70,7 +88,7 @@ export function PlanCheckMock() {
   return (
     <MockFrame height={380}>
       <div dir="rtl" className="flex flex-col gap-3.5 w-full h-full">
-        {/* Context header — symbol chips unchanged, plus a strategy-name chip (Task 3) */}
+        {/* Context header — symbol chips unchanged, plus the strategy-name chip */}
         <div className="flex items-center gap-1.5 flex-wrap" aria-hidden>
           {CHIPS.map((chip) => (
             <span
@@ -83,11 +101,10 @@ export function PlanCheckMock() {
           ))}
         </div>
 
-        {/* Abstract chart: grid → candles → strategy-match highlight → R:R
-            zones/bracket → price lines, drawing in sequence left-to-right
-            (chart time always flows left-to-right, even on this RTL page —
-            real trading platforms keep that convention regardless of text
-            direction). */}
+        {/* Abstract chart: grid → candles → trend line → R:R zones/bracket →
+            price lines, drawing in sequence left-to-right (chart time always
+            flows left-to-right, even on this RTL page — real trading
+            platforms keep that convention regardless of text direction). */}
         <div className="relative w-full" style={{ height: CHART_H }}>
           <svg
             className="absolute inset-0 w-full h-full"
@@ -148,20 +165,17 @@ export function PlanCheckMock() {
               })}
             </g>
 
-            {/* Strategy-match highlight — soft turquoise box over the last 3
-                candles, hidden below md since the right edge is already busy
-                with price labels/R:R bracket at narrow widths. */}
-            <rect
-              className="plan-appear-stop hidden md:block"
-              x={HIGHLIGHT_START_X}
-              y={PAD_Y - 2}
-              width={CHART_W - HIGHLIGHT_START_X}
-              height={CHART_H - (PAD_Y - 2) * 2}
-              rx={4}
-              fill="rgba(0,210,210,0.07)"
-              stroke="rgba(0,210,210,0.4)"
+            {/* Strategy trend line — a real ascending line through the swing
+                lows, not a highlight box. Kept visible at every breakpoint
+                (only its text label goes desktop-only below). */}
+            <polyline
+              className="plan-trend-fade"
+              points={TREND_LINE_POINTS}
+              fill="none"
+              stroke="#f59e0b"
               strokeWidth={1}
-              style={{ transformBox: 'fill-box', transformOrigin: 'center' }}
+              strokeDasharray="3 3"
+              strokeLinejoin="round"
             />
 
             {/* R:R zones — reward (target→entry) visibly bigger than risk
@@ -192,38 +206,44 @@ export function PlanCheckMock() {
             />
           </svg>
 
-          {/* Strategy-match tag — bottom of the highlighted region, clear of
-              every price label (all of which sit higher, at target/entry/stop). */}
+          {/* Trend-line label — near the bracket's bottom-right end but
+              parked at the chart's bottom margin, below every candle and
+              every price pill (which all sit in the 20-60% vertical band). */}
           <span
-            className="plan-appear-stop hidden md:flex absolute items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 text-[9px] font-bold"
+            className="plan-trend-fade hidden md:flex absolute items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 text-[9px] font-bold"
             style={{
-              left: pctX((HIGHLIGHT_START_X + CHART_W) / 2),
+              left: pctX(TREND_LABEL_X),
               top: pctY(CHART_H - 10),
               transform: 'translate(-50%, -50%)',
               background: 'rgba(10,12,16,0.8)',
-              border: '1px solid rgba(0,210,210,0.35)',
-              color: '#00d2d2',
+              border: '1px solid rgba(245,158,11,0.4)',
+              color: '#f59e0b',
             }}
             aria-hidden
           >
-            <Check size={9} />
-            תואם לדפוס
+            קו מגמה
           </span>
 
-          {/* R:R label — vertically centered in the reward zone, clear of the
-              target/entry price pills above and below it. */}
+          {/* R:R label — two-tone (risk in red, reward in green), anchored
+              to the chart's LEFT edge on purpose: the right edge is already
+              a dense column of three price pills, and this is the fix for a
+              real overlap that column caused when the label lived there too.
+              Sits above candles 1-2 (the only ones nearby), which top out
+              lower than this Y. */}
           <span
             className="plan-zone-fade absolute whitespace-nowrap rounded-md px-1.5 py-0.5 text-[10px] font-bold"
             style={{
+              left: 4,
               top: pctY((targetY + entryY) / 2),
-              right: 2,
               transform: 'translateY(-50%)',
               background: 'rgba(10,12,16,0.78)',
-              color: '#e5e7eb',
             }}
             aria-hidden
           >
-            R:R 1:2.5
+            <span style={{ color: 'rgba(255,255,255,0.6)' }}>R:R </span>
+            <span style={{ color: '#f87171' }}>1</span>
+            <span style={{ color: 'rgba(255,255,255,0.6)' }}>:</span>
+            <span style={{ color: '#4ade80' }}>2.5</span>
           </span>
 
           {/* Label pills anchor to the chart's physical right edge (its
@@ -238,7 +258,13 @@ export function PlanCheckMock() {
           </span>
           <span
             className="plan-appear-stop absolute whitespace-nowrap rounded-md px-1.5 py-0.5 text-[10px] font-bold"
-            style={{ top: pctY(stopY), right: 2, transform: 'translateY(-50%)', background: 'rgba(10,12,16,0.78)', color: LINES.stop.textColor }}
+            style={{
+              top: pctY(stopY),
+              right: 2,
+              transform: `translateY(calc(-50% + ${STOP_LABEL_NUDGE}px))`,
+              background: 'rgba(10,12,16,0.78)',
+              color: LINES.stop.textColor,
+            }}
             aria-hidden
           >
             {LINES.stop.label}
@@ -248,7 +274,7 @@ export function PlanCheckMock() {
             style={{
               top: pctY(entryY),
               right: 2,
-              transform: 'translateY(-50%)',
+              transform: `translateY(calc(-50% + ${ENTRY_LABEL_NUDGE}px))`,
               background: 'rgba(10,12,16,0.85)',
               border: '1px solid rgba(0,210,210,0.4)',
               color: LINES.entry.textColor,

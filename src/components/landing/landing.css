@@ -738,6 +738,16 @@
 .plan-appear-stop   { animation: plan-appear-stop-kf 7.5s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
 .plan-appear-target { animation: plan-appear-target-kf 7.5s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
 
+/* Trend line — same "appears once the stop line completes" beat as
+   .plan-appear-stop (the מתאים לאסטרטגיה row), opacity-only since a dashed
+   polyline scaling from its center would distort its slope mid-reveal. */
+@keyframes plan-trend-fade {
+  0%, 33.3%    { opacity: 0; }
+  39.3%, 86.7% { opacity: 1; }
+  100%         { opacity: 0; }
+}
+.plan-trend-fade { animation: plan-trend-fade 7.5s ease-in-out infinite; }
+
 /* R:R zones/bracket/label — same "appears once the target line completes"
    beat as .plan-appear-target, but opacity-only: these are wide background
    bands, and scaling a 280-unit-wide rect from its center reads as an odd
@@ -864,6 +874,11 @@
     animation: none;
     opacity: 1;
     transform: scale(1);
+  }
+
+  .landing .plan-trend-fade {
+    animation: none;
+    opacity: 1;
   }
 
   .landing .plan-zone-fade {
