@@ -3,8 +3,12 @@ import { MockFrame } from './MockFrame';
 
 const CHIPS = ['NQ1', 'Long', '5m', 'Trend Follow'];
 
+// Column 1 — price chart (candles + trend line only). No entry/stop/target
+// lines share this Y-axis anymore (those live in the ladder, column 2) — see
+// the two-zone layout below. Taller than the old single-band chart so it
+// reads as a real chart, not a thin strip.
 const CHART_W = 280;
-const CHART_H = 140;
+const CHART_H = 152;
 const PAD_Y = 14;
 
 function toY(value: number) {
@@ -19,20 +23,9 @@ function pctX(x: number) {
   return `${((x / CHART_W) * 100).toFixed(2)}%`;
 }
 
-// entry/stop/target values chosen so (target-entry) is exactly 2.5x
-// (entry-stop) — the R:R bracket's ratio needs to be geometrically true, not
-// just claimed in the label text. The price strings below match that same
-// 1:2.5 ratio (risk 100, reward 250).
-const LINES = {
-  target: { value: 88, label: 'יעד: 29,700', textColor: '#4ade80' },
-  entry: { value: 58, label: 'כניסה: 29,450', textColor: '#00d2d2' },
-  stop: { value: 46, label: 'סטופ: 29,350', textColor: '#f87171' },
-};
-
-// A believable but entirely made-up price silhouette — not real data. Spans
-// ~50-84 (81% of the 46-88 stop→target range), approaching but not touching
-// either line, with real body-size and wick variety (a near-doji, two big
-// moves) instead of a tight wiggle near the entry line.
+// A believable but entirely made-up price silhouette — no longer tied to any
+// entry/stop/target value (those moved to the ladder), just needs to read as
+// real price movement: mixed body sizes, varied wicks, no tight wiggle.
 const CANDLES = [
   { o: 52, c: 61, h: 64, l: 50 },
   { o: 61, c: 57, h: 63, l: 55 },
@@ -48,9 +41,10 @@ const CANDLE_BODY_W = CANDLE_SPACING * 0.58; // ~58% body / ~42% gap, standard c
 
 const GRID_LINES = [0.2, 0.4, 0.6, 0.8].map((f) => PAD_Y + f * (CHART_H - PAD_Y * 2));
 
-// Trend line — connects the swing lows of 4 candles (indices 0,2,4,6), all
-// ascending, matching the Long direction. Derived from CANDLES so it stays
-// correct if the price data ever changes again.
+// Trend line — connects the swing lows of 4 ascending candles, matching the
+// Long direction. Draws left-to-right via pathLength=100 on the <polyline>
+// (see plan-trend-draw in landing.css) so the dash math is plain 0-100
+// regardless of the path's real length in user units.
 const TREND_LINE_INDICES = [0, 2, 4, 6];
 const TREND_LINE_PTS = TREND_LINE_INDICES.map((i) => ({
   x: (i + 0.5) * CANDLE_SPACING,
@@ -58,37 +52,101 @@ const TREND_LINE_PTS = TREND_LINE_INDICES.map((i) => ({
 }));
 const TREND_LINE_POINTS = TREND_LINE_PTS.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
 const TREND_LABEL_X = 190;
+// Parked just under the lowest point of any candle (not pinned to the
+// chart's bottom margin) so it reads as attached to the line's end instead
+// of floating alone in the taller column's extra empty space below.
+const TREND_LABEL_Y = Math.max(...CANDLES.map((k) => toY(k.l))) + 16;
 
-const BRACKET_X = CHART_W - 14;
-const BRACKET_TICK = 5;
+// Column 2 — vertical price ladder. Values chosen so (target-entry) is
+// exactly 2.5x (entry-stop) — the R:R ratio drives the two zone bars'
+// relative height for real, not just the label text.
+const LINES = {
+  target: { label: 'יעד: 29,700', color: '#4ade80' },
+  entry: { label: 'כניסה: 29,450', color: '#00d2d2' },
+  stop: { label: 'סטופ: 29,350', color: '#f87171' },
+};
+const REWARD = 30; // target(88) - entry(58) on the old 0-100 scale
+const RISK = 12; // entry(58) - stop(46)
+const SPINE_W = 16; // dot+tick column width, shared by every ladder row/bar so they line up in one vertical line
 
-// The entry/stop price pills sit only ~13px apart (their values are 12 apart
-// on the 0-100 scale) while each pill is ~19-21px tall — centered exactly on
-// their line they overlap by ~7-8px at every breakpoint (pixel gap doesn't
-// scale with viewport width). Nudge each pill a few px off its line, entry up
-// and stop down, just enough to clear; small enough that each still reads as
-// "at" its line.
-const ENTRY_LABEL_NUDGE = -5;
-const STOP_LABEL_NUDGE = 6;
-
-// Row text stays exactly as given; each row's reveal is synced to a specific
-// line above (row 1 with entry, row 2 with stop, row 3 with target) — not a
-// 1:1 semantic pairing with the row's own wording, that's intentional per spec.
 const ROWS = [
-  { text: 'סטופ מוגדר', appearClass: 'plan-appear-entry' },
-  { text: 'מתאים לאסטרטגיה', appearClass: 'plan-appear-stop' },
-  { text: 'יחס סיכוי/סיכון תקין', appearClass: 'plan-appear-target' },
+  { text: 'סטופ מוגדר', appearClass: 'plan-appear-row1' },
+  { text: 'מתאים לאסטרטגיה', appearClass: 'plan-appear-row2' },
+  { text: 'יחס סיכוי/סיכון תקין', appearClass: 'plan-appear-row3' },
 ];
 
-export function PlanCheckMock() {
-  const targetY = toY(LINES.target.value);
-  const entryY = toY(LINES.entry.value);
-  const stopY = toY(LINES.stop.value);
-
+function LadderRow({
+  color,
+  label,
+  appearClass,
+  glowClass = '',
+}: {
+  color: string;
+  label: string;
+  appearClass: string;
+  glowClass?: string;
+}) {
   return (
-    <MockFrame height={380}>
-      <div dir="rtl" className="flex flex-col gap-3.5 w-full h-full">
-        {/* Context header — symbol chips unchanged, plus the strategy-name chip */}
+    <div className={`${appearClass} flex items-center gap-1.5 shrink-0`}>
+      <span className="flex items-center shrink-0" style={{ width: SPINE_W }}>
+        <span className={`rounded-full shrink-0 ${glowClass}`} style={{ width: 7, height: 7, background: color }} />
+        <span className="shrink-0" style={{ width: 8, height: 1.5, marginInlineStart: 2, borderRadius: 1, background: color }} />
+      </span>
+      <span className="text-[11px] font-bold whitespace-nowrap" style={{ color }}>{label}</span>
+    </div>
+  );
+}
+
+function ZoneBarVertical({ grow, color, appearClass }: { grow: number; color: string; appearClass: string }) {
+  return (
+    <div className={`${appearClass} flex`} style={{ flexGrow: grow }}>
+      <span className="flex justify-center shrink-0" style={{ width: SPINE_W }}>
+        <span className="rounded-full" style={{ width: 3, alignSelf: 'stretch', background: `linear-gradient(180deg, ${color}b3, ${color}33)` }} />
+      </span>
+      <span style={{ flex: 1 }} />
+    </div>
+  );
+}
+
+function RRLabel({ appearClass, className = '' }: { appearClass: string; className?: string }) {
+  return (
+    <span
+      className={`${appearClass} ${className} whitespace-nowrap rounded-md px-1.5 py-0.5 text-[10px] font-bold`}
+      style={{ background: 'rgba(10,12,16,0.78)' }}
+      aria-hidden
+    >
+      <span style={{ color: 'rgba(255,255,255,0.6)' }}>R:R </span>
+      <span style={{ color: '#f87171' }}>1</span>
+      <span style={{ color: 'rgba(255,255,255,0.6)' }}>:</span>
+      <span style={{ color: '#4ade80' }}>2.5</span>
+    </span>
+  );
+}
+
+function MiniLadderItem({
+  color,
+  value,
+  appearClass,
+  glowClass = '',
+}: {
+  color: string;
+  value: string;
+  appearClass: string;
+  glowClass?: string;
+}) {
+  return (
+    <div className={`${appearClass} flex flex-col items-center gap-1 shrink-0`}>
+      <span className={`rounded-full shrink-0 ${glowClass}`} style={{ width: 7, height: 7, background: color }} />
+      <span className="text-[9px] font-bold whitespace-nowrap" style={{ color }}>{value}</span>
+    </div>
+  );
+}
+
+export function PlanCheckMock() {
+  return (
+    <MockFrame height={420}>
+      <div dir="rtl" className="flex flex-col gap-3 w-full h-full">
+        {/* Context header — unchanged */}
         <div className="flex items-center gap-1.5 flex-wrap" aria-hidden>
           {CHIPS.map((chip) => (
             <span
@@ -101,191 +159,123 @@ export function PlanCheckMock() {
           ))}
         </div>
 
-        {/* Abstract chart: grid → candles → trend line → R:R zones/bracket →
-            price lines, drawing in sequence left-to-right (chart time always
-            flows left-to-right, even on this RTL page — real trading
-            platforms keep that convention regardless of text direction). */}
-        <div className="relative w-full" style={{ height: CHART_H }}>
-          <svg
-            className="absolute inset-0 w-full h-full"
-            viewBox={`0 0 ${CHART_W} ${CHART_H}`}
-            preserveAspectRatio="none"
-            aria-hidden
-          >
-            <defs>
-              {/* Dashed lines can't "grow" via stroke-dashoffset the way a
-                  solid line can (offset just shifts a repeating pattern's
-                  phase, it doesn't reveal length) — so stop/target draw via
-                  an animated clip instead. */}
-              <clipPath id="plan-clip-stop">
-                <rect
-                  className="plan-clip-rect-stop"
-                  x={0}
-                  y={0}
-                  width={CHART_W}
-                  height={CHART_H}
-                  style={{ transformBox: 'fill-box', transformOrigin: '0% 50%' }}
-                />
-              </clipPath>
-              <clipPath id="plan-clip-target">
-                <rect
-                  className="plan-clip-rect-target"
-                  x={0}
-                  y={0}
-                  width={CHART_W}
-                  height={CHART_H}
-                  style={{ transformBox: 'fill-box', transformOrigin: '0% 50%' }}
-                />
-              </clipPath>
-            </defs>
+        {/* Two clearly separated zones instead of one overlaid band — the
+            fix for the "stretched/cluttered" complaint. RTL row: the chart
+            (first child) renders on the physical right/wide side, the
+            ladder (second child) on the left/narrow side. On mobile the row
+            collapses to a column so the chart keeps full width + real
+            height instead of being squeezed into a thin 65% column; the
+            ladder becomes a compact horizontal strip underneath it. */}
+        <div className="flex flex-col md:flex-row gap-3 md:gap-2.5 w-full">
+          {/* Column 1 — clean price chart: candles + trend line only */}
+          <div className="relative w-full md:flex-[0.65] shrink-0" style={{ height: CHART_H }}>
+            <svg
+              className="absolute inset-0 w-full h-full"
+              viewBox={`0 0 ${CHART_W} ${CHART_H}`}
+              preserveAspectRatio="none"
+              aria-hidden
+            >
+              {GRID_LINES.map((y, i) => (
+                <line key={i} x1={0} y1={y} x2={CHART_W} y2={y} stroke="rgba(255,255,255,0.05)" strokeWidth={0.75} />
+              ))}
 
-            {GRID_LINES.map((y, i) => (
-              <line key={i} x1={0} y1={y} x2={CHART_W} y2={y} stroke="rgba(255,255,255,0.05)" strokeWidth={0.75} />
-            ))}
+              <g className="plan-candles">
+                {CANDLES.map((k, i) => {
+                  const x = (i + 0.5) * CANDLE_SPACING;
+                  const top = toY(Math.max(k.o, k.c));
+                  const bottom = toY(Math.min(k.o, k.c));
+                  const color = k.c > k.o ? 'rgba(34,197,94,0.55)' : 'rgba(239,68,68,0.55)';
+                  return (
+                    <g key={i}>
+                      <line x1={x} y1={toY(k.h)} x2={x} y2={toY(k.l)} stroke={color} strokeWidth={1.2} />
+                      <rect
+                        x={x - CANDLE_BODY_W / 2}
+                        y={top}
+                        width={CANDLE_BODY_W}
+                        height={Math.max(2, bottom - top)}
+                        fill={color}
+                        rx={1}
+                      />
+                    </g>
+                  );
+                })}
+              </g>
 
-            <g className="plan-candles">
-              {CANDLES.map((k, i) => {
-                const x = (i + 0.5) * CANDLE_SPACING;
-                const top = toY(Math.max(k.o, k.c));
-                const bottom = toY(Math.min(k.o, k.c));
-                const color = k.c > k.o ? 'rgba(34,197,94,0.55)' : 'rgba(239,68,68,0.55)';
-                return (
-                  <g key={i}>
-                    <line x1={x} y1={toY(k.h)} x2={x} y2={toY(k.l)} stroke={color} strokeWidth={1.2} />
-                    <rect
-                      x={x - CANDLE_BODY_W / 2}
-                      y={top}
-                      width={CANDLE_BODY_W}
-                      height={Math.max(2, bottom - top)}
-                      fill={color}
-                      rx={1}
-                    />
-                  </g>
-                );
-              })}
-            </g>
+              {/* Nothing else draws on this chart — the trend line is the
+                  clear visual focus with no price lines competing against
+                  it. pathLength=100 keeps the draw-in math simple. */}
+              <polyline
+                className="plan-trend-draw"
+                points={TREND_LINE_POINTS}
+                fill="none"
+                stroke="#f59e0b"
+                strokeWidth={1.4}
+                strokeDasharray="100"
+                pathLength={100}
+                strokeLinejoin="round"
+              />
+            </svg>
 
-            {/* Strategy trend line — a real ascending line through the swing
-                lows, not a highlight box. Kept visible at every breakpoint
-                (only its text label goes desktop-only below). */}
-            <polyline
-              className="plan-trend-fade"
-              points={TREND_LINE_POINTS}
-              fill="none"
-              stroke="#f59e0b"
-              strokeWidth={1}
-              strokeDasharray="3 3"
-              strokeLinejoin="round"
-            />
+            <span
+              className="plan-appear-row2 hidden md:flex absolute items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 text-[9px] font-bold"
+              style={{
+                left: pctX(TREND_LABEL_X),
+                top: pctY(TREND_LABEL_Y),
+                transform: 'translate(-50%, -50%)',
+                background: 'rgba(10,12,16,0.8)',
+                border: '1px solid rgba(245,158,11,0.4)',
+                color: '#f59e0b',
+              }}
+              aria-hidden
+            >
+              קו מגמה
+            </span>
+          </div>
 
-            {/* R:R zones — reward (target→entry) visibly bigger than risk
-                (entry→stop) since the geometry is a true 2.5x, not just the
-                label's claim. */}
-            <rect className="plan-zone-fade" x={0} y={targetY} width={CHART_W} height={entryY - targetY} fill="rgba(34,197,94,0.1)" />
-            <rect className="plan-zone-fade" x={0} y={entryY} width={CHART_W} height={stopY - entryY} fill="rgba(239,68,68,0.12)" />
+          {/* Column 2 — vertical price ladder (md and up) */}
+          <div className="hidden md:flex md:flex-col w-full md:flex-[0.35]" style={{ height: CHART_H }}>
+            <RRLabel appearClass="plan-appear-row3" className="self-start mb-1.5" />
+            <div className="flex flex-1 flex-col">
+              <LadderRow color={LINES.target.color} label={LINES.target.label} appearClass="plan-appear-ladder-target" />
+              <ZoneBarVertical grow={REWARD} color="#4ade80" appearClass="plan-appear-row3" />
+              <LadderRow
+                color={LINES.entry.color}
+                label={LINES.entry.label}
+                appearClass="plan-appear-ladder-entry"
+                glowClass="plan-entry-label-glow"
+              />
+              <ZoneBarVertical grow={RISK} color="#f87171" appearClass="plan-appear-row3" />
+              <LadderRow color={LINES.stop.color} label={LINES.stop.label} appearClass="plan-appear-row1" />
+            </div>
+          </div>
 
-            {/* R:R caliper bracket, inset from the right edge (see BRACKET_X) */}
-            <g className="plan-zone-fade">
-              <line x1={BRACKET_X} y1={targetY} x2={BRACKET_X} y2={stopY} stroke="rgba(255,255,255,0.4)" strokeWidth={1} />
-              <line x1={BRACKET_X - BRACKET_TICK} y1={targetY} x2={BRACKET_X + BRACKET_TICK} y2={targetY} stroke="#4ade80" strokeWidth={1} />
-              <line x1={BRACKET_X - BRACKET_TICK} y1={entryY} x2={BRACKET_X + BRACKET_TICK} y2={entryY} stroke="#00d2d2" strokeWidth={1} />
-              <line x1={BRACKET_X - BRACKET_TICK} y1={stopY} x2={BRACKET_X + BRACKET_TICK} y2={stopY} stroke="#f87171" strokeWidth={1} />
-            </g>
-
-            <line x1={0} y1={targetY} x2={CHART_W} y2={targetY} stroke="#22c55e" strokeWidth={1.5} strokeDasharray="6 4" clipPath="url(#plan-clip-target)" />
-            <line x1={0} y1={stopY} x2={CHART_W} y2={stopY} stroke="#ef4444" strokeWidth={1.5} strokeDasharray="6 4" clipPath="url(#plan-clip-stop)" />
-            <line
-              className="plan-line-entry"
-              x1={0}
-              y1={entryY}
-              x2={CHART_W}
-              y2={entryY}
-              stroke="#00d2d2"
-              strokeWidth={2}
-              strokeDasharray={CHART_W}
-            />
-          </svg>
-
-          {/* Trend-line label — near the bracket's bottom-right end but
-              parked at the chart's bottom margin, below every candle and
-              every price pill (which all sit in the 20-60% vertical band). */}
-          <span
-            className="plan-trend-fade hidden md:flex absolute items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 text-[9px] font-bold"
-            style={{
-              left: pctX(TREND_LABEL_X),
-              top: pctY(CHART_H - 10),
-              transform: 'translate(-50%, -50%)',
-              background: 'rgba(10,12,16,0.8)',
-              border: '1px solid rgba(245,158,11,0.4)',
-              color: '#f59e0b',
-            }}
-            aria-hidden
-          >
-            קו מגמה
-          </span>
-
-          {/* R:R label — two-tone (risk in red, reward in green), anchored
-              to the chart's LEFT edge on purpose: the right edge is already
-              a dense column of three price pills, and this is the fix for a
-              real overlap that column caused when the label lived there too.
-              Sits above candles 1-2 (the only ones nearby), which top out
-              lower than this Y. */}
-          <span
-            className="plan-zone-fade absolute whitespace-nowrap rounded-md px-1.5 py-0.5 text-[10px] font-bold"
-            style={{
-              left: 4,
-              top: pctY((targetY + entryY) / 2),
-              transform: 'translateY(-50%)',
-              background: 'rgba(10,12,16,0.78)',
-            }}
-            aria-hidden
-          >
-            <span style={{ color: 'rgba(255,255,255,0.6)' }}>R:R </span>
-            <span style={{ color: '#f87171' }}>1</span>
-            <span style={{ color: 'rgba(255,255,255,0.6)' }}>:</span>
-            <span style={{ color: '#4ade80' }}>2.5</span>
-          </span>
-
-          {/* Label pills anchor to the chart's physical right edge (its
-              "current price" side) — right/top are physical here on purpose,
-              independent of the page's RTL flow. */}
-          <span
-            className="plan-appear-target absolute whitespace-nowrap rounded-md px-1.5 py-0.5 text-[10px] font-bold"
-            style={{ top: pctY(targetY), right: 2, transform: 'translateY(-50%)', background: 'rgba(10,12,16,0.78)', color: LINES.target.textColor }}
-            aria-hidden
-          >
-            {LINES.target.label}
-          </span>
-          <span
-            className="plan-appear-stop absolute whitespace-nowrap rounded-md px-1.5 py-0.5 text-[10px] font-bold"
-            style={{
-              top: pctY(stopY),
-              right: 2,
-              transform: `translateY(calc(-50% + ${STOP_LABEL_NUDGE}px))`,
-              background: 'rgba(10,12,16,0.78)',
-              color: LINES.stop.textColor,
-            }}
-            aria-hidden
-          >
-            {LINES.stop.label}
-          </span>
-          <span
-            className="plan-appear-entry plan-entry-label-glow absolute whitespace-nowrap rounded-md px-1.5 py-0.5 text-[10px] font-bold"
-            style={{
-              top: pctY(entryY),
-              right: 2,
-              transform: `translateY(calc(-50% + ${ENTRY_LABEL_NUDGE}px))`,
-              background: 'rgba(10,12,16,0.85)',
-              border: '1px solid rgba(0,210,210,0.4)',
-              color: LINES.entry.textColor,
-            }}
-            aria-hidden
-          >
-            {LINES.entry.label}
-          </span>
+          {/* Column 2 — compact horizontal ladder (mobile only): same
+              target→entry→stop order read right-to-left, zone bars run
+              horizontally instead of vertically. */}
+          <div className="flex md:hidden flex-col items-center gap-1.5 w-full">
+            <RRLabel appearClass="plan-appear-row3" />
+            <div className="flex items-center w-full" style={{ height: 32 }}>
+              <MiniLadderItem color={LINES.target.color} value="29,700" appearClass="plan-appear-ladder-target" />
+              <div className="plan-appear-row3" style={{ flexGrow: REWARD }}>
+                <div style={{ height: 3, borderRadius: 2, background: 'linear-gradient(90deg, rgba(74,222,128,0.25), rgba(74,222,128,0.7))' }} />
+              </div>
+              <MiniLadderItem
+                color={LINES.entry.color}
+                value="29,450"
+                appearClass="plan-appear-ladder-entry"
+                glowClass="plan-entry-label-glow"
+              />
+              <div className="plan-appear-row3" style={{ flexGrow: RISK }}>
+                <div style={{ height: 3, borderRadius: 2, background: 'linear-gradient(90deg, rgba(248,113,113,0.7), rgba(248,113,113,0.25))' }} />
+              </div>
+              <MiniLadderItem color={LINES.stop.color} value="29,350" appearClass="plan-appear-row1" />
+            </div>
+          </div>
         </div>
 
-        {/* Checklist — each check pops in synced with its line above */}
+        {/* Checklist — each check pops in synced with its counterpart above:
+            row 1 with the stop ladder row, row 2 with the trend line
+            finishing its draw, row 3 with both R:R zone bars landing. */}
         <div className="flex flex-col gap-2">
           {ROWS.map((row) => (
             <div key={row.text} className="flex items-center gap-2.5">
