@@ -72,7 +72,6 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
   const today = new Date();
   const [year, setYear]   = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
-  const [view, setView]   = useState<'monthly' | 'yearly'>('monthly');
 
   // Display currency — same rule as the All Trades summary: a single uniform
   // trade currency wins, anything mixed (or no money data) falls back to ₪.
@@ -175,53 +174,28 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
   return (
     <div dir="rtl" className="flex flex-col gap-4">
 
-      {/* ── Month navigation + view toggle ──────────────────── */}
-      <div className="flex items-center justify-end gap-3 px-1">
-        <div className="flex rounded-full p-0.5" style={{ background: 'var(--color-tg-surface)' }}>
-          <button
-            onClick={() => setView('monthly')}
-            className="hit-40 relative px-3 py-1.5 rounded-full text-xs font-semibold transition-colors"
-            style={{
-              background: view === 'monthly' ? 'var(--color-tg-primary)' : 'transparent',
-              color:      view === 'monthly' ? '#fff' : 'var(--color-tg-muted)',
-            }}
-          >
-            חודשי
-          </button>
-          <button
-            onClick={() => setView('yearly')}
-            className="hit-40 relative px-3 py-1.5 rounded-full text-xs font-semibold transition-colors"
-            style={{
-              background: view === 'yearly' ? 'var(--color-tg-primary)' : 'transparent',
-              color:      view === 'yearly' ? '#fff' : 'var(--color-tg-muted)',
-            }}
-          >
-            שנתי
-          </button>
-        </div>
-
-        <div className="flex items-center gap-2" style={{ direction: 'ltr' }}>
-          <button
-            onClick={() => navMonth(-1)}
-            className="hit-40 relative w-9 h-9 flex items-center justify-center rounded-xl text-base font-bold transition-opacity hover:opacity-60 active:scale-95"
-            style={{ background: 'var(--color-tg-surface)', color: 'var(--color-tg-text-2)' }}
-          >
-            «
-          </button>
-          <h2
-            className="text-lg font-bold tracking-tight px-1"
-            style={{ direction: 'rtl', color: 'var(--color-tg-text)' }}
-          >
-            {HEBREW_MONTHS[month]}&nbsp;{year}
-          </h2>
-          <button
-            onClick={() => navMonth(1)}
-            className="hit-40 relative w-9 h-9 flex items-center justify-center rounded-xl text-base font-bold transition-opacity hover:opacity-60 active:scale-95"
-            style={{ background: 'var(--color-tg-surface)', color: 'var(--color-tg-text-2)' }}
-          >
-            »
-          </button>
-        </div>
+      {/* ── Month navigation ────────────────────────────────── */}
+      <div className="flex items-center justify-end gap-2 px-1" style={{ direction: 'ltr' }}>
+        <button
+          onClick={() => navMonth(-1)}
+          className="hit-40 relative w-9 h-9 flex items-center justify-center rounded-xl text-base font-bold transition-opacity hover:opacity-60 active:scale-95"
+          style={{ background: 'var(--color-tg-surface)', color: 'var(--color-tg-text-2)' }}
+        >
+          «
+        </button>
+        <h2
+          className="text-lg font-bold tracking-tight px-1"
+          style={{ direction: 'rtl', color: 'var(--color-tg-text)' }}
+        >
+          {HEBREW_MONTHS[month]}&nbsp;{year}
+        </h2>
+        <button
+          onClick={() => navMonth(1)}
+          className="hit-40 relative w-9 h-9 flex items-center justify-center rounded-xl text-base font-bold transition-opacity hover:opacity-60 active:scale-95"
+          style={{ background: 'var(--color-tg-surface)', color: 'var(--color-tg-text-2)' }}
+        >
+          »
+        </button>
       </div>
 
       {/* ── Header stats bar ────────────────────────────────── */}
