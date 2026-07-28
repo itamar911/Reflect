@@ -781,6 +781,40 @@
 .coach-typing  { animation: coach-typing-cycle 6s ease-in-out infinite; }
 .coach-message { animation: coach-message-cycle 6s ease-in-out infinite; }
 
+/* CalendarMock: the weekday header and the day grid are two separate grids
+   (one continuous grid would fight the per-row week divider), so the column
+   template has to be identical in both or the day names stop lining up with
+   the columns underneath them. These custom properties are the single source
+   of that template. On a phone the day cells get squeezed to ~28px, so the
+   week-total column and the gaps both give up room to buy the cells back. */
+.cal-grid {
+  --cal-week-col: 40px;
+  --cal-gap: 5px;
+  grid-template-columns: repeat(7, minmax(0, 1fr)) 1px var(--cal-week-col);
+  gap: var(--cal-gap);
+}
+
+@media (max-width: 640px) {
+  .cal-grid {
+    --cal-week-col: 30px;
+    --cal-gap: 3px;
+  }
+}
+
+/* CalendarMock: the idle "ghost cursor" that tours the month on its own. The
+   left/top travel between cells is an inline transition (the coordinates are
+   measured in JS); this is only the resting pulse that keeps it feeling alive
+   while it sits on a day. Scales about the pointer tip, not the icon's centre,
+   so the arrow appears anchored to the cell it is pointing at. */
+@keyframes cal-ghost-pulse {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.14); }
+}
+.cal-ghost {
+  transform-origin: top left;
+  animation: cal-ghost-pulse 2.5s ease-in-out infinite;
+}
+
 /* ── Reduced motion: kill all landing animation ────────────── */
 
 @media (prefers-reduced-motion: reduce) {
@@ -879,6 +913,13 @@
   .landing .radar-sweep {
     animation: none;
     transform: translate(-50%, -50%) rotate(0deg);
+  }
+
+  /* The cursor is not rendered at all under reduced motion (CalendarMock gates
+     it in JS); this is belt-and-braces in case that gate ever changes. */
+  .landing .cal-ghost {
+    animation: none;
+    transform: none;
   }
 
   /* The lightbox portals to document.body, outside .landing — needs its own override. */
