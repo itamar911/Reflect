@@ -533,6 +533,65 @@
     linear-gradient(180deg, transparent 0%, rgba(8, 145, 178, 0.07) 35%, rgba(0, 210, 210, 0.05) 65%, transparent 100%);
 }
 
+/* ── Feature mocks (FeaturesSection): tilted card + per-mock loops ── */
+
+.feature-mock-wrap {
+  perspective: 1200px;
+}
+
+.feature-mock-card {
+  transform: rotateY(-3deg) rotateX(1deg);
+  transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.card-hover:hover .feature-mock-card {
+  transform: rotateY(0deg) rotateX(0deg);
+}
+
+@media (max-width: 767px) {
+  .feature-mock-card {
+    transform: none;
+  }
+}
+
+/* RulesMock: amber halo around the locked-button icon — transform/opacity
+   only (compositor-only), same pattern as the sidebar handle pulse. */
+.mock-lock-halo {
+  position: absolute;
+  inset: -4px;
+  border-radius: 999px;
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.8);
+  opacity: 0;
+  animation: mock-lock-halo-pulse 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes mock-lock-halo-pulse {
+  0%, 100% { opacity: 0; transform: scale(0.85); }
+  50%      { opacity: 1; transform: scale(1); }
+}
+
+/* PlanCheckMock / DebriefMock: reuse the hero's row-reveal keyframe at a
+   different cadence per mock, staggered per row via animation-delay. */
+.plan-check-row { opacity: 0; animation: hero-row-in 4s ease-in-out infinite; }
+.debrief-line   { opacity: 0; animation: hero-row-in 5s ease-in-out infinite; }
+
+/* CoachMock: typing dots and the resolved message are stacked in the same
+   grid cell (no layout shift) and crossfade on a shared 5s loop. */
+@keyframes coach-typing-cycle {
+  0%, 28%   { opacity: 1; }
+  35%, 100% { opacity: 0; }
+}
+
+@keyframes coach-message-cycle {
+  0%, 33%   { opacity: 0; transform: translateY(4px); }
+  40%, 92%  { opacity: 1; transform: translateY(0); }
+  98%, 100% { opacity: 0; transform: translateY(4px); }
+}
+
+.coach-typing  { animation: coach-typing-cycle 5s ease-in-out infinite; }
+.coach-message { animation: coach-message-cycle 5s ease-in-out infinite; }
+
 /* ── Reduced motion: kill all landing animation ────────────── */
 
 @media (prefers-reduced-motion: reduce) {
@@ -559,6 +618,30 @@
 
   .landing .hiw-line path {
     stroke-dashoffset: 0;
+  }
+
+  .landing .feature-mock-card {
+    transform: none;
+  }
+
+  .landing .mock-lock-halo {
+    animation: none;
+    opacity: 0;
+  }
+
+  .landing .plan-check-row,
+  .landing .debrief-line {
+    opacity: 1;
+    transform: none;
+  }
+
+  .landing .coach-typing {
+    opacity: 0;
+  }
+
+  .landing .coach-message {
+    opacity: 1;
+    transform: none;
   }
 
   /* The lightbox portals to document.body, outside .landing — needs its own override. */

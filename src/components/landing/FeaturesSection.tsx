@@ -3,43 +3,49 @@ import { ScrollReveal } from './ScrollReveal';
 import { SectionHeading } from './SectionHeading';
 import { LightboxImage } from './LightboxImage';
 import { landingImages } from './landingImages';
+import { RulesMock } from './feature-mocks/RulesMock';
+import { PlanCheckMock } from './feature-mocks/PlanCheckMock';
+import { DisciplineScoreMock } from './feature-mocks/DisciplineScoreMock';
+import { DebriefMock } from './feature-mocks/DebriefMock';
+import { CalendarMock } from './feature-mocks/CalendarMock';
+import { CoachMock } from './feature-mocks/CoachMock';
 
-const FEATURES: { icon: LucideIcon; title: string; body: string; imageIndex: number }[] = [
+const FEATURES: { icon: LucideIcon; title: string; body: string; Mock: React.ComponentType }[] = [
   {
     icon: ShieldCheck,
     title: 'חוקים שעובדים בזמן אמת',
     body: 'בנה חוקים אישיים ("אחרי 2 הפסדים — סיימת להיום") והם ייאכפו בזמן התכנון. לא תזכורת בנייד. עצירה אמיתית.',
-    imageIndex: 0,
+    Mock: RulesMock,
   },
   {
     icon: ClipboardList,
     title: 'תכנון עסקה חכם',
     body: 'כניסה, סטופ, יעד, R:R, התאמה לאסטרטגיה — הכל נבדק מולך תוך כדי הקלדה.',
-    imageIndex: 1,
+    Mock: PlanCheckMock,
   },
   {
     icon: Gauge,
     title: 'ציון משמעת',
     body: 'רדאר שמודד אותך על מה שבשליטתך: נאמנות לתוכנית, שמירה על סטופ, סבלנות, שליטה רגשית.',
-    imageIndex: 2,
+    Mock: DisciplineScoreMock,
   },
   {
     icon: Sparkles,
     title: 'תחקיר AI אחרי כל עסקה',
     body: 'לא "מה הרווחת" אלא "איך התנהגת". ניתוח אישי שמזהה FOMO, עסקאות נקמה ויציאות מוקדמות — ונותן ציון שמחושב, לא מומצא.',
-    imageIndex: 3,
+    Mock: DebriefMock,
   },
   {
     icon: CalendarDays,
     title: 'יומן חודשי חכם',
     body: 'כל חודש המסחר שלך במבט אחד: ימים ירוקים, ימים אדומים, ונקודות ההפרה שמספרות את הסיפור האמיתי.',
-    imageIndex: 4,
+    Mock: CalendarMock,
   },
   {
     icon: Bot,
     title: 'מאמן AI אישי',
     body: 'שאל כל שאלה על המסחר שלך וקבל תשובות שמבוססות על הנתונים שלך, לא על עצות גנריות.',
-    imageIndex: 5,
+    Mock: CoachMock,
   },
 ];
 
@@ -52,21 +58,15 @@ export function FeaturesSection() {
           מה מחכה לך בפנים
         </SectionHeading>
 
-        {/* uniform 2×3 grid — every card identical: screenshot on top, icon + title + full description below */}
+        {/* uniform 2×3 grid — every card identical: live mini-mock on top, icon + title + full description below */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-24">
           {FEATURES.map((feature, i) => {
             const Icon = feature.icon;
-            const screenshot = landingImages.features[feature.imageIndex];
+            const Mock = feature.Mock;
             return (
               <ScrollReveal key={feature.title} delay={(i % 2) * 120} className="h-full">
                 <div className="glass-card card-hover h-full min-h-[420px] rounded-2xl p-6 flex flex-col gap-5">
-                  <LightboxImage
-                    id={screenshot.id}
-                    label={screenshot.label}
-                    src={screenshot.src}
-                    objectPosition={screenshot.objectPosition}
-                    aspect="aspect-[16/10]"
-                  />
+                  <Mock />
                   <div className="flex items-center gap-3.5">
                     <div
                       className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0"
