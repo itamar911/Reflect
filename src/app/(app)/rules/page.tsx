@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, getCachedUser } from '@/lib/supabase/server';
 import { getUserPlan } from '@/lib/plans/getUserPlan';
 import RulesEditor from '@/components/rules/RulesEditor';
 import type { PresetRules, CustomRule } from '@/lib/types';
@@ -9,7 +9,7 @@ export const metadata = { title: 'חוקי מסחר — Reflect' };
 
 export default async function RulesPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { user } } = await getCachedUser();
   if (!user) redirect('/login');
 
   const [{ tier: plan }, presetRes, customRes] = await Promise.all([

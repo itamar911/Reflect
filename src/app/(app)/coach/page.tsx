@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server';
+import { createClient, getCachedUser } from '@/lib/supabase/server';
 import { Bot } from 'lucide-react';
 import ChartAnalysis from '@/components/ai/ChartAnalysis';
 import AICoachCard from '@/components/ai/AICoachCard';
@@ -9,7 +9,7 @@ export const metadata = { title: 'יועץ מסחר — Reflect' };
 
 export default async function CoachPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { user } } = await getCachedUser();
   if (!user) return null;
 
   const { data: trades } = await supabase

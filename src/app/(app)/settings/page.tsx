@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, getCachedUser } from '@/lib/supabase/server';
 import { getUserPlan } from '@/lib/plans/getUserPlan';
 import Card from '@/components/ui/Card';
 import AlertsPanel from '@/components/settings/AlertsPanel';
@@ -11,7 +11,7 @@ export const metadata = { title: 'הגדרות — Reflect' };
 
 export default async function SettingsPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { user } } = await getCachedUser();
   if (!user) redirect('/login');
 
   const [profileRes, alertRes, { tier: plan }] = await Promise.all([

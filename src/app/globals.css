@@ -190,12 +190,26 @@ html.light .sidebar-handle {
 
 /* Slow beckoning glow until the user toggles the sidebar once (ever —
    flagged in localStorage). Disabled under prefers-reduced-motion by the
-   .sidebar-motion override below. Only the halo layer breathes. */
-@keyframes handle-beckon {
-  0%, 100% { box-shadow: var(--h-inset), var(--h-drop), var(--h-glow); }
-  50%      { box-shadow: var(--h-inset), var(--h-drop), 0 0 16px rgba(0, 210, 210, 0.8); }
+   .sidebar-motion override below. Implemented as a ::after halo animating
+   only transform/opacity (compositor-only, no repaint) instead of animating
+   box-shadow directly on .sidebar-handle — box-shadow is paint-triggering
+   and ran continuously on every page until first use, competing with
+   navigation rendering on the paint thread. .sidebar-handle's own box-shadow
+   stays static. */
+.sidebar-handle-pulse::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 16px rgba(0, 210, 210, 0.8);
+  opacity: 0;
+  animation: handle-beckon 2.4s ease-in-out infinite;
+  pointer-events: none;
 }
-.sidebar-handle-pulse { animation: handle-beckon 2.4s ease-in-out infinite; }
+@keyframes handle-beckon {
+  0%, 100% { opacity: 0; transform: scale(0.92); }
+  50%      { opacity: 1; transform: scale(1); }
+}
 
 /* Sidebar active link: swap gold text → dark text in light mode for readability */
 html.light .sidebar-link-active {
@@ -288,38 +302,40 @@ input[type="button"] {
 .animate-slide-up    { animation: slide-up    0.28s cubic-bezier(0.32, 0.72, 0, 1); }
 .animate-fade-in     { animation: fade-in     0.22s ease-out; }
 
+/* Single lightweight fade, opacity-only — replaces a translateY(50px) slide
+   that used to run alongside a full subtree remount on every navigation.
+   Applied once at the page-container level (PageTransition), not per-card. */
 @keyframes page-enter {
-  from { transform: translateY(50px); }
-  to   { transform: translateY(0); }
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
 .page-enter {
-  animation: page-enter 400ms ease-out both;
+  animation: page-enter 180ms ease-out both;
 }
 
-@keyframes card-enter {
-  from { opacity: 0; transform: translateY(20px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
+/* Subtle staggered card entrance — desktop only (768px+). This is the
+   mobile-specific nav-slowness fix: on phones/tablets it's skipped entirely
+   rather than tuned down, since it's the animation most likely to visibly
+   jank on weaker mobile GPUs. Bucketed via :nth-child(n+6) so the total
+   stagger stays capped regardless of how many cards a page renders (old
+   version scaled unbounded per-card, up to 2.7s on a 15-card page). */
+@media (min-width: 768px) {
+  @keyframes card-enter {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
 
-.page-enter > * > * {
-  animation: card-enter 600ms ease-out backwards;
+  .page-enter > * > * {
+    animation: card-enter 220ms ease-out backwards;
+  }
+  .page-enter > * > :nth-child(1) { animation-delay: 0ms; }
+  .page-enter > * > :nth-child(2) { animation-delay: 30ms; }
+  .page-enter > * > :nth-child(3) { animation-delay: 60ms; }
+  .page-enter > * > :nth-child(4) { animation-delay: 90ms; }
+  .page-enter > * > :nth-child(5) { animation-delay: 120ms; }
+  .page-enter > * > :nth-child(n+6) { animation-delay: 150ms; }
 }
-.page-enter > * > :nth-child(1)  { animation-delay: 0ms; }
-.page-enter > * > :nth-child(2)  { animation-delay: 150ms; }
-.page-enter > * > :nth-child(3)  { animation-delay: 300ms; }
-.page-enter > * > :nth-child(4)  { animation-delay: 450ms; }
-.page-enter > * > :nth-child(5)  { animation-delay: 600ms; }
-.page-enter > * > :nth-child(6)  { animation-delay: 750ms; }
-.page-enter > * > :nth-child(7)  { animation-delay: 900ms; }
-.page-enter > * > :nth-child(8)  { animation-delay: 1050ms; }
-.page-enter > * > :nth-child(9)  { animation-delay: 1200ms; }
-.page-enter > * > :nth-child(10) { animation-delay: 1350ms; }
-.page-enter > * > :nth-child(11) { animation-delay: 1500ms; }
-.page-enter > * > :nth-child(12) { animation-delay: 1650ms; }
-.page-enter > * > :nth-child(13) { animation-delay: 1800ms; }
-.page-enter > * > :nth-child(14) { animation-delay: 1950ms; }
-.page-enter > * > :nth-child(15) { animation-delay: 2100ms; }
 
 /* Applied by AppShell until just after hydration: the server always renders
    the sidebar collapsed, so a saved-open sidebar corrects itself on the first
@@ -334,7 +350,7 @@ input[type="button"] {
 
 @media (prefers-reduced-motion: reduce) {
   .page-enter,
-  .page-enter > * { animation: none; }
+  .page-enter > * > * { animation: none; }
 
   /* Sidebar toggle (clip-path/transform/opacity/margin) — collapse straight
      to the end state instead of animating. Covers inline-styled transitions
@@ -344,6 +360,14 @@ input[type="button"] {
     transition-duration: 0ms !important;
     transition-delay: 0ms !important;
     animation-duration: 0ms !important;
+  }
+
+  /* .sidebar-motion * doesn't reach generated content — the handle's pulse
+     lives on a ::after (see .sidebar-handle-pulse::after above), so it needs
+     its own override here. */
+  .sidebar-handle-pulse::after {
+    animation: none;
+    opacity: 0;
   }
 
 }

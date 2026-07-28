@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server';
+import { createClient, getCachedUser } from '@/lib/supabase/server';
 import { getUserPlan } from '@/lib/plans/getUserPlan';
 import StrategiesClient from '@/components/strategies/StrategiesClient';
 import type { PersonalStrategy, TradeSummary } from '@/components/strategies/StrategiesClient';
@@ -7,7 +7,7 @@ export const metadata = { title: 'אסטרטגיות — Reflect' };
 
 export default async function StrategiesPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { user } } = await getCachedUser();
   if (!user) return null;
 
   const [strategiesRes, tradesRes, { tier: plan }] = await Promise.all([

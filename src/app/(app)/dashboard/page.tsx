@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server';
+import { createClient, getCachedUser } from '@/lib/supabase/server';
 import { getUserPlan } from '@/lib/plans/getUserPlan';
 import DashboardClient from '@/components/dashboard/DashboardClient';
 import { DASH_TRADE_SELECT, mapDashTrade } from '@/lib/dashboard/trades';
@@ -8,7 +8,7 @@ export const metadata = { title: 'דשבורד — Reflect' };
 
 export default async function DashboardPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { user } } = await getCachedUser();
   if (!user) return null;
 
   const [profileRes, tradesRes, { tier: plan }] = await Promise.all([

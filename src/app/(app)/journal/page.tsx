@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server';
+import { createClient, getCachedUser } from '@/lib/supabase/server';
 import { BookOpen } from 'lucide-react';
 import JournalExport from '@/components/journal/JournalExport';
 import TradeCalendar from '@/components/journal/TradeCalendar';
@@ -7,7 +7,7 @@ export const metadata = { title: 'יומן חודשי — Reflect' };
 
 export default async function JournalPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { user } } = await getCachedUser();
   if (!user) return null;
 
   const { data: trades } = await supabase

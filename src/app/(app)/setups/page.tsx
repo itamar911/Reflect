@@ -1,12 +1,12 @@
 import { redirect } from 'next/navigation';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, getCachedUser } from '@/lib/supabase/server';
 import SetupsClient, { type Setup, type LinkedTrade } from '@/components/setups/SetupsClient';
 
 export const metadata = { title: 'סטאפים ותגיות — Reflect' };
 
 export default async function SetupsPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { user } } = await getCachedUser();
   if (!user) redirect('/login');
 
   const [setupsRes, tradesRes] = await Promise.all([

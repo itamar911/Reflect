@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server';
+import { createClient, getCachedUser } from '@/lib/supabase/server';
 import JournalExport from '@/components/journal/JournalExport';
 import JournalClient from '@/components/journal/JournalClient';
 
@@ -6,7 +6,7 @@ export const metadata = { title: 'כל העסקאות — Reflect' };
 
 export default async function TradesPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { user } } = await getCachedUser();
   if (!user) return null;
 
   const [{ data: trades }, { data: violations }] = await Promise.all([

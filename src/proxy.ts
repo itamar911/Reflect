@@ -65,6 +65,16 @@ export async function proxy(request: NextRequest) {
     .getAll()
     .some((c) => c.name.startsWith('sb-') && c.name.includes('-auth-token'));
 
+  // Deliberately not using the shared getCachedUser() helper (src/lib/supabase/server.ts)
+  // here: that helper's client is built from next/headers cookies(), which can only
+  // write refreshed auth cookies onto a Server Component response as a best-effort
+  // no-op — this proxy is what actually persists rotated tokens onto the real
+  // NextResponse (see redirectWithCookies below and supabaseResponse). Routing
+  // this through the RSC-oriented client would silently break token refresh.
+  // React's cache() scope is also documented as deduplicating "within a single
+  // render pass" — proxy/middleware runs before that render pass, so this call
+  // wouldn't dedupe against the page's cached call regardless.
+  //
   // A transient getUser() failure (network error, Supabase 5xx) must not be
   // treated as "logged out" — with auth cookies present we let the request
   // through and rely on the page-level getUser() gates; the next request retries.

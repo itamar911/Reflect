@@ -1,12 +1,12 @@
 import { redirect } from 'next/navigation';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, getCachedUser } from '@/lib/supabase/server';
 import NotebookClient, { type NotebookPage } from '@/components/notebook/NotebookClient';
 
 export const metadata = { title: 'מחברת — Reflect' };
 
 export default async function NotebookPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { user } } = await getCachedUser();
   if (!user) redirect('/login');
 
   const { data } = await supabase

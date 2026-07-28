@@ -1,11 +1,11 @@
 ﻿import { redirect } from 'next/navigation';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, getCachedUser } from '@/lib/supabase/server';
 import { getUserPlan } from '@/lib/plans/getUserPlan';
 import AppShell from '@/components/layout/AppShell';
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { user } } = await getCachedUser();
 
   if (!user) redirect('/login');
 

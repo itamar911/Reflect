@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, getCachedUser } from '@/lib/supabase/server';
 import PnlChart, { type PeriodPoint } from '@/components/stats/PnlChart';
 import DistributionSection, { type DistBar } from '@/components/stats/DistributionSection';
 import MindStateSection, { type ScaleBucket, type ScalePanelData } from '@/components/stats/MindStateSection';
@@ -25,7 +25,7 @@ const pnlIls = tradeMoneyPnl;
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default async function StatsPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { user } } = await getCachedUser();
   if (!user) redirect('/login');
 
   const { data: raw } = await supabase
