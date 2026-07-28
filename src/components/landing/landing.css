@@ -738,6 +738,17 @@
 .plan-appear-stop   { animation: plan-appear-stop-kf 7.5s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
 .plan-appear-target { animation: plan-appear-target-kf 7.5s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
 
+/* R:R zones/bracket/label — same "appears once the target line completes"
+   beat as .plan-appear-target, but opacity-only: these are wide background
+   bands, and scaling a 280-unit-wide rect from its center reads as an odd
+   grow-in-both-directions pop rather than a clean fade. */
+@keyframes plan-zone-fade {
+  0%, 46.7%    { opacity: 0; }
+  52.7%, 86.7% { opacity: 1; }
+  100%         { opacity: 0; }
+}
+.plan-zone-fade { animation: plan-zone-fade 7.5s ease-in-out infinite; }
+
 /* Compound selector (higher specificity than .plan-appear-entry alone) so
    the entry label gets both its appear animation and the glow pulse below,
    without the second declaration clobbering the first — the check icon
@@ -853,6 +864,11 @@
     animation: none;
     opacity: 1;
     transform: scale(1);
+  }
+
+  .landing .plan-zone-fade {
+    animation: none;
+    opacity: 1;
   }
 
   .landing .plan-entry-label-glow {
