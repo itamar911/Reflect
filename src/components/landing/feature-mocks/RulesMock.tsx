@@ -1,10 +1,15 @@
-import { Lock } from 'lucide-react';
+import { Lock, Shield } from 'lucide-react';
 import { MockFrame } from './MockFrame';
 
 export function RulesMock() {
   return (
     <MockFrame>
-      <div dir="rtl" className="flex flex-col h-full gap-3">
+      <div dir="rtl" className="flex flex-col h-full gap-2.5">
+        <div className="flex items-center gap-1.5">
+          <Shield size={12} className="shrink-0" style={{ color: 'rgba(255,255,255,0.45)' }} />
+          <span style={{ fontSize: 11.5, color: 'rgba(255,255,255,0.45)' }}>3 חוקים פעילים</span>
+        </div>
+
         <div className="flex items-center justify-between">
           <span className="text-sm font-bold text-white">חוק פעיל</span>
           <span
@@ -17,15 +22,23 @@ export function RulesMock() {
         </div>
 
         <div
-          className="flex items-center justify-between rounded-xl px-3 py-2.5"
+          className="flex items-center justify-between gap-2 rounded-xl px-3 py-2.5"
           style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}
         >
           <span className="text-white/80" style={{ fontSize: 14 }}>מקסימום 2 הפסדים ביום</span>
-          <span className="flex items-center gap-1" aria-hidden>
+          <span className="flex items-center gap-1 shrink-0" aria-hidden>
             <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#00d2d2' }} />
             <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#00d2d2' }} />
             <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'rgba(255,255,255,0.2)' }} />
           </span>
+        </div>
+
+        <div
+          className="flex items-center justify-between gap-2 rounded-xl px-3 py-2.5"
+          style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}
+        >
+          <span className="text-white/80" style={{ fontSize: 14 }}>לא לפתוח עסקה 5 דקות מפתיחת המסחר</span>
+          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: 'rgba(255,255,255,0.2)' }} aria-hidden />
         </div>
 
         <div className="mt-auto flex flex-col items-center gap-2">

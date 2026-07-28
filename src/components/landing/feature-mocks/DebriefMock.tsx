@@ -1,4 +1,4 @@
-import { Sparkles, Check, AlertTriangle } from 'lucide-react';
+import { Sparkles, Check, AlertTriangle, Lightbulb } from 'lucide-react';
 import { MockFrame } from './MockFrame';
 
 export function DebriefMock() {
@@ -21,16 +21,20 @@ export function DebriefMock() {
             <Check size={15} className="shrink-0" style={{ color: '#22c55e' }} />
             <span style={{ fontSize: 14, color: '#86efac' }}>הכניסה הייתה לפי התוכנית</span>
           </div>
-          <div className="debrief-line flex items-center gap-2" style={{ animationDelay: '0.8s' }}>
+          <div className="debrief-line flex items-center gap-2" style={{ animationDelay: '0.6s' }}>
             <AlertTriangle size={15} className="shrink-0" style={{ color: '#f59e0b' }} />
             <span style={{ fontSize: 14, color: '#fbbf24' }}>הסטופ הוזז פעמיים</span>
+          </div>
+          <div className="debrief-line flex items-center gap-2" style={{ animationDelay: '1.2s' }}>
+            <Lightbulb size={15} className="shrink-0" style={{ color: '#38bdf8' }} />
+            <span style={{ fontSize: 14, color: '#93c5fd' }}>שקול הקטנת פוזיציה בכניסות דומות</span>
           </div>
         </div>
 
         <span
           className="debrief-line self-start rounded-full px-3 py-1 text-xs font-bold"
           style={{
-            animationDelay: '1.6s',
+            animationDelay: '1.8s',
             background: 'rgba(0,210,210,0.12)',
             border: '1px solid rgba(0,210,210,0.35)',
             color: '#00d2d2',

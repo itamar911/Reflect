@@ -554,6 +554,28 @@
   }
 }
 
+/* Ambient depth blob behind every mock's content — see MockFrame.tsx.
+   z-index:-1 keeps it behind normal-flow content while still painting over
+   the card's own background (no z-index needed on the content itself). */
+.mock-ambient-glow {
+  position: absolute;
+  width: 200px;
+  height: 200px;
+  top: 50%;
+  right: 50%;
+  transform: translate(50%, -50%);
+  border-radius: 9999px;
+  background: radial-gradient(circle, rgba(0, 210, 210, 0.14), transparent 72%);
+  pointer-events: none;
+  z-index: -1;
+  animation: mock-glow-drift 8s ease-in-out infinite alternate;
+}
+
+@keyframes mock-glow-drift {
+  from { transform: translate(50%, -50%) scale(1); }
+  to   { transform: translate(calc(50% + 24px), calc(-50% - 16px)) scale(1.12); }
+}
+
 /* RulesMock: amber halo around the locked-button icon — transform/opacity
    only (compositor-only), same pattern as the sidebar handle pulse. */
 .mock-lock-halo {
@@ -577,20 +599,22 @@
 .debrief-line   { opacity: 0; animation: hero-row-in 5s ease-in-out infinite; }
 
 /* CoachMock: typing dots and the resolved message are stacked in the same
-   grid cell (no layout shift) and crossfade on a shared 5s loop. */
+   grid cell (no layout shift) and crossfade on a shared 6s loop — typing
+   shows for ~1.5s (0-25%), the reply holds for ~4s (25-91.7%), then a brief
+   fade back to typing before the loop repeats. */
 @keyframes coach-typing-cycle {
-  0%, 28%   { opacity: 1; }
-  35%, 100% { opacity: 0; }
+  0%, 20%   { opacity: 1; }
+  25%, 100% { opacity: 0; }
 }
 
 @keyframes coach-message-cycle {
-  0%, 33%   { opacity: 0; transform: translateY(4px); }
-  40%, 92%  { opacity: 1; transform: translateY(0); }
-  98%, 100% { opacity: 0; transform: translateY(4px); }
+  0%, 20%      { opacity: 0; transform: translateY(4px); }
+  25%, 91.7%   { opacity: 1; transform: translateY(0); }
+  96.7%, 100%  { opacity: 0; transform: translateY(4px); }
 }
 
-.coach-typing  { animation: coach-typing-cycle 5s ease-in-out infinite; }
-.coach-message { animation: coach-message-cycle 5s ease-in-out infinite; }
+.coach-typing  { animation: coach-typing-cycle 6s ease-in-out infinite; }
+.coach-message { animation: coach-message-cycle 6s ease-in-out infinite; }
 
 /* ── Reduced motion: kill all landing animation ────────────── */
 

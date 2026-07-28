@@ -55,6 +55,24 @@ export function DisciplineScoreMock() {
 
   return (
     <MockFrame className="items-center justify-center">
+      {/* Floating corner badges — same hero-float treatment as HeroMock's
+          stat chips, sized down and pulled inward so they stay clear of
+          the frame's overflow-hidden edges instead of poking off-card. */}
+      <span
+        className="hero-float-1 absolute top-3 right-3 z-[1] rounded-full px-2 py-1 text-[10px] font-bold"
+        style={{ background: 'rgba(0,210,210,0.14)', border: '1px solid rgba(0,210,210,0.4)', color: '#00d2d2' }}
+        aria-hidden
+      >
+        רצף נוכחי: 4
+      </span>
+      <span
+        className="hero-float-2 absolute bottom-3 left-3 z-[1] rounded-full px-2 py-1 text-[10px] font-bold"
+        style={{ background: 'rgba(34,197,94,0.12)', border: '1px solid rgba(34,197,94,0.35)', color: '#4ade80' }}
+        aria-hidden
+      >
+        מעל הממוצע האישי
+      </span>
+
       <div ref={ref} dir="rtl" className="flex flex-col items-center gap-2">
         <div className="relative" style={{ width: SIZE, height: SIZE }}>
           <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`} className="-rotate-90">
