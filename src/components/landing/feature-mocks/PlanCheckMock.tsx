@@ -25,36 +25,76 @@ function pctX(x: number) {
 
 // A believable but entirely made-up price silhouette — no longer tied to any
 // entry/stop/target value (those moved to the ladder), just needs to read as
-// real price movement: mixed body sizes, varied wicks, no tight wiggle.
+// real, slightly noisy price action: mixed body sizes (3 small-bodied/
+// doji-like bars among the trend moves), wicks that vary from tight
+// (strong-bodied trend candles) to long relative to their body (rejection
+// candles), overall drifting up to match the Long/Trend Follow framing.
 const CANDLES = [
-  { o: 52, c: 61, h: 64, l: 50 },
-  { o: 61, c: 57, h: 63, l: 55 },
-  { o: 57, c: 56, h: 60, l: 54 },
-  { o: 56, c: 72, h: 75, l: 55 },
-  { o: 72, c: 67, h: 76, l: 64 },
-  { o: 67, c: 81, h: 84, l: 66 },
-  { o: 81, c: 74, h: 83, l: 70 },
-  { o: 74, c: 65, h: 76, l: 63 },
+  { o: 48, h: 55, l: 46, c: 53 },
+  { o: 53, h: 54, l: 48, c: 50 },
+  { o: 50, h: 53, l: 47, c: 51 }, // doji-like
+  { o: 51, h: 62, l: 50, c: 60 },
+  { o: 60, h: 64, l: 56, c: 58 }, // small body, long upper wick — rejection
+  { o: 58, h: 70, l: 57, c: 68 },
+  { o: 68, h: 72, l: 64, c: 66 }, // doji-like
+  { o: 66, h: 78, l: 65, c: 76 },
+  { o: 76, h: 80, l: 70, c: 73 },
+  { o: 73, h: 85, l: 72, c: 82 },
+  { o: 82, h: 86, l: 76, c: 79 }, // small body, long upper wick — rejection near highs
+  { o: 79, h: 87, l: 77, c: 84 },
 ];
 const CANDLE_SPACING = CHART_W / CANDLES.length;
-const CANDLE_BODY_W = CANDLE_SPACING * 0.58; // ~58% body / ~42% gap, standard chart proportions
+const CANDLE_BODY_W = CANDLE_SPACING * 0.6; // ~60% body / ~40% gap, standard chart proportions
 
-const GRID_LINES = [0.2, 0.4, 0.6, 0.8].map((f) => PAD_Y + f * (CHART_H - PAD_Y * 2));
+// TradingView's standard candle palette — body fill plus a subtly darker
+// shade of the same hue for the 1px border (definition against the dark
+// background without reading as a contrasting outline).
+const CANDLE_UP_FILL = '#26a69a';
+const CANDLE_UP_BORDER = '#1d7d74';
+const CANDLE_DOWN_FILL = '#ef5350';
+const CANDLE_DOWN_BORDER = '#b33e3c';
 
-// Trend line — connects the swing lows of 4 ascending candles, matching the
-// Long direction. Draws left-to-right via pathLength=100 on the <polyline>
-// (see plan-trend-draw in landing.css) so the dash math is plain 0-100
-// regardless of the path's real length in user units.
-const TREND_LINE_INDICES = [0, 2, 4, 6];
-const TREND_LINE_PTS = TREND_LINE_INDICES.map((i) => ({
-  x: (i + 0.5) * CANDLE_SPACING,
-  y: toY(CANDLES[i].l),
-}));
-const TREND_LINE_POINTS = TREND_LINE_PTS.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
-const TREND_LABEL_X = 190;
-// Parked just under the lowest point of any candle (not pinned to the
-// chart's bottom margin) so it reads as attached to the line's end instead
-// of floating alone in the taller column's extra empty space below.
+const GRID_LINES_H = [0.2, 0.4, 0.6, 0.8].map((f) => PAD_Y + f * (CHART_H - PAD_Y * 2));
+const GRID_LINES_V = [0.2, 0.4, 0.6, 0.8].map((f) => f * CHART_W);
+
+// Uniform Catmull-Rom -> cubic Bezier conversion so the trend curve flows
+// through every point with no visible segment joints (standard 1/6-tension
+// construction; endpoints clamp by reusing the nearest real point in place
+// of the missing neighbor).
+function smoothPath(points: { x: number; y: number }[]) {
+  const d = [`M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)}`];
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[i - 1] ?? points[i];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[i + 2] ?? p2;
+    const cp1x = p1.x + (p2.x - p0.x) / 6;
+    const cp1y = p1.y + (p2.y - p0.y) / 6;
+    const cp2x = p2.x - (p3.x - p1.x) / 6;
+    const cp2y = p2.y - (p3.y - p1.y) / 6;
+    d.push(`C ${cp1x.toFixed(2)} ${cp1y.toFixed(2)}, ${cp2x.toFixed(2)} ${cp2y.toFixed(2)}, ${p2.x.toFixed(2)} ${p2.y.toFixed(2)}`);
+  }
+  return d.join(' ');
+}
+
+// Trend curve — a moving-average-style line smoothed through every candle's
+// CLOSE across the whole range (not just a few swing lows), so it reads as a
+// real indicator instead of a hand-drawn line. Draws left-to-right via
+// pathLength=100 on the <path> (see plan-trend-draw in landing.css) so the
+// dash math is plain 0-100 regardless of the curve's real length.
+const TREND_CURVE_PTS = CANDLES.map((k, i) => ({ x: (i + 0.5) * CANDLE_SPACING, y: toY(k.c) }));
+const TREND_CURVE_D = smoothPath(TREND_CURVE_PTS);
+const TREND_CURVE_END = TREND_CURVE_PTS[TREND_CURVE_PTS.length - 1];
+// Pulled back from the curve's exact endpoint (near the chart's right edge)
+// so the label has room to breathe instead of overflowing the column, and
+// parked just under the lowest point of any candle so it reads as attached
+// to the curve instead of floating alone. The label's own width is fixed
+// CSS px while its x position is a percentage of the column, so the same
+// pullback reads as much less physical clearance on a narrow column (e.g.
+// the md breakpoint, where column 1 is only ~35% of a already-narrow card)
+// than on a wide one — capping at 80% of the chart width keeps it clear of
+// the right edge at every breakpoint, not just the widest.
+const TREND_LABEL_X = Math.min(TREND_CURVE_END.x - CANDLE_SPACING, CHART_W * 0.8);
 const TREND_LABEL_Y = Math.max(...CANDLES.map((k) => toY(k.l))) + 16;
 
 // Column 2 — vertical price ladder. Values chosen so (target-entry) is
@@ -175,8 +215,11 @@ export function PlanCheckMock() {
               preserveAspectRatio="none"
               aria-hidden
             >
-              {GRID_LINES.map((y, i) => (
-                <line key={i} x1={0} y1={y} x2={CHART_W} y2={y} stroke="rgba(255,255,255,0.05)" strokeWidth={0.75} />
+              {GRID_LINES_H.map((y, i) => (
+                <line key={`h${i}`} x1={0} y1={y} x2={CHART_W} y2={y} stroke="rgba(255,255,255,0.05)" strokeWidth={0.75} vectorEffect="non-scaling-stroke" />
+              ))}
+              {GRID_LINES_V.map((x, i) => (
+                <line key={`v${i}`} x1={x} y1={0} x2={x} y2={CHART_H} stroke="rgba(255,255,255,0.04)" strokeWidth={0.75} vectorEffect="non-scaling-stroke" />
               ))}
 
               <g className="plan-candles">
@@ -184,35 +227,42 @@ export function PlanCheckMock() {
                   const x = (i + 0.5) * CANDLE_SPACING;
                   const top = toY(Math.max(k.o, k.c));
                   const bottom = toY(Math.min(k.o, k.c));
-                  const color = k.c > k.o ? 'rgba(34,197,94,0.55)' : 'rgba(239,68,68,0.55)';
+                  const up = k.c > k.o;
+                  const fill = up ? CANDLE_UP_FILL : CANDLE_DOWN_FILL;
+                  const border = up ? CANDLE_UP_BORDER : CANDLE_DOWN_BORDER;
                   return (
                     <g key={i}>
-                      <line x1={x} y1={toY(k.h)} x2={x} y2={toY(k.l)} stroke={color} strokeWidth={1.2} />
+                      <line x1={x} y1={toY(k.h)} x2={x} y2={toY(k.l)} stroke={fill} strokeWidth={1.6} vectorEffect="non-scaling-stroke" />
                       <rect
                         x={x - CANDLE_BODY_W / 2}
                         y={top}
                         width={CANDLE_BODY_W}
                         height={Math.max(2, bottom - top)}
-                        fill={color}
-                        rx={1}
+                        fill={fill}
+                        stroke={border}
+                        strokeWidth={1}
+                        vectorEffect="non-scaling-stroke"
                       />
                     </g>
                   );
                 })}
               </g>
 
-              {/* Nothing else draws on this chart — the trend line is the
+              {/* Nothing else draws on this chart — the trend curve is the
                   clear visual focus with no price lines competing against
-                  it. pathLength=100 keeps the draw-in math simple. */}
-              <polyline
+                  it. pathLength=100 keeps the draw-in math simple regardless
+                  of the smoothed curve's real length. */}
+              <path
                 className="plan-trend-draw"
-                points={TREND_LINE_POINTS}
+                d={TREND_CURVE_D}
                 fill="none"
-                stroke="#f59e0b"
-                strokeWidth={1.4}
+                stroke="#00d2d2"
+                strokeWidth={2.2}
                 strokeDasharray="100"
                 pathLength={100}
-                strokeLinejoin="round"
+                strokeLinecap="round"
+                vectorEffect="non-scaling-stroke"
+                style={{ filter: 'drop-shadow(0 0 3px rgba(0,210,210,0.55))' }}
               />
             </svg>
 
@@ -223,8 +273,8 @@ export function PlanCheckMock() {
                 top: pctY(TREND_LABEL_Y),
                 transform: 'translate(-50%, -50%)',
                 background: 'rgba(10,12,16,0.8)',
-                border: '1px solid rgba(245,158,11,0.4)',
-                color: '#f59e0b',
+                border: '1px solid rgba(0,210,210,0.4)',
+                color: '#00d2d2',
               }}
               aria-hidden
             >
