@@ -7,7 +7,7 @@ import { MockFrame } from './MockFrame';
 const SIZE = 320; // logical viewBox units — the wrap renders smaller on mobile via Tailwind, scaling everything (incl. % -positioned labels) proportionally
 const CENTER = SIZE / 2;
 const MAX_R = 105; // plot radius for a value of 100
-const LABEL_R = 134;
+const LABEL_R = 144; // pushed out from 134 to clear the larger label text below
 const TARGET = 87;
 
 // Longest labels go on the horizontally-safest clock positions (top, then
@@ -97,14 +97,14 @@ export function DisciplineScoreMock() {
     <MockFrame className="items-center justify-center" height={440}>
       {/* Floating corner badges, kept from the previous round */}
       <span
-        className="hero-float-1 absolute top-2 right-2 z-[25] rounded-full px-2 py-1 text-[10px] font-bold"
+        className="hero-float-1 absolute top-2 right-2 z-[25] whitespace-nowrap rounded-full px-2.5 py-1.5 text-xs font-bold"
         style={{ background: 'rgba(0,210,210,0.14)', border: '1px solid rgba(0,210,210,0.4)', color: '#00d2d2' }}
         aria-hidden
       >
         רצף נוכחי: 4
       </span>
       <span
-        className="hero-float-2 absolute bottom-2 left-2 z-[25] rounded-full px-2 py-1 text-[10px] font-bold"
+        className="hero-float-2 absolute bottom-2 left-2 z-[25] whitespace-nowrap rounded-full px-2.5 py-1.5 text-xs font-bold"
         style={{ background: 'rgba(34,197,94,0.12)', border: '1px solid rgba(34,197,94,0.35)', color: '#4ade80' }}
         aria-hidden
       >
@@ -113,17 +113,17 @@ export function DisciplineScoreMock() {
 
       {/* Legend — the corner the badges don't occupy */}
       <div
-        className="absolute bottom-2 right-2 z-[25] flex flex-col gap-1 rounded-lg px-2 py-1.5"
+        className="absolute bottom-2 right-2 z-[25] flex flex-col gap-2 rounded-lg px-2.5 py-2"
         style={{ background: 'rgba(10,12,16,0.55)', border: '1px solid rgba(255,255,255,0.08)' }}
         aria-hidden
       >
-        <span className="flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: '#00d2d2' }} />
-          <span style={{ fontSize: 9.5, color: 'rgba(255,255,255,0.75)' }}>אתה</span>
+        <span className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full shrink-0" style={{ background: '#00d2d2' }} />
+          <span className="whitespace-nowrap" style={{ fontSize: 11, color: 'rgba(255,255,255,0.8)' }}>אתה</span>
         </span>
-        <span className="flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: 'rgba(255,255,255,0.45)' }} />
-          <span style={{ fontSize: 9.5, color: 'rgba(255,255,255,0.55)' }}>ממוצע הסוחרים</span>
+        <span className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full shrink-0" style={{ background: 'rgba(255,255,255,0.45)' }} />
+          <span className="whitespace-nowrap" style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)' }}>ממוצע הסוחרים</span>
         </span>
       </div>
 
@@ -211,10 +211,11 @@ export function DisciplineScoreMock() {
                   left: pct(lp.x),
                   top: pct(lp.y),
                   transform: 'translate(-50%, -50%)',
-                  maxWidth: 64,
-                  fontSize: 11,
-                  lineHeight: 1.25,
-                  color: 'rgba(255,255,255,0.6)',
+                  maxWidth: 76,
+                  fontSize: 15,
+                  fontWeight: 600,
+                  lineHeight: 1.3,
+                  color: 'rgba(255,255,255,0.88)',
                 }}
               >
                 {axis.label}
@@ -264,7 +265,7 @@ export function DisciplineScoreMock() {
           }}
         >
           <span className="text-3xl font-extrabold text-white leading-none">{displayValue}</span>
-          <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.6)', marginTop: 2 }}>מתוך 100</span>
+          <span style={{ fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.7)', marginTop: 2 }}>מתוך 100</span>
         </div>
       </div>
     </MockFrame>
