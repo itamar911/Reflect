@@ -594,6 +594,29 @@
 
 .radar-dot-pulse { animation: radar-dot-pulse 3s ease-in-out infinite; }
 
+/* Sonar sweep beam — sits behind the data polygon/dots (z-20) but above the
+   guide rings and average-trader baseline. A single conic-gradient stands in
+   for "a beam + fading trail": bright at the 0deg edge, fading out over the
+   next ~55deg, transparent the rest of the way round. border-radius:50%
+   clips the (square) gradient box into a circle. */
+.radar-sweep {
+  pointer-events: none;
+  background: conic-gradient(
+    from 0deg,
+    rgba(0, 210, 210, 0.65) 0deg,
+    rgba(0, 210, 210, 0.22) 18deg,
+    rgba(0, 210, 210, 0.06) 40deg,
+    transparent 55deg,
+    transparent 360deg
+  );
+  animation: radar-sweep-spin 4.5s linear infinite;
+}
+
+@keyframes radar-sweep-spin {
+  from { transform: translate(-50%, -50%) rotate(0deg); }
+  to   { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
 /* Hover bonus layer: :has() reaches from the chart root into the SVG spoke/
    dot from an HTML hit-area hover elsewhere in the tree, so no JS state is
    needed for a chart this static. Gated on (hover: hover) so touch taps
@@ -728,6 +751,13 @@
   .landing .radar-dot-pulse {
     animation: none;
     opacity: 1;
+  }
+
+  /* Freezes pointing at the top axis — rotate(0deg) is also the sweep's own
+     un-rotated resting orientation, so this is just "stop animating". */
+  .landing .radar-sweep {
+    animation: none;
+    transform: translate(-50%, -50%) rotate(0deg);
   }
 
   /* The lightbox portals to document.body, outside .landing — needs its own override. */
