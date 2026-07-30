@@ -697,9 +697,65 @@
   animation: rules-cursor-tap 0.52s ease-out both;
 }
 
-/* DebriefMock: reuses the hero's row-reveal keyframe at its own cadence,
-   staggered per row via animation-delay. */
-.debrief-line { opacity: 0; animation: hero-row-in 5s ease-in-out infinite; }
+/* DebriefMock: findings stream in under JS phase control (see the component),
+   so these are one-shot accents rather than ambient loops.
+
+   The text wipe uses clip-path with a *left* inset because clip-path is
+   physical: animating the left edge from 100% to 0 uncovers the line from its
+   right edge leftward, which is the reading direction of the Hebrew text
+   inside it. An inline-size animation would have been logical-property-aware
+   but also reflows the row on every frame. */
+@keyframes debrief-stream-in {
+  from { clip-path: inset(0 0 0 100%); }
+  to   { clip-path: inset(0 0 0 0); }
+}
+
+.debrief-stream {
+  animation: debrief-stream-in 0.5s steps(22, end) both;
+}
+
+/* The analysing pulse shown while the report is still being generated. */
+@keyframes debrief-scan-pulse {
+  0%, 100% { opacity: 0.3; transform: scale(0.8); }
+  50%      { opacity: 1;   transform: scale(1); }
+}
+
+.debrief-scan-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  animation: debrief-scan-pulse 1.1s ease-in-out infinite;
+}
+
+/* CoachMock: a message arriving. Bubbles are mounted on arrival rather than
+   revealed in place (see the component), so this runs once per message and the
+   thread grows upward off the composer. */
+@keyframes coach-msg-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.coach-msg-in {
+  animation: coach-msg-in 0.26s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* CoachMock: the caret trailing the streaming reply. Rendered only while
+   tokens are still arriving (the component unmounts it on completion), so it
+   never blinks under a finished message. */
+@keyframes coach-caret-blink {
+  0%, 45%   { opacity: 1; }
+  55%, 100% { opacity: 0; }
+}
+
+.coach-caret {
+  display: inline-block;
+  width: 2px;
+  height: 12px;
+  vertical-align: -2px;
+  border-radius: 1px;
+  background: #00d2d2;
+  animation: coach-caret-blink 0.85s steps(1, end) infinite;
+}
 
 /* PlanCheckMock: mini trade-planning walkthrough, split into two visually
    separate zones (see the component) — a candle chart and a vertical price
@@ -793,24 +849,6 @@
 }
 .plan-entry-label-glow { animation: plan-entry-label-glow-pulse 7.5s ease-in-out infinite; }
 
-/* CoachMock: typing dots and the resolved message are stacked in the same
-   grid cell (no layout shift) and crossfade on a shared 6s loop — typing
-   shows for ~1.5s (0-25%), the reply holds for ~4s (25-91.7%), then a brief
-   fade back to typing before the loop repeats. */
-@keyframes coach-typing-cycle {
-  0%, 20%   { opacity: 1; }
-  25%, 100% { opacity: 0; }
-}
-
-@keyframes coach-message-cycle {
-  0%, 20%      { opacity: 0; transform: translateY(4px); }
-  25%, 91.7%   { opacity: 1; transform: translateY(0); }
-  96.7%, 100%  { opacity: 0; transform: translateY(4px); }
-}
-
-.coach-typing  { animation: coach-typing-cycle 6s ease-in-out infinite; }
-.coach-message { animation: coach-message-cycle 6s ease-in-out infinite; }
-
 /* CalendarMock: the weekday header and the day grid are two separate grids
    (one continuous grid would fight the per-row week divider), so the column
    template has to be identical in both or the day names stop lining up with
@@ -895,7 +933,26 @@
     opacity: 0;
   }
 
-  .landing .debrief-line {
+  /* DebriefMock and CoachMock both gate their sequences in JS under reduced
+     motion and render the resolved end state, so the scan dot and the caret are
+     not mounted at all. Belt-and-braces in case those gates ever change. */
+  .landing .debrief-stream {
+    animation: none;
+    clip-path: none;
+  }
+
+  .landing .debrief-scan-dot {
+    animation: none;
+    opacity: 1;
+  }
+
+  .landing .coach-caret {
+    animation: none;
+    opacity: 0;
+  }
+
+  .landing .coach-msg-in {
+    animation: none;
     opacity: 1;
     transform: none;
   }
@@ -929,15 +986,6 @@
     animation: none;
     opacity: 1;
     transform: scale(1) translateY(0);
-  }
-
-  .landing .coach-typing {
-    opacity: 0;
-  }
-
-  .landing .coach-message {
-    opacity: 1;
-    transform: none;
   }
 
   .landing .radar-polygon {
