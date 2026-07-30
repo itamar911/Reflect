@@ -650,13 +650,15 @@
   }
 }
 
-/* RulesMock: amber halo around the locked-button icon — transform/opacity
-   only (compositor-only), same pattern as the sidebar handle pulse. */
+/* RulesMock: halo around the locked-button icon — transform/opacity only
+   (compositor-only), same pattern as the sidebar handle pulse. Red rather than
+   amber since the rule that fires is a hard block, and the mock's severity ramp
+   reserves amber/orange for the two softer levels. */
 .mock-lock-halo {
   position: absolute;
   inset: -4px;
   border-radius: 999px;
-  box-shadow: 0 0 12px rgba(245, 158, 11, 0.8);
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.8);
   opacity: 0;
   animation: mock-lock-halo-pulse 2.4s ease-in-out infinite;
   pointer-events: none;
@@ -665,6 +667,34 @@
 @keyframes mock-lock-halo-pulse {
   0%, 100% { opacity: 0; transform: scale(0.85); }
   50%      { opacity: 1; transform: scale(1); }
+}
+
+/* RulesMock: the matched rule firing. Mounted only for the ~1s `fire` phase
+   (see the component's SEQUENCE), so this runs as a short burst rather than an
+   ambient loop — box-shadow is the only animated property and the element is
+   already composited, so the cost is confined to that window. */
+@keyframes rules-row-fire-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+  50%      { box-shadow: 0 0 14px 2px rgba(239, 68, 68, 0.45); }
+}
+
+.rules-row-fire {
+  animation: rules-row-fire-pulse 0.5s ease-in-out 2;
+}
+
+/* RulesMock: the simulated pointer tapping the trade button. translate(-50%)
+   centres it on the button; the scale dip is the tap itself. Physical-pixel
+   percentages, so it needs no RTL mirror. */
+@keyframes rules-cursor-tap {
+  0%   { opacity: 0; transform: translate(-50%, 6px) scale(1.15); }
+  35%  { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  55%  { opacity: 1; transform: translate(-50%, 0) scale(0.82); }
+  100% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+
+.rules-cursor {
+  transform-origin: top left;
+  animation: rules-cursor-tap 0.52s ease-out both;
 }
 
 /* DebriefMock: reuses the hero's row-reveal keyframe at its own cadence,
@@ -848,6 +878,19 @@
   }
 
   .landing .mock-lock-halo {
+    animation: none;
+    opacity: 0;
+  }
+
+  /* RulesMock gates its whole sequence in JS under reduced motion — it renders
+     the resting blocked state, so neither of these elements is mounted at all.
+     Belt-and-braces in case that gate ever changes. */
+  .landing .rules-row-fire {
+    animation: none;
+    box-shadow: none;
+  }
+
+  .landing .rules-cursor {
     animation: none;
     opacity: 0;
   }

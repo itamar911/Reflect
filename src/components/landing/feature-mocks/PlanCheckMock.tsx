@@ -99,16 +99,32 @@ const TREND_LINE_P3 = { x: (ANCHOR_IDX.a3 + 0.5) * CANDLE_SPACING, y: toY(ANCHOR
 const TREND_LABEL_X = Math.min(TREND_LINE_P3.x - CANDLE_SPACING, CHART_W * 0.8);
 const TREND_LABEL_Y = Math.max(...CANDLES.map((k) => toY(k.l))) + 16;
 
-// Column 2 — vertical price ladder. Values chosen so (target-entry) is
-// exactly 2.5x (entry-stop) — the R:R ratio drives the two zone bars'
-// relative height for real, not just the label text.
+// Column 2 — vertical price ladder. The three prices are the single source of
+// truth: the reward/risk distances, the two zone heights and the R:R label are
+// all derived from them, so editing a price here re-proportions the whole
+// ladder and relabels it in one step. Nothing downstream is hand-tuned.
+const PRICES = { target: 29700, entry: 29450, stop: 29350 };
+
+const REWARD = PRICES.target - PRICES.entry; // 250
+const RISK = PRICES.entry - PRICES.stop; // 100
+const RR = REWARD / RISK; // 2.5
+
+/** 29700 → "29,700". Hand-rolled rather than toLocaleString so the output can't
+ *  drift between the server's ICU build and the browser's and trip a hydration
+ *  mismatch (same reasoning as CalendarMock). */
+function group(n: number) {
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+/** Trailing .0 is noise on a whole-number ratio ("1:2.5" but "1:3", not "1:3.0"). */
+const RR_LABEL = Number.isInteger(RR) ? String(RR) : RR.toFixed(1);
+
 const LINES = {
-  target: { label: 'יעד: 29,700', color: '#4ade80' },
-  entry: { label: 'כניסה: 29,450', color: '#00d2d2' },
-  stop: { label: 'סטופ: 29,350', color: '#f87171' },
+  target: { label: `יעד: ${group(PRICES.target)}`, color: '#4ade80' },
+  entry: { label: `כניסה: ${group(PRICES.entry)}`, color: '#00d2d2' },
+  stop: { label: `סטופ: ${group(PRICES.stop)}`, color: '#f87171' },
 };
-const REWARD = 30; // target(88) - entry(58) on the old 0-100 scale
-const RISK = 12; // entry(58) - stop(46)
+
 const SPINE_W = 16; // dot+tick column width, shared by every ladder row/bar so they line up in one vertical line
 
 const ROWS = [
@@ -139,13 +155,41 @@ function LadderRow({
   );
 }
 
-function ZoneBarVertical({ grow, color, appearClass }: { grow: number; color: string; appearClass: string }) {
+/**
+ * A filled reward/risk zone spanning the vertical gap between two price rows.
+ *
+ * The height is pure flex distribution: `flex-basis: 0` is the load-bearing
+ * part. With the default `flex-basis: auto` a grown item's final size is its
+ * own content height *plus* its share of the leftover space, so two items with
+ * grow 250 and 100 only land on a true 2.5:1 ratio when both happen to measure
+ * zero — an accident that survives right up until either zone gains a label or
+ * a border. Zeroing the basis makes the whole height the distributed share, so
+ * the ratio is exactly REWARD:RISK by construction and stays correct if the
+ * prices change. `min-height: 0` stops the flex floor (min-height: auto) from
+ * silently over-sizing the smaller zone on a short card.
+ *
+ * `stops` runs top→bottom in physical order, so each caller passes its own
+ * fade direction — both zones fade toward the entry line between them, which
+ * is the shared edge, not a fixed end of the gradient.
+ */
+function ZoneBlock({
+  grow,
+  stops,
+  appearClass,
+}: {
+  grow: number;
+  stops: [string, string];
+  appearClass: string;
+}) {
   return (
-    <div className={`${appearClass} flex`} style={{ flexGrow: grow }}>
-      <span className="flex justify-center shrink-0" style={{ width: SPINE_W }}>
-        <span className="rounded-full" style={{ width: 3, alignSelf: 'stretch', background: `linear-gradient(180deg, ${color}b3, ${color}33)` }} />
-      </span>
-      <span style={{ flex: 1 }} />
+    <div className={`${appearClass} flex items-stretch`} style={{ flexGrow: grow, flexBasis: 0, minHeight: 0 }}>
+      {/* Spine gutter keeps the zone's start edge flush with the dot column
+          above and below it, so the ladder still reads as one vertical axis. */}
+      <span className="shrink-0" style={{ width: SPINE_W / 2 }} />
+      <span
+        className="flex-1 rounded-[3px]"
+        style={{ background: `linear-gradient(180deg, ${stops[0]}, ${stops[1]})` }}
+      />
     </div>
   );
 }
@@ -160,7 +204,7 @@ function RRLabel({ appearClass, className = '' }: { appearClass: string; classNa
       <span style={{ color: 'rgba(255,255,255,0.6)' }}>R:R </span>
       <span style={{ color: '#f87171' }}>1</span>
       <span style={{ color: 'rgba(255,255,255,0.6)' }}>:</span>
-      <span style={{ color: '#4ade80' }}>2.5</span>
+      <span style={{ color: '#4ade80' }}>{RR_LABEL}</span>
     </span>
   );
 }
@@ -187,9 +231,15 @@ function MiniLadderItem({
 export function PlanCheckMock() {
   return (
     <MockFrame height={420}>
-      <div dir="rtl" className="flex flex-col gap-3 w-full h-full">
+      {/* justify-between rather than a single flex-1 child: handing all the
+          leftover height to the chart row just relocates the empty space into
+          the middle of the chart (the candle silhouette only occupies its upper
+          band, so a taller chart is a taller gap under the candles). Spreading
+          the slack across the three gaps instead is what actually reads as
+          "evenly filled". */}
+      <div dir="rtl" className="flex flex-col justify-between gap-3 w-full h-full">
         {/* Context header — unchanged */}
-        <div className="flex items-center gap-1.5 flex-wrap" aria-hidden>
+        <div className="flex items-center gap-1.5 flex-wrap shrink-0" aria-hidden>
           {CHIPS.map((chip) => (
             <span
               key={chip}
@@ -208,9 +258,19 @@ export function PlanCheckMock() {
             collapses to a column so the chart keeps full width + real
             height instead of being squeezed into a thin 65% column; the
             ladder becomes a compact horizontal strip underneath it. */}
-        <div className="flex flex-col md:flex-row gap-3 md:gap-2.5 w-full">
-          {/* Column 1 — clean price chart: candles + trend line only */}
-          <div className="relative w-full md:flex-[0.65] shrink-0" style={{ height: CHART_H }}>
+        {/* Capped growth: the row takes enough extra height to give the ladder
+            zones room to be read, but not so much that the chart outgrows its
+            own candle range. The cap is desktop-only — on mobile the row is a
+            column and needs its natural height. */}
+        <div className="flex min-h-0 flex-col md:flex-row gap-3 md:gap-2.5 w-full md:flex-1 md:max-h-[186px]">
+          {/* Column 1 — clean price chart: candles + trend line only. Height is
+              no longer the fixed CHART_H: this row is the card's flex-1 child,
+              so the chart and ladder absorb whatever vertical space the header,
+              checklist and pill leave over instead of pooling it above the pill.
+              The SVG keeps its CHART_W×CHART_H viewBox with
+              preserveAspectRatio="none", so it simply stretches — every
+              percentage-positioned overlay still lands correctly. */}
+          <div className="relative w-full h-[150px] md:h-auto md:flex-[0.65] md:min-h-0">
             <svg
               className="absolute inset-0 w-full h-full"
               viewBox={`0 0 ${CHART_W} ${CHART_H}`}
@@ -286,19 +346,33 @@ export function PlanCheckMock() {
             </span>
           </div>
 
-          {/* Column 2 — vertical price ladder (md and up) */}
-          <div className="hidden md:flex md:flex-col w-full md:flex-[0.35]" style={{ height: CHART_H }}>
+          {/* Column 2 — vertical price ladder (md and up). The two filled zones
+              sit strictly between the price rows rather than reaching under
+              them to the dot centres: stretching each zone by half a row at
+              both ends would add the same constant to both, which pulls the
+              visible 2.5:1 ratio toward 1:1 and costs exactly the thing the
+              zones exist to show. The rows are kept compact instead, so the
+              zones dominate the column. */}
+          <div className="hidden md:flex md:flex-col w-full md:flex-[0.35] min-h-0">
             <RRLabel appearClass="plan-appear-row3" className="self-start mb-1.5" />
-            <div className="flex flex-1 flex-col">
+            <div className="flex flex-1 flex-col min-h-0">
               <LadderRow color={LINES.target.color} label={LINES.target.label} appearClass="plan-appear-ladder-target" />
-              <ZoneBarVertical grow={REWARD} color="#4ade80" appearClass="plan-appear-row3" />
+              <ZoneBlock
+                grow={REWARD}
+                stops={['rgba(74,222,128,0.46)', 'rgba(74,222,128,0.05)']}
+                appearClass="plan-appear-row3"
+              />
               <LadderRow
                 color={LINES.entry.color}
                 label={LINES.entry.label}
                 appearClass="plan-appear-ladder-entry"
                 glowClass="plan-entry-label-glow"
               />
-              <ZoneBarVertical grow={RISK} color="#f87171" appearClass="plan-appear-row3" />
+              <ZoneBlock
+                grow={RISK}
+                stops={['rgba(248,113,113,0.05)', 'rgba(248,113,113,0.46)']}
+                appearClass="plan-appear-row3"
+              />
               <LadderRow color={LINES.stop.color} label={LINES.stop.label} appearClass="plan-appear-row1" />
             </div>
           </div>
@@ -306,23 +380,29 @@ export function PlanCheckMock() {
           {/* Column 2 — compact horizontal ladder (mobile only): same
               target→entry→stop order read right-to-left, zone bars run
               horizontally instead of vertically. */}
-          <div className="flex md:hidden flex-col items-center gap-1.5 w-full">
+          {/* Mobile strip. Same flex-basis:0 reasoning as ZoneBlock, applied on
+              the horizontal axis. The gradients read left→right in physical
+              pixels regardless of dir, and under RTL this row lays out
+              target(right) → entry(centre) → stop(left), so "fade toward the
+              entry line" is a leftward fade for the green bar and a rightward
+              one for the red — mirrored from the vertical ladder, not copied. */}
+          <div className="flex md:hidden flex-col items-center gap-1.5 w-full shrink-0">
             <RRLabel appearClass="plan-appear-row3" />
             <div className="flex items-center w-full" style={{ height: 32 }}>
-              <MiniLadderItem color={LINES.target.color} value="29,700" appearClass="plan-appear-ladder-target" />
-              <div className="plan-appear-row3" style={{ flexGrow: REWARD }}>
-                <div style={{ height: 3, borderRadius: 2, background: 'linear-gradient(90deg, rgba(74,222,128,0.25), rgba(74,222,128,0.7))' }} />
+              <MiniLadderItem color={LINES.target.color} value={group(PRICES.target)} appearClass="plan-appear-ladder-target" />
+              <div className="plan-appear-row3" style={{ flexGrow: REWARD, flexBasis: 0, minWidth: 0 }}>
+                <div style={{ height: 7, borderRadius: 3, background: 'linear-gradient(90deg, rgba(74,222,128,0.08), rgba(74,222,128,0.62))' }} />
               </div>
               <MiniLadderItem
                 color={LINES.entry.color}
-                value="29,450"
+                value={group(PRICES.entry)}
                 appearClass="plan-appear-ladder-entry"
                 glowClass="plan-entry-label-glow"
               />
-              <div className="plan-appear-row3" style={{ flexGrow: RISK }}>
-                <div style={{ height: 3, borderRadius: 2, background: 'linear-gradient(90deg, rgba(248,113,113,0.7), rgba(248,113,113,0.25))' }} />
+              <div className="plan-appear-row3" style={{ flexGrow: RISK, flexBasis: 0, minWidth: 0 }}>
+                <div style={{ height: 7, borderRadius: 3, background: 'linear-gradient(90deg, rgba(248,113,113,0.62), rgba(248,113,113,0.08))' }} />
               </div>
-              <MiniLadderItem color={LINES.stop.color} value="29,350" appearClass="plan-appear-row1" />
+              <MiniLadderItem color={LINES.stop.color} value={group(PRICES.stop)} appearClass="plan-appear-row1" />
             </div>
           </div>
         </div>
@@ -330,7 +410,7 @@ export function PlanCheckMock() {
         {/* Checklist — each check pops in synced with its counterpart above:
             row 1 with the stop ladder row, row 2 with the trend line
             finishing its draw, row 3 with both R:R zone bars landing. */}
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-2.5 shrink-0">
           {ROWS.map((row) => (
             <div key={row.text} className="flex items-center gap-2.5">
               <span className={`${row.appearClass} flex shrink-0`}>
@@ -341,9 +421,12 @@ export function PlanCheckMock() {
           ))}
         </div>
 
-        {/* Final beat — approval pill, bottom-right (RTL), clear of the chart above */}
+        {/* Final beat — approval pill, bottom-right (RTL), clear of the chart
+            above. No mt-auto: the chart/ladder row above is the flex-1 child
+            now, so there is no leftover space left to push against — the pill
+            sits one gap under the checklist where it belongs. */}
         <span
-          className="plan-approved-pill self-start mt-auto rounded-full px-3 py-1 text-xs font-bold"
+          className="plan-approved-pill self-start shrink-0 rounded-full px-3 py-1 text-xs font-bold"
           style={{ background: '#22c55e', color: '#052e16' }}
         >
           אושר לכניסה
