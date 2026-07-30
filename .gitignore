@@ -44,5 +44,6 @@ next-env.d.ts
 .env*.local
 
 # Claude Code local config (shared skills are committed)
-.claude/*
+# **/ so nested .claude/ dirs (e.g. supabase/.claude/) can't get tracked either
+**/.claude/*
 !.claude/skills/
