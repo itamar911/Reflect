@@ -2,8 +2,6 @@
   "permissions": {
     "disableBypassPermissionsMode": "disable",
     "deny": [
-      "Bash(git push *)",
-      "PowerShell(git push *)",
       "Bash(git reset --hard *)",
       "Bash(git * --hard *)",
       "PowerShell(git reset --hard *)",
