@@ -124,6 +124,10 @@ export async function proxy(request: NextRequest) {
   return supabaseResponse;
 }
 
+// mp4 is excluded alongside the image extensions for the same reason: static
+// assets under public/ are public by definition, and without the exclusion the
+// auth gate below sends the landing page's testimonial clip to /login for every
+// logged-out visitor (the request path is not '/', so it fails isPublicRoute).
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|mp4)$).*)'],
 };
