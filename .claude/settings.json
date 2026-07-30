@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "disableBypassPermissionsMode": "disable",
+    "deny": [
+      "Bash(git push *)",
+      "PowerShell(git push *)",
+      "Bash(git reset --hard *)",
+      "Bash(git * --hard *)",
+      "PowerShell(git reset --hard *)",
+      "PowerShell(git * --hard *)",
+      "Bash(rm *)",
+      "PowerShell(rm *)",
+      "PowerShell(Remove-Item *)",
+      "PowerShell(del *)",
+      "PowerShell(ri *)",
+      "PowerShell(rd *)",
+      "Bash(supabase *)",
+      "Bash(npx supabase *)",
+      "PowerShell(supabase *)",
+      "PowerShell(npx supabase *)",
+      "Bash(psql *)",
+      "PowerShell(psql *)",
+      "Bash(*supabase.co*)",
+      "PowerShell(*supabase.co*)",
+      "Read(.env)",
+      "Read(.env.*)",
+      "Edit(.env)",
+      "Edit(.env.*)"
+    ]
+  }
+}

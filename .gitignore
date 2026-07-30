@@ -43,7 +43,9 @@ next-env.d.ts
 .vercel
 .env*.local
 
-# Claude Code local config (shared skills are committed)
+# Claude Code config. settings.json (shared project rules) and skills are
+# committed; settings.local.json (personal, machine-specific) is not.
 # **/ so nested .claude/ dirs (e.g. supabase/.claude/) can't get tracked either
 **/.claude/*
 !.claude/skills/
+!.claude/settings.json
