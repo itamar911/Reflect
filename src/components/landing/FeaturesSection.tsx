@@ -1,8 +1,6 @@
 import { ShieldCheck, ClipboardList, Gauge, Sparkles, CalendarDays, Bot, type LucideIcon } from 'lucide-react';
 import { ScrollReveal } from './ScrollReveal';
 import { SectionHeading } from './SectionHeading';
-import { LightboxImage } from './LightboxImage';
-import { landingImages } from './landingImages';
 import { RulesMock } from './feature-mocks/RulesMock';
 import { PlanCheckMock } from './feature-mocks/PlanCheckMock';
 import { DisciplineScoreMock } from './feature-mocks/DisciplineScoreMock';
@@ -59,7 +57,7 @@ export function FeaturesSection() {
         </SectionHeading>
 
         {/* uniform 2×3 grid — every card identical: live mini-mock on top, icon + title + full description below */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-24">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {FEATURES.map((feature, i) => {
             const Icon = feature.icon;
             const Mock = feature.Mock;
@@ -81,39 +79,6 @@ export function FeaturesSection() {
               </ScrollReveal>
             );
           })}
-        </div>
-
-        {/* ── הצצה למערכת — two large framed screenshots ── */}
-        <div>
-          <div className="flex flex-col items-center text-center mb-10">
-            <ScrollReveal>
-              <h3 className="text-2xl md:text-3xl font-extrabold text-white leading-tight">הצצה למערכת</h3>
-            </ScrollReveal>
-            <ScrollReveal delay={100}>
-              <span className="section-underline mt-4" style={{ width: 52 }} aria-hidden />
-            </ScrollReveal>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-6xl mx-auto">
-            {landingImages.gallery.map((item, i) => (
-              <ScrollReveal key={item.id} delay={i * 110}>
-                <figure className="flex flex-col gap-4">
-                  <div
-                    className="rounded-2xl p-2"
-                    style={{
-                      background: 'rgba(255,255,255,0.04)',
-                      border: '1px solid rgba(0,210,210,0.2)',
-                      boxShadow: '0 18px 44px rgba(0,0,0,0.4), 0 0 30px rgba(0,210,210,0.08)',
-                    }}
-                  >
-                    <LightboxImage id={item.id} label={item.label} src={item.src} aspect="aspect-[16/10]" />
-                  </div>
-                  <figcaption className="text-tg-text-2 text-center font-medium" style={{ fontSize: 16 }}>
-                    {item.label}
-                  </figcaption>
-                </figure>
-              </ScrollReveal>
-            ))}
-          </div>
         </div>
       </div>
     </section>

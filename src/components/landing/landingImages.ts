@@ -1,10 +1,3 @@
-export interface PlaceholderImage {
-  id: string;
-  label: string;
-  src?: string;
-  objectPosition?: string;
-}
-
 export interface PlaceholderVideo {
   id: string;
   name: string;
@@ -14,11 +7,6 @@ export interface PlaceholderVideo {
 }
 
 export const landingImages = {
-  gallery: [
-    { id: 'gallery-1', label: 'לוח הבקרה הראשי', src: '/landing/gallery-dashboard.png' },
-    { id: 'gallery-2', label: 'תובנות וסטטיסטיקה', src: '/landing/gallery-stats.png' },
-  ] satisfies PlaceholderImage[],
-
   videos: [
     {
       id: 'video-1',
