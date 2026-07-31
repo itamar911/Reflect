@@ -59,9 +59,11 @@ interface TradeSpec {
 
 const STRAT_NAMES = ['פריצת פתיחה', 'החזרה לממוצע'] as const;
 
-// 75% winners among closed (21 of 28), planned R:R 1.5–3 — the 1.5 floor is the
-// min_rr_ratio in DEMO_PRESET_RULES, so no fixture may plan below it. Current +
-// previous month. Recount before editing this line; the pages derive everything.
+// 57% winners among closed (16 of 28) at a ~2.05 avg win/loss ratio — a profit
+// factor near 2.7, which is a strong-but-believable disciplined record rather
+// than a fantasy one. Planned R:R 1.5–3; the 1.5 floor is the min_rr_ratio in
+// DEMO_PRESET_RULES, so no fixture may plan below it. Current + previous month.
+// Recount before editing this line; the pages derive everything from these rows.
 const TRADE_SPECS: TradeSpec[] = [
   // ── Open positions ──
   { d: 0,  h: 16, sym: 'NQ', dir: 'long',  strat: 0, entry: 22240, sl: 22190, tp: 22350, exit: null, emo: 4, conf: 4, score: null,
@@ -83,27 +85,31 @@ const TRADE_SPECS: TradeSpec[] = [
   { d: 5,  h: 16, sym: 'ES', dir: 'long',  strat: 0, entry: 6260, sl: 6248, tp: 6296, exit: 6296, emo: 4, conf: 5, score: 92,
     reason: 'פריצת שיא שבועי עם רוחב שוק חיובי', exitReason: 'הגיע ליעד Take Profit',
     debrief: 'ביצוע נקי מהכניסה עד היציאה. הגודל היה נכון והיעד ריאלי.', setup: 'demo-setup-vwap', u: 2 },
-  { d: 6,  h: 17, sym: 'NQ', dir: 'long',  strat: 0, entry: 22050, sl: 22000, tp: 22160, exit: 22135, emo: 4, conf: 4, score: 86,
-    reason: 'דגל שורי אחרי מהלך מומנטום', exitReason: 'יציאה ידנית — רווח' },
+  { d: 6,  h: 17, sym: 'NQ', dir: 'long',  strat: 0, entry: 22050, sl: 22000, tp: 22160, exit: 22000, emo: 4, conf: 4, score: 76,
+    reason: 'דגל שורי אחרי מהלך מומנטום', exitReason: 'הגיע Stop Loss',
+    debrief: 'הסטאפ היה תקין והסטופ במקום — המהלך פשוט נגמר לפני ההמשך. אין מה לתקן בביצוע.' },
   { d: 7,  h: 16, sym: 'NQ', dir: 'short', strat: 1, entry: 22180, sl: 22230, tp: 22080, exit: 22230, emo: 3, conf: 3, score: 58,
     reason: 'שבירת תמיכה תוך-יומית', exitReason: 'הגיע Stop Loss',
     notes: 'נכנסתי דקות לפני פרסום CPI — ספייק חדשותי חטף את הסטופ. לבדוק לוח אירועים לפני כל כניסה.' },
-  { d: 8,  h: 18, sym: 'ES', dir: 'long',  strat: 1, entry: 6238, sl: 6226, tp: 6262, exit: 6262, emo: 4, conf: 4, score: 84,
-    reason: 'החזרה לממוצע 20 בתוך טרנד עולה', exitReason: 'הגיע ליעד Take Profit', setup: 'demo-setup-vwap' },
+  { d: 8,  h: 18, sym: 'ES', dir: 'long',  strat: 1, entry: 6238, sl: 6226, tp: 6262, exit: 6226, emo: 4, conf: 4, score: 71,
+    reason: 'החזרה לממוצע 20 בתוך טרנד עולה', exitReason: 'הגיע Stop Loss', setup: 'demo-setup-vwap',
+    debrief: 'הכניסה הייתה לפי הכללים, אבל הטרנד נשבר בדיוק בנקודה. הפסד נקי — הסטופ עשה את העבודה.', durH: 1 },
 
   // ── Previous month ──
   { d: 10, h: 16, sym: 'NQ', dir: 'long',  strat: 0, entry: 21980, sl: 21940, tp: 22100, exit: 22100, emo: 5, conf: 5, score: 95,
     reason: 'פריצה נקייה של טווח הפתיחה', exitReason: 'הגיע ליעד Take Profit',
     debrief: 'העסקה הכי טובה של החודש — סבלנות עד לסטאפ המדויק.', setup: 'demo-setup-orb', u: 2 },
-  { d: 11, h: 17, sym: 'ES', dir: 'short', strat: 1, entry: 6270, sl: 6282, tp: 6240, exit: 6246, emo: 4, conf: 4, score: 83,
-    reason: 'מתיחה של 2 סטיות תקן מעל VWAP', exitReason: 'יציאה ידנית — רווח' },
+  { d: 11, h: 17, sym: 'ES', dir: 'short', strat: 1, entry: 6270, sl: 6282, tp: 6240, exit: 6282, emo: 4, conf: 4, score: 69,
+    reason: 'מתיחה של 2 סטיות תקן מעל VWAP', exitReason: 'הגיע Stop Loss',
+    debrief: 'מתיחה שהמשיכה להימתח. יצאתי בסטופ בלי להתווכח עם השוק.', durH: 1 },
   { d: 12, h: 19, sym: 'NQ', dir: 'long',  strat: 1, entry: 22120, sl: 22070, tp: 22195, exit: 22070, emo: 3, conf: 3, score: 55,
     reason: 'קנייה בירידה לממוצע — נגד מומנטום', exitReason: 'הגיע Stop Loss',
     debrief: 'הסטאפ היה בסדר אבל התזמון מוקדם מדי. לחכות לנר היפוך.' },
   { d: 13, h: 16, sym: 'ES', dir: 'long',  strat: 0, entry: 6215, sl: 6203, tp: 6245, exit: 6245, emo: 4, conf: 4, score: 87,
     reason: 'גאפ אנד גו מעל שיא אתמול', exitReason: 'הגיע ליעד Take Profit', setup: 'demo-setup-orb' },
-  { d: 14, h: 18, sym: 'NQ', dir: 'short', strat: 0, entry: 22250, sl: 22300, tp: 22150, exit: 22165, emo: 4, conf: 4, score: 85,
-    reason: 'כשל פריצה מעל שיא — מלכודת קונים', exitReason: 'יציאה ידנית — רווח', u: 2 },
+  { d: 14, h: 18, sym: 'NQ', dir: 'short', strat: 0, entry: 22250, sl: 22300, tp: 22150, exit: 22300, emo: 4, conf: 4, score: 74,
+    reason: 'כשל פריצה מעל שיא — מלכודת קונים', exitReason: 'הגיע Stop Loss', u: 2,
+    debrief: 'קראתי את הפריצה כמלכודת והשוק הוכיח אחרת. הגודל הכפול הפך את זה להפסד הגדול של התקופה — אבל הסטופ נשמר בדיוק כפי שתוכנן.' },
   { d: 17, h: 16, sym: 'NQ', dir: 'long',  strat: 0, entry: 21900, sl: 21850, tp: 21975, exit: 21975, emo: 4, conf: 3, score: 79,
     reason: 'המשכיות אחרי איחוד צמוד בשיא', exitReason: 'הגיע ליעד Take Profit' },
   { d: 18, h: 17, sym: 'ES', dir: 'long',  strat: 1, entry: 6195, sl: 6183, tp: 6213, exit: 6183, emo: 2, conf: 4, score: 61,
@@ -118,8 +124,9 @@ const TRADE_SPECS: TradeSpec[] = [
     movedSl: true, debrief: 'הזזתי את הסטופ פעם אחת לפני שנחטף. חוק קשיח: הסטופ לא זז.' },
   { d: 24, h: 16, sym: 'NQ', dir: 'long',  strat: 0, entry: 21820, sl: 21770, tp: 21930, exit: 21930, emo: 5, conf: 4, score: 91,
     reason: 'פריצת טווח פתיחה ביום מגמה', exitReason: 'הגיע ליעד Take Profit', u: 2, setup: 'demo-setup-orb' },
-  { d: 25, h: 18, sym: 'ES', dir: 'long',  strat: 1, entry: 6170, sl: 6158, tp: 6188, exit: 6188, emo: 4, conf: 4, score: 82,
-    reason: 'קנייה ב-Pullback לאזור הביקוש', exitReason: 'הגיע ליעד Take Profit', setup: 'demo-setup-vwap' },
+  { d: 25, h: 18, sym: 'ES', dir: 'long',  strat: 1, entry: 6170, sl: 6158, tp: 6188, exit: 6158, emo: 4, conf: 4, score: 72,
+    reason: 'קנייה ב-Pullback לאזור הביקוש', exitReason: 'הגיע Stop Loss', setup: 'demo-setup-vwap',
+    debrief: 'אזור הביקוש לא החזיק. ביצוע לפי התוכנית, תוצאה שלילית — בדיוק ההבדל בין תהליך לתוצאה.', durH: 1 },
   { d: 26, h: 16, sym: 'NQ', dir: 'long',  strat: 1, entry: 21880, sl: 21830, tp: 21955, exit: 21830, emo: 3, conf: 2, score: 48,
     reason: 'ראיתי את כולם נכנסים — פחדתי לפספס את המהלך', exitReason: 'הגיע Stop Loss',
     fomo: true, followed: false, notes: 'כניסת FOMO בלי אישור. הכלל של Reflect צדק — קיבלתי אזהרה ונכנסתי בכל זאת.' },
@@ -294,7 +301,7 @@ const DEMO_NOTEBOOK_PAGES = [
   {
     id: 'demo-note-1', user_id: DEMO_USER_ID,
     title: 'סיכום שבוע — משמעת מעל הכל',
-    content: 'שבוע חזק: 4 מתוך 5 עסקאות לפי התוכנית.\n\nמה עבד: חיכיתי לאישור ווליום בכל פריצה, והיציאות היו לפי היעד המקורי.\n\nמה פחות: עסקת הנקמה של יום שלישי. ההפסד עצמו קטן, אבל הדפוס מסוכן — Reflect חסם אותי נכון ביום רביעי בבוקר.\n\nפוקוס לשבוע הבא: אפס עסקאות אחרי 2 הפסדים רצופים. בלי יוצאים מן הכלל.',
+    content: 'שבוע חזק: 3 מתוך 4 עסקאות לפי התוכנית.\n\nמה עבד: חיכיתי לאישור ווליום בכל פריצה, והיציאות היו לפי היעד המקורי.\n\nמה פחות: עסקת הנקמה של יום שלישי. ההפסד עצמו קטן, אבל הדפוס מסוכן — Reflect חסם אותי נכון ביום רביעי בבוקר.\n\nבמבט על כל התקופה: 26 מתוך 28 עסקאות סגורות בוצעו לפי התוכנית. אחוז ההצלחה עומד על 57% — לא כל עסקה מנצחת, אבל ההפסדים נשארים בגודל שתוכנן.\n\nפוקוס לשבוע הבא: אפס עסקאות אחרי 2 הפסדים רצופים. בלי יוצאים מן הכלל.',
     page_type: 'journal', tags: ['פסיכולוגיה', 'חשוב'],
     created_at: iso(4, 21), updated_at: iso(2, 8),
   },
@@ -308,7 +315,7 @@ const DEMO_NOTEBOOK_PAGES = [
   {
     id: 'demo-note-3', user_id: DEMO_USER_ID,
     title: 'תובנה: השעה הראשונה שלי שווה זהב',
-    content: 'ניתוח של 30 העסקאות האחרונות מראה פער עצום:\n\n- עסקאות בין 16:30–18:00: אחוז הצלחה 78%\n- עסקאות אחרי 20:00: אחוז הצלחה 40%\n\nהריכוז יורד והנטייה לאלתר עולה. המסקנה: את רוב הסיכון לוקחים בשעה הראשונה, אחרי 20:00 רק ניהול פוזיציות קיימות.',
+    content: 'ניתוח של 28 העסקאות הסגורות מראה פער ברור:\n\n- עסקאות שנפתחו לפני 18:00: אחוז הצלחה 65%\n- עסקאות שנפתחו מ-18:00 והלאה: אחוז הצלחה 38%\n\nהריכוז יורד והנטייה לאלתר עולה. המסקנה: את רוב הסיכון לוקחים בשעות הראשונות, ומ-18:00 רק ניהול פוזיציות קיימות.\n\nנתון שני שקפץ לעין: פריצת הפתיחה עומדת על 67% הצלחה ומרכזת כמעט את כל הרווח, בעוד החזרה לממוצע עומדת על 46% ומסיימת את התקופה במינוס קל. יש כאן החלטה שצריך לקבל.',
     page_type: 'insights', tags: ['אסטרטגיה', 'חשוב'],
     created_at: iso(12, 22), updated_at: iso(9, 10),
   },
@@ -407,9 +414,15 @@ const stratPnl = (name: string) =>
 const DEMO_TOP_STRATEGY = stratPnl(STRAT_NAMES[0]) >= stratPnl(STRAT_NAMES[1]) ? STRAT_NAMES[0] : STRAT_NAMES[1];
 const DEMO_VIOLATION_COUNT = DEMO_RULE_VIOLATIONS.length;
 const DEMO_ORB_COUNT = CLOSED.filter(t => t.strategy === STRAT_NAMES[0]).length;
+// The time-of-day insight used to hard-code its percentages and drifted out of
+// sync with the rows; deriving both ends keeps the claim true by construction.
+const winRateOf = (rows: typeof DEMO_TRADES) =>
+  Math.round((rows.filter(t => isWinningTrade(t)).length / Math.max(rows.length, 1)) * 100);
+const DEMO_EARLY_WIN_RATE = winRateOf(CLOSED.filter(t => new Date(t.submitted_at).getHours() < 18));
+const DEMO_LATE_WIN_RATE = winRateOf(CLOSED.filter(t => new Date(t.submitted_at).getHours() >= 18));
 
 export const DEMO_COACH_INSIGHTS = [
-  { type: 'time', text: 'רוב הרווח שלך נוצר בשעה הראשונה של המסחר — בשעות המאוחרות אחוז ההצלחה יורד משמעותית. שקול לרכז את הכניסות החדשות בשעה הראשונה בלבד.' },
+  { type: 'time', text: `רוב הרווח שלך נוצר לפני 18:00 — ${DEMO_EARLY_WIN_RATE}% הצלחה שם, לעומת ${DEMO_LATE_WIN_RATE}% בכניסות מ-18:00 והלאה. שקול לרכז את הכניסות החדשות בשעות הראשונות.` },
   { type: 'discipline', text: `בעסקאות שבוצעו לפי התוכנית ציון התהליך הממוצע שלך הוא ${DEMO_SCORE_FOLLOWED}, לעומת ${DEMO_SCORE_IMPULSIVE} בעסקאות האימפולסיביות. עם אחוז הצלחה כולל של ${DEMO_WIN_RATE}% — המשמעת שלך שווה כסף אמיתי.` },
   { type: 'performance', text: `אסטרטגיית "${DEMO_TOP_STRATEGY}" מניבה את הרווח הכולל הגבוה ביותר. שקול להקצות לה משקל גדול יותר בתוכנית השבועית.` },
 ];
