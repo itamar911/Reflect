@@ -59,7 +59,9 @@ interface TradeSpec {
 
 const STRAT_NAMES = ['פריצת פתיחה', 'החזרה לממוצע'] as const;
 
-// ~65% winners among closed, R:R 0.5–3, current + previous month.
+// 75% winners among closed (21 of 28), planned R:R 1.5–3 — the 1.5 floor is the
+// min_rr_ratio in DEMO_PRESET_RULES, so no fixture may plan below it. Current +
+// previous month. Recount before editing this line; the pages derive everything.
 const TRADE_SPECS: TradeSpec[] = [
   // ── Open positions ──
   { d: 0,  h: 16, sym: 'NQ', dir: 'long',  strat: 0, entry: 22240, sl: 22190, tp: 22350, exit: null, emo: 4, conf: 4, score: null,
@@ -127,8 +129,13 @@ const TRADE_SPECS: TradeSpec[] = [
     reason: 'המשך מגמה מעל ממוצע 20', exitReason: 'הגיע ליעד Take Profit' },
   { d: 31, h: 18, sym: 'ES', dir: 'long',  strat: 1, entry: 6150, sl: 6138, tp: 6174, exit: 6156, emo: 3, conf: 3, score: 72,
     reason: 'החזרה לממוצע בשוק דשדוש', exitReason: 'סגירה מוקדמת', durH: 1 },
-  { d: 32, h: 16, sym: 'NQ', dir: 'short', strat: 1, entry: 21950, sl: 21990, tp: 21870, exit: 21990, emo: 3, conf: 3, score: 57,
-    reason: 'מתיחה מעל VWAP — שורט נגד מגמה', exitReason: 'הגיע Stop Loss' },
+  // Counter-momentum short: target stays at 21870 (R:R 2.0, above the 1.5 floor)
+  // but the exit is a deliberate early take — holding a trade against the daily
+  // trend to full target is what strat 1's risk_rules forbid.
+  { d: 32, h: 16, sym: 'NQ', dir: 'short', strat: 1, entry: 21950, sl: 21990, tp: 21870, exit: 21925, emo: 3, conf: 3, score: 73,
+    reason: 'מתיחה מעל VWAP — שורט נגד מגמה', exitReason: 'יציאה ידנית — רווח',
+    debrief: 'שורט נגד המגמה היומית — לקחתי את המהלך המהיר במקום להחזיק ליעד המלא. בעסקאות נגד מומנטום זה הניהול הנכון.',
+    durH: 1 },
   { d: 33, h: 17, sym: 'NQ', dir: 'long',  strat: 0, entry: 21680, sl: 21630, tp: 21790, exit: 21790, emo: 4, conf: 5, score: 89,
     reason: 'פריצת שיא יומי עם ווליום', exitReason: 'הגיע ליעד Take Profit', setup: 'demo-setup-orb' },
   { d: 34, h: 16, sym: 'ES', dir: 'long',  strat: 0, entry: 6120, sl: 6108, tp: 6150, exit: 6108, emo: 2, conf: 3, score: 52,
