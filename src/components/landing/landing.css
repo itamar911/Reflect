@@ -883,31 +883,6 @@
   animation: cal-ghost-pulse 2.5s ease-in-out infinite;
 }
 
-/* ── Social proof: featured 9:16 testimonial player ────────── */
-
-/* The clip is 1080x1920. Left to fill its column it would render ~2000px tall
-   on desktop, so the width is clamped three ways and the frame is centred:
-     100%          — never overflow the column (this is what makes it fill the
-                     width on a phone, minus the section's own padding)
-     360px         — a portrait player wider than this gets unreadably tall on
-                     a laptop (360px wide => 640px tall)
-     78vh * 9/16   — derives a width from the height budget, so the player can
-                     never grow past ~78% of the viewport height on any screen;
-                     this is the constraint that binds on short/mobile viewports
-   The 9:16 box itself is reserved by aspect-[9/16] on the frame's child, so the
-   height is known before the poster or metadata arrives — no layout shift. */
-.featured-video-frame {
-  width: min(100%, 360px, calc(78vh * 9 / 16));
-}
-
-/* svh excludes the mobile URL bar, so the height budget is honest while the
-   bar is showing. Progressive: browsers without svh keep the vh line above. */
-@supports (width: 1svh) {
-  .featured-video-frame {
-    width: min(100%, 360px, calc(78svh * 9 / 16));
-  }
-}
-
 /* ── Reduced motion: kill all landing animation ────────────── */
 
 @media (prefers-reduced-motion: reduce) {

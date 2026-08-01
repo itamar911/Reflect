@@ -10,7 +10,7 @@ export const landingImages = {
   videos: [
     {
       id: 'video-1',
-      name: 'סוחר יומי, פיוצ׳רס',
+      name: 'אימרי, סוחר יומי',
       quote: 'הפעם הראשונה שמשהו עצר אותי באמת',
       videoUrl: '/video/creative-1-web.mp4',
       poster: '/video/creative-1-poster.jpg',

@@ -1,14 +1,29 @@
-import { PlayCircle } from 'lucide-react';
 import { ScrollReveal } from './ScrollReveal';
 import { SectionHeading } from './SectionHeading';
-import { FeaturedVideo } from './FeaturedVideo';
+import { TestimonialCard } from './TestimonialCard';
 import { landingImages } from './landingImages';
 
+/**
+ * All four testimonials share one row — real clips first, pending placeholders
+ * after — so the set reads as a single strip rather than a spotlight plus
+ * filler. Order is DOM order; the RTL shell puts the first card on the right.
+ *
+ * Layout by width:
+ *   < 768px   snap-scroll carousel, cards at min(78vw, 300px) — one card at a
+ *             time, wide enough that the burned-in subtitles stay readable
+ *   >= 768px  2 columns (cards capped at 360px so a 9:16 box can't run past
+ *             ~640px tall)
+ *   >= 1280px 4 columns — all four visible at once, ~285px cards at 1280 and
+ *             ~325px once the 1360px container caps out, which is close to the
+ *             old featured player's 360px
+ *
+ * The 4-up switch is at xl, not lg, deliberately: at 1024px four columns leave
+ * only ~219px per card, which is too narrow to read the burned-in subtitles.
+ */
 export function SocialProofSection() {
-  // Entries that have a real file get the full-size player; the rest stay in
-  // the placeholder strip until their clip exists.
-  const featured = landingImages.videos.filter((v) => v.videoUrl);
-  const pending = landingImages.videos.filter((v) => !v.videoUrl);
+  const videos = [...landingImages.videos].sort(
+    (a, b) => Number(Boolean(b.videoUrl)) - Number(Boolean(a.videoUrl)),
+  );
 
   return (
     <section className="section-alt cv-auto relative py-24 px-4 md:px-8 lg:px-10">
@@ -16,43 +31,13 @@ export function SocialProofSection() {
       <div className="max-w-[1360px] mx-auto relative">
         <SectionHeading>סוחרים אמיתיים. שינוי אמיתי.</SectionHeading>
 
-        {featured.map((video) => (
-          <ScrollReveal key={video.id} delay={120}>
-            <div id={video.id} className="mb-16">
-              <FeaturedVideo video={video} />
-            </div>
-          </ScrollReveal>
-        ))}
-
-        {pending.length > 0 && (
-          <ScrollReveal delay={120}>
-            <div className="flex gap-5 overflow-x-auto pb-4 px-1 snap-x snap-mandatory scrollbar-none">
-              {pending.map((video) => (
-                <div key={video.id} className="shrink-0 w-56 md:w-64 snap-center flex flex-col gap-3">
-                  <div
-                    id={video.id}
-                    className="glass-card card-hover relative w-full aspect-[9/16] rounded-2xl overflow-hidden flex items-center justify-center"
-                  >
-                    <div
-                      className="absolute inset-0"
-                      style={{ background: 'radial-gradient(circle at 50% 30%, rgba(0,210,210,0.14), transparent 65%)' }}
-                    />
-                    <span
-                      className="relative flex items-center justify-center w-16 h-16 rounded-full"
-                      style={{ background: 'rgba(0,210,210,0.1)', border: '1px solid rgba(0,210,210,0.35)' }}
-                    >
-                      <PlayCircle size={40} style={{ color: '#00d2d2' }} />
-                    </span>
-                  </div>
-                  <div className="px-1">
-                    <p className="text-base text-tg-text-2 leading-relaxed">&quot;{video.quote}&quot;</p>
-                    <p className="text-sm text-tg-muted mt-1">{video.name}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </ScrollReveal>
-        )}
+        <ScrollReveal delay={120}>
+          <div className="flex gap-5 overflow-x-auto pb-4 px-1 snap-x snap-mandatory scrollbar-none md:grid md:grid-cols-2 md:gap-8 md:overflow-x-visible md:pb-0 xl:grid-cols-4 xl:gap-5">
+            {videos.map((video) => (
+              <TestimonialCard key={video.id} video={video} />
+            ))}
+          </div>
+        </ScrollReveal>
       </div>
     </section>
   );
