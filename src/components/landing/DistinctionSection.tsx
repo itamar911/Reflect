@@ -54,6 +54,26 @@ const SLATE = '#94a3b8';
 const TURQUOISE = '#00d2d2';
 const AMBER = '#f59e0b';
 
+/**
+ * The archive's win/loss pair. Both are desaturated to keep the panel reading as
+ * a record rather than a live surface, but they are a green and a red — the
+ * winning sessions used to be drawn in the panel's own slate, which made them
+ * look like missing data and told a false "nothing but losses" story. Colour is
+ * the fast channel here; the bar's side of the zero baseline carries the same
+ * information without it.
+ */
+const WIN_BAR = 'rgba(74,222,128,0.55)';
+const LOSS_BAR = 'rgba(248,113,113,0.5)';
+
+/**
+ * The trade being checked right now. The headline figure is the account times
+ * the risk percentage the panel already lists, so the number and the row it
+ * comes from cannot disagree.
+ */
+const ACCOUNT = 43500;
+const RISK_PCT = 1.8;
+const AT_RISK = Math.round((ACCOUNT * RISK_PCT) / 100 / 10) * 10;
+
 // ── Motion ───────────────────────────────────────────────────
 
 /**
@@ -85,13 +105,13 @@ const FINAL_STEP = STEPS.length; // 8
 const COUNT_MS = 900;
 
 /**
- * Both panels are pinned to this so the pair stays matched however the two very
- * different bodies inside them measure out. It is also the lever for balancing
- * the two columns: merging the redundant paragraphs made the copy column
- * shorter, so the panels come down to meet it rather than the prose being
- * padded back out.
+ * Floor for both panels. Side by side the flex row equalises them anyway; this
+ * is what keeps them equal once they stack, where each would otherwise size to
+ * its own content and the archive came out 53px shorter. The value is the
+ * decision panel's own natural height — it is the taller of the two at every
+ * width — so the archive rises to meet it rather than either being clipped.
  */
-const PANEL_MIN_H = 272;
+const PANEL_MIN_H = 340;
 
 export function DistinctionSection() {
   const reducedMotion = usePrefersReducedMotion();
@@ -178,12 +198,22 @@ export function DistinctionSection() {
             content — not enough for the labels, and the pair reads cramped.
             Below xl the section runs full width instead, which the panels use
             far better than a squeezed two-column split would. */}
-        <div ref={rootRef} className="grid grid-cols-1 xl:grid-cols-2 gap-10 xl:gap-16 items-center">
+        {/* Split 0.7/1.3 rather than evenly, with the gap tightened from 64px to
+            48px. An even split left the copy capped well short of its column and
+            opened a ~180px dead band between the text and the pair at 1440. The
+            copy now fills its column exactly — no cap needed, so no slack — and
+            the ratio is what sets its measure: 0.7 lands it near 460px, which is
+            both a comfortable ~51-character line and tall enough to finish level
+            with the panels. The pair takes the width it wanted anyway. */}
+        <div
+          ref={rootRef}
+          className="grid grid-cols-1 gap-10 items-center xl:grid-cols-[minmax(0,0.7fr)_minmax(0,1.3fr)] xl:gap-12"
+        >
           {/* copy — first child = right column in RTL */}
           <div className="flex flex-col gap-7">
             <ScrollReveal delay={80}>
               <p
-                className="text-tg-muted max-w-[36rem] mx-auto xl:mx-0 xl:max-w-[33rem]"
+                className="text-tg-muted max-w-[36rem] mx-auto xl:mx-0 xl:max-w-none"
                 style={{ fontSize: 18.5, lineHeight: 1.85 }}
               >
                 יומן טוב מראה לך מה קרה: איפה טעית, מה עבד, אילו דפוסים חוזרים אצלך. זה שלב הכרחי —
@@ -193,7 +223,7 @@ export function DistinctionSection() {
 
             <ScrollReveal delay={160}>
               <p
-                className="text-tg-muted max-w-[36rem] mx-auto xl:mx-0 xl:max-w-[33rem]"
+                className="text-tg-muted max-w-[36rem] mx-auto xl:mx-0 xl:max-w-none"
                 style={{ fontSize: 18.5, lineHeight: 1.85 }}
               >
                 אבל יש רגע אחד שאף יומן בעולם לא מכסה: הרגע שבו האצבע על הכפתור, וכל מה שראית אתמול
@@ -407,24 +437,33 @@ function DecisionPanel({
         </span>
       </div>
 
-      {/* Reserved height, so the blocked bar appearing never shifts the rows. */}
-      <div className="mt-auto" style={{ minHeight: 38 }}>
-        <span
-          className="flex items-center justify-center gap-2 rounded-lg w-full"
+      {/* Headline figure, sitting in the same slot as the archive panel's so the
+          two are directly comparable. This is the half the section argues for,
+          so it carries the section's largest number in the accent colour and the
+          archive's total is stepped down to match — previously the archive's red
+          total was the loudest thing on screen, pulling the eye to exactly the
+          side the argument calls insufficient.
+
+          It lands whole rather than counting up: a decision happens at one
+          instant, where the archive's total is something that accumulated. */}
+      <div className="mt-auto" style={{ minHeight: 60 }}>
+        <div
           style={{
-            height: 38,
-            background: 'rgba(239,68,68,0.1)',
-            border: '1px solid rgba(239,68,68,0.45)',
             opacity: blocked ? 1 : 0,
-            transform: blocked ? 'scale(1)' : 'scale(0.97)',
+            transform: blocked ? 'translateY(0)' : 'translateY(6px)',
             transition: 'opacity 0.35s ease, transform 0.45s cubic-bezier(0.16,1,0.3,1)',
           }}
         >
-          <Lock size={14} className="shrink-0" style={{ color: '#f87171' }} />
-          <span className="font-bold" style={{ fontSize: 13, color: '#f87171' }}>
-            פתיחת העסקה נחסמה
-          </span>
-        </span>
+          <p className="font-extrabold leading-none" style={{ fontSize: 30, color: TURQUOISE }}>
+            <span dir="ltr" style={{ fontVariantNumeric: 'tabular-nums' }}>{`₪${group(AT_RISK)}`}</span>
+          </p>
+          <p className="flex items-center gap-1.5 mt-2">
+            <Lock size={13} className="shrink-0" style={{ color: '#f87171' }} />
+            <span className="font-semibold" style={{ fontSize: 12.5, color: '#f87171' }}>
+              נעצר עכשיו — פתיחת העסקה נחסמה
+            </span>
+          </p>
+        </div>
       </div>
     </PanelShell>
   );
@@ -478,17 +517,23 @@ function ArchivePanel({ archiveIn, shownNet }: { archiveIn: boolean; shownNet: n
     >
       {/* Six sessions around a zero baseline: wins grow up, losses grow down.
           Each bar scales from the baseline, so the growth is transform-only. */}
-      <div className="relative w-full" style={{ height: 66 }}>
+      {/* The chart takes the panel's slack rather than sitting at a fixed 66px:
+          once both panels were pinned to the taller one's height, a fixed chart
+          left ~90px of dead space between it and the total below. Bar heights
+          are percentages of the container for the same reason — they scale with
+          the panel instead of floating in the middle of it. */}
+      <div className="relative w-full flex-1" style={{ minHeight: 66 }}>
         <span
           className="absolute inset-x-0"
           style={{ top: '50%', height: 1, background: 'rgba(148,163,184,0.28)' }}
         />
         <div className="absolute inset-0 flex items-stretch justify-between gap-1.5">
-          {SESSIONS.map((session, i) => {
+            {SESSIONS.map((session, i) => {
             const up = session.pnl > 0;
             // A floor as well as a scale, so the smallest session is still a
-            // legible bar rather than a hairline.
-            const h = 6 + (Math.abs(session.pnl) / MAX_ABS) * 22;
+            // legible bar rather than a hairline. 46 caps the tallest bar just
+            // short of the container edge.
+            const h = `${(0.2 + (Math.abs(session.pnl) / MAX_ABS) * 0.62) * 46}%`;
             return (
               <span key={i} className="relative flex-1">
                 <span
@@ -507,7 +552,7 @@ function ArchivePanel({ archiveIn, shownNet }: { archiveIn: boolean; shownNet: n
                     transform: archiveIn ? 'scaleY(1)' : 'scaleY(0)',
                     transition: 'transform 0.55s cubic-bezier(0.16,1,0.3,1)',
                     transitionDelay: `${i * 60}ms`,
-                    background: up ? 'rgba(148,163,184,0.55)' : 'rgba(239,68,68,0.45)',
+                    background: up ? WIN_BAR : LOSS_BAR,
                   }}
                 />
               </span>
@@ -520,7 +565,11 @@ function ArchivePanel({ archiveIn, shownNet }: { archiveIn: boolean; shownNet: n
         {/* The paragraph stays RTL so the figure sits on the panel's start edge
             with everything else; only the numeral itself is isolated LTR, which
             is where the sign and separators would otherwise be reordered. */}
-        <p className="font-extrabold leading-none" style={{ fontSize: 24, color: '#f87171' }}>
+        {/* Stepped down from 24px extrabold solid red: this panel is the
+            de-emphasised half, so its total must not out-shout the decision
+            panel's headline. Still the largest thing inside this panel — just
+            no longer the largest thing in the section. */}
+        <p className="font-bold leading-none" style={{ fontSize: 19, color: 'rgba(248,113,113,0.78)' }}>
           <span dir="ltr" style={{ fontVariantNumeric: 'tabular-nums' }}>
             {`-₪${group(Math.abs(shownNet))}`}
           </span>
