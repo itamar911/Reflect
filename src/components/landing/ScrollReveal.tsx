@@ -20,6 +20,21 @@ export function ScrollReveal({ children, className = '', delay = 0 }: ScrollReve
     const el = ref.current;
     if (!el || reducedMotion) return;
 
+    /**
+     * The bottom margin extends the observation box *past* the viewport, so a
+     * reveal starts while its element is still below the fold and the 850ms
+     * transition has largely run by the time it crosses.
+     *
+     * It used to be -60px, which pulled the trigger 60px the other way — an
+     * element could sit visibly above the fold and still be at opacity 0. That
+     * is what kept the section heading under the hero unpainted at a 1440x800
+     * viewport: laid out 31px above the fold, but 91px short of triggering.
+     *
+     * 120px is deliberately modest. The margin only ever pre-reveals elements
+     * within 120px of the fold, so nothing further down the page is painted
+     * before it is anywhere near view, and the entrance is still there to see
+     * on everything a visitor scrolls to.
+     */
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
@@ -27,7 +42,7 @@ export function ScrollReveal({ children, className = '', delay = 0 }: ScrollReve
           observer.disconnect();
         }
       },
-      { threshold: 0.15, rootMargin: '0px 0px -60px 0px' }
+      { threshold: 0.15, rootMargin: '0px 0px 120px 0px' }
     );
 
     observer.observe(el);
