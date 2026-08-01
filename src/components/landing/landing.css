@@ -233,8 +233,16 @@
   50%      { box-shadow: 0 0 20px rgba(0, 210, 210, 0.5); }
 }
 
+/* Was sharing the hero's old warn-pulse keyframes; the hero mock no longer has
+   them (its violation row is now driven by the scan sequence), so this owns
+   them outright. */
+@keyframes mock-warn-pulse-glow {
+  0%, 8%, 100% { box-shadow: 0 0 0 rgba(245, 158, 11, 0); }
+  10%, 14%     { box-shadow: 0 0 16px rgba(245, 158, 11, 0.45); }
+}
+
 .mock-warn-pulse {
-  animation: hero-warn-pulse 3s ease-in-out infinite;
+  animation: mock-warn-pulse-glow 3s ease-in-out infinite;
 }
 
 .distinction-connector {
@@ -359,24 +367,110 @@
 .hero-float-1 { animation: hero-float 5s ease-in-out infinite; }
 .hero-float-2 { animation: hero-float 6.5s ease-in-out infinite 1.2s; }
 
-@keyframes hero-row-in {
-  0%, 4%    { opacity: 0; transform: translateY(6px); }
-  10%, 90%  { opacity: 1; transform: translateY(0); }
-  96%, 100% { opacity: 0; transform: translateY(6px); }
+/* ── Hero mock: the interception sequence ──────────────────────
+   Driven by HeroMock.tsx, which mounts each of these for exactly the phase it
+   belongs to. Everything here animates transform/opacity only: the card is
+   above the fold, so no frame may touch layout. */
+
+/* The scan bar. The element is the full card (inset: 0) and the visible "bar"
+   is the bright band sitting at the 50% mark of its gradient, so translating
+   the element by ±50% of itself walks that band from the card's top edge to its
+   bottom edge at any card size — no measurement, no layout read. Travel is
+   vertical, which is direction-neutral; a horizontal sweep would have to begin
+   at the right edge under RTL.
+
+   ±50% (not ±100%) and `linear` (not an ease) both matter: with the wider
+   travel the band is only inside the card for the middle half of the timeline,
+   which on an ease-in-out is its fastest stretch — the bar blurs through the
+   card instead of scanning it. This way the whole 1100ms is spent crossing, at
+   constant speed, which is what makes it read as the system working through
+   the plan. The scan/scanLit split in HeroMock is set from the same geometry:
+   the violation row's centre measures 58% down the card, so the row ignites
+   660ms into the 1100ms sweep — as the bar reaches it, not before. */
+.hero-scan {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 210, 210, 0) 44%,
+    rgba(0, 210, 210, 0.10) 48%,
+    rgba(0, 210, 210, 0.85) 49.6%,
+    #00d2d2 50%,
+    rgba(0, 210, 210, 0.85) 50.4%,
+    rgba(0, 210, 210, 0.10) 52%,
+    rgba(0, 210, 210, 0) 56%
+  );
+  animation: hero-scan-sweep 1100ms linear both;
 }
 
-.hero-check-row {
-  opacity: 0;
-  animation: hero-row-in 6s ease-in-out infinite;
+@keyframes hero-scan-sweep {
+  0%   { transform: translate3d(0, -50%, 0); opacity: 0; }
+  9%   { opacity: 1; }
+  85%  { opacity: 1; }
+  100% { transform: translate3d(0, 50%, 0); opacity: 0; }
 }
 
-@keyframes hero-warn-pulse {
-  0%, 8%, 100% { box-shadow: 0 0 0 rgba(245, 158, 11, 0); }
-  10%, 14%     { box-shadow: 0 0 16px rgba(245, 158, 11, 0.45); }
+/* Ripple out of the button's centre, clipped to the button's rounded box.
+   The 24px box is offset by static margins rather than a translate, so the
+   animation itself stays a pure scale. */
+.hero-press-ripple-clip {
+  position: absolute;
+  inset: 0;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  pointer-events: none;
 }
 
-.hero-warn-row {
-  animation: hero-row-in 6s ease-in-out infinite, hero-warn-pulse 6s ease-in-out infinite;
+.hero-press-ripple {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 24px;
+  height: 24px;
+  margin: -12px 0 0 -12px;
+  border-radius: 9999px;
+  background: radial-gradient(circle, rgba(0, 210, 210, 0.55) 0%, rgba(0, 210, 210, 0.18) 60%, rgba(0, 210, 210, 0) 100%);
+  animation: hero-ripple 450ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+@keyframes hero-ripple {
+  0%   { transform: scale(0.3); opacity: 0.75; }
+  100% { transform: scale(16);  opacity: 0; }
+}
+
+/* Violation row ignition: blooms as the scan bar crosses, then settles to a
+   faint residual tint that holds for the rest of the sequence. */
+.hero-row-bloom {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(60% 120% at 50% 50%, rgba(245, 158, 11, 0.45), rgba(245, 158, 11, 0) 70%);
+  animation: hero-row-bloom-in 1400ms ease-out both;
+}
+
+@keyframes hero-row-bloom-in {
+  0%   { opacity: 0; transform: scale(0.92); }
+  22%  { opacity: 1; transform: scale(1); }
+  100% { opacity: 0.18; transform: scale(1); }
+}
+
+/* The badge's own beat — blooms and fades out completely, leaving the pill. */
+.hero-badge-bloom {
+  position: absolute;
+  inset: -6px;
+  border-radius: 9999px;
+  pointer-events: none;
+  background: radial-gradient(circle, rgba(239, 68, 68, 0.55), rgba(239, 68, 68, 0) 70%);
+  animation: hero-badge-bloom-in 1500ms ease-out both;
+}
+
+@keyframes hero-badge-bloom-in {
+  0%   { opacity: 0; transform: scale(0.7); }
+  25%  { opacity: 1; transform: scale(1.15); }
+  100% { opacity: 0; transform: scale(1.3); }
 }
 
 /* ── Loop: winding descent curve + glass cards ─────────────── */
@@ -894,10 +988,11 @@
     transition-duration: 0.01ms !important;
   }
 
-  .landing .hero-check-row {
-    opacity: 1;
-    transform: none;
-  }
+  /* HeroMock gates its whole sequence in JS under reduced motion — it renders
+     the resting locked state, so the scan bar and the press ripple are never
+     mounted at all. The two bloom layers can still mount (they belong to the
+     resting state), and the blanket rule above collapses them to their end
+     frames. */
 
   .landing .loop-path {
     stroke-dashoffset: 0;

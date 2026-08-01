@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 // Update this as the real number grows.
-const NEW_USERS_THIS_MONTH = 367;
+const NEW_USERS_THIS_MONTH = 247;
 
 const COUNT_DURATION_MS = 1700;
 
@@ -61,7 +61,7 @@ export function HeroJoinStat() {
         className="text-base font-extrabold"
         style={{
           color: '#00d2d2',
-          // Fixed-width LTR box sized for the final "+367" so the count-up
+          // Fixed-width LTR box sized for the final "+247" so the count-up
           // never pushes the surrounding text around; left-aligned so the
           // number stays glued to the text (which follows on its left in RTL).
           fontVariantNumeric: 'tabular-nums',

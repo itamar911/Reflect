@@ -28,8 +28,8 @@ export function HeroSection() {
           <div className="flex flex-col items-center lg:items-start text-center lg:text-start gap-7">
             <ScrollReveal>
               <h1 className="text-3xl md:text-5xl lg:text-[3.25rem] font-extrabold text-white leading-[1.2] md:leading-[1.18] max-w-4xl lg:max-w-none mx-auto lg:mx-0">
-                כמה פעמים אמרת &quot;זאת הפעם האחרונה שאני עושה את זה&quot; —{' '}
-                <span className="text-gradient-cyan">ועשית את זה שוב למחרת?</span>
+                אמרת &quot;זאת הפעם האחרונה שאני עושה את זה&quot; —{' '}
+                <span className="text-gradient-cyan">ועשית את זה שוב למחרת.</span>
               </h1>
             </ScrollReveal>
 
@@ -37,7 +37,7 @@ export function HeroSection() {
               <p className="text-lg text-tg-muted max-w-2xl lg:max-w-xl mx-auto lg:mx-0 leading-relaxed">
                 הבעיה שלך היא לא עוד ידע. הבעיה היא ששום דבר לא עוצר אותך ברגע שהכי צריך. Reflect הוא
                 יומן המסחר היחיד שנכנס לרגע הזה — אתה מגדיר את החוקים שלך, והוא אומר לך בפרצוף כשאתה
-                עומד להפר אותם. לפני הכניסה, לא אחרי ההפסד.
+                עומד להפר אותם.
               </p>
             </ScrollReveal>
 
