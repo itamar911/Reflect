@@ -110,8 +110,12 @@ const COUNT_MS = 900;
  * its own content and the archive came out 53px shorter. The value is the
  * decision panel's own natural height — it is the taller of the two at every
  * width — so the archive rises to meet it rather than either being clipped.
+ *
+ * It therefore has to be raised whenever a row is added to the decision panel;
+ * left behind, the panels silently drift apart in the stacked layout only. The
+ * stacked heights are worth re-measuring after any change to that panel.
  */
-const PANEL_MIN_H = 340;
+const PANEL_MIN_H = 365;
 
 export function DistinctionSection() {
   const reducedMotion = usePrefersReducedMotion();
@@ -409,7 +413,7 @@ function DecisionPanel({
       }}
     >
       <CheckRow shown={check1} text="סטופ מוגדר · יחס 1:2.5" />
-      <CheckRow shown={check2} text="סיכון 1.8% מהחשבון" />
+      <CheckRow shown={check2} text={`סיכון ${RISK_PCT}% מהחשבון`} />
 
       <div
         className="flex items-center gap-2 rounded-lg px-2.5 py-2 -mx-0.5"
@@ -446,7 +450,7 @@ function DecisionPanel({
 
           It lands whole rather than counting up: a decision happens at one
           instant, where the archive's total is something that accumulated. */}
-      <div className="mt-auto" style={{ minHeight: 60 }}>
+      <div className="mt-auto" style={{ minHeight: 78 }}>
         <div
           style={{
             opacity: blocked ? 1 : 0,
@@ -457,10 +461,18 @@ function DecisionPanel({
           <p className="font-extrabold leading-none" style={{ fontSize: 30, color: TURQUOISE }}>
             <span dir="ltr" style={{ fontVariantNumeric: 'tabular-nums' }}>{`₪${group(AT_RISK)}`}</span>
           </p>
-          <p className="flex items-center gap-1.5 mt-2">
+          {/* A bare turquoise figure reads as money made. It is the opposite —
+              exposure that never happened — and without this line the archive's
+              total was the only one of the two that said what it was. The
+              percentage is interpolated from the same RISK_PCT the check row
+              above prints, so the label, that row and AT_RISK cannot drift. */}
+          <p className="mt-1.5" style={{ fontSize: 12.5, color: 'rgba(255,255,255,0.6)' }}>
+            {`סיכון שנמנע — ${RISK_PCT}% מהחשבון`}
+          </p>
+          <p className="flex items-center gap-1.5 mt-1.5">
             <Lock size={13} className="shrink-0" style={{ color: '#f87171' }} />
             <span className="font-semibold" style={{ fontSize: 12.5, color: '#f87171' }}>
-              נעצר עכשיו — פתיחת העסקה נחסמה
+              פתיחת העסקה נחסמה
             </span>
           </p>
         </div>
