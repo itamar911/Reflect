@@ -211,63 +211,76 @@
   }
 }
 
-/* ── Mini-mock panels (Distinction section) ────────────────── */
+/* ── Distinction section: the two-moment pair ──────────────── */
 
-.mini-mock-hover {
-  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease;
+/* The "+" between the panels is the section's thesis, so it is built as a node
+   with real presence: a filled core, a hairline ring, and a wide soft halo laid
+   on with a spread shadow rather than an extra element. */
+.dist-plus-node {
+  width: 54px;
+  height: 54px;
+  flex-shrink: 0;
+  background: radial-gradient(circle at 50% 38%, rgba(0, 210, 210, 0.3), rgba(0, 210, 210, 0.07) 72%);
+  border: 1.5px solid rgba(0, 210, 210, 0.55);
+  box-shadow:
+    0 0 0 7px rgba(0, 210, 210, 0.06),
+    0 0 28px rgba(0, 210, 210, 0.3),
+    inset 0 0 18px rgba(0, 210, 210, 0.12);
 }
 
-.mini-mock-hover:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.4);
+/* Causality pulse — the beat that carries the decision into the record.
+   The element spans the whole pair and the visible streak is the bright band
+   inside its gradient, so translating it 100% of itself walks the streak from
+   one panel to the other at any width, with no measurement.
+
+   Two axes because the pair reflows: stacked on a phone the decision panel is
+   on top, so the pulse travels downward; side by side it travels right to left,
+   decision to archive, which is the reading direction under RTL. translateX is
+   physical rather than logical, so the negative value is what makes it run
+   right-to-left and it does not need a mirror case. */
+/* The travelling mark is a compact node — a bright core inside a soft halo —
+   not a bar. A full-height line sweeping the pair would read as the hero's scan
+   rotated 90 degrees, and this section's idea is one moment handing off to
+   another, which a single point crossing the gap says far more precisely. */
+.dist-pulse {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(7px 7px at 50% 3%, rgba(0, 210, 210, 1) 0%, rgba(0, 210, 210, 0) 70%),
+    radial-gradient(24px 24px at 50% 3%, rgba(0, 210, 210, 0.32) 0%, rgba(0, 210, 210, 0) 72%);
+  animation: dist-pulse-down 620ms cubic-bezier(0.4, 0, 0.25, 1) both;
 }
 
-.plus-node-glow {
-  background: rgba(0, 210, 210, 0.12);
-  border: 1px solid rgba(0, 210, 210, 0.35);
-  animation: plus-node-pulse 2.6s ease-in-out infinite;
+@keyframes dist-pulse-down {
+  0%   { transform: translateY(-3%);  opacity: 0; }
+  16%  { opacity: 1; }
+  84%  { opacity: 1; }
+  100% { transform: translateY(100%); opacity: 0; }
 }
 
-@keyframes plus-node-pulse {
-  0%, 100% { box-shadow: 0 0 10px rgba(0, 210, 210, 0.25); }
-  50%      { box-shadow: 0 0 20px rgba(0, 210, 210, 0.5); }
+@media (min-width: 640px) {
+  .dist-pulse {
+    background:
+      radial-gradient(7px 7px at 97% 50%, rgba(0, 210, 210, 1) 0%, rgba(0, 210, 210, 0) 70%),
+      radial-gradient(24px 24px at 97% 50%, rgba(0, 210, 210, 0.32) 0%, rgba(0, 210, 210, 0) 72%);
+    animation: dist-pulse-across 620ms cubic-bezier(0.4, 0, 0.25, 1) both;
+  }
 }
 
-/* Was sharing the hero's old warn-pulse keyframes; the hero mock no longer has
-   them (its violation row is now driven by the scan sequence), so this owns
-   them outright. */
-@keyframes mock-warn-pulse-glow {
-  0%, 8%, 100% { box-shadow: 0 0 0 rgba(245, 158, 11, 0); }
-  10%, 14%     { box-shadow: 0 0 16px rgba(245, 158, 11, 0.45); }
+@keyframes dist-pulse-across {
+  0%   { transform: translateX(3%);    opacity: 0; }
+  16%  { opacity: 1; }
+  84%  { opacity: 1; }
+  100% { transform: translateX(-100%); opacity: 0; }
 }
 
-.mock-warn-pulse {
-  animation: mock-warn-pulse-glow 3s ease-in-out infinite;
-}
-
-.distinction-connector {
-  width: 2px;
-  height: 56px;
-  margin-top: 8px;
-  margin-bottom: 8px;
-  background: linear-gradient(180deg, rgba(0, 210, 210, 0.5), rgba(0, 210, 210, 0.05));
-  background-size: 100% 220%;
-  animation: connector-flow 3.5s ease-in-out infinite;
-}
-
-@keyframes connector-flow {
-  0%, 100% { background-position: 0 0%; }
-  50%      { background-position: 0 100%; }
-}
-
-.proof-chip {
-  transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
-}
-
-.proof-chip:hover {
-  transform: translateY(-2px);
-  border-color: rgba(0, 210, 210, 0.4) !important;
-  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.3), 0 0 18px rgba(0, 210, 210, 0.12);
+/* The closing synthesis. Weighted as a conclusion — accent ring and glow —
+   rather than as one of the three equal chips it replaced. */
+.dist-synthesis {
+  background: linear-gradient(120deg, rgba(0, 210, 210, 0.14), rgba(0, 210, 210, 0.04));
+  border: 1px solid rgba(0, 210, 210, 0.45);
+  box-shadow: 0 0 30px rgba(0, 210, 210, 0.14);
 }
 
 /* ── Section ambience ──────────────────────────────────────── */
