@@ -42,7 +42,7 @@ const AVOIDED = 780;
  * badge lands, keeps the whole card derivable from one step index — no
  * cascading setState, and the beats cannot drift apart.
  */
-type Phase = 'idle' | 'press' | 'scan' | 'scanLit' | 'locked' | 'lockedBadge';
+type Phase = 'idle' | 'press' | 'scan' | 'scanLit' | 'locked' | 'lockedBadge' | 'resetOut' | 'resetIn';
 
 /**
  * `idle` is the "let them read first" beat — the whole card is static for its
@@ -50,6 +50,14 @@ type Phase = 'idle' | 'press' | 'scan' | 'scanLit' | 'locked' | 'lockedBadge';
  * quick; scan + scanLit together are the 1100ms the CSS sweep takes, split at
  * the point the bar crosses the violation row; locked + lockedBadge hold the
  * end state, split so the badge lands half a second after the button locks.
+ *
+ * resetOut/resetIn cross-fade the return to idle between the two passes. The
+ * elements that revert (the violation row and the button) fade out still
+ * wearing their locked look, swap state while they are at zero opacity, and
+ * fade back already idle — so the card never visibly un-ignites. Letting the
+ * colour transitions simply run backwards reads as a glitch this high on the
+ * page. These two beats are skipped after the final pass: `done` freezes the
+ * card on lockedBadge, so there is no dip before it settles.
  */
 const SEQUENCE: { phase: Phase; ms: number }[] = [
   { phase: 'idle', ms: 1500 },
@@ -58,6 +66,8 @@ const SEQUENCE: { phase: Phase; ms: number }[] = [
   { phase: 'scanLit', ms: 440 },
   { phase: 'locked', ms: 500 },
   { phase: 'lockedBadge', ms: 2500 },
+  { phase: 'resetOut', ms: 220 },
+  { phase: 'resetIn', ms: 260 },
 ];
 
 /** Passes before the card rests on the locked state for good. */
@@ -86,9 +96,17 @@ export function HeroMock() {
 
   // Everything below is derived from the phase — no second source of truth.
   const scanning = phase === 'scan' || phase === 'scanLit';
-  const ignited = phase === 'scanLit' || phase === 'locked' || phase === 'lockedBadge';
-  const locked = phase === 'locked' || phase === 'lockedBadge';
+  const ignited =
+    phase === 'scanLit' || phase === 'locked' || phase === 'lockedBadge' || phase === 'resetOut';
+  const locked = phase === 'locked' || phase === 'lockedBadge' || phase === 'resetOut';
   const badgeIn = phase === 'lockedBadge';
+
+  // During the cross-fade the row and button are mid-dip, so their colour
+  // transitions are suppressed: the state swap has to be instantaneous at the
+  // trough, otherwise the fade-in shows the old colours easing to the new ones
+  // — which is the very thing the cross-fade exists to hide.
+  const resetting = phase === 'resetOut' || phase === 'resetIn';
+  const dipClass = phase === 'resetOut' ? 'hero-reset-out' : phase === 'resetIn' ? 'hero-reset-in' : '';
 
   /**
    * On desktop this card is above the fold, so the observer fires on mount and
@@ -116,19 +134,23 @@ export function HeroMock() {
   }, [reducedMotion]);
 
   // Self-rescheduling timeout rather than one interval: the phases have
-  // different durations, and the pass counter has to advance on the wrap.
+  // different durations. The pass counter advances when `lockedBadge` ends
+  // rather than on the wrap, so the final pass can stop right there and skip
+  // the two reset beats entirely.
   useEffect(() => {
     if (reducedMotion || done || !inView) return;
     const id = setTimeout(() => {
-      if (step === SEQUENCE.length - 1) {
-        setPass((p) => p + 1);
-        setStep(0);
-      } else {
-        setStep(step + 1);
+      if (SEQUENCE[step].phase === 'lockedBadge') {
+        const nextPass = pass + 1;
+        setPass(nextPass);
+        // On the last pass `done` takes over and freezes the card here.
+        if (nextPass < RUNS) setStep(step + 1);
+        return;
       }
+      setStep(step === SEQUENCE.length - 1 ? 0 : step + 1);
     }, SEQUENCE[step].ms);
     return () => clearTimeout(id);
-  }, [reducedMotion, done, inView, step]);
+  }, [reducedMotion, done, inView, step, pass]);
 
   // setAmount only ever fires from inside the rAF callback, never synchronously
   // in the effect body — the resting and reduced-motion values are derived at
@@ -258,25 +280,28 @@ export function HeroMock() {
           {/* The violation. Dormant until the scan bar reaches it, then lit for
               the rest of the sequence. Colour fades are paint-only. */}
           <div
-            className="relative flex items-center gap-2.5 rounded-lg px-3 py-2 -mx-1 overflow-hidden"
+            className={`relative flex items-center gap-2.5 rounded-lg px-3 py-2 -mx-1 overflow-hidden ${dipClass}`}
             style={{
               background: ignited ? 'rgba(245,158,11,0.1)' : 'rgba(255,255,255,0.04)',
               border: `1px solid ${ignited ? 'rgba(245,158,11,0.3)' : 'rgba(255,255,255,0.08)'}`,
-              transition: 'background-color 0.35s ease, border-color 0.35s ease',
+              transition: resetting ? 'none' : 'background-color 0.35s ease, border-color 0.35s ease',
             }}
           >
             {ignited && <span className="hero-row-bloom" aria-hidden />}
             <AlertTriangle
               size={17}
               className="shrink-0"
-              style={{ color: ignited ? '#f59e0b' : 'rgba(255,255,255,0.35)', transition: 'color 0.35s ease' }}
+              style={{
+                color: ignited ? '#f59e0b' : 'rgba(255,255,255,0.35)',
+                transition: resetting ? 'none' : 'color 0.35s ease',
+              }}
             />
             <span
               className="text-base"
               style={{
                 position: 'relative',
                 color: ignited ? '#f59e0b' : 'rgba(255,255,255,0.45)',
-                transition: 'color 0.35s ease',
+                transition: resetting ? 'none' : 'color 0.35s ease',
               }}
             >
               עסקה שלישית היום — חוק שלך מופר
@@ -290,7 +315,7 @@ export function HeroMock() {
             disabled={locked}
             className={`w-full flex items-center justify-center gap-2 rounded-xl py-3.5 text-base font-bold ${
               locked ? 'cursor-not-allowed' : ''
-            }`}
+            } ${dipClass}`}
             style={
               locked
                 ? {
@@ -299,7 +324,9 @@ export function HeroMock() {
                     color: 'rgba(255,255,255,0.5)',
                     boxShadow: '0 0 22px rgba(245,158,11,0.15)',
                     transform: 'scale(1)',
-                    transition: 'background-color 0.32s ease, border-color 0.32s ease, color 0.32s ease, transform 0.28s cubic-bezier(0.16,1,0.3,1)',
+                    transition: resetting
+                      ? 'none'
+                      : 'background-color 0.32s ease, border-color 0.32s ease, color 0.32s ease, transform 0.28s cubic-bezier(0.16,1,0.3,1)',
                   }
                 : {
                     background: 'rgba(0,210,210,0.14)',
@@ -308,7 +335,9 @@ export function HeroMock() {
                     boxShadow: '0 0 18px rgba(0,210,210,0.12)',
                     // Transform-only depress, so the rows above never reflow.
                     transform: phase === 'press' ? 'scale(0.965)' : 'scale(1)',
-                    transition: 'background-color 0.32s ease, border-color 0.32s ease, color 0.32s ease, transform 0.28s cubic-bezier(0.16,1,0.3,1)',
+                    transition: resetting
+                      ? 'none'
+                      : 'background-color 0.32s ease, border-color 0.32s ease, color 0.32s ease, transform 0.28s cubic-bezier(0.16,1,0.3,1)',
                   }
             }
           >

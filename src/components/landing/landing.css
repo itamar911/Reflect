@@ -457,6 +457,29 @@
   100% { opacity: 0.18; transform: scale(1); }
 }
 
+/* Cross-fade between the two passes. Only the elements that actually revert
+   (violation row, button) dip: they fade out still locked, swap state at zero
+   opacity — where the swap is invisible — and fade back already idle. HeroMock
+   suppresses their colour transitions for the duration, so nothing eases
+   backwards behind the fade. */
+.hero-reset-out {
+  animation: hero-reset-out 220ms ease-in both;
+}
+
+.hero-reset-in {
+  animation: hero-reset-in 260ms ease-out both;
+}
+
+@keyframes hero-reset-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+@keyframes hero-reset-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
 /* The badge's own beat — blooms and fades out completely, leaving the pill. */
 .hero-badge-bloom {
   position: absolute;

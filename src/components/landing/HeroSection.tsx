@@ -10,9 +10,20 @@ const TRUST_ITEMS = [
   { icon: Users, text: 'נבנה על ידי סוחרים' },
 ];
 
+/**
+ * Hero padding is asymmetric by breakpoint because the two viewports have
+ * opposite problems. Below lg the hero stacks and runs ~1630px tall, so the
+ * primary CTA was falling at or below the fold on a phone — the 80px top pulls
+ * it back up. At lg the hero is only ~818px against an 800-900px viewport, so
+ * the next section's heading sat just under the fold with nothing but padding
+ * showing above it; 112px top / 24px bottom lifts it into view. The bottom cut
+ * is desktop-only: those 96px are dead space under the trust row (the CTA ends
+ * ~200px above it), while on mobile the same 96px is the gap before the next
+ * section and worth keeping.
+ */
 export function HeroSection() {
   return (
-    <section className="relative pt-36 pb-24 px-4 md:px-8 lg:px-10 overflow-hidden">
+    <section className="relative pt-20 pb-24 lg:pt-28 lg:pb-6 px-4 md:px-8 lg:px-10 overflow-hidden">
       <div className="hero-grid" aria-hidden />
       <div className="hero-orb hero-orb-1" aria-hidden />
       <div className="hero-orb hero-orb-2" aria-hidden />
