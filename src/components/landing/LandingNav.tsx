@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Menu, X, Sparkles } from 'lucide-react';
 import { Logo } from '@/components/ui/Logo';
@@ -34,6 +34,22 @@ export function LandingNav() {
   const scrollY = useScrollY();
   const scrolled = scrollY > 8;
   const [open, setOpen] = useState(false);
+  const navRef = useRef<HTMLElement>(null);
+
+  // Publishes the <nav> row's real rendered height as a CSS variable so
+  // anything anchored to "clear the navbar" (ContactSection's scroll-mt)
+  // follows it instead of assuming a fixed 76px — the row can grow past
+  // that at larger text scales even with the hamburger switch above, since
+  // min-height (not height) is what's set on it now.
+  useEffect(() => {
+    const el = navRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      document.documentElement.style.setProperty('--landing-nav-h', `${entry.contentRect.height}px`);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   return (
     <header
@@ -54,7 +70,10 @@ export function LandingNav() {
         בס״ד
       </span>
 
-      <nav className="max-w-[1360px] mx-auto px-4 md:px-8 lg:px-10 h-[76px] flex items-center justify-between">
+      <nav
+        ref={navRef}
+        className="max-w-[1360px] mx-auto px-4 md:px-8 lg:px-10 min-h-[76px] flex items-center justify-between"
+      >
         <Link href="/" className="flex items-center gap-2 shrink-0">
           {/* Scale-up only from md — at ≤360 the enlarged mark visually
               overflows its box into the edge padding and clips */}
@@ -63,7 +82,7 @@ export function LandingNav() {
           </span>
         </Link>
 
-        <div className="hidden md:flex items-center gap-8">
+        <div className="lnav-desktop items-center gap-8">
           {NAV_LINKS.map((link) => (
             <a key={link.href} href={link.href} className="nav-link py-2.5 text-base font-medium text-tg-text-2 hover:text-white transition-colors">
               {link.label}
@@ -74,7 +93,7 @@ export function LandingNav() {
           </span>
         </div>
 
-        <div className="hidden md:flex items-center gap-3">
+        <div className="lnav-desktop items-center gap-3">
           <Link
             href="/login"
             className="px-4 py-2.5 rounded-xl text-sm font-semibold border border-tg-border text-tg-text-2 hover:border-tg-primary hover:text-tg-primary transition-colors"
@@ -92,7 +111,7 @@ export function LandingNav() {
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="md:hidden p-2 text-tg-text-2"
+          className="lnav-mobile p-2 text-tg-text-2"
           aria-label={open ? 'סגור תפריט' : 'פתח תפריט'}
         >
           {open ? <X size={26} /> : <Menu size={26} />}
@@ -112,7 +131,7 @@ export function LandingNav() {
 
       {open && (
         <div
-          className="md:hidden px-5 pb-7 pt-3 flex flex-col gap-5"
+          className="lnav-mobile px-5 pb-7 pt-3 flex-col gap-5"
           style={{
             background: 'rgba(10,13,20,0.97)',
             backdropFilter: 'blur(18px)',

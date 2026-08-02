@@ -9,7 +9,10 @@ const WHATSAPP_DIGITS = '972502255903';
 
 export function ContactSection() {
   return (
-    <section id="contact" className="relative py-24 px-4 md:px-8 lg:px-10 scroll-mt-[100px]">
+    <section
+      id="contact"
+      className="relative py-24 px-4 md:px-8 lg:px-10 scroll-mt-[calc(var(--landing-nav-h,76px)+24px)]"
+    >
       <div className="section-glow" aria-hidden />
       <div className="max-w-[720px] mx-auto relative">
         <SectionHeading sub="יש שאלה לפני שמתחילים? אנחנו כאן — בטלפון או בוואטסאפ.">

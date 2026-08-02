@@ -71,10 +71,30 @@ html[data-a11y-text-scale='130'] { font-size: 20.8px; }
 html[data-a11y-text-scale='140'] { font-size: 22.4px; }
 html[data-a11y-text-scale='150'] { font-size: 24px; }
 
-/* ── Underline links ──────────────────────────────────────────────── */
+/* ── Underline links ──────────────────────────────────────────────────
+   A rectangular outline plus a thick underline, not just a color change —
+   this has to read as "this is a link" at a glance, not just to someone
+   already looking closely.
+
+   outline never affects layout (unlike border), so it can't push adjacent
+   text out of place. The padding gives the outline room to breathe instead
+   of hugging the glyphs, and the matching negative margin cancels that
+   padding back out for layout purposes — the box paints bigger without the
+   link taking up more space in its flex row, so neighbors don't collide.
+
+   currentColor ties the outline to whatever color the link already renders
+   in, so it stays visible under grayscale/high-contrast/inverted too: those
+   modes are a backdrop-filter overlay recoloring every painted pixel
+   (see the overlay rule above), and that includes this outline. */
 html[data-a11y-underline-links='true'] a {
   text-decoration: underline !important;
-  text-underline-offset: 3px;
+  text-decoration-thickness: 3px !important;
+  text-underline-offset: 4px;
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+  border-radius: 4px;
+  padding: 3px 6px;
+  margin: -3px -6px;
 }
 
 /* ── Readable font ────────────────────────────────────────────────── */

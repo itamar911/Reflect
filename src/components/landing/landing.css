@@ -94,6 +94,56 @@
   transform: translateY(0) scale(0.97);
 }
 
+/* ── Navbar: desktop/hamburger threshold, text-scale aware ──────────
+   The desktop row's content (4 links + 2 CTA buttons) grows with the
+   accessibility widget's text scale (rem-based classes), but the row
+   itself doesn't get more width to grow into — so the point where it
+   switches to the hamburger has to move out with the scale too, not stay
+   pinned to one breakpoint that only works at 100%.
+
+   Plain CSS media queries, not a JS matchMedia check: the browser
+   evaluates these against the real viewport at first paint, with no
+   hydration-timing gap — a JS-computed version showed the desktop row (or
+   the hamburger) for one frame on the wrong device before React corrected
+   it, because the server can't know the client's viewport width up front.
+   data-a11y-text-scale is already set pre-paint by AccessibilityInitScript,
+   so combining it with @media here carries no such gap either.
+
+   Thresholds were measured directly (logo + links + CTA natural widths at
+   a 2400px viewport, so nothing was being squeezed while measuring), not
+   guessed: even at 100% scale the four nav links plus both CTA buttons need
+   ~1130px before padding — past the old static 768px `md` breakpoint,
+   because a 4th link (contact) was added after that breakpoint was last
+   tuned. Each value below includes a ~50px buffer past its measured
+   minimum. 130/140/150 share one breakpoint because their measured widths
+   cluster within ~10px of each other. */
+.lnav-desktop { display: flex; }
+.lnav-mobile { display: none; }
+
+@media (max-width: 1189px) {
+  .lnav-desktop { display: none !important; }
+  .lnav-mobile { display: flex !important; }
+}
+
+@media (max-width: 1269px) {
+  html[data-a11y-text-scale='110'] .lnav-desktop { display: none !important; }
+  html[data-a11y-text-scale='110'] .lnav-mobile { display: flex !important; }
+}
+
+@media (max-width: 1349px) {
+  html[data-a11y-text-scale='120'] .lnav-desktop { display: none !important; }
+  html[data-a11y-text-scale='120'] .lnav-mobile { display: flex !important; }
+}
+
+@media (max-width: 1469px) {
+  html[data-a11y-text-scale='130'] .lnav-desktop,
+  html[data-a11y-text-scale='140'] .lnav-desktop,
+  html[data-a11y-text-scale='150'] .lnav-desktop { display: none !important; }
+  html[data-a11y-text-scale='130'] .lnav-mobile,
+  html[data-a11y-text-scale='140'] .lnav-mobile,
+  html[data-a11y-text-scale='150'] .lnav-mobile { display: flex !important; }
+}
+
 /* ── Navbar: hover underline + CTA shine sweep ─────────────── */
 
 .nav-link {
