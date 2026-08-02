@@ -75,15 +75,16 @@ export function AccessibilityWidget() {
         aria-expanded={open}
         aria-haspopup="dialog"
         aria-controls={panelId}
-        className="fixed bottom-5 right-5 z-[110] flex h-14 w-14 items-center justify-center rounded-full text-white transition-transform duration-200 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 sm:bottom-6 sm:right-6"
+        className="fixed bottom-5 right-5 z-[110] flex h-12 w-12 items-center justify-center rounded-full text-white transition-transform duration-200 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 sm:bottom-6 sm:right-6 sm:h-14 sm:w-14"
         style={{ backgroundColor: 'var(--color-tg-primary)', boxShadow: '0 4px 16px rgba(0, 210, 210, 0.4)' }}
       >
-        <Accessibility size={28} aria-hidden />
+        <Accessibility size={24} className="sm:hidden" aria-hidden />
+        <Accessibility size={28} className="hidden sm:block" aria-hidden />
       </button>
 
       {open && (
         <div
-          className="fixed inset-0 z-[115] flex items-center justify-center p-4"
+          className="fixed inset-0 z-[115] flex items-end justify-center p-0 sm:items-center sm:p-4"
           style={{ background: 'rgba(0,0,0,0.6)' }}
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) close();
@@ -96,7 +97,10 @@ export function AccessibilityWidget() {
             aria-modal="true"
             aria-labelledby={headingId}
             dir="rtl"
-            className="w-full max-w-sm max-h-[85vh] overflow-y-auto rounded-2xl p-6 flex flex-col gap-5"
+            // Below sm this is a full-width bottom sheet — max-h caps it well
+            // short of the viewport (dvh accounts for mobile browser chrome)
+            // and the extra bottom padding clears the home-indicator safe area.
+            className="w-full sm:max-w-sm max-h-[85dvh] overflow-y-auto rounded-t-2xl sm:rounded-2xl p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] sm:pb-6 flex flex-col gap-5"
             style={{
               background: 'var(--color-tg-surface)',
               border: '1px solid var(--color-tg-border)',
@@ -181,7 +185,12 @@ export function AccessibilityWidget() {
               <ToggleRow label="גווני אפור" pressed={a11y.grayscale} onClick={a11y.toggleGrayscale} />
               <ToggleRow label="הדגשת קישורים" pressed={a11y.underlineLinks} onClick={a11y.toggleUnderlineLinks} />
               <ToggleRow label="גופן קריא" pressed={a11y.readableFont} onClick={a11y.toggleReadableFont} />
-              <ToggleRow label="סמן עכבר גדול" pressed={a11y.largeCursor} onClick={a11y.toggleLargeCursor} />
+              <ToggleRow
+                label="סמן עכבר גדול"
+                pressed={a11y.largeCursor}
+                onClick={a11y.toggleLargeCursor}
+                note="ללא השפעה במסכי מגע"
+              />
               <ToggleRow label="עצירת אנימציות" pressed={a11y.reduceMotion} onClick={a11y.toggleReduceMotion} />
             </div>
 
@@ -205,26 +214,43 @@ export function AccessibilityWidget() {
   );
 }
 
-function ToggleRow({ label, pressed, onClick }: { label: string; pressed: boolean; onClick: () => void }) {
+function ToggleRow({
+  label,
+  pressed,
+  onClick,
+  note,
+}: {
+  label: string;
+  pressed: boolean;
+  onClick: () => void;
+  note?: string;
+}) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={pressed}
-      className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-lg text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tg-primary"
-      style={{ background: 'var(--color-tg-surface-2)', color: 'var(--color-tg-text)' }}
-    >
-      {label}
-      <span
-        className="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors"
-        style={{ background: pressed ? 'var(--color-tg-primary)' : 'var(--color-tg-border)' }}
-        aria-hidden
+    <div className="flex flex-col gap-1">
+      <button
+        type="button"
+        onClick={onClick}
+        aria-pressed={pressed}
+        className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-lg text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tg-primary"
+        style={{ background: 'var(--color-tg-surface-2)', color: 'var(--color-tg-text)' }}
       >
+        {label}
         <span
-          className="absolute h-3.5 w-3.5 rounded-full bg-white transition-all"
-          style={{ insetInlineStart: pressed ? 'calc(100% - 16px)' : '2px' }}
-        />
-      </span>
-    </button>
+          className="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors"
+          style={{ background: pressed ? 'var(--color-tg-primary)' : 'var(--color-tg-border)' }}
+          aria-hidden
+        >
+          <span
+            className="absolute h-3.5 w-3.5 rounded-full bg-white transition-all"
+            style={{ insetInlineStart: pressed ? 'calc(100% - 16px)' : '2px' }}
+          />
+        </span>
+      </button>
+      {note && (
+        <span className="px-3.5 text-xs" style={{ color: 'var(--text-muted)' }}>
+          {note}
+        </span>
+      )}
+    </div>
   );
 }

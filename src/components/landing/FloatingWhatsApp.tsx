@@ -22,12 +22,13 @@ export function FloatingWhatsApp() {
       target="_blank"
       rel="noopener noreferrer"
       aria-label="פתחו שיחה בוואטסאפ"
-      className={`fixed bottom-5 left-5 z-40 flex h-14 w-14 items-center justify-center rounded-full text-white transition-all duration-300 sm:bottom-6 sm:left-6 ${
+      className={`fixed bottom-5 left-5 z-40 flex h-12 w-12 items-center justify-center rounded-full text-white transition-all duration-300 sm:bottom-6 sm:left-6 sm:h-14 sm:w-14 ${
         visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'
       }`}
       style={{ backgroundColor: WHATSAPP_GREEN, boxShadow: '0 4px 16px rgba(0, 0, 0, 0.25)' }}
     >
-      <FaWhatsapp size={28} aria-hidden />
+      <FaWhatsapp size={24} className="sm:hidden" aria-hidden />
+      <FaWhatsapp size={28} className="hidden sm:block" aria-hidden />
     </a>
   );
 }
