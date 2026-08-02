@@ -76,11 +76,17 @@ html[data-a11y-text-scale='150'] { font-size: 24px; }
    this has to read as "this is a link" at a glance, not just to someone
    already looking closely.
 
-   outline never affects layout (unlike border), so it can't push adjacent
-   text out of place. The padding gives the outline room to breathe instead
-   of hugging the glyphs, and the matching negative margin cancels that
-   padding back out for layout purposes — the box paints bigger without the
-   link taking up more space in its flex row, so neighbors don't collide.
+   outline never affects layout (unlike border) — it paints outside the
+   element's box without reserving space for itself. That's exactly why a
+   *fully* negative margin canceling the padding is wrong: it makes the
+   whole padding+outline expansion "free" too, so two adjacent outlined
+   elements (e.g. the two nav CTA buttons, gap-3 apart) paint their
+   outlines right through each other with nothing forcing them apart.
+   Real elements must actually claim more layout space for their
+   neighbors to be pushed away from — margin here is a small *positive*
+   value on top of the padding, not a canceling one, so part of the
+   breathing room is real. Tuned so that even a gap-3 (12px) pair —
+   the tightest spacing in this codebase — clears the outlines.
 
    currentColor ties the outline to whatever color the link already renders
    in, so it stays visible under grayscale/high-contrast/inverted too: those
@@ -94,7 +100,7 @@ html[data-a11y-underline-links='true'] a {
   outline-offset: 3px;
   border-radius: 4px;
   padding: 3px 6px;
-  margin: -3px -6px;
+  margin: 2px 3px;
 }
 
 /* ── Readable font ────────────────────────────────────────────────── */

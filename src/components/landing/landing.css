@@ -109,39 +109,50 @@
    data-a11y-text-scale is already set pre-paint by AccessibilityInitScript,
    so combining it with @media here carries no such gap either.
 
-   Thresholds were measured directly (logo + links + CTA natural widths at
-   a 2400px viewport, so nothing was being squeezed while measuring), not
-   guessed: even at 100% scale the four nav links plus both CTA buttons need
-   ~1130px before padding — past the old static 768px `md` breakpoint,
-   because a 4th link (contact) was added after that breakpoint was last
-   tuned. Each value below includes a ~50px buffer past its measured
-   minimum. 130/140/150 share one breakpoint because their measured widths
-   cluster within ~10px of each other. */
+   Thresholds are "does the row still get its guaranteed gap-x-8 (32px)
+   between logo/links/CTA", not "does it merely avoid overflowing" — an
+   earlier version only measured the latter, which let the row render with
+   that gap squeezed to nothing at scale >=120. Measured by pulling each
+   section (logo/links/CTA) out of flow (position:absolute + width:
+   max-content) so its natural size is fully decoupled from the flex
+   container's own shrink algorithm, and with underline-links ON, since
+   that setting adds real padding to every link independent of text scale —
+   a visitor can have both on at once, and the row has to hold up either
+   way. Re-measure (don't hand-tune) if the nav's links, CTA copy, or
+   gap-x value ever change.
+
+   Below 120% the nav's own max-w-[1360px] never binds — plain
+   `@media (max-width)` thresholds work as expected. At 120% and up, the
+   row's required width (logo+links+CTA+padding+2*32px) exceeds 1360px
+   outright, so no viewport is ever wide enough: the nav is capped at
+   1360px same as every other section on the page, and widening the
+   browser past that doesn't give it any more room. Those tiers hide the
+   desktop row unconditionally instead of behind a width query — there is
+   no width at which it would fit. */
 .lnav-desktop { display: flex; }
 .lnav-mobile { display: none; }
 
-@media (max-width: 1189px) {
+@media (max-width: 1209px) {
   .lnav-desktop { display: none !important; }
   .lnav-mobile { display: flex !important; }
 }
 
-@media (max-width: 1269px) {
+@media (max-width: 1299px) {
   html[data-a11y-text-scale='110'] .lnav-desktop { display: none !important; }
   html[data-a11y-text-scale='110'] .lnav-mobile { display: flex !important; }
 }
 
-@media (max-width: 1349px) {
-  html[data-a11y-text-scale='120'] .lnav-desktop { display: none !important; }
-  html[data-a11y-text-scale='120'] .lnav-mobile { display: flex !important; }
+html[data-a11y-text-scale='120'] .lnav-desktop,
+html[data-a11y-text-scale='130'] .lnav-desktop,
+html[data-a11y-text-scale='140'] .lnav-desktop,
+html[data-a11y-text-scale='150'] .lnav-desktop {
+  display: none !important;
 }
-
-@media (max-width: 1469px) {
-  html[data-a11y-text-scale='130'] .lnav-desktop,
-  html[data-a11y-text-scale='140'] .lnav-desktop,
-  html[data-a11y-text-scale='150'] .lnav-desktop { display: none !important; }
-  html[data-a11y-text-scale='130'] .lnav-mobile,
-  html[data-a11y-text-scale='140'] .lnav-mobile,
-  html[data-a11y-text-scale='150'] .lnav-mobile { display: flex !important; }
+html[data-a11y-text-scale='120'] .lnav-mobile,
+html[data-a11y-text-scale='130'] .lnav-mobile,
+html[data-a11y-text-scale='140'] .lnav-mobile,
+html[data-a11y-text-scale='150'] .lnav-mobile {
+  display: flex !important;
 }
 
 /* ── Navbar: hover underline + CTA shine sweep ─────────────── */

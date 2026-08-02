@@ -72,7 +72,11 @@ export function LandingNav() {
 
       <nav
         ref={navRef}
-        className="max-w-[1360px] mx-auto px-4 md:px-8 lg:px-10 min-h-[76px] flex items-center justify-between"
+        // gap-x-8 is a floor CSS respects even under justify-between: it's
+        // the minimum space between logo/links/CTA, topped up with whatever
+        // extra room justify-between finds — not a margin that flex is free
+        // to squeeze toward zero as the row gets tighter.
+        className="max-w-[1360px] mx-auto px-4 md:px-8 lg:px-10 min-h-[76px] flex items-center justify-between gap-x-8"
       >
         <Link href="/" className="flex items-center gap-2 shrink-0">
           {/* Scale-up only from md — at ≤360 the enlarged mark visually
