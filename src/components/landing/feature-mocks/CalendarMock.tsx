@@ -323,9 +323,9 @@ export function CalendarMock() {
     // Square cells shrink with the card, so a phone-width grid is ~180px tall
     // against the 440px desktop frame — the height has to come down with it or
     // the bottom third of the card is empty. The important modifier is needed
-    // to beat MockFrame's inline height, which is the desktop value.
-    <MockFrame height={440} className="h-[360px]! sm:h-[440px]!">
-      <div ref={bodyRef} dir="rtl" className="relative flex flex-col h-full w-full">
+    // to beat MockFrame's inline min-height, which is the desktop value.
+    <MockFrame height={440} className="min-h-[360px]! sm:min-h-[440px]!">
+      <div ref={bodyRef} dir="rtl" className="relative flex flex-col flex-1 w-full">
         {/* ── Header: month on the start edge, net result on the end edge ── */}
         <div className="flex items-start justify-between gap-3">
           <div className="flex flex-col gap-0.5">

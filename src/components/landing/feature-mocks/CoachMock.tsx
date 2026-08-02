@@ -151,7 +151,7 @@ export function CoachMock() {
 
   return (
     <MockFrame height={440}>
-      <div ref={rootRef} dir="rtl" className="flex flex-col h-full gap-2.5">
+      <div ref={rootRef} dir="rtl" className="flex flex-col flex-1 gap-2.5">
         {/* ── Header ── */}
         <div className="flex items-center gap-2.5 shrink-0">
           <span

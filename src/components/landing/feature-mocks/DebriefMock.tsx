@@ -144,7 +144,7 @@ export function DebriefMock() {
 
   return (
     <MockFrame height={440}>
-      <div ref={rootRef} dir="rtl" className="flex flex-col h-full gap-3">
+      <div ref={rootRef} dir="rtl" className="flex flex-col flex-1 gap-3">
         {/* ── Header: what is being debriefed ── */}
         <div className="flex flex-col gap-2 shrink-0">
           <div className="flex items-center justify-between gap-2">

@@ -120,7 +120,7 @@ export function RulesMock() {
 
   return (
     <MockFrame height={420}>
-      <div ref={rootRef} dir="rtl" className="flex flex-col h-full gap-2.5">
+      <div ref={rootRef} dir="rtl" className="flex flex-col flex-1 gap-2.5">
         {/* ── Header: the featured rule's own on/off state, not a decorative
                switch. The label names the rule the loop is about to fire, so
                the toggle and the highlighted row below are visibly the same

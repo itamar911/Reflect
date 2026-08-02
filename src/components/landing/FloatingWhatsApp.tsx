@@ -1,5 +1,6 @@
 'use client';
 
+import { usePathname } from 'next/navigation';
 import { FaWhatsapp } from 'react-icons/fa';
 import { useScrollY } from '@/lib/hooks';
 
@@ -7,9 +8,13 @@ const WHATSAPP_DIGITS = '972502255903';
 const SHOW_AFTER_SCROLL_Y = 400;
 const WHATSAPP_GREEN = '#25D366';
 
+// Mounted globally (see layout.tsx) so it never lands inside the
+// accessibility filter overlay's DOM subtree — it gates itself to the
+// landing page instead of relying on where it's rendered from.
 export function FloatingWhatsApp() {
+  const pathname = usePathname();
   const scrollY = useScrollY();
-  const visible = scrollY > SHOW_AFTER_SCROLL_Y;
+  const visible = pathname === '/' && scrollY > SHOW_AFTER_SCROLL_Y;
 
   return (
     <a

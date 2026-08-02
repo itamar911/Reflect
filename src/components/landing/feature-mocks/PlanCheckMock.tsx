@@ -237,7 +237,7 @@ export function PlanCheckMock() {
           band, so a taller chart is a taller gap under the candles). Spreading
           the slack across the three gaps instead is what actually reads as
           "evenly filled". */}
-      <div dir="rtl" className="flex flex-col justify-between gap-3 w-full h-full">
+      <div dir="rtl" className="flex flex-col flex-1 justify-between gap-3 w-full">
         {/* Context header — unchanged */}
         <div className="flex items-center gap-1.5 flex-wrap shrink-0" aria-hidden>
           {CHIPS.map((chip) => (

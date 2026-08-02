@@ -1,0 +1,116 @@
+/* ══════════════════════════════════════════════════════════════
+   Accessibility widget — global effects, driven entirely by
+   data-a11y-* attributes on <html> (see AccessibilityContext.tsx
+   and AccessibilityInitScript.tsx).
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── Grayscale / contrast overlay ─────────────────────────────────
+   Grayscale and inverted/high contrast are visual filters, and a CSS
+   `filter` on any ancestor of app content creates a new containing block
+   for that ancestor's position:fixed descendants — nav bars, floating
+   buttons, modals would stop tracking the viewport and start scrolling
+   with the page instead. Rather than wrap app content in a filtered
+   element (and risk missing one of the app's many existing fixed-position
+   modals), these two settings are rendered as an independent full-viewport
+   layer using `backdrop-filter`: it recolors everything already painted
+   behind it without ever becoming an ancestor of that content, so no
+   containing block is created anywhere in the app.
+   z-index sits above ordinary content and above the app's pre-existing
+   modals (highest prior z-index in the app is 100), so the effect is
+   genuinely global, but below the accessibility trigger/panel themselves,
+   so the widget that controls these settings always stays legible
+   regardless of which of them is active.
+
+   No -webkit-backdrop-filter fallback: this project's build (Lightning CSS,
+   via @tailwindcss/postcss) drops the *entire* declaration block — including
+   the unprefixed property — whenever a rule pairs backdrop-filter with
+   -webkit-backdrop-filter, or declares -webkit-backdrop-filter alone.
+   Verified directly against the compiled stylesheet; the plain property
+   alone survives untouched, so it's the only one used here. */
+.a11y-filter-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 105;
+  pointer-events: none;
+}
+
+html[data-a11y-grayscale='true'] .a11y-filter-overlay {
+  backdrop-filter: grayscale(1);
+}
+
+html[data-a11y-contrast='high'] .a11y-filter-overlay {
+  backdrop-filter: contrast(1.6) saturate(1.3);
+}
+
+html[data-a11y-contrast='inverted'] .a11y-filter-overlay {
+  backdrop-filter: invert(1) hue-rotate(180deg);
+}
+
+html[data-a11y-grayscale='true'][data-a11y-contrast='high'] .a11y-filter-overlay {
+  backdrop-filter: grayscale(1) contrast(1.6) saturate(1.3);
+}
+
+html[data-a11y-grayscale='true'][data-a11y-contrast='inverted'] .a11y-filter-overlay {
+  backdrop-filter: grayscale(1) invert(1) hue-rotate(180deg);
+}
+
+/* The overlay's invert also runs over images/video, turning them into
+   photo negatives. Counter-invert them directly so the double inversion
+   cancels back to their real colors. */
+html[data-a11y-contrast='inverted'] img,
+html[data-a11y-contrast='inverted'] video {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+/* ── Text scale ────────────────────────────────────────────────────
+   Scales the root font size so every rem-based Tailwind size (see the
+   text-xs..text-5xl overrides in globals.css) follows proportionally. */
+html[data-a11y-text-scale='110'] { font-size: 17.6px; }
+html[data-a11y-text-scale='120'] { font-size: 19.2px; }
+html[data-a11y-text-scale='130'] { font-size: 20.8px; }
+html[data-a11y-text-scale='140'] { font-size: 22.4px; }
+html[data-a11y-text-scale='150'] { font-size: 24px; }
+
+/* ── Underline links ──────────────────────────────────────────────── */
+html[data-a11y-underline-links='true'] a {
+  text-decoration: underline !important;
+  text-underline-offset: 3px;
+}
+
+/* ── Readable font ────────────────────────────────────────────────── */
+html[data-a11y-readable-font='true'] body {
+  font-family: Arial, 'Segoe UI', 'Noto Sans Hebrew', 'Arial Hebrew', sans-serif !important;
+}
+
+/* ── Large cursor ───────────────────────────────────────────────────
+   Inline SVG arrow (2x a typical system pointer) with an explicit
+   hotspot at its tip, falling back to the keyword cursor if a browser
+   rejects the data URI. Applied with the universal selector + !important
+   because most interactive elements set their own cursor (pointer, text,
+   not-allowed, …) which would otherwise win over an inherited value. */
+html[data-a11y-large-cursor='true'],
+html[data-a11y-large-cursor='true'] * {
+  cursor:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48' viewBox='0 0 24 24'%3E%3Cpath d='M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z' fill='black' stroke='white' stroke-width='1.5' stroke-linejoin='round'/%3E%3C/svg%3E")
+      4 4,
+    auto !important;
+}
+
+/* ── Stop animations (CSS layer only) ────────────────────────────────
+   Mirrors the existing @media (prefers-reduced-motion: reduce) rules
+   elsewhere in the app, but keyed off the widget's own toggle instead of
+   (or in addition to) the OS setting. JS-driven animation loops (rAF,
+   setInterval-based sequences in the feature mocks, etc.) are a separate,
+   later pass — this only reaches CSS animations/transitions. */
+html[data-a11y-reduce-motion='true'] {
+  scroll-behavior: auto !important;
+}
+
+html[data-a11y-reduce-motion='true'] *,
+html[data-a11y-reduce-motion='true'] *::before,
+html[data-a11y-reduce-motion='true'] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
