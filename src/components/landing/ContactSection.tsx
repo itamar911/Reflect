@@ -1,4 +1,5 @@
-import { MessageCircle, Phone } from 'lucide-react';
+import { Phone } from 'lucide-react';
+import { FaWhatsapp } from 'react-icons/fa';
 import { ScrollReveal } from './ScrollReveal';
 import { SectionHeading } from './SectionHeading';
 
@@ -31,7 +32,7 @@ export function ContactSection() {
               rel="noopener noreferrer"
               className="landing-cta cta-shine inline-flex items-center gap-2.5 px-7 py-3.5 rounded-xl text-base font-bold text-black"
             >
-              <MessageCircle size={20} aria-hidden />
+              <FaWhatsapp size={20} className="text-white" aria-hidden />
               שלחו הודעה בוואטסאפ
             </a>
           </div>
