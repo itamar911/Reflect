@@ -11,8 +11,10 @@ import { FeaturesSection } from '@/components/landing/FeaturesSection';
 import { SocialProofSection } from '@/components/landing/SocialProofSection';
 import { PricingSection } from '@/components/landing/PricingSection';
 import { FaqSection } from '@/components/landing/FaqSection';
+import { ContactSection } from '@/components/landing/ContactSection';
 import { FinalCtaSection } from '@/components/landing/FinalCtaSection';
 import { LandingFooter } from '@/components/landing/LandingFooter';
+import { FloatingWhatsApp } from '@/components/landing/FloatingWhatsApp';
 import '@/components/landing/landing.css';
 
 export const metadata: Metadata = {
@@ -42,9 +44,11 @@ export default async function HomePage() {
         <SocialProofSection />
         <PricingSection />
         <FaqSection />
+        <ContactSection />
         <FinalCtaSection />
       </main>
       <LandingFooter />
+      <FloatingWhatsApp />
     </div>
   );
 }

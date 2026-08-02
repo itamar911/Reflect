@@ -6,7 +6,7 @@ const FOOTER_LINKS = [
   { href: '/signup', label: 'הרשמה' },
   { href: '#pricing', label: 'מחירים' },
   { href: '#faq', label: 'שאלות נפוצות' },
-  { href: 'mailto:hello@reflect.app', label: 'צור קשר' },
+  { href: '#contact', label: 'צור קשר' },
 ];
 
 export function LandingFooter() {

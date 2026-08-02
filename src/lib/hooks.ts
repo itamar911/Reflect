@@ -35,6 +35,20 @@ export function usePrefersReducedMotion(): boolean {
   );
 }
 
+function subscribeScrollY(onChange: () => void) {
+  window.addEventListener('scroll', onChange, { passive: true });
+  return () => window.removeEventListener('scroll', onChange);
+}
+
+/** Live window.scrollY; 0 on the server and before hydration. */
+export function useScrollY(): number {
+  return useSyncExternalStore(
+    subscribeScrollY,
+    () => window.scrollY,
+    () => 0,
+  );
+}
+
 /** Live media-query match; `serverDefault` on the server / during hydration. */
 export function useMediaQuery(query: string, serverDefault = false): boolean {
   const subscribe = useCallback(

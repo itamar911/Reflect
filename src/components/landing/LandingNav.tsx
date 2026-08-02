@@ -1,14 +1,16 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { Menu, X, Sparkles } from 'lucide-react';
 import { Logo } from '@/components/ui/Logo';
+import { useScrollY } from '@/lib/hooks';
 
 const NAV_LINKS = [
   { href: '#features', label: "פיצ'רים" },
   { href: '#pricing', label: 'מחירים' },
   { href: '#faq', label: 'שאלות נפוצות' },
+  { href: '#contact', label: 'צור קשר' },
 ];
 
 function NewBadge() {
@@ -29,17 +31,9 @@ function NewBadge() {
 }
 
 export function LandingNav() {
-  const [scrolled, setScrolled] = useState(false);
+  const scrollY = useScrollY();
+  const scrolled = scrollY > 8;
   const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    function onScroll() {
-      setScrolled(window.scrollY > 8);
-    }
-    onScroll();
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
-  }, []);
 
   return (
     <header
