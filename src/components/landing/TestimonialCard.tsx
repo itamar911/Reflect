@@ -10,7 +10,7 @@ import type { PlaceholderVideo } from './landingImages';
  * Hebrew subtitles. They are watch-on-purpose, not decorative loops — hence
  * native controls and no autoplay.
  *
- * The source file is ~32MB, so preload MUST stay at "metadata". Anything more
+ * The source file is ~33MB, so preload MUST stay at "metadata". Anything more
  * pulls the whole clip down for every visitor who never presses play.
  *
  * aspect-[9/16] reserves the box up front, so nothing shifts when the poster
