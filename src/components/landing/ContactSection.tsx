@@ -17,7 +17,7 @@ export function ContactSection() {
         </SectionHeading>
 
         <ScrollReveal delay={160}>
-          <div className="glass-card rounded-2xl p-8 flex flex-col items-center gap-6 text-center">
+          <div className="glass-card rounded-2xl p-8 pb-6 flex flex-col items-center gap-8 text-center">
             <a
               href={`tel:${PHONE_E164}`}
               className="inline-flex items-center gap-3 text-xl font-bold text-white hover:text-tg-primary transition-colors"
