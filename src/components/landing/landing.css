@@ -155,6 +155,39 @@ html[data-a11y-text-scale='150'] .lnav-mobile {
   display: flex !important;
 }
 
+/* ── Mobile nav menu: frosted glass ──────────────────────────
+   Tint + blur so the page shows through instead of the old near-opaque
+   panel. Paired like .glass-card above (backdrop-filter next to its
+   -webkit- variant); this build's autoprefixer keeps only the -webkit-
+   one in the compiled output, which still covers Safari/iOS and Chromium
+   (which continues to honor -webkit-backdrop-filter) — Firefox falls back
+   to the flat tint with no blur, which stays readable on its own. */
+.lnav-mobile-panel {
+  background: rgba(10, 13, 20, 0.7);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+/* Browsers with neither backdrop-filter variant: raise the tint to the
+   old near-opaque level so the panel stays fully readable without blur. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .lnav-mobile-panel {
+    background: rgba(10, 13, 20, 0.97);
+  }
+}
+
+/* High-contrast/inverted already recolor every painted pixel behind them
+   (see .a11y-filter-overlay in accessibility.css) — stacking that on top
+   of a blurred, semi-transparent panel risks unreadable text, so these
+   modes drop back to the flat near-opaque panel instead of gambling on it. */
+html[data-a11y-contrast='high'] .lnav-mobile-panel,
+html[data-a11y-contrast='inverted'] .lnav-mobile-panel {
+  background: rgba(10, 13, 20, 0.97);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
 /* ── Navbar: hover underline + CTA shine sweep ─────────────── */
 
 .nav-link {

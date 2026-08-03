@@ -135,14 +135,8 @@ export function LandingNav() {
 
       {open && (
         <div
-          className="lnav-mobile px-5 pb-7 pt-3 flex-col gap-5"
-          style={{
-            background: 'rgba(10,13,20,0.97)',
-            backdropFilter: 'blur(18px)',
-            WebkitBackdropFilter: 'blur(18px)',
-            borderBottom: '1px solid rgba(0,210,210,0.25)',
-            boxShadow: '0 18px 40px rgba(0,0,0,0.45)',
-          }}
+          className="lnav-mobile lnav-mobile-panel px-5 pb-7 pt-3 flex-col gap-5"
+          style={{ boxShadow: '0 18px 40px rgba(0,0,0,0.45)' }}
         >
           <div className="pt-1">
             <NewBadge />
