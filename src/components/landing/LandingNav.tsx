@@ -52,86 +52,96 @@ export function LandingNav() {
   }, []);
 
   return (
-    <header
-      className="fixed top-0 inset-x-0 z-50 transition-all duration-300"
-      style={{
-        background: scrolled ? 'rgba(10,13,20,0.85)' : 'rgba(10,13,20,0.45)',
-        backdropFilter: 'blur(18px) saturate(1.4)',
-        WebkitBackdropFilter: 'blur(18px) saturate(1.4)',
-        boxShadow: scrolled ? '0 10px 34px rgba(0,0,0,0.4)' : 'none',
-      }}
-    >
-      {/* Letterhead mark — pinned to the page's top-right (start edge in RTL),
-          outside the nav flow; fixed light tone since the landing is always dark */}
-      <span
-        className="absolute top-1 right-2.5 text-[11px] font-medium pointer-events-none select-none"
-        style={{ color: 'rgba(226, 236, 244, 0.5)' }}
-      >
-        בס״ד
-      </span>
-
-      <nav
-        ref={navRef}
-        // gap-x-8 is a floor CSS respects even under justify-between: it's
-        // the minimum space between logo/links/CTA, topped up with whatever
-        // extra room justify-between finds — not a margin that flex is free
-        // to squeeze toward zero as the row gets tighter.
-        className="max-w-[1360px] mx-auto px-4 md:px-8 lg:px-10 min-h-[76px] flex items-center justify-between gap-x-8"
-      >
-        <Link href="/" className="flex items-center gap-2 shrink-0">
-          {/* Scale-up only from md — at ≤360 the enlarged mark visually
-              overflows its box into the edge padding and clips */}
-          <span className="inline-block md:scale-[1.08]">
-            <Logo />
-          </span>
-        </Link>
-
-        <div className="lnav-desktop items-center gap-8">
-          {NAV_LINKS.map((link) => (
-            <a key={link.href} href={link.href} className="nav-link py-2.5 text-base font-medium text-tg-text-2 hover:text-white transition-colors">
-              {link.label}
-            </a>
-          ))}
-          <span className="hidden lg:inline-flex">
-            <NewBadge />
-          </span>
-        </div>
-
-        <div className="lnav-desktop items-center gap-3">
-          <Link
-            href="/login"
-            className="px-4 py-2.5 rounded-xl text-sm font-semibold border border-tg-border text-tg-text-2 hover:border-tg-primary hover:text-tg-primary transition-colors"
-          >
-            כניסה למערכת
-          </Link>
-          <Link
-            href="/signup"
-            className="landing-cta cta-shine px-5 py-2.5 rounded-xl text-[15px] font-bold text-black"
-          >
-            התחל ניסיון חינם
-          </Link>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="lnav-mobile p-2 text-tg-text-2"
-          aria-label={open ? 'סגור תפריט' : 'פתח תפריט'}
-        >
-          {open ? <X size={26} /> : <Menu size={26} />}
-        </button>
-      </nav>
-
-      {/* bottom hairline: turquoise gradient fading to transparent */}
+    <header className="fixed top-0 inset-x-0 z-50">
+      {/* The scrolled-state chrome (solid tint + blur) lives on this row
+          wrapper, not <header> itself. <header> also contains the open
+          mobile panel as a normal-flow sibling below; when the background
+          was on <header>, it painted behind the panel too and the panel's
+          own glass composited on top of an already near-opaque backdrop
+          instead of the real page — the panel looked solid the moment
+          `scrolled` flipped its alpha up, even though the panel's own rule
+          was correct the whole time. */}
       <div
-        className="absolute bottom-0 inset-x-0 h-px pointer-events-none"
+        className="relative transition-all duration-300"
         style={{
-          background: 'linear-gradient(90deg, transparent 0%, rgba(0,210,210,0.55) 50%, transparent 100%)',
-          opacity: scrolled ? 1 : 0.6,
-          transition: 'opacity 0.3s ease',
+          background: scrolled ? 'rgba(10,13,20,0.85)' : 'rgba(10,13,20,0.45)',
+          backdropFilter: 'blur(18px) saturate(1.4)',
+          WebkitBackdropFilter: 'blur(18px) saturate(1.4)',
+          boxShadow: scrolled ? '0 10px 34px rgba(0,0,0,0.4)' : 'none',
         }}
-        aria-hidden
-      />
+      >
+        {/* Letterhead mark — pinned to the page's top-right (start edge in RTL),
+            outside the nav flow; fixed light tone since the landing is always dark */}
+        <span
+          className="absolute top-1 right-2.5 text-[11px] font-medium pointer-events-none select-none"
+          style={{ color: 'rgba(226, 236, 244, 0.5)' }}
+        >
+          בס״ד
+        </span>
+
+        <nav
+          ref={navRef}
+          // gap-x-8 is a floor CSS respects even under justify-between: it's
+          // the minimum space between logo/links/CTA, topped up with whatever
+          // extra room justify-between finds — not a margin that flex is free
+          // to squeeze toward zero as the row gets tighter.
+          className="max-w-[1360px] mx-auto px-4 md:px-8 lg:px-10 min-h-[76px] flex items-center justify-between gap-x-8"
+        >
+          <Link href="/" className="flex items-center gap-2 shrink-0">
+            {/* Scale-up only from md — at ≤360 the enlarged mark visually
+                overflows its box into the edge padding and clips */}
+            <span className="inline-block md:scale-[1.08]">
+              <Logo />
+            </span>
+          </Link>
+
+          <div className="lnav-desktop items-center gap-8">
+            {NAV_LINKS.map((link) => (
+              <a key={link.href} href={link.href} className="nav-link py-2.5 text-base font-medium text-tg-text-2 hover:text-white transition-colors">
+                {link.label}
+              </a>
+            ))}
+            <span className="hidden lg:inline-flex">
+              <NewBadge />
+            </span>
+          </div>
+
+          <div className="lnav-desktop items-center gap-3">
+            <Link
+              href="/login"
+              className="px-4 py-2.5 rounded-xl text-sm font-semibold border border-tg-border text-tg-text-2 hover:border-tg-primary hover:text-tg-primary transition-colors"
+            >
+              כניסה למערכת
+            </Link>
+            <Link
+              href="/signup"
+              className="landing-cta cta-shine px-5 py-2.5 rounded-xl text-[15px] font-bold text-black"
+            >
+              התחל ניסיון חינם
+            </Link>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="lnav-mobile p-2 text-tg-text-2"
+            aria-label={open ? 'סגור תפריט' : 'פתח תפריט'}
+          >
+            {open ? <X size={26} /> : <Menu size={26} />}
+          </button>
+        </nav>
+
+        {/* bottom hairline: turquoise gradient fading to transparent */}
+        <div
+          className="absolute bottom-0 inset-x-0 h-px pointer-events-none"
+          style={{
+            background: 'linear-gradient(90deg, transparent 0%, rgba(0,210,210,0.55) 50%, transparent 100%)',
+            opacity: scrolled ? 1 : 0.6,
+            transition: 'opacity 0.3s ease',
+          }}
+          aria-hidden
+        />
+      </div>
 
       {open && (
         <div
