@@ -163,10 +163,17 @@ html[data-a11y-text-scale='150'] .lnav-mobile {
    (which continues to honor -webkit-backdrop-filter) — Firefox falls back
    to the flat tint with no blur, which stays readable on its own. */
 .lnav-mobile-panel {
-  background: rgba(10, 13, 20, 0.7);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  background: rgba(10, 13, 20, 0.42);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
   border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+/* At this low a tint, link text needs its own anchor against whatever
+   busy/bright content is blurring behind it — a soft dark shadow instead
+   of a scrim, so the panel still reads as glass rather than a solid card. */
+.lnav-mobile-panel a {
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.65), 0 0 12px rgba(0, 0, 0, 0.35);
 }
 
 /* Browsers with neither backdrop-filter variant: raise the tint to the
