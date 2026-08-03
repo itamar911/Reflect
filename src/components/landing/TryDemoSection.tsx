@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ExternalLink, MousePointerClick } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Maximize2, MousePointerClick, X } from 'lucide-react';
 import { ScrollReveal } from './ScrollReveal';
 import { SectionHeading } from './SectionHeading';
 
@@ -10,12 +11,14 @@ import { SectionHeading } from './SectionHeading';
  * (same codebase, fixture data) when it nears the viewport. The iframe starts
  * pointer-events:none behind a click-to-activate overlay so page scrolling is
  * never hijacked; the overlay re-arms when the frame scrolls mostly out of view,
- * so return passes must click again. "מסך מלא" opens the standalone /demo in a new tab.
+ * so return passes must click again. "מסך מלא" opens an in-page fullscreen view
+ * (its own iframe instance) with its own exit control.
  */
 export function TryDemoSection() {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [load, setLoad] = useState(false);     // mount the iframe near viewport
   const [active, setActive] = useState(false); // overlay dismissed → interactive
+  const [fullscreen, setFullscreen] = useState(false);
 
   useEffect(() => {
     const el = wrapRef.current;
@@ -47,6 +50,29 @@ export function TryDemoSection() {
     io.observe(el);
     return () => io.disconnect();
   }, []);
+
+  // CSS overlay, not the native Fullscreen API: iOS Safari doesn't support
+  // Element.requestFullscreen() outside <video>, and this needs to behave
+  // the same on a phone as on desktop. Escape is therefore our own listener
+  // rather than the browser's native fullscreenchange handling.
+  useEffect(() => {
+    if (!fullscreen) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') setFullscreen(false);
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [fullscreen]);
+
+  // Prevent the page from scrolling behind the fullscreen overlay.
+  useEffect(() => {
+    if (!fullscreen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [fullscreen]);
 
   return (
     <section className="cv-auto relative py-24 px-4 md:px-8 lg:px-10">
@@ -103,10 +129,9 @@ export function TryDemoSection() {
                 </span>
               </button>
 
-              <a
-                href="/demo"
-                target="_blank"
-                rel="noopener"
+              <button
+                type="button"
+                onClick={() => { setLoad(true); setActive(true); setFullscreen(true); }}
                 className="absolute top-3 end-3 z-20 flex items-center gap-1.5 px-3 h-8 rounded-lg text-xs font-bold transition-opacity hover:opacity-85"
                 style={{
                   background: 'rgba(13,17,23,0.82)',
@@ -115,13 +140,44 @@ export function TryDemoSection() {
                   backdropFilter: 'blur(8px)',
                 }}
               >
-                <ExternalLink size={12} />
+                <Maximize2 size={12} />
                 מסך מלא
-              </a>
+              </button>
             </div>
           </div>
         </ScrollReveal>
       </div>
+
+      {fullscreen && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[104]" style={{ background: '#0a0e14' }}>
+          <iframe
+            src="/demo/dashboard?embed=1"
+            title="דמו חי של Reflect — מסך מלא"
+            className="w-full h-full border-0 block"
+          />
+
+          <button
+            type="button"
+            onClick={() => setFullscreen(false)}
+            aria-label="יציאה ממסך מלא"
+            title="יציאה ממסך מלא"
+            className="fixed z-20 flex items-center justify-center rounded-full transition-colors hover:bg-white/10"
+            style={{
+              top: 'calc(env(safe-area-inset-top, 0px) + 12px)',
+              insetInlineEnd: 'calc(env(safe-area-inset-right, 0px) + 12px)',
+              width: 44,
+              height: 44,
+              background: 'rgba(10,13,20,0.72)',
+              backdropFilter: 'blur(8px)',
+              WebkitBackdropFilter: 'blur(8px)',
+              border: '1px solid rgba(255,255,255,0.18)',
+            }}
+          >
+            <X size={22} className="text-white" aria-hidden />
+          </button>
+        </div>,
+        document.body,
+      )}
     </section>
   );
 }
