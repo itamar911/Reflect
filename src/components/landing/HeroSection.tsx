@@ -24,7 +24,7 @@ const TRUST_ITEMS = [
  */
 export function HeroSection() {
   return (
-    <section className="relative pt-28 pb-24 lg:pb-6 px-4 md:px-8 lg:px-10 overflow-hidden">
+    <section id="hero" className="relative pt-28 pb-24 lg:pb-6 px-4 md:px-8 lg:px-10 overflow-hidden">
       <div className="hero-grid" aria-hidden />
       <div className="hero-orb hero-orb-1" aria-hidden />
       <div className="hero-orb hero-orb-2" aria-hidden />

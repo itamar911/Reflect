@@ -1,11 +1,11 @@
 import { Phone } from 'lucide-react';
-import { FaWhatsapp } from 'react-icons/fa';
+import { WhatsAppIcon } from './WhatsAppIcon';
 import { ScrollReveal } from './ScrollReveal';
 import { SectionHeading } from './SectionHeading';
+import { WHATSAPP_URL } from '@/lib/whatsapp';
 
 const PHONE_E164 = '+972502255903';
 const PHONE_DISPLAY = '050-225-5903';
-const WHATSAPP_DIGITS = '972502255903';
 
 export function ContactSection() {
   return (
@@ -30,12 +30,12 @@ export function ContactSection() {
             </a>
 
             <a
-              href={`https://wa.me/${WHATSAPP_DIGITS}`}
+              href={WHATSAPP_URL}
               target="_blank"
               rel="noopener noreferrer"
               className="landing-cta cta-shine inline-flex items-center gap-2.5 px-7 py-3.5 rounded-xl text-base font-bold text-black"
             >
-              <FaWhatsapp size={20} className="text-white" aria-hidden />
+              <WhatsAppIcon size={20} className="text-white" />
               שלחו הודעה בוואטסאפ
             </a>
           </div>
