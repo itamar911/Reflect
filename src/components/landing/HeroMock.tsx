@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import { Lock, Check, AlertTriangle } from 'lucide-react';
 import { usePrefersReducedMotion } from '@/lib/hooks';
+import { DISCIPLINE_SCORE } from './landingStats';
 
 /**
  * The hero's trade-plan card, animated as a self-running interception.
@@ -191,7 +192,7 @@ export function HeroMock() {
         }}
         aria-hidden
       >
-        ציון משמעת 87
+        {`ציון משמעת ${DISCIPLINE_SCORE}`}
       </div>
 
       {/* The saved-money badge. The float lives on the outer element and the

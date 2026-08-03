@@ -612,44 +612,178 @@ html[data-a11y-text-scale='150'] .lnav-mobile {
   50%      { transform: scale(1.3); }
 }
 
-/* ── How-it-works: self-drawing progress line ──────────────── */
+/* ── How it works: the three-step rail ─────────────────────────
+   Every entrance in this section is a CSS transition keyed off .hiw-in, which
+   HowItWorksSection adds once when the row first intersects. The 1 → 2 → 3
+   narration lives entirely in per-element --hiw-d (transition-delay) custom
+   properties: no timers, no rAF, and therefore nothing the accessibility
+   widget's "stop animations" toggle cannot reach.
 
-.hiw-line path {
-  stroke-dasharray: 1;
-  stroke-dashoffset: 1;
-  transition: stroke-dashoffset 1.6s cubic-bezier(0.4, 0, 0.2, 1) 0.25s;
+   The reduced-motion rules at the foot of this block are what honour it. The
+   widget's own blanket rules collapse animation and transition *durations*
+   only, so a 2-second delay would still hold an element invisible for two
+   seconds after the toggle was flipped; those rules zero the delays too.
+
+   Directional note: the row is RTL, so an element's start edge is its right
+   edge and "forward" is leftward. The physical values below (transform-origin:
+   right, gradient `to left`) are chosen for that, and are what makes the rail
+   read as running from step 1 to step 3. */
+
+.hiw-row {
+  /* Single source for both the flex gap and the rail length, so a connector
+     always spans exactly the gutter it sits in. rem, so it tracks the
+     accessibility text scale along with everything else. */
+  --hiw-gap: 2.25rem;
+  --hiw-pad: 1.5rem;
 }
 
-.hiw-in .hiw-line path {
-  stroke-dashoffset: 0;
+.hiw-card {
+  /* These cards are not links or buttons — nothing here is clickable — so the
+     hover is light and, crucially, does not translate: the rail leaves this
+     card's edge, and a card that lifted 4px would tear away from its own
+     connector. */
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
 }
 
-.step-badge-ring {
-  background: conic-gradient(from 180deg, #00d2d2, #67e8f9, #0891b2, #00d2d2);
-  animation: step-badge-glow 3s ease-in-out infinite;
+.hiw-card:hover {
+  border-color: rgba(0, 210, 210, 0.4);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35), 0 0 26px rgba(0, 210, 210, 0.12);
 }
 
-@keyframes step-badge-glow {
-  0%, 100% { box-shadow: 0 0 18px rgba(0, 210, 210, 0.3); }
-  50%      { box-shadow: 0 0 30px rgba(0, 210, 210, 0.55); }
+.hiw-step {
+  opacity: 0;
+  transform: translateY(18px);
+  transition:
+    opacity 0.6s ease var(--hiw-d, 0ms),
+    transform 0.7s cubic-bezier(0.16, 1, 0.3, 1) var(--hiw-d, 0ms),
+    border-color 0.3s ease,
+    box-shadow 0.3s ease;
 }
 
-.step-card-accent {
-  border-top: 2px solid rgba(0, 210, 210, 0.5);
+.hiw-in .hiw-step {
+  opacity: 1;
+  transform: none;
 }
 
-@keyframes rule-slider-move {
-  0%, 100% { left: 62%; }
-  50%      { left: 22%; }
+/* Shared entrance for everything that simply arrives: rail chevrons, the
+   strategy chips, the gate's legend, the debrief and pattern rows. */
+.hiw-fade {
+  opacity: 0;
+  transform: translateY(6px);
+  transition:
+    opacity 0.5s ease var(--hiw-d, 0ms),
+    transform 0.55s cubic-bezier(0.16, 1, 0.3, 1) var(--hiw-d, 0ms);
 }
 
-@keyframes rule-slider-move-alt {
-  0%, 100% { left: 28%; }
-  50%      { left: 68%; }
+.hiw-in .hiw-fade {
+  opacity: 1;
+  transform: none;
 }
 
-.rule-slider-thumb { animation: rule-slider-move 4s ease-in-out infinite; }
-.rule-slider-thumb-alt { animation: rule-slider-move-alt 4.6s ease-in-out infinite; }
+/* The rail itself. Drawn from its start edge — right for the horizontal
+   variant, top for the vertical one — so it grows toward the next station. */
+.hiw-rail-h {
+  transform: scaleX(0);
+  transform-origin: right center;
+  transition: transform 0.55s cubic-bezier(0.16, 1, 0.3, 1) var(--hiw-d, 0ms);
+}
+
+.hiw-in .hiw-rail-h {
+  transform: scaleX(1);
+}
+
+.hiw-rail-v {
+  transform: scaleY(0);
+  transform-origin: center top;
+  transition: transform 0.55s cubic-bezier(0.16, 1, 0.3, 1) var(--hiw-d, 0ms);
+}
+
+.hiw-in .hiw-rail-v {
+  transform: scaleY(1);
+}
+
+/* Card 1: rule thresholds sweeping out to their configured value. The fill is
+   absolutely positioned, so animating its width cannot reflow a sibling. */
+.hiw-fill {
+  width: 0;
+  transition: width 0.7s cubic-bezier(0.16, 1, 0.3, 1) var(--hiw-d, 0ms);
+}
+
+.hiw-in .hiw-fill {
+  width: var(--hiw-w, 0);
+}
+
+/* Card 2: the over-cap trade parked off-lane, then running into the barrier.
+   The easing decelerates hard at the end — it stops against the gate rather
+   than gliding to a halt short of it. */
+.hiw-token {
+  transform: translateX(var(--hiw-x, 0));
+  transition: transform 0.75s cubic-bezier(0.22, 1, 0.28, 1) var(--hiw-d, 0ms);
+}
+
+.hiw-in .hiw-token {
+  transform: none;
+}
+
+/* The barrier lights as the blocked trade reaches it. */
+.hiw-gate-bar {
+  background: rgba(0, 210, 210, 0.35);
+  transition: background 0.4s ease var(--hiw-d, 0ms);
+}
+
+.hiw-in .hiw-gate-bar {
+  background: #00d2d2;
+}
+
+.hiw-gate {
+  border: 1px solid rgba(0, 210, 210, 0.3);
+  box-shadow: none;
+  transition:
+    border-color 0.4s ease var(--hiw-d, 0ms),
+    box-shadow 0.4s ease var(--hiw-d, 0ms);
+}
+
+.hiw-in .hiw-gate {
+  border-color: rgba(0, 210, 210, 0.85);
+  box-shadow: 0 0 16px rgba(0, 210, 210, 0.45);
+}
+
+/* Card 3: the discipline ring sweeping to its score. */
+.hiw-arc {
+  stroke-dashoffset: var(--hiw-arc-len, 0);
+  transition: stroke-dashoffset 0.95s cubic-bezier(0.16, 1, 0.3, 1) var(--hiw-d, 0ms);
+}
+
+.hiw-in .hiw-arc {
+  stroke-dashoffset: var(--hiw-arc-off, 0);
+}
+
+/* Reduced motion, from the OS preference or from the accessibility widget's own
+   "עצירת אנימציות" toggle. Both are handled here rather than in JS.
+
+   Delays have to be zeroed as well as durations. This section's entire 1 → 2 → 3
+   order lives in transition-delay, and the blanket reduced-motion rules — both
+   the one at the foot of this file and the widget's in accessibility.css —
+   collapse durations only. Without these rules the last card would still sit
+   blank for two seconds with animations switched off.
+
+   Keyed off the <html> attribute rather than a React-rendered class on purpose:
+   AccessibilityInitScript sets it before first paint, so it is already right
+   during hydration, and flipping the toggle mid-page takes effect immediately
+   instead of waiting on a re-render. */
+@media (prefers-reduced-motion: reduce) {
+  .hiw-row,
+  .hiw-row * {
+    transition-delay: 0s !important;
+    transition-duration: 0s !important;
+  }
+}
+
+html[data-a11y-reduce-motion='true'] .hiw-row,
+html[data-a11y-reduce-motion='true'] .hiw-row * {
+  transition-delay: 0s !important;
+  transition-duration: 0s !important;
+}
 
 /* ── Lightbox overlay (portal to document.body) ────────────── */
 
@@ -1099,9 +1233,10 @@ html[data-a11y-text-scale='150'] .lnav-mobile {
     transform: none;
   }
 
-  .landing .hiw-line path {
-    stroke-dashoffset: 0;
-  }
+  /* HowItWorksSection needs its transition *delays* zeroed as well as its
+     durations, or its 1 → 2 → 3 ladder would still hold the last card blank
+     for two seconds. That rule lives with the rest of the .hiw-* block above,
+     next to the delays it cancels, rather than being duplicated here. */
 
   .landing .feature-mock-card {
     transform: none;

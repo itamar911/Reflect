@@ -2,13 +2,14 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { usePrefersReducedMotion } from '@/lib/hooks';
+import { DISCIPLINE_SCORE } from '../landingStats';
 import { MockFrame } from './MockFrame';
 
 const SIZE = 320; // logical viewBox units — the wrap renders smaller on mobile via Tailwind, scaling everything (incl. % -positioned labels) proportionally
 const CENTER = SIZE / 2;
 const MAX_R = 105; // plot radius for a value of 100
 const LABEL_R = 144; // pushed out from 134 to clear the larger label text below
-const TARGET = 87;
+const TARGET = DISCIPLINE_SCORE;
 
 // Longest labels go on the horizontally-safest clock positions (top, then
 // lower-left/right); the shortest go on the tightest ones (upper-left/right,
