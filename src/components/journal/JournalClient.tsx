@@ -947,12 +947,21 @@ function TradeDetailModal({ trade, onClose, debriefResult, onDebrief }: {
 }) {
   const [analyzing, setAnalyzing] = useState(false);
   const [localResult, setLocalResult] = useState<AIDebriefResult | null>(null);
+  const [debriefOpen, setDebriefOpen] = useState(debriefResult != null);
 
   const dir = trade.take_profit >= trade.entry_price ? 'long' : 'short';
   const pnlPoints = trade.status === 'closed' && trade.exit_price != null
     ? (dir === 'long' ? trade.exit_price - trade.entry_price : trade.entry_price - trade.exit_price)
     : null;
   const result = debriefResult ?? localResult;
+
+  // Same toggle pattern as the other AI panels: opening fetches only if
+  // nothing is cached/in-flight; closing never cancels an in-flight request.
+  function handleDebriefClick() {
+    const willOpen = !debriefOpen;
+    setDebriefOpen(willOpen);
+    if (willOpen && !result && !analyzing) runAnalysis();
+  }
 
   async function runAnalysis() {
     setAnalyzing(true);
@@ -1031,21 +1040,31 @@ function TradeDetailModal({ trade, onClose, debriefResult, onDebrief }: {
 
       {trade.status === 'closed' && (
         <div className="pt-1 border-t" style={{ borderColor: 'var(--color-tg-border)' }}>
-          {result ? (
-            <div className="pt-3"><AIDebriefView result={result} /></div>
-          ) : analyzing ? (
-            <div className="pt-4 flex flex-col items-center gap-3">
-              <div className="w-7 h-7 rounded-full border-2 border-t-transparent animate-spin"
-                style={{ borderColor: 'var(--color-tg-primary)', borderTopColor: 'transparent' }} />
-              <p className="text-xs text-tg-text-2">מנתח את העסקה עם AI...</p>
+          <button
+            onClick={handleDebriefClick}
+            aria-expanded={debriefOpen}
+            className="w-full mt-3 py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-1.5"
+            style={{
+              background: debriefOpen ? 'rgba(0,210,210,0.2)' : 'var(--color-tg-primary-muted)',
+              color: 'var(--color-tg-primary)',
+              border: '1px solid rgba(0,210,210,0.3)',
+            }}>
+            <Bot size={14} /> {analyzing && debriefOpen ? 'מנתח...' : debriefOpen ? 'סגור ניתוח AI' : 'נתח עסקה עם AI'}
+          </button>
+          {(debriefOpen || result != null) && (
+            <div className={`ai-collapse ${debriefOpen ? 'ai-collapse-open' : ''}`}>
+              <div>
+                {analyzing ? (
+                  <div className="pt-4 flex flex-col items-center gap-3">
+                    <div className="w-7 h-7 rounded-full border-2 border-t-transparent animate-spin"
+                      style={{ borderColor: 'var(--color-tg-primary)', borderTopColor: 'transparent' }} />
+                    <p className="text-xs text-tg-text-2">מנתח את העסקה עם AI...</p>
+                  </div>
+                ) : result ? (
+                  <div className="pt-3"><AIDebriefView result={result} /></div>
+                ) : null}
+              </div>
             </div>
-          ) : (
-            <button
-              onClick={(e) => { e.stopPropagation(); runAnalysis(); }}
-              className="w-full mt-3 py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-1.5"
-              style={{ background: 'var(--color-tg-primary-muted)', color: 'var(--color-tg-primary)', border: '1px solid rgba(0,210,210,0.3)' }}>
-              <Bot size={14} /> נתח עסקה עם AI
-            </button>
           )}
         </div>
       )}

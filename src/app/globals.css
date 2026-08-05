@@ -302,6 +302,27 @@ input[type="button"] {
 .animate-slide-up    { animation: slide-up    0.28s cubic-bezier(0.32, 0.72, 0, 1); }
 .animate-fade-in     { animation: fade-in     0.22s ease-out; }
 
+/* Collapsible AI-analysis panels (grid-template-rows 0fr→1fr) — the only way
+   to transition to/from an intrinsic ("auto") height without JS measuring. */
+.ai-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.22s ease-out;
+}
+.ai-collapse.ai-collapse-open {
+  grid-template-rows: 1fr;
+}
+.ai-collapse > div {
+  overflow: hidden;
+  min-height: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-collapse { transition: none; }
+}
+html[data-a11y-reduce-motion='true'] .ai-collapse {
+  transition: none;
+}
+
 /* Single lightweight fade, opacity-only — replaces a translateY(50px) slide
    that used to run alongside a full subtree remount on every navigation.
    Applied once at the page-container level (PageTransition), not per-card. */

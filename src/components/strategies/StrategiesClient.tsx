@@ -189,6 +189,7 @@ export default function StrategiesClient({
   const [expandBuiltin, setExpandBuiltin] = useState<Record<string, boolean>>({});
   const [aiReviews,     setAiReviews]     = useState<Record<string, string | null>>({});
   const [aiLoading,     setAiLoading]     = useState<Record<string, boolean>>({});
+  const [expandAi,      setExpandAi]      = useState<Record<string, boolean>>({});
   const [newCondition,  setNewCondition]  = useState('');
   const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
   const supabase = createClient();
@@ -329,6 +330,16 @@ export default function StrategiesClient({
     setExpandTrades(prev => ({ ...prev, [id]: !prev[id] }));
   }
 
+  // Toggles the AI panel open/closed. Only fetches on the transition into
+  // "open" when there's no cached review yet and nothing in flight — closing
+  // never cancels an in-flight request, it just hides the panel until it's
+  // reopened (at which point the now-cached result renders with no refetch).
+  function toggleAi(id: string, cached: boolean, loading: boolean, fetcher: () => void) {
+    const willOpen = !expandAi[id];
+    setExpandAi(prev => ({ ...prev, [id]: willOpen }));
+    if (willOpen && !cached && !loading) fetcher();
+  }
+
   async function fetchAiReviewBuiltin(b: BuiltinDef) {
     setAiLoading(prev => ({ ...prev, [b.id]: true }));
     const stats = computeStats(b.name, allTrades);
@@ -364,6 +375,7 @@ export default function StrategiesClient({
             const isOpen     = expandBuiltin[b.id];
             const aiText     = aiReviews[b.id];
             const aiLoad     = aiLoading[b.id];
+            const aiOpen     = !!expandAi[b.id];
 
             return (
               <div key={b.id} className="rounded-2xl overflow-hidden"
@@ -421,15 +433,15 @@ export default function StrategiesClient({
                         <ListIcon /> עסקאות ({linked.length})
                       </button>
                       <button
-                        onClick={() => !aiText && fetchAiReviewBuiltin(b)}
-                        disabled={aiLoad}
-                        className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-medium disabled:opacity-50"
+                        onClick={() => toggleAi(b.id, aiText != null, !!aiLoad, () => fetchAiReviewBuiltin(b))}
+                        aria-expanded={aiOpen}
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-medium transition-all"
                         style={{
-                          background: aiText ? 'rgba(0,210,210,0.12)' : SURF2,
-                          color:      aiText ? GOLD : TEXT2,
-                          border:     `1px solid ${aiText ? 'rgba(0,210,210,0.3)' : BORDER}`,
+                          background: aiOpen ? 'rgba(0,210,210,0.12)' : SURF2,
+                          color:      aiOpen ? GOLD : TEXT2,
+                          border:     `1px solid ${aiOpen ? 'rgba(0,210,210,0.3)' : BORDER}`,
                         }}>
-                        <SparkIcon /> {aiLoad ? 'מנתח...' : aiText ? 'ניתוח AI' : 'ניתוח AI'}
+                        <SparkIcon /> {aiLoad && aiOpen ? 'מנתח...' : 'ניתוח AI'}
                       </button>
                     </div>
 
@@ -479,17 +491,21 @@ export default function StrategiesClient({
 
                     {/* AI review */}
                     {(aiText || aiLoad) && (
-                      <div className="px-4 pb-4" style={{ borderTop: `1px solid ${BORDER}` }}>
-                        <p className="text-xs font-semibold mt-3 mb-2" style={{ color: MUTED }}>ניתוח AI</p>
-                        {aiLoad ? (
-                          <div className="flex flex-col gap-2">
-                            {[80, 65, 75].map((w, i) => (
-                              <div key={i} className="h-3 rounded animate-pulse" style={{ background: SURF2, width: `${w}%` }} />
-                            ))}
+                      <div className={`ai-collapse ${aiOpen ? 'ai-collapse-open' : ''}`}>
+                        <div>
+                          <div className="px-4 pb-4" style={{ borderTop: `1px solid ${BORDER}` }}>
+                            <p className="text-xs font-semibold mt-3 mb-2" style={{ color: MUTED }}>ניתוח AI</p>
+                            {aiLoad ? (
+                              <div className="flex flex-col gap-2">
+                                {[80, 65, 75].map((w, i) => (
+                                  <div key={i} className="h-3 rounded animate-pulse" style={{ background: SURF2, width: `${w}%` }} />
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: TEXT2 }}>{renderPlainAiText(aiText)}</div>
+                            )}
                           </div>
-                        ) : (
-                          <div className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: TEXT2 }}>{renderPlainAiText(aiText)}</div>
-                        )}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -523,6 +539,7 @@ export default function StrategiesClient({
         const isOpen  = expandTrades[s.id];
         const aiText  = aiReviews[s.id];
         const aiLoad  = aiLoading[s.id];
+        const aiOpen  = !!expandAi[s.id];
 
         return (
           <div key={s.id} className="rounded-2xl flex flex-col"
@@ -607,16 +624,16 @@ export default function StrategiesClient({
                   עסקאות ({linked.length})
                 </button>
                 <button
-                  onClick={() => !aiText && fetchAiReview(s)}
-                  disabled={aiLoad}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-medium transition-all disabled:opacity-50"
+                  onClick={() => toggleAi(s.id, aiText != null, !!aiLoad, () => fetchAiReview(s))}
+                  aria-expanded={aiOpen}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-medium transition-all"
                   style={{
-                    background: aiText ? 'rgba(0,210,210,0.12)' : SURF2,
-                    color:      aiText ? GOLD : TEXT2,
-                    border:     `1px solid ${aiText ? 'rgba(0,210,210,0.3)' : BORDER}`,
+                    background: aiOpen ? 'rgba(0,210,210,0.12)' : SURF2,
+                    color:      aiOpen ? GOLD : TEXT2,
+                    border:     `1px solid ${aiOpen ? 'rgba(0,210,210,0.3)' : BORDER}`,
                   }}>
                   <SparkIcon />
-                  {aiLoad ? 'מנתח...' : aiText ? 'ניתוח AI' : 'ניתוח AI'}
+                  {aiLoad && aiOpen ? 'מנתח...' : 'ניתוח AI'}
                 </button>
               </div>
             </div>
@@ -678,19 +695,23 @@ export default function StrategiesClient({
 
             {/* AI review panel */}
             {(aiText || aiLoad) && (
-              <div className="px-4 pb-4" style={{ borderTop: `1px solid ${BORDER}` }}>
-                <p className="text-xs font-semibold mt-3 mb-2" style={{ color: MUTED }}>ניתוח AI</p>
-                {aiLoad ? (
-                  <div className="flex flex-col gap-2">
-                    {[80, 65, 75].map((w, i) => (
-                      <div key={i} className="h-3 rounded animate-pulse" style={{ background: SURF2, width: `${w}%` }} />
-                    ))}
+              <div className={`ai-collapse ${aiOpen ? 'ai-collapse-open' : ''}`}>
+                <div>
+                  <div className="px-4 pb-4" style={{ borderTop: `1px solid ${BORDER}` }}>
+                    <p className="text-xs font-semibold mt-3 mb-2" style={{ color: MUTED }}>ניתוח AI</p>
+                    {aiLoad ? (
+                      <div className="flex flex-col gap-2">
+                        {[80, 65, 75].map((w, i) => (
+                          <div key={i} className="h-3 rounded animate-pulse" style={{ background: SURF2, width: `${w}%` }} />
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: TEXT2 }}>
+                        {renderPlainAiText(aiText)}
+                      </div>
+                    )}
                   </div>
-                ) : (
-                  <div className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: TEXT2 }}>
-                    {renderPlainAiText(aiText)}
-                  </div>
-                )}
+                </div>
               </div>
             )}
           </div>

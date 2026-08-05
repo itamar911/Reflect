@@ -286,6 +286,16 @@ function DetailView({ setup, stats, linked, unlinked, aiReview, aiLoading, onBac
   onToggleTrade: (id: string, currentSetupId: string | null) => void;
 }) {
   const [showLinkPanel, setShowLinkPanel] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
+
+  // Mirrors the trades/AI toggle in StrategiesClient: opening fetches only if
+  // there's no cached review yet and nothing already in flight; closing never
+  // cancels an in-flight request, it just hides the panel.
+  function handleAiClick() {
+    const willOpen = !aiOpen;
+    setAiOpen(willOpen);
+    if (willOpen && aiReview == null && !aiLoading) onAiReview();
+  }
 
   return (
     <div dir="rtl" className="min-h-screen px-4 py-6 flex flex-col gap-4">
@@ -364,28 +374,35 @@ function DetailView({ setup, stats, linked, unlinked, aiReview, aiLoading, onBac
       <div className="rounded-2xl p-4 flex flex-col gap-3" style={{ background: SURF, border: `1px solid ${BORDER}` }}>
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold" style={{ color: TEXT }}>ביקורת AI</h2>
-          {!aiReview && (
-            <button onClick={onAiReview} disabled={aiLoading}
-              className="inline-flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg font-semibold transition-opacity hover:opacity-80 disabled:opacity-50"
-              style={{ background: `rgba(0,210,210,0.12)`, color: GOLD }}>
-              {aiLoading ? '⟳ מנתח...' : <><Sparkles size={12} /> קבל ביקורת AI</>}
-            </button>
-          )}
+          <button onClick={handleAiClick} aria-expanded={aiOpen}
+            className="inline-flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg font-semibold transition-all hover:opacity-80"
+            style={{
+              background: aiOpen ? 'rgba(0,210,210,0.12)' : SURF2,
+              color:      aiOpen ? GOLD : TEXT2,
+            }}>
+            {aiLoading && aiOpen ? '⟳ מנתח...' : aiOpen ? 'סגור' : <><Sparkles size={12} /> קבל ביקורת AI</>}
+          </button>
         </div>
 
-        {aiReview ? (
-          <div className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: TEXT2 }}>
-            {renderPlainAiText(aiReview)}
-          </div>
-        ) : !aiLoading ? (
-          <p className="text-xs py-4 text-center" style={{ color: MUTED }}>
-            לחץ כדי לקבל ניתוח AI על הסטאפ
-          </p>
-        ) : (
-          <div className="flex flex-col gap-2 py-2">
-            {[1, 2, 3].map(i => (
-              <div key={i} className="h-3 rounded animate-pulse" style={{ background: SURF2, width: `${70 + i * 10}%` }} />
-            ))}
+        {(aiOpen || aiReview != null) && (
+          <div className={`ai-collapse ${aiOpen ? 'ai-collapse-open' : ''}`}>
+            <div>
+              {aiReview ? (
+                <div className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: TEXT2 }}>
+                  {renderPlainAiText(aiReview)}
+                </div>
+              ) : !aiLoading ? (
+                <p className="text-xs py-4 text-center" style={{ color: MUTED }}>
+                  לחץ כדי לקבל ניתוח AI על הסטאפ
+                </p>
+              ) : (
+                <div className="flex flex-col gap-2 py-2">
+                  {[1, 2, 3].map(i => (
+                    <div key={i} className="h-3 rounded animate-pulse" style={{ background: SURF2, width: `${70 + i * 10}%` }} />
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

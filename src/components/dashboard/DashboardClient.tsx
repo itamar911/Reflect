@@ -842,6 +842,16 @@ function TradeDetailPanel({ trade, onClose, aiReview, aiLoading, onAiReview }: {
 }) {
   const pnl = calcPnl(trade);
   const dir = tradeDir(trade);
+  const [aiOpen, setAiOpen] = useState(false);
+
+  // Mirrors the toggle pattern used for AI panels elsewhere in the app:
+  // opening fetches only if nothing is cached/in-flight yet; closing never
+  // cancels an in-flight request, it just hides the panel until reopened.
+  function handleAiClick() {
+    const willOpen = !aiOpen;
+    setAiOpen(willOpen);
+    if (willOpen && !aiReview && !aiLoading) onAiReview();
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-end" style={{ background: 'rgba(0,0,0,0.7)' }}
@@ -935,24 +945,31 @@ function TradeDetailPanel({ trade, onClose, aiReview, aiLoading, onAiReview }: {
           )}
 
           {/* AI Review */}
-          {!aiReview && !aiLoading && (
-            <button onClick={onAiReview}
-              className="w-full py-2.5 rounded-xl text-sm font-semibold transition-opacity hover:opacity-80 flex items-center justify-center gap-1.5"
-              style={{ background: 'rgba(0,210,210,0.12)', color: ACCENT, border: `1px solid rgba(0,210,210,0.25)` }}>
-              <Sparkles size={14} /> ניתוח AI על העסקה
-            </button>
-          )}
-          {aiLoading && (
-            <div className="flex flex-col gap-2">
-              {[80, 60, 70].map((w, i) => (
-                <div key={i} className="h-3 rounded animate-pulse" style={{ background: SURF2, width: `${w}%` }} />
-              ))}
-            </div>
-          )}
-          {aiReview && (
-            <div>
-              <p className="text-xs font-semibold mb-2" style={{ color: MUTED, fontWeight: 600 }}>ניתוח AI</p>
-              <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: TEXT2, fontWeight: 600 }}>{renderPlainAiText(aiReview)}</p>
+          <button onClick={handleAiClick} aria-expanded={aiOpen}
+            className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-1.5"
+            style={{
+              background: aiOpen ? 'rgba(0,210,210,0.2)' : 'rgba(0,210,210,0.12)',
+              color: ACCENT,
+              border: `1px solid rgba(0,210,210,0.25)`,
+            }}>
+            <Sparkles size={14} /> {aiLoading && aiOpen ? 'מנתח...' : aiOpen ? 'סגור ניתוח AI' : 'ניתוח AI על העסקה'}
+          </button>
+          {(aiOpen || aiReview != null) && (
+            <div className={`ai-collapse ${aiOpen ? 'ai-collapse-open' : ''}`}>
+              <div>
+                {aiLoading ? (
+                  <div className="flex flex-col gap-2">
+                    {[80, 60, 70].map((w, i) => (
+                      <div key={i} className="h-3 rounded animate-pulse" style={{ background: SURF2, width: `${w}%` }} />
+                    ))}
+                  </div>
+                ) : aiReview ? (
+                  <div>
+                    <p className="text-xs font-semibold mb-2" style={{ color: MUTED, fontWeight: 600 }}>ניתוח AI</p>
+                    <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: TEXT2, fontWeight: 600 }}>{renderPlainAiText(aiReview)}</p>
+                  </div>
+                ) : null}
+              </div>
             </div>
           )}
 

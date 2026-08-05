@@ -104,6 +104,7 @@ export default function PatternDetection({ trades }: { trades: Trade[] }) {
             <div key={i}>
               <button
                 onClick={() => setExpanded(expanded === i ? null : i)}
+                aria-expanded={expanded === i}
                 className="w-full flex items-center gap-3 p-3 rounded-xl text-right transition-colors"
                 style={{ background: 'var(--color-tg-surface-2)', border: `1px solid ${SEVERITY_COLOR[p.severity]}30` }}>
                 <span className="text-base shrink-0">{TYPE_ICON[p.type] ?? <BarChart2 size={14} />}</span>
