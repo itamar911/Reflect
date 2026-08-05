@@ -383,6 +383,27 @@ input[type="button"] {
   animation: shimmer 2s linear infinite;
 }
 
+/* A permanently looping gradient on a button, and the only blanket
+   prefers-reduced-motion rule in this codebase is scoped to `.landing *`
+   (landing.css) — which this class is never inside. Its two users are the
+   settings pricing table and the upgrade modal, both in the app shell, so
+   until now the OS preference did not reach it at all.
+
+   The widget's own toggle already collapses it via the universal rule in
+   accessibility.css; it is restated here so the guarantee lives next to the
+   animation it guards rather than depending on another file's selector. */
+@media (prefers-reduced-motion: reduce) {
+  .shimmer-btn {
+    animation: none;
+    background-position: 50% center;
+  }
+}
+
+html[data-a11y-reduce-motion='true'] .shimmer-btn {
+  animation: none;
+  background-position: 50% center;
+}
+
 .animate-pulse-gold  { animation: pulse-gold  2s   infinite; }
 .animate-pulse-danger{ animation: pulse-danger 1.5s infinite; }
 .animate-gold-breathe{ animation: gold-breathe 3s  ease-in-out infinite; }

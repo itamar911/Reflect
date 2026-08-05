@@ -268,50 +268,94 @@ html[data-a11y-contrast='inverted'] .lnav-mobile-panel {
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4), 0 0 28px rgba(0, 210, 210, 0.14);
 }
 
-/* ── Pricing: Pro card hover (cards stay exactly equal-sized) ── */
+/* ── Pricing cards ─────────────────────────────────────────────
+   Padding in rem, not a Tailwind px step, so the accessibility widget's text
+   scale grows the card's breathing room along with the type inside it. */
 
-.pricing-pro-card {
-  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease;
+.pricing-card {
+  padding: 1.75rem;
 }
 
-.pricing-pro-card:hover {
+/**
+ * The recommended plan has to win on sight, before a word of either card is
+ * read. It does that on four channels at once — a lift out of the row, a
+ * turquoise top edge, a tinted surface, and a wider glow — none of which is
+ * scale.
+ *
+ * Deliberately not `scale()`: scaling a card resamples every glyph in it at a
+ * non-integer ratio (the text goes soft, worst on the largest thing in the
+ * card — the price), and at 150% text scale a scaled card is also the one that
+ * overflows its column first. A translate moves the same pixels.
+ *
+ * The lift is a static transform, not an animation, so there is nothing here
+ * for reduced motion to stop; the hover transition is covered by the blanket
+ * rules at the foot of this file and by the widget's own in accessibility.css.
+ */
+.pricing-card-pro {
+  border-color: rgba(0, 210, 210, 0.5);
+  border-top: 2px solid #00d2d2;
+  background: rgba(0, 210, 210, 0.045);
+  box-shadow:
+    0 0 0 1px rgba(0, 210, 210, 0.15),
+    0 24px 60px rgba(0, 0, 0, 0.4),
+    0 0 46px rgba(0, 210, 210, 0.16);
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease, border-color 0.3s ease;
+}
+
+.pricing-card-pro:hover {
   transform: translateY(-4px);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4), 0 0 50px rgba(0, 210, 210, 0.2) !important;
+  box-shadow:
+    0 0 0 1px rgba(0, 210, 210, 0.22),
+    0 30px 70px rgba(0, 0, 0, 0.45),
+    0 0 60px rgba(0, 210, 210, 0.24);
 }
 
-/* ── Pricing: gradient title with shine sweep + flanking lines ── */
-
-.pricing-title {
-  font-size: clamp(2.5rem, 5vw, 3rem);
-  font-weight: 800;
-  line-height: 1.15;
-  letter-spacing: -0.02em;
-  background: linear-gradient(100deg, #00d2d2 10%, #67e8f9 35%, #d9fdfd 50%, #67e8f9 65%, #00d2d2 90%);
-  background-size: 220% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: pricing-shine 4.5s linear infinite;
-  filter: drop-shadow(0 0 22px rgba(0, 210, 210, 0.28));
-}
-
-@keyframes pricing-shine {
-  0%   { background-position: 200% 50%; }
-  100% { background-position: -100% 50%; }
-}
-
-.pricing-title-line {
-  width: 56px;
-  height: 2px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, transparent, rgba(0, 210, 210, 0.7), transparent);
-  flex-shrink: 0;
-}
-
-@media (max-width: 480px) {
-  .pricing-title-line {
-    width: 28px;
+/* The lift only exists once the cards are side by side and there is a row to
+   stand out of. Stacked, it would just be an unexplained 12px gap. */
+@media (min-width: 1024px) {
+  .pricing-card-pro {
+    transform: translateY(-12px);
   }
+
+  .pricing-card-pro:hover {
+    transform: translateY(-18px);
+  }
+}
+
+/* Basic's CTA. An outline rather than the filled gradient, so the two buttons
+   are not equally loud at the moment of choosing — but still an inviting
+   button in the accent colour, not a disabled-looking grey one. */
+.pricing-cta-ghost {
+  color: #00d2d2;
+  background: rgba(0, 210, 210, 0.06);
+  border: 1px solid rgba(0, 210, 210, 0.5);
+  transition: transform 0.2s ease, background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.pricing-cta-ghost:hover {
+  transform: translateY(-2px);
+  background: rgba(0, 210, 210, 0.13);
+  border-color: rgba(0, 210, 210, 0.85);
+}
+
+.pricing-cta-ghost:active {
+  transform: translateY(0) scale(0.97);
+}
+
+/* Saving figures — beside the billing toggle, and again inside each card once
+   annual is selected. One treatment for both so they read as the same fact
+   stated at two levels of precision. */
+.pricing-save-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.125rem 0.625rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  white-space: nowrap;
+  color: #4ade80;
+  background: rgba(34, 197, 94, 0.14);
+  border: 1px solid rgba(34, 197, 94, 0.4);
 }
 
 /* ── Distinction section: the two-moment pair ──────────────── */
