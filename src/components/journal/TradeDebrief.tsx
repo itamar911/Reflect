@@ -3,6 +3,7 @@
 import { useState, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Bot, Camera } from 'lucide-react';
+import { renderPlainAiText } from '@/lib/ai/textFormatting';
 
 interface TradeData {
   id: string;
@@ -165,7 +166,7 @@ export default function TradeDebrief({ trade, existingAnswer }: TradeDebriefProp
               <div key={label as string} className="rounded-xl p-2.5"
                 style={{ background: 'var(--color-tg-surface-2)' }}>
                 <p className="text-[10px] font-semibold text-tg-muted mb-1">{label as string}</p>
-                <p className="text-xs text-tg-text leading-relaxed">{value as string}</p>
+                <p className="text-xs text-tg-text leading-relaxed">{renderPlainAiText(value as string)}</p>
               </div>
             ))}
             <button onClick={() => setAiResult(null)} className="text-xs text-tg-muted py-1">ניתוח חדש</button>

@@ -3,6 +3,7 @@
 import { useState, useRef, type CSSProperties } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Sparkles, Target } from 'lucide-react';
+import { renderPlainAiText } from '@/lib/ai/textFormatting';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -374,7 +375,7 @@ function DetailView({ setup, stats, linked, unlinked, aiReview, aiLoading, onBac
 
         {aiReview ? (
           <div className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: TEXT2 }}>
-            {aiReview}
+            {renderPlainAiText(aiReview)}
           </div>
         ) : !aiLoading ? (
           <p className="text-xs py-4 text-center" style={{ color: MUTED }}>

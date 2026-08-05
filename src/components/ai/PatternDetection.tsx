@@ -3,6 +3,7 @@
 import { useState, useEffect, type ReactNode } from 'react';
 import Card from '@/components/ui/Card';
 import { Smile, AlertTriangle, CheckCircle, RefreshCw, Clock, TrendingDown, Search, BarChart2 } from 'lucide-react';
+import { renderPlainAiText } from '@/lib/ai/textFormatting';
 
 interface Pattern {
   type: string;
@@ -108,13 +109,13 @@ export default function PatternDetection({ trades }: { trades: Trade[] }) {
                 <span className="text-base shrink-0">{TYPE_ICON[p.type] ?? <BarChart2 size={14} />}</span>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-tg-text">{p.title}</span>
+                    <span className="text-xs font-semibold text-tg-text">{renderPlainAiText(p.title)}</span>
                     <span className="text-[10px] px-1.5 py-0.5 rounded-full"
                       style={{ background: `${SEVERITY_COLOR[p.severity]}20`, color: SEVERITY_COLOR[p.severity] }}>
                       {p.occurrences}x
                     </span>
                   </div>
-                  <p className="text-[11px] text-tg-text-2 mt-0.5 truncate">{p.description}</p>
+                  <p className="text-[11px] text-tg-text-2 mt-0.5 truncate">{renderPlainAiText(p.description)}</p>
                 </div>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
                   className="shrink-0 text-tg-muted transition-transform"
@@ -125,7 +126,7 @@ export default function PatternDetection({ trades }: { trades: Trade[] }) {
               {expanded === i && (
                 <div className="mt-1 px-3 py-2 rounded-xl text-xs text-tg-text-2 animate-fade-in"
                   style={{ background: 'var(--color-tg-surface)', border: '1px solid var(--color-tg-border)' }}>
-                  <strong style={{ color: 'var(--color-tg-primary)' }}>המלצה:</strong> {p.recommendation}
+                  <strong style={{ color: 'var(--color-tg-primary)' }}>המלצה:</strong> {renderPlainAiText(p.recommendation)}
                 </div>
               )}
             </div>

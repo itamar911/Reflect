@@ -6,6 +6,7 @@ import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
 import { Bot, Target, BarChart3, ShieldCheck } from 'lucide-react';
 import { formatPnlIls, formatPnlPoints } from '@/lib/utils';
+import { renderPlainAiText } from '@/lib/ai/textFormatting';
 
 export interface ScoreCategory {
   score: number;
@@ -480,7 +481,7 @@ export function AIDebriefView({ result }: { result: AIDebriefResult }) {
         <div key={label} className="rounded-xl p-3"
           style={{ background: 'var(--color-tg-surface-2)' }}>
           <p className="text-[10px] font-bold text-tg-muted mb-1 uppercase tracking-wide">{label}</p>
-          <p className="text-xs leading-relaxed text-tg-text">{value}</p>
+          <p className="text-xs leading-relaxed text-tg-text">{renderPlainAiText(value)}</p>
         </div>
       )) : (
         <p className="text-xs leading-relaxed" style={{ color: 'var(--color-tg-muted)' }}>

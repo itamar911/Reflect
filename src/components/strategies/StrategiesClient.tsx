@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import { TrendingUp, Rocket, ArrowLeftRight, RefreshCw, Building2, Activity, Ruler } from 'lucide-react';
 import { getPlanLimits, isPro, type PlanTier } from '@/lib/plans/config';
 import UpgradeModal from '@/components/plans/UpgradeModal';
+import { renderPlainAiText } from '@/lib/ai/textFormatting';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const GOLD   = '#00d2d2';
@@ -487,7 +488,7 @@ export default function StrategiesClient({
                             ))}
                           </div>
                         ) : (
-                          <div className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: TEXT2 }}>{aiText}</div>
+                          <div className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: TEXT2 }}>{renderPlainAiText(aiText)}</div>
                         )}
                       </div>
                     )}
@@ -687,7 +688,7 @@ export default function StrategiesClient({
                   </div>
                 ) : (
                   <div className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: TEXT2 }}>
-                    {aiText}
+                    {renderPlainAiText(aiText)}
                   </div>
                 )}
               </div>
@@ -841,7 +842,7 @@ export default function StrategiesClient({
           {saveError && (
             <p className="text-xs px-3 py-2 rounded-xl"
               style={{ background: 'rgba(248,113,113,0.1)', color: RED }}>
-              שגיאה: {saveError}
+              שגיאה: {renderPlainAiText(saveError)}
             </p>
           )}
 

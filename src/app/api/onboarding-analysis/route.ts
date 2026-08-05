@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { PLAIN_HEBREW_PROSE_CLAUSE } from '@/lib/ai/prompts';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -12,7 +13,9 @@ const SYSTEM_PROMPT = `You are a professional trading psychology analyst. Based 
   weaknesses: [string, string] (2 specific Hebrew weaknesses based on their profile combination),
   firstTip: string (ONE specific actionable Hebrew tip for their exact profile)
 }
-Return only valid JSON, no markdown, no explanation.`;
+Return only valid JSON, no explanation.
+
+${PLAIN_HEBREW_PROSE_CLAUSE}`;
 
 export async function POST(request: Request) {
   const supabase = await createClient();

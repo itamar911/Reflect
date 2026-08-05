@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { PLAIN_HEBREW_PROSE_CLAUSE } from '@/lib/ai/prompts';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -20,7 +21,9 @@ ${pnl != null ? `תוצאה: ${pnl > 0 ? '+' : ''}${pnl.toFixed(2)}` : 'עסקה
 מצב רגשי: ${trade.emotional_state}/5 | סיבה: ${trade.trade_reason}
 ${trade.exit_reason ? `סיבת יציאה: ${trade.exit_reason}` : ''}
 
-האם ניהול הסיכון היה נכון? מה ניתן ללמוד? אל תחזור על הנתונים.`;
+האם ניהול הסיכון היה נכון? מה ניתן ללמוד? אל תחזור על הנתונים.
+
+${PLAIN_HEBREW_PROSE_CLAUSE}`;
 
   const message = await client.messages.create({
     model: 'claude-sonnet-4-6',

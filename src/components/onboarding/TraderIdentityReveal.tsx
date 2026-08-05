@@ -9,6 +9,7 @@ import {
   CHALLENGE_OPTIONS, AFTER_LOSS_OPTIONS, FALLBACK_ANALYSIS, traderThemeColor,
   type ChallengeId, type AfterLossId, type TraderAnalysis,
 } from './onboardingData';
+import { renderPlainAiText } from '@/lib/ai/textFormatting';
 
 const MIN_ANALYZING_MS = 2200;
 
@@ -94,21 +95,21 @@ export default function TraderIdentityReveal({
       <div className="w-full max-w-md animate-fade-in rounded-2xl border p-6 text-center"
         style={{ borderColor: color, background: 'var(--color-tg-surface)', boxShadow: `0 0 40px ${color}33` }}>
         <p className="text-xs font-semibold tracking-wide text-tg-muted mb-2">זהות הסוחר שלך</p>
-        <h1 className="text-2xl font-bold mb-3" style={{ color }}>{analysis.traderTypeHebrew}</h1>
-        <p className="text-sm text-tg-text-2 mb-5 leading-relaxed">{analysis.description}</p>
+        <h1 className="text-2xl font-bold mb-3" style={{ color }}>{renderPlainAiText(analysis.traderTypeHebrew)}</h1>
+        <p className="text-sm text-tg-text-2 mb-5 leading-relaxed">{renderPlainAiText(analysis.description)}</p>
 
         <div className="flex flex-col gap-2 mb-5">
           {analysis.weaknesses.map((w, i) => (
             <span key={i} className="text-xs font-medium px-3 py-2 rounded-xl"
               style={{ background: `${color}1f`, color }}>
-              {w}
+              {renderPlainAiText(w)}
             </span>
           ))}
         </div>
 
         <div className="text-right rounded-xl p-4 mb-6" style={{ background: 'var(--color-tg-surface-2)' }}>
           <p className="text-xs font-semibold text-tg-muted mb-1">הטיפ הראשון שלך</p>
-          <p className="text-sm text-tg-text">{analysis.firstTip}</p>
+          <p className="text-sm text-tg-text">{renderPlainAiText(analysis.firstTip)}</p>
         </div>
 
         <Button onClick={() => router.push('/dashboard')} fullWidth size="lg" variant="success">

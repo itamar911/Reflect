@@ -10,6 +10,7 @@ import { tradeMoneyPnl, hasMoneyPnl, isWinningTrade } from '@/lib/pnl';
 import { getPlanLimits, type PlanTier } from '@/lib/plans/config';
 import UpgradeModal from '@/components/plans/UpgradeModal';
 import { useMediaQuery } from '@/lib/hooks';
+import { renderPlainAiText, segmentByLineMarker, joinLines, CHECK_CHARS, CROSS_CHARS } from '@/lib/ai/textFormatting';
 
 export type { DashTrade } from '@/lib/dashboard/trades';
 
@@ -951,7 +952,7 @@ function TradeDetailPanel({ trade, onClose, aiReview, aiLoading, onAiReview }: {
           {aiReview && (
             <div>
               <p className="text-xs font-semibold mb-2" style={{ color: MUTED, fontWeight: 600 }}>ניתוח AI</p>
-              <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: TEXT2, fontWeight: 600 }}>{aiReview}</p>
+              <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: TEXT2, fontWeight: 600 }}>{renderPlainAiText(aiReview)}</p>
             </div>
           )}
 
@@ -1037,9 +1038,6 @@ const SECTION_ICONS: { match: string; icon: typeof CheckCircle; color: string }[
   { match: 'מה שאמרת', icon: Quote, color: ICON_GRAY },
 ];
 
-// Checkmark/cross-mark and other emoji code points the AI might still produce.
-const CHECK_CHARS = '✅✔✓☑';
-const CROSS_CHARS = '✖✗✘❌❎';
 const INLINE_SPLIT_RE = new RegExp(`(\\*\\*[^*]+\\*\\*|[${CHECK_CHARS}${CROSS_CHARS}]|\\p{Extended_Pictographic}|\\uFE0F)`, 'gu');
 const CHECK_RE = new RegExp(`^[${CHECK_CHARS}]$`, 'u');
 const CROSS_RE = new RegExp(`^[${CROSS_CHARS}]$`, 'u');
@@ -1062,36 +1060,9 @@ function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
   }).filter(part => part !== null && part !== '');
 }
 
-// Splits the AI weekly summary into per-##-heading segments, dropping any
-// intro/greeting text that appears before the first heading.
-function segmentSummaryByHeading(text: string): { heading: string; lines: string[] }[] {
-  const segments: { heading: string; lines: string[] }[] = [];
-  let current: { heading: string; lines: string[] } | null = null;
-
-  for (const rawLine of text.split('\n')) {
-    const headingMatch = rawLine.trim().match(/^#{1,6}\s+(.*)/);
-    if (headingMatch) {
-      current = { heading: headingMatch[1].trim(), lines: [] };
-      segments.push(current);
-      continue;
-    }
-    current?.lines.push(rawLine);
-  }
-  return segments;
-}
-
-// Joins markdown lines into a single plain-text blob, stripping list/quote/hr markers,
-// for compact line-clamped rendering.
-function joinSummaryLines(lines: string[]): string {
-  return lines
-    .map(l => l.trim())
-    .filter(l => l && !/^(-{3,}|\*{3,})\s*$/.test(l))
-    .map(l => l
-      .replace(/^[-*•]\s+/, '')
-      .replace(/^\d+[.)]\s+/, '')
-      .replace(new RegExp(`^[${CHECK_CHARS}${CROSS_CHARS}]\\s*`, 'u'), ''))
-    .join(' ');
-}
+// Weekly summary headings are anchored one per line as `#{1,6} text`; any
+// intro/greeting text before the first heading is dropped along the way.
+const WEEKLY_HEADING_RE = /^#{1,6}\s+(.*)/;
 
 // One compact card per AI-summary section: icon + bold heading + up to 3 lines of body text.
 function SummarySectionCard({ heading, lines }: { heading: string; lines: string[] }) {
@@ -1100,7 +1071,7 @@ function SummarySectionCard({ heading, lines }: { heading: string; lines: string
 
   const Icon = section?.icon;
   const color = section?.color ?? ACCENT;
-  const text = joinSummaryLines(lines);
+  const text = joinLines(lines);
   if (!text) return null;
 
   return (
@@ -1128,7 +1099,7 @@ function SummarySectionCard({ heading, lines }: { heading: string; lines: string
 // Renders the optional "what you told yourself" quote in italic, if the AI included one.
 function SummaryQuote({ segments }: { segments: { heading: string; lines: string[] }[] }) {
   const seg = segments.find(s => s.heading.includes('מה שאמרת'));
-  const text = seg ? joinSummaryLines(seg.lines) : '';
+  const text = seg ? joinLines(seg.lines) : '';
   if (!text) return null;
 
   return (
@@ -1431,7 +1402,7 @@ export default function DashboardClient({
   const lineData = lineMode === 'cumulative' ? stats.cumulativeSeries : stats.dailySeries;
   const recent   = trades.slice(0, 10);
 
-  const summarySegments = weeklySummary?.summary_text ? segmentSummaryByHeading(weeklySummary.summary_text) : [];
+  const summarySegments = weeklySummary?.summary_text ? segmentByLineMarker(weeklySummary.summary_text, WEEKLY_HEADING_RE) : [];
   const weeklyDayMaxAbs = weeklySummary
     ? Math.max(...weeklySummary.stats.daily_pnl.map(d => Math.abs(d.pnl)), 0.001)
     : 0.001;

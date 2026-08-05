@@ -6,6 +6,7 @@ import Button from '@/components/ui/Button';
 import { Ruler } from 'lucide-react';
 import { getPlanLimits, isPro, type PlanTier } from '@/lib/plans/config';
 import UpgradeModal from '@/components/plans/UpgradeModal';
+import { renderPlainAiText } from '@/lib/ai/textFormatting';
 
 export interface PersonalStrategy {
   id: string;
@@ -496,7 +497,7 @@ export default function StrategyBuilder({ initialStrategies, plan }: StrategyBui
 
           {saveError && (
             <p className="text-xs rounded-lg px-3 py-2" style={{ background: 'var(--color-tg-danger-muted)', color: 'var(--color-tg-danger)' }}>
-              שגיאה בשמירה: {saveError}
+              שגיאה בשמירה: {renderPlainAiText(saveError)}
             </p>
           )}
 

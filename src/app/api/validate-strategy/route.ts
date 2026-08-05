@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { PLAIN_HEBREW_PROSE_CLAUSE } from '@/lib/ai/prompts';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -19,7 +20,9 @@ export async function POST(request: Request) {
 Name: ${name}
 Description: ${description}
 Entry conditions: ${JSON.stringify(entry_conditions)}
-Return ONLY JSON: { "valid": true/false, "feedback": "short feedback in Hebrew explaining what's missing if invalid, empty string if valid" }`;
+Return ONLY JSON: { "valid": true/false, "feedback": "short feedback in Hebrew explaining what's missing if invalid, empty string if valid" }
+
+${PLAIN_HEBREW_PROSE_CLAUSE}`;
 
   try {
     const response = await client.messages.create({

@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { PLAIN_HEBREW_PROSE_CLAUSE } from '@/lib/ai/prompts';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -37,7 +38,9 @@ Return JSON exactly in this format (no additional text):
   ]
 }
 
-Identify up to 5 patterns. Include positive patterns if present. Focus on the most prominent patterns. Write all text in Hebrew.`,
+Identify up to 5 patterns. Include positive patterns if present. Focus on the most prominent patterns. Write all text in Hebrew.
+
+${PLAIN_HEBREW_PROSE_CLAUSE}`,
     }],
   });
 

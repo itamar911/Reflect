@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Bot, ArrowDown } from 'lucide-react';
 import UpgradeModal from '@/components/plans/UpgradeModal';
+import { renderPlainAiText } from '@/lib/ai/textFormatting';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -267,7 +268,9 @@ export default function TradingBot() {
                       borderRadius: msg.role === 'user' ? '18px 18px 4px 18px' : '4px 18px 18px 18px',
                     }}>
                     {msg.content ? (
-                      <p className="text-xs leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                      <p className="text-xs leading-relaxed whitespace-pre-wrap">
+                        {msg.role === 'assistant' ? renderPlainAiText(msg.content) : msg.content}
+                      </p>
                     ) : (
                       <div className="flex gap-1 py-1">
                         {[0, 1, 2].map(j => (

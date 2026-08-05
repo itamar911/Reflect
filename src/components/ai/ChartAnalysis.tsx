@@ -4,6 +4,13 @@ import { useState, useRef } from 'react';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import { AlertTriangle, BarChart2, Upload } from 'lucide-react';
+import { segmentByLineMarker, renderPlainAiText } from '@/lib/ai/textFormatting';
+
+// The model is asked for section headers as a whole "**heading**" line — this
+// must only match when the entire trimmed line is the marker, never mid-
+// sentence, so an unrelated inline "**word**" emphasis inside a body sentence
+// can't be mistaken for a new section boundary.
+const CHART_HEADING_RE = /^\*\*(.+?)\*\*$/;
 
 const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 const MAX_SIZE_BYTES = 5 * 1024 * 1024;
@@ -142,31 +149,21 @@ export default function ChartAnalysis() {
 }
 
 function AnalysisDisplay({ text }: { text: string }) {
-  const sections = text.split(/\*\*(.+?)\*\*/g);
-  const parts: { title?: string; content: string }[] = [];
+  const segments = segmentByLineMarker(text, CHART_HEADING_RE);
 
-  for (let i = 0; i < sections.length; i++) {
-    if (i % 2 === 1) {
-      parts.push({ title: sections[i], content: sections[i + 1]?.trim() ?? '' });
-      i++;
-    } else if (i === 0 && sections[i].trim()) {
-      parts.push({ content: sections[i].trim() });
-    }
-  }
-
-  if (parts.length === 0) {
+  if (segments.length === 0) {
     return (
       <div className="p-4 rounded-xl text-sm leading-relaxed whitespace-pre-wrap"
         style={{ background: 'var(--color-tg-surface-2)', color: 'var(--color-tg-text)' }}>
-        {text}
+        {renderPlainAiText(text)}
       </div>
     );
   }
 
   return (
     <div className="flex flex-col gap-2.5">
-      {parts.map((part, i) => (
-        <SectionCard key={i} title={part.title} content={part.content} />
+      {segments.map((seg, i) => (
+        <SectionCard key={i} title={seg.heading} content={renderPlainAiText(seg.lines.join('\n'))} />
       ))}
     </div>
   );
@@ -312,20 +309,19 @@ function KeyLevelsCard({ content }: { content: string }) {
             : isSupport
               ? 'var(--color-tg-success)'
               : 'var(--color-tg-text-2)';
-          const clean = line.replace(/^•\s*/, '');
-          const colonIdx = clean.indexOf(':');
+          const colonIdx = line.indexOf(':');
 
           if (colonIdx === -1) {
             return (
               <div key={i} className="flex items-center gap-2 py-1.5">
                 <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: dotColor }} />
-                <span className="text-xs text-tg-text">{clean}</span>
+                <span className="text-xs text-tg-text">{line}</span>
               </div>
             );
           }
 
-          const label = clean.slice(0, colonIdx).trim();
-          const rest = clean.slice(colonIdx + 1).trim();
+          const label = line.slice(0, colonIdx).trim();
+          const rest = line.slice(colonIdx + 1).trim();
           // Split "price — explanation" on em-dash / en-dash / hyphen
           const dashMatch = rest.match(/^(.+?)\s*[—–-]\s*(.+)$/);
           const price = dashMatch ? dashMatch[1].trim() : rest;

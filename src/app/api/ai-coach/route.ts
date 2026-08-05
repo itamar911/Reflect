@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { PLAIN_HEBREW_PROSE_CLAUSE } from '@/lib/ai/prompts';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -40,7 +41,9 @@ CRITICAL: Every insight must quantify financial impact using the actual numbers 
 - "האסטרטגיה הטובה ביותר שלך הרוויחה $X, הגרועה ביותר הפסידה $X"
 
 Insight types: time (best/worst hours by P&L), emotional (emotional state vs P&L), performance (overall numbers), pattern (patterns), revenge (revenge trading cost in $), discipline (rules impact in $).
-Write all insight text in Hebrew. Be specific with numbers.`,
+Write all insight text in Hebrew. Be specific with numbers.
+
+${PLAIN_HEBREW_PROSE_CLAUSE}`,
     }],
   });
 

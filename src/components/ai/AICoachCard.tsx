@@ -3,6 +3,7 @@
 import { useState, useEffect, type ReactNode } from 'react';
 import Card from '@/components/ui/Card';
 import { AlertTriangle, Clock, Heart, TrendingUp, Search, Target, DollarSign } from 'lucide-react';
+import { renderPlainAiText } from '@/lib/ai/textFormatting';
 
 interface Insight {
   type: 'time' | 'emotional' | 'revenge' | 'performance' | 'pattern' | 'discipline';
@@ -117,7 +118,7 @@ export default function AICoachCard({ trades }: { trades: Trade[] }) {
                 <span className="text-base shrink-0 mt-0.5">{cfg.icon}</span>
                 <div className="flex-1 min-w-0">
                   <span className="text-[10px] font-medium" style={{ color: cfg.color }}>{cfg.label}</span>
-                  <p className="text-xs text-tg-text mt-0.5 leading-relaxed">{ins.text}</p>
+                  <p className="text-xs text-tg-text mt-0.5 leading-relaxed">{renderPlainAiText(ins.text)}</p>
                 </div>
               </div>
             );
