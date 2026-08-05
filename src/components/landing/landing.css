@@ -615,17 +615,25 @@ html[data-a11y-reduce-motion='true'] .pricing-title {
   color: rgba(255, 255, 255, 0.62);
 }
 
-.pricing-chip {
-  display: inline-flex;
-  align-items: center;
-  border-radius: 999px;
-  padding: 0.2rem 0.6rem;
+/* Pro's inherited foundation, as one line under a hairline at the foot of its
+   list. It was a cluster of pills inside the panel, which both crowded the
+   panel and took the slot Pro needed for its own audience line. As running text
+   it says exactly the same thing far more quietly. */
+.pricing-foundation {
+  padding-top: 0.875rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
   font-size: 0.8125rem;
-  font-weight: 600;
+  line-height: 1.65;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.pricing-foundation-label {
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.pricing-foundation-item {
   white-space: nowrap;
-  color: rgba(255, 255, 255, 0.72);
-  background: rgba(255, 255, 255, 0.055);
-  border: 1px solid rgba(255, 255, 255, 0.09);
 }
 
 /* The lift only exists once the cards are side by side and there is a row to

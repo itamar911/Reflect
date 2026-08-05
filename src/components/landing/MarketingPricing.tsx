@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import Link from 'next/link';
 import { Check, Sparkles } from 'lucide-react';
 import { PLAN_LIMITS } from '@/lib/plans/config';
@@ -95,12 +95,16 @@ const PRO_ADDITIONS: Feature[] = [
   { text: 'מאמן אישי שמכיר את דפוסי המסחר שלך' },
   { text: 'סטטיסטיקות מלאות לפי שעה ויום' },
   { text: 'סיכום שבועי עם תובנות מספריות' },
+  // Both limits happen to be 3, so both qualifiers rendered as the identical
+  // string "במקום 3" on consecutive lines and read as a copy-paste error. The
+  // second states the same lift as a coverage figure instead — different shape,
+  // same source, and it also says what the 8 is measured against.
   { text: 'חוקי משמעת ללא הגבלה', note: `במקום ${BASIC_RULES}` },
-  { text: `כל ${TOTAL_CONDITIONS} תנאי החסימה`, note: `במקום ${BASIC_CONDITIONS}` },
+  { text: `כל ${TOTAL_CONDITIONS} תנאי החסימה`, note: `ב-Basic פתוחים ${BASIC_CONDITIONS} מתוך ${TOTAL_CONDITIONS}` },
 ];
 
 /** The foundation Pro inherits, in short form. Derived — never a second list. */
-const SHARED_CHIPS = BASIC_FEATURES.flatMap((f) => (f.short ? [f.short] : []));
+const SHARED_FOUNDATION = BASIC_FEATURES.flatMap((f) => (f.short ? [f.short] : []));
 
 export function MarketingPricing() {
   const [billing, setBilling] = useState<'monthly' | 'yearly'>('monthly');
@@ -136,6 +140,12 @@ export function MarketingPricing() {
           browser zoom — a full-width card puts six short bullets on a ~900px
           measure, leaving most of each row empty. */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-7 max-w-[560px] lg:max-w-[1120px] mx-auto w-full items-stretch">
+        {/* Both panels answer the same question, so the pair can be read across:
+            documentation first, or enforcement now. Pro used to spend this slot
+            on the shared-foundation chips instead, which left the recommended
+            plan — the one where self-identification matters most — with no
+            audience framing at all. The foundation moved to a single quiet line
+            closing Pro's list. */}
         <PlanCard
           name="Basic"
           plan="basic"
@@ -151,8 +161,9 @@ export function MarketingPricing() {
           billing={billing}
           lead="מה ש-Pro מוסיף:"
           features={PRO_ADDITIONS}
-          panelLabel="כולל גם את כל מה שב-Basic"
-          chips={SHARED_CHIPS}
+          panelLabel="למי זה מתאים"
+          panelText="לסוחר שהידע כבר לא הבעיה, וצריך משהו שיעצור אותו ברגע ההחלטה."
+          foundation={SHARED_FOUNDATION}
           highlighted
         />
       </div>
@@ -168,7 +179,7 @@ function PlanCard({
   features,
   panelLabel,
   panelText,
-  chips,
+  foundation,
   highlighted = false,
 }: {
   name: string;
@@ -177,8 +188,9 @@ function PlanCard({
   lead: string;
   features: Feature[];
   panelLabel: string;
-  panelText?: string;
-  chips?: string[];
+  panelText: string;
+  /** Pro only: the shared capabilities it inherits, as one closing line. */
+  foundation?: string[];
   highlighted?: boolean;
 }) {
   const price = PLAN_PRICES[plan][billing];
@@ -254,23 +266,33 @@ function PlanCard({
             </li>
           ))}
         </ul>
+
+        {/* The foundation, as one quiet line closing the list rather than a
+            cluster of pills in the panel. `mt-auto` pins it to the foot of the
+            list block, so the card's slack opens above it instead of between it
+            and the rows it belongs to. */}
+        {foundation && (
+          <p className="pricing-foundation mt-auto">
+            <span className="pricing-foundation-label">כולל גם את כל מה שב-Basic:</span>{' '}
+            {/* Each name is nowrap and the separators are not, so a line can
+                only break *between* capabilities. Joined as one string, "ניתוח
+                לכל עסקה" split across two lines and left "עסקה" stranded. */}
+            {foundation.map((item, i) => (
+              <Fragment key={item}>
+                {i > 0 && ' · '}
+                <span className="pricing-foundation-item">{item}</span>
+              </Fragment>
+            ))}
+          </p>
+        )}
       </div>
 
-      {/* Both cards carry a quiet panel here, which is what makes the pair
-          structurally identical. Pro's resolves its own cross-reference with
-          chips; Basic's says who the plan is for. */}
+      {/* Both cards carry the same panel here, answering the same question, so
+          the pair can be read across rather than each card being a different
+          kind of thing. */}
       <div className="pricing-panel mt-7">
         <p className="pricing-panel-label">{panelLabel}</p>
-        {panelText && <p className="pricing-panel-text">{panelText}</p>}
-        {chips && (
-          <div className="flex flex-wrap gap-1.5 mt-2.5">
-            {chips.map((chip) => (
-              <span key={chip} className="pricing-chip">
-                {chip}
-              </span>
-            ))}
-          </div>
-        )}
+        <p className="pricing-panel-text">{panelText}</p>
       </div>
 
       {/* The recommended plan keeps the page's filled gradient CTA; the other
