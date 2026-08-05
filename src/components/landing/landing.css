@@ -268,12 +268,175 @@ html[data-a11y-contrast='inverted'] .lnav-mobile-panel {
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4), 0 0 28px rgba(0, 210, 210, 0.14);
 }
 
+/* ── Pricing heading ───────────────────────────────────────────
+   Restored after 5599be5 folded it into the shared SectionHeading. Pricing is
+   the page's decision moment and this heading is the page's one licensed piece
+   of brand theatre, so it keeps its own gradient wordmark and flanking rules.
+
+   The sweep is 6s linear rather than the old 4.5s, over a wider (260%) and more
+   finely stepped gradient, so it reads as a specular highlight travelling
+   across metal rather than as a barber pole. The travel distance equals exactly
+   one background width and the gradient's two ends are the same colour, so the
+   loop has no visible seam. */
+
+.pricing-title-wrap {
+  position: relative;
+  isolation: isolate;
+}
+
+/* A soft aura behind the words rather than a box around them. Its own layer
+   below the text, so the drop-shadows on .pricing-title stay legible over it. */
+.pricing-title-wrap::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset-inline-start: 50%;
+  top: 50%;
+  width: 128%;
+  height: 300%;
+  transform: translate(50%, -50%);
+  background: radial-gradient(
+    closest-side,
+    rgba(0, 210, 210, 0.20),
+    rgba(0, 210, 210, 0.06) 55%,
+    transparent 78%
+  );
+  pointer-events: none;
+}
+
+.pricing-title {
+  /* The floor is what keeps "המסלולים שלנו" on one line at 376px — the rules
+     plus the words need ~340px of the 344px available, and a wrapped two-line
+     wordmark left the flanking rules stranded against its middle. In rem, so
+     the accessibility text scale still grows it (and is allowed to wrap it). */
+  font-size: clamp(2.125rem, 5.4vw, 3.5rem);
+  font-weight: 900;
+  line-height: 1.12;
+  letter-spacing: -0.03em;
+  background: linear-gradient(
+    100deg,
+    #00b4b4 0%,
+    #00d2d2 18%,
+    #7fe9f2 36%,
+    #ffffff 50%,
+    #7fe9f2 64%,
+    #00d2d2 82%,
+    #00b4b4 100%
+  );
+  background-size: 260% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: pricing-shine 6s linear infinite;
+  /* Two glows rather than one: a tight halo that reads as the letterforms
+     themselves emitting light, and a wide soft bloom that lifts the whole
+     wordmark off the section background. */
+  filter:
+    drop-shadow(0 0 8px rgba(0, 210, 210, 0.45))
+    drop-shadow(0 0 30px rgba(0, 210, 210, 0.26));
+}
+
+@keyframes pricing-shine {
+  0%   { background-position: 200% 50%; }
+  100% { background-position: -60% 50%; }
+}
+
+/* The two rules taper *toward* the words they frame. Direction-specific by
+   design: the landing page is RTL everywhere (layout.tsx sets dir on <html>,
+   page.tsx again on the shell), so the first span is the right-hand rule and
+   its lit end is its left one. */
+.pricing-title-line {
+  width: 72px;
+  height: 2px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  background: linear-gradient(90deg, rgba(0, 210, 210, 0.9), transparent);
+  box-shadow: 0 0 10px rgba(0, 210, 210, 0.4);
+}
+
+.pricing-title-line:last-of-type {
+  background: linear-gradient(90deg, transparent, rgba(0, 210, 210, 0.9));
+}
+
+@media (max-width: 480px) {
+  .pricing-title-line {
+    width: 30px;
+  }
+}
+
+/* Reduced motion resolves the heading to a static *lit* state, not to a dark
+   one. This has to be explicit: the blanket `.landing *` rule at the foot of
+   this file only collapses the duration, which would freeze the sweep on the
+   keyframe it happened to land on — the 100% frame, where the bright band has
+   already travelled off the text and only the dim ends remain. Centring the
+   background instead parks the white band across the words permanently. */
+@media (prefers-reduced-motion: reduce) {
+  .landing .pricing-title {
+    animation: none;
+    background-position: 50% 50%;
+  }
+}
+
+html[data-a11y-reduce-motion='true'] .pricing-title {
+  animation: none;
+  background-position: 50% 50%;
+}
+
+/* ── Pricing: billing toggle ───────────────────────────────────
+   A recessed track with a lit thumb, rather than two flat pills. Colour and
+   shadow transitions only — no movement to animate, so nothing here needs a
+   reduced-motion carve-out beyond the blanket rule. */
+
+.pricing-toggle {
+  display: inline-flex;
+  gap: 0.25rem;
+  padding: 0.3rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+.pricing-toggle-btn {
+  padding: 0.5rem 1.4rem;
+  border-radius: 999px;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.6);
+  transition: color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.pricing-toggle-btn:hover {
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.pricing-toggle-btn.is-active {
+  color: #04191c;
+  background: linear-gradient(120deg, #00d2d2 0%, #22d3ee 100%);
+  box-shadow: 0 2px 12px rgba(0, 210, 210, 0.38);
+}
+
+.pricing-toggle-btn.is-active:hover {
+  color: #04191c;
+}
+
 /* ── Pricing cards ─────────────────────────────────────────────
    Padding in rem, not a Tailwind px step, so the accessibility widget's text
    scale grows the card's breathing room along with the type inside it. */
 
 .pricing-card {
-  padding: 1.75rem;
+  position: relative;
+  overflow: hidden;
+  padding: 2rem 1.75rem;
+  /* A vertical falloff plus a lit top hairline, instead of one flat wash. It is
+     what makes the card read as a surface catching light from above rather than
+     as a rectangle of tinted glass. */
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.012) 62%),
+    rgba(255, 255, 255, 0.02);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    0 18px 44px rgba(0, 0, 0, 0.34);
 }
 
 /**
@@ -292,22 +455,177 @@ html[data-a11y-contrast='inverted'] .lnav-mobile-panel {
  * rules at the foot of this file and by the widget's own in accessibility.css.
  */
 .pricing-card-pro {
-  border-color: rgba(0, 210, 210, 0.5);
-  border-top: 2px solid #00d2d2;
-  background: rgba(0, 210, 210, 0.045);
+  border-color: rgba(0, 210, 210, 0.45);
+  /* Light pooling at the top of the card under the accent bar, over the same
+     falloff Basic has. Static — the card is a surface, not a light show. */
+  background:
+    radial-gradient(120% 62% at 50% 0%, rgba(0, 210, 210, 0.17), transparent 72%),
+    linear-gradient(180deg, rgba(0, 210, 210, 0.075), rgba(0, 210, 210, 0.012) 58%),
+    rgba(255, 255, 255, 0.02);
   box-shadow:
-    0 0 0 1px rgba(0, 210, 210, 0.15),
-    0 24px 60px rgba(0, 0, 0, 0.4),
-    0 0 46px rgba(0, 210, 210, 0.16);
+    inset 0 1px 0 rgba(255, 255, 255, 0.13),
+    0 0 0 1px rgba(0, 210, 210, 0.16),
+    0 26px 64px rgba(0, 0, 0, 0.45),
+    0 0 54px rgba(0, 210, 210, 0.18);
   transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease, border-color 0.3s ease;
+}
+
+/* The accent edge, as a gradient bar clipped by the card's own radius rather
+   than a flat 2px border-top. Brightest at the centre, so it reads as the lit
+   crown of the card instead of a rule drawn across it. */
+.pricing-card-pro::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  inset-inline: 0;
+  height: 2px;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    rgba(0, 210, 210, 0.1),
+    #00d2d2 28%,
+    #a5f3fc 50%,
+    #00d2d2 72%,
+    rgba(0, 210, 210, 0.1)
+  );
 }
 
 .pricing-card-pro:hover {
   transform: translateY(-4px);
   box-shadow:
-    0 0 0 1px rgba(0, 210, 210, 0.22),
-    0 30px 70px rgba(0, 0, 0, 0.45),
-    0 0 60px rgba(0, 210, 210, 0.24);
+    inset 0 1px 0 rgba(255, 255, 255, 0.15),
+    0 0 0 1px rgba(0, 210, 210, 0.24),
+    0 32px 74px rgba(0, 0, 0, 0.5),
+    0 0 66px rgba(0, 210, 210, 0.26);
+}
+
+/* ── Pricing: the recommended badge ────────────────────────── */
+
+.pricing-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 800;
+  white-space: nowrap;
+  color: #04191c;
+  background: linear-gradient(120deg, #00d2d2 0%, #67e8f9 100%);
+  box-shadow: 0 2px 14px rgba(0, 210, 210, 0.45);
+}
+
+/* ── Pricing: price typography ─────────────────────────────────
+   The figure is the largest thing in the card, so it carries the most weight:
+   heavy, tightly tracked, tabular. The currency is stepped down and lifted onto
+   the digits' shoulder — the sign is not part of the number a reader is
+   comparing, and at full size it competed with it. */
+
+.pricing-price {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.08em;
+  font-size: clamp(2.75rem, 4vw, 3.25rem);
+  font-weight: 800;
+  line-height: 1;
+  color: #fff;
+}
+
+.pricing-currency {
+  align-self: flex-start;
+  margin-top: 0.16em;
+  font-size: 0.5em;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.pricing-amount {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.035em;
+}
+
+/* Pro's figure is the one the section is arguing for, so it gets the accent
+   glow. Kept as a shadow on white text rather than a gradient fill: gradient
+   text on a numeral costs contrast exactly where legibility matters most. */
+.pricing-card-pro .pricing-price {
+  text-shadow: 0 0 26px rgba(0, 210, 210, 0.45);
+}
+
+.pricing-per {
+  font-size: 1rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+/* ── Pricing: feature rows ─────────────────────────────────── */
+
+/* A tinted token rather than a bare tick. rem-sized so it tracks the text
+   scale instead of shrinking against it. */
+.pricing-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin-top: 0.1rem;
+  border-radius: 999px;
+  color: #4ade80;
+  background: rgba(34, 197, 94, 0.14);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.pricing-card-pro .pricing-check {
+  color: #00d2d2;
+  background: rgba(0, 210, 210, 0.16);
+  border-color: rgba(0, 210, 210, 0.38);
+}
+
+.pricing-note {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.875rem;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.48);
+}
+
+/* ── Pricing: the quiet panel above each CTA ───────────────────
+   Both cards carry one, which is what makes the pair structurally identical.
+   Recessed rather than raised — it is the card's footnote, and must not
+   compete with the list above it. */
+
+.pricing-panel {
+  border-radius: 0.875rem;
+  padding: 0.875rem 1rem;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.pricing-panel-label {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: rgba(255, 255, 255, 0.52);
+}
+
+.pricing-panel-text {
+  margin-top: 0.35rem;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.pricing-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.055);
+  border: 1px solid rgba(255, 255, 255, 0.09);
 }
 
 /* The lift only exists once the cards are side by side and there is a row to
@@ -342,9 +660,10 @@ html[data-a11y-contrast='inverted'] .lnav-mobile-panel {
   transform: translateY(0) scale(0.97);
 }
 
-/* Saving figures — beside the billing toggle, and again inside each card once
-   annual is selected. One treatment for both so they read as the same fact
-   stated at two levels of precision. */
+/* The annual saving, inside a card, once annual is selected. This is now the
+   *only* place the figure appears — the "עד ₪120" pill that used to sit beside
+   the toggle restated it less precisely and hedged it across two plans whose
+   discounts differ (Basic 7%, Pro 10%). */
 .pricing-save-chip {
   display: inline-flex;
   align-items: center;
