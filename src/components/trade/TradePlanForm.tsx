@@ -654,7 +654,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
       />
 
       {/* Bottom Sheet */}
-      <div className="fixed bottom-0 left-0 right-0 z-50 animate-slide-up rounded-t-3xl overflow-hidden"
+      <div className="fixed bottom-0 left-0 right-0 z-50 md:left-1/2 md:right-auto md:-translate-x-1/2 md:w-full md:max-w-4xl animate-slide-up rounded-t-3xl overflow-hidden"
         style={{ background: 'var(--color-tg-surface)', maxHeight: '90vh' }}>
 
         {/* Handle */}
