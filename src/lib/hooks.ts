@@ -19,18 +19,51 @@ export function useHydrated(): boolean {
 }
 
 const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
+const REDUCED_MOTION_ATTR = 'data-a11y-reduce-motion';
 
 function subscribeReducedMotion(onChange: () => void) {
   const mql = window.matchMedia(REDUCED_MOTION_QUERY);
   mql.addEventListener('change', onChange);
-  return () => mql.removeEventListener('change', onChange);
+
+  // The accessibility widget writes its own toggle onto <html>, both from the
+  // beforeInteractive init script and from AccessibilityProvider. Watching the
+  // attribute is what lets the toggle take effect without a reload.
+  const observer = new MutationObserver(onChange);
+  observer.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: [REDUCED_MOTION_ATTR],
+  });
+
+  return () => {
+    mql.removeEventListener('change', onChange);
+    observer.disconnect();
+  };
 }
 
-/** Live prefers-reduced-motion flag; false on the server. */
+function getReducedMotion(): boolean {
+  // The attribute is written as the string 'true' | 'false' (never removed),
+  // so this has to compare the value — presence alone would always be true.
+  return (
+    document.documentElement.getAttribute(REDUCED_MOTION_ATTR) === 'true' ||
+    window.matchMedia(REDUCED_MOTION_QUERY).matches
+  );
+}
+
+/**
+ * Live reduced-motion flag: true when the OS setting asks for reduced motion
+ * OR the in-app accessibility widget's toggle is on.
+ *
+ * Always false on the server AND on the first client render, because neither
+ * source is knowable during SSR. A snapshot that disagreed with the server
+ * would be a hydration mismatch, and React 19 does not repair mismatched
+ * className/style — a consumer that styles off this value would render the
+ * server's markup and then never correct it. useSyncExternalStore re-renders
+ * consumers right after hydration instead, which is safe.
+ */
 export function usePrefersReducedMotion(): boolean {
   return useSyncExternalStore(
     subscribeReducedMotion,
-    () => window.matchMedia(REDUCED_MOTION_QUERY).matches,
+    getReducedMotion,
     () => false,
   );
 }

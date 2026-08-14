@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { usePrefersReducedMotion } from '@/lib/hooks';
 
 // Update this as the real number grows.
 const NEW_USERS_THIS_MONTH = 247;
@@ -15,37 +16,45 @@ export function HeroJoinStat() {
   const [value, setValue] = useState(0);
   const ref = useRef<HTMLSpanElement>(null);
   const started = useRef(false);
+  const reducedMotion = usePrefersReducedMotion();
 
   useEffect(() => {
+    // Reduced motion (OS setting or the accessibility widget's toggle) skips
+    // the count-up entirely; the final number is shown from `display` below.
+    // Flipping the toggle on mid-count re-runs this effect, and the cleanup
+    // cancels the in-flight frame.
+    if (reducedMotion) return;
+
     const el = ref.current;
     if (!el) return;
 
+    let raf = 0;
     const io = new IntersectionObserver(
       ([entry]) => {
         if (!entry.isIntersecting || started.current) return;
         started.current = true;
         io.disconnect();
 
-        if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-          setValue(NEW_USERS_THIS_MONTH);
-          return;
-        }
-
         const t0 = performance.now();
         const tick = (now: number) => {
           const t = Math.min((now - t0) / COUNT_DURATION_MS, 1);
           const eased = 1 - Math.pow(1 - t, 3); // ease-out: fast start, slow settle
           setValue(Math.round(eased * NEW_USERS_THIS_MONTH));
-          if (t < 1) requestAnimationFrame(tick);
+          if (t < 1) raf = requestAnimationFrame(tick);
         };
-        requestAnimationFrame(tick);
+        raf = requestAnimationFrame(tick);
       },
       { threshold: 0.4 }
     );
 
     io.observe(el);
-    return () => io.disconnect();
-  }, []);
+    return () => {
+      io.disconnect();
+      cancelAnimationFrame(raf);
+    };
+  }, [reducedMotion]);
+
+  const display = reducedMotion ? NEW_USERS_THIS_MONTH : value;
 
   return (
     <span
@@ -71,7 +80,7 @@ export function HeroJoinStat() {
           textAlign: 'left',
         }}
       >
-        +{value}
+        +{display}
       </span>
       סוחרים הצטרפו בחודש האחרון
     </span>

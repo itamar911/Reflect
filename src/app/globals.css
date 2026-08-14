@@ -225,6 +225,15 @@ html.light .sidebar-link-active {
 html {
   scroll-behavior: smooth;
 }
+/* The accessibility widget's toggle resets this via
+   html[data-a11y-reduce-motion='true'] in accessibility.css; this is the
+   OS-setting half of the same rule. Both are needed — they are independent
+   sources, and either one alone should disable smooth scrolling. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
 
 button,
 a,
