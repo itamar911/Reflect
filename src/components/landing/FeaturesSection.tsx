@@ -72,9 +72,13 @@ export function FeaturesSection() {
                     >
                       <Icon size={24} style={{ color: '#00d2d2' }} />
                     </div>
-                    <h3 className="font-bold text-white" style={{ fontSize: 21 }}>{feature.title}</h3>
+                    {/* rem, not px literals, so the accessibility widget's text
+                        scale and the browser's own font-size preference reach
+                        the card's reading copy. 1.3125rem/1.09375rem are the
+                        21px/17.5px this section already used. */}
+                    <h3 className="font-bold text-white" style={{ fontSize: '1.3125rem' }}>{feature.title}</h3>
                   </div>
-                  <p className="text-tg-muted" style={{ fontSize: 17.5, lineHeight: 1.7 }}>{feature.body}</p>
+                  <p className="text-tg-muted" style={{ fontSize: '1.09375rem', lineHeight: 1.7 }}>{feature.body}</p>
                 </div>
               </ScrollReveal>
             );

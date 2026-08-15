@@ -39,6 +39,11 @@
   background: var(--color-tg-surface-2);
   border: 1px solid var(--color-tg-border-light);
 }
+/* The px font sizes in this file are a known, deliberate hold-out. The
+   landing page's reading copy was converted to rem for WCAG 1.4.4; the app's
+   internal UI (this file, journal.css, dashboard, settings) is a separate
+   post-launch pass, because it is dense data UI whose column and row geometry
+   was measured against these sizes. Do not convert piecemeal. */
 .stats-seg button {
   padding: 5px 14px;
   border-radius: 8px;

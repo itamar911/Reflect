@@ -63,7 +63,10 @@ export function FaqSection() {
                     className="w-full flex items-center justify-between gap-4 p-5 text-start"
                     aria-expanded={isOpen}
                   >
-                    <span className="font-bold text-white" style={{ fontSize: 17 }}>{item.q}</span>
+                    {/* rem, not a px literal, so the question follows the browser
+                        font-size preference and the widget's text scale the same
+                        way the answer's text-base already does. 1.0625rem = 17px. */}
+                    <span className="font-bold text-white" style={{ fontSize: '1.0625rem' }}>{item.q}</span>
                     <span className={`faq-toggle ${isOpen ? 'open' : ''}`} aria-hidden />
                   </button>
                   <div

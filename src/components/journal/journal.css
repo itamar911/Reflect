@@ -45,6 +45,10 @@
 }
 
 /* Trades table: sticky header, comfortable rows, subtle dividers, no zebra */
+/* The px font sizes here are a known, deliberate hold-out — same call as
+   stats.css: the landing page's reading copy moved to rem for WCAG 1.4.4,
+   while the app's internal data UI is a separate post-launch pass. Do not
+   convert piecemeal. */
 .jr-table {
   width: 100%;
   border-collapse: separate; /* keeps the th border attached while sticky */

@@ -52,6 +52,10 @@ function dailySummaryHtml(
   const rrColor     = stats.avgRR  >= 2   ? '#00C853' : '#F59E0B';
   const msg         = motivation(stats.trades, stats.winRate, stats.totalPL);
 
+  // The font-size:…px values in the templates in this file are correct as px
+  // and must stay that way. This HTML is rendered by mail clients, not by the
+  // app in a browser; rem is unreliable across them and there is no root
+  // font-size to resolve against. The app's rem/accessibility rules stop here.
   return `<!DOCTYPE html><html dir="rtl" lang="he">
 <body style="font-family:sans-serif;background:#0a0a0f;color:#fff;padding:24px;max-width:600px;margin:0 auto">
 <div style="background:#0d1117;border:1px solid #1a2535;border-radius:16px;padding:24px">

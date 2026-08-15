@@ -156,7 +156,9 @@ export function LoopSection() {
                           transform: `rotate(${rotate})`,
                         }}
                       >
-                        <p className="text-white/95" style={{ fontSize: 16, lineHeight: 1.55 }}>
+                        {/* rem so the widget's text scale and the browser font
+                            preference reach this copy; 1rem is the 16px used before */}
+                        <p className="text-white/95" style={{ fontSize: '1rem', lineHeight: 1.55 }}>
                           {step.text}
                         </p>
                         {isLast && <LoopRestartPill className="mt-2" />}
@@ -190,7 +192,9 @@ export function LoopSection() {
                         className="loop-glass-card rounded-2xl px-4 py-3.5"
                         style={{ borderColor: tone.border, boxShadow: `inset 0 0 20px ${tone.glow}` }}
                       >
-                        <p className="text-white/95" style={{ fontSize: 15, lineHeight: 1.55 }}>
+                        {/* 0.9375rem = the 15px used before — see the note on the
+                            desktop copy above */}
+                        <p className="text-white/95" style={{ fontSize: '0.9375rem', lineHeight: 1.55 }}>
                           {step.text}
                         </p>
                       </div>

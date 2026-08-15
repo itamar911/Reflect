@@ -14,6 +14,15 @@
  * height — min-height doesn't count — while flex-grow correctly fills a
  * flex container's resolved size either way.
  *
+ * Font sizes inside the six mocks are deliberately px, not rem — do not
+ * "fix" them in a later accessibility pass. These are illustrations of UI,
+ * not reading copy, and their text sits inside this frame's fixed geometry.
+ * Pinning it in px is precisely why they survived the 150% text-scale audit:
+ * converting them to rem would grow the text inside a frame sized in px and
+ * re-open the clipping that the min-height + flex-1 arrangement above closed.
+ * The landing page's actual reading copy (section headings, body paragraphs,
+ * FAQ questions, CTA labels) is rem — see SectionHeading/FeaturesSection.
+ *
  * .mock-ambient-glow is a slow-drifting radial blob sitting at z-index:-1
  * (behind normal-flow content, in front of the card background) that gives
  * any leftover empty space inside a mock a sense of depth instead of reading

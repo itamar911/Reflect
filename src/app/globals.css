@@ -478,8 +478,14 @@ html[data-a11y-reduce-motion='true'] .shimmer-btn {
 /* ── Global font-size scale — every class bumped up one step ─────
    text-xs  12→14  text-sm  14→16  text-base 16→18
    text-lg  18→20  text-xl  20→24  text-2xl  24→30  text-3xl 30→36
+
+   The px comments below assume the browser's usual 16px default. There is
+   deliberately no `html { font-size }` rule here: pinning the root to an
+   absolute px value overrides the user's own browser text-size preference
+   for the whole app (WCAG 1.4.4 — page zoom still works, so a percentage-
+   zoom audit passes while the browser setting does nothing). The root must
+   inherit the browser default, and everything below is rem so it follows.
    ─────────────────────────────────────────────────────────────── */
-html { font-size: 16px; }
 
 .text-xs   { font-size: 0.875rem;  line-height: 1.25rem;  }  /* 14 px */
 .text-sm   { font-size: 1rem;      line-height: 1.5rem;   }  /* 16 px */

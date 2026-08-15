@@ -8,6 +8,15 @@ interface LogoProps {
   showWordmark?: boolean;
 }
 
+/**
+ * The three fontSize values below (38 / 38 / 18) are deliberately px and must
+ * stay that way — do not convert them to rem in an accessibility pass. A
+ * logotype is branding, not reading copy: WCAG 1.4.4 covers text a user reads,
+ * and does not require a mark to resize. Keeping it pinned also holds the logo
+ * section of the landing nav at a constant 190.6px across every browser
+ * font-size and widget text-scale combination, which is headroom the nav row
+ * currently depends on to fit inside its max-w-[1360px] cap.
+ */
 export function Logo({ showWordmark = true }: LogoProps) {
   return (
     <span

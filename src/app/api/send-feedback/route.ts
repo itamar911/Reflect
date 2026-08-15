@@ -24,6 +24,10 @@ function buildHtml(
   });
   const descEscaped = description.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
+  // The font-size:…px values in this template are correct as px and must stay
+  // that way. This HTML is rendered by mail clients, not by the app in a
+  // browser; rem is unreliable across them and there is no root font-size to
+  // resolve against. The app's own rem/accessibility rules do not apply here.
   return `<!DOCTYPE html>
 <html dir="rtl" lang="he">
 <body style="font-family:Arial,sans-serif;background:#0a0a1a;color:#eee;padding:24px;max-width:640px;margin:0 auto">

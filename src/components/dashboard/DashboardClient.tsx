@@ -507,6 +507,11 @@ function RadarCard({
 
   return (
     <Card>
+      {/* The numeric fontSize values throughout this file render as px. That is
+          a known, deliberate hold-out, not an oversight: the landing page's
+          reading copy was converted to rem for WCAG 1.4.4, while the app's
+          internal UI (here, settings, stats.css, journal.css) is a separate
+          post-launch pass. Do not convert piecemeal. */}
       {/* Header — title + score circle + trend indicator */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
         <p style={{ fontSize: 15, fontWeight: 700, color: TEXT }}>{title}</p>

@@ -64,12 +64,19 @@ html[data-a11y-contrast='inverted'] video {
 
 /* ── Text scale ────────────────────────────────────────────────────
    Scales the root font size so every rem-based Tailwind size (see the
-   text-xs..text-5xl overrides in globals.css) follows proportionally. */
-html[data-a11y-text-scale='110'] { font-size: 17.6px; }
-html[data-a11y-text-scale='120'] { font-size: 19.2px; }
-html[data-a11y-text-scale='130'] { font-size: 20.8px; }
-html[data-a11y-text-scale='140'] { font-size: 22.4px; }
-html[data-a11y-text-scale='150'] { font-size: 24px; }
+   text-xs..text-5xl overrides in globals.css) follows proportionally.
+
+   Percentages, not px. A percentage on html resolves against the browser's
+   default font size, so the widget's scale *multiplies* the user's own text-
+   size preference. The px values these replaced (17.6/19.2/20.8/22.4/24)
+   were 16px x scale — they pinned the root to an absolute size and silently
+   discarded that preference, the same WCAG 1.4.4 failure as the
+   `html { font-size: 16px }` rule removed from globals.css. */
+html[data-a11y-text-scale='110'] { font-size: 110%; }
+html[data-a11y-text-scale='120'] { font-size: 120%; }
+html[data-a11y-text-scale='130'] { font-size: 130%; }
+html[data-a11y-text-scale='140'] { font-size: 140%; }
+html[data-a11y-text-scale='150'] { font-size: 150%; }
 
 /* ── Underline links ──────────────────────────────────────────────────
    A rectangular outline plus a thick underline, not just a color change —

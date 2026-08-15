@@ -71,9 +71,11 @@ export function LandingNav() {
         }}
       >
         {/* Letterhead mark — pinned to the page's top-right (start edge in RTL),
-            outside the nav flow; fixed light tone since the landing is always dark */}
+            outside the nav flow; fixed light tone since the landing is always dark.
+            Sized in rem (0.6875rem = the 11px used before) so it follows the
+            browser's font-size preference like the rest of the nav's text. */}
         <span
-          className="absolute top-1 right-2.5 text-[11px] font-medium pointer-events-none select-none"
+          className="absolute top-1 right-2.5 text-[0.6875rem] font-medium pointer-events-none select-none"
           style={{ color: 'rgba(226, 236, 244, 0.5)' }}
         >
           בס״ד
@@ -113,9 +115,12 @@ export function LandingNav() {
             >
               כניסה למערכת
             </Link>
+            {/* 0.9375rem = the 15px used before. In rem the CTA label follows the
+                browser font-size preference — which does widen the desktop row,
+                since the nav's own width thresholds are measured against it. */}
             <Link
               href="/signup"
-              className="landing-cta cta-shine px-5 py-2.5 rounded-xl text-[15px] font-bold text-black"
+              className="landing-cta cta-shine px-5 py-2.5 rounded-xl text-[0.9375rem] font-bold text-black"
             >
               התחל ניסיון חינם
             </Link>
@@ -169,10 +174,11 @@ export function LandingNav() {
             >
               כניסה למערכת
             </Link>
+            {/* 0.9375rem = the 15px used before — mirrors the desktop CTA above */}
             <Link
               href="/signup"
               onClick={() => setOpen(false)}
-              className="landing-cta cta-shine px-4 py-3 rounded-xl text-[15px] font-bold text-black text-center"
+              className="landing-cta cta-shine px-4 py-3 rounded-xl text-[0.9375rem] font-bold text-black text-center"
             >
               התחל ניסיון חינם
             </Link>

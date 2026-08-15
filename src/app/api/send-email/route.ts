@@ -29,6 +29,10 @@ async function sendEmail({ to, subject, html }: EmailPayload) {
   return res.json();
 }
 
+// The font-size:…px values in the templates below are correct as px and must
+// stay that way. This HTML is rendered by mail clients, not by the app in a
+// browser; rem is unreliable across them and there is no root font-size to
+// resolve against. The app's own rem/accessibility rules do not apply here.
 function buildPreMarketEmail(name: string) {
   return `
 <!DOCTYPE html><html dir="rtl" lang="he"><body style="font-family:sans-serif;background:#0a0a1a;color:#fff;padding:24px;max-width:600px;margin:0 auto">

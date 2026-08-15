@@ -214,11 +214,16 @@ export function DistinctionSection() {
           className="grid grid-cols-1 gap-10 items-center xl:grid-cols-[minmax(0,0.7fr)_minmax(0,1.3fr)] xl:gap-12"
         >
           {/* copy — first child = right column in RTL */}
+          {/* The two paragraphs below are rem, not px: this is the section's
+              reading copy, so it has to follow the browser's font-size
+              preference and the widget's text scale. 1.15625rem is the 18.5px
+              they already used. The panels to their left stay pinned in px —
+              see the note above PANEL_MIN_H. */}
           <div className="flex flex-col gap-7">
             <ScrollReveal delay={80}>
               <p
                 className="text-tg-muted max-w-[36rem] mx-auto xl:mx-0 xl:max-w-none"
-                style={{ fontSize: 18.5, lineHeight: 1.85 }}
+                style={{ fontSize: '1.15625rem', lineHeight: 1.85 }}
               >
                 יומן טוב מראה לך מה קרה: איפה טעית, מה עבד, אילו דפוסים חוזרים אצלך. זה שלב הכרחי —
                 בלי תיעוד אף אחד לא בוחן אותך.
@@ -228,7 +233,7 @@ export function DistinctionSection() {
             <ScrollReveal delay={160}>
               <p
                 className="text-tg-muted max-w-[36rem] mx-auto xl:mx-0 xl:max-w-none"
-                style={{ fontSize: 18.5, lineHeight: 1.85 }}
+                style={{ fontSize: '1.15625rem', lineHeight: 1.85 }}
               >
                 אבל יש רגע אחד שאף יומן בעולם לא מכסה: הרגע שבו האצבע על הכפתור, וכל מה שראית אתמול
                 בסטטיסטיקות נעלם. Reflect בנוי על שני החצאים — הוא מנתח אותך לעומק אחרי כל עסקה, והוא
