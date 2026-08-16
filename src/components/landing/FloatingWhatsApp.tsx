@@ -53,10 +53,19 @@ export function FloatingWhatsApp() {
       target="_blank"
       rel="noopener noreferrer"
       aria-label="פתחו שיחה בוואטסאפ"
-      className={`fixed bottom-5 left-5 z-40 flex h-12 w-12 items-center justify-center rounded-full text-white transition-all duration-300 sm:bottom-6 sm:left-6 sm:h-14 sm:w-14 ${
+      // Slot 1 of the shared floating stack (globals.css) — one button-height
+      // above the accessibility trigger, which owns the corner on every route.
+      className={`fixed z-40 flex items-center justify-center rounded-full text-white transition-all duration-300 ${
         visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'
       }`}
-      style={{ backgroundColor: WHATSAPP_GREEN, boxShadow: '0 4px 16px rgba(0, 0, 0, 0.25)' }}
+      style={{
+        bottom: 'var(--floating-slot-1)',
+        left: 'var(--floating-inset)',
+        width: 'var(--floating-size)',
+        height: 'var(--floating-size)',
+        backgroundColor: WHATSAPP_GREEN,
+        boxShadow: '0 4px 16px rgba(0, 0, 0, 0.25)',
+      }}
     >
       <WhatsAppIcon size={24} className="sm:hidden" />
       <WhatsAppIcon size={28} className="hidden sm:block" />

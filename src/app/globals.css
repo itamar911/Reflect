@@ -169,6 +169,31 @@ body {
   outline-offset: 2px;
 }
 
+/* ── Floating corner controls ─────────────────────────────
+   The page's fixed bottom-corner buttons (accessibility trigger, landing
+   WhatsApp) share one stack so they can never land on top of each other.
+   All of them sit in the bottom-LEFT corner: in this RTL layout the right
+   edge belongs to the app sidebar, whose collapsed 64px rail carries the
+   "עסקה חדשה" CTA — a control pinned bottom-right covers it and steals the
+   click.
+   Slot 0 is the corner itself, slot 1 is one button-height above it. Size
+   lives here too rather than in Tailwind h-/w- classes, so the slot maths
+   and the buttons can't disagree about how tall a button is. */
+:root {
+  --floating-inset: 1.25rem;
+  --floating-size:  3rem;
+  --floating-gap:   0.75rem;
+  --floating-slot-0: var(--floating-inset);
+  --floating-slot-1: calc(var(--floating-inset) + var(--floating-size) + var(--floating-gap));
+}
+@media (min-width: 640px) {
+  :root {
+    --floating-inset: 1.5rem;
+    --floating-size:  3.5rem;
+    --floating-gap:   1rem;
+  }
+}
+
 /* ── Sidebar toggle handle ────────────────────────────────
    Half-pill tab attached to the sidebar's edge (RTL: rounded on the left,
    flat against the panel). The outer button (.sidebar-handle-btn, inline

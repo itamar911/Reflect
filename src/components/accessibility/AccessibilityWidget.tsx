@@ -75,8 +75,19 @@ export function AccessibilityWidget() {
         aria-expanded={open}
         aria-haspopup="dialog"
         aria-controls={panelId}
-        className="fixed bottom-5 right-5 z-[110] flex h-12 w-12 items-center justify-center rounded-full text-white transition-transform duration-200 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 sm:bottom-6 sm:right-6 sm:h-14 sm:w-14"
-        style={{ backgroundColor: 'var(--color-tg-primary)', boxShadow: '0 4px 16px rgba(0, 210, 210, 0.4)' }}
+        // Bottom-LEFT, slot 0 of the shared floating stack (globals.css).
+        // `left`, not `insetInlineStart`: the page is dir="rtl", so the
+        // logical start edge is the right one — where the sidebar rail and
+        // its "עסקה חדשה" CTA live.
+        className="fixed z-[110] flex items-center justify-center rounded-full text-white transition-transform duration-200 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2"
+        style={{
+          bottom: 'var(--floating-slot-0)',
+          left: 'var(--floating-inset)',
+          width: 'var(--floating-size)',
+          height: 'var(--floating-size)',
+          backgroundColor: 'var(--color-tg-primary)',
+          boxShadow: '0 4px 16px rgba(0, 210, 210, 0.4)',
+        }}
       >
         <Accessibility size={24} className="sm:hidden" aria-hidden />
         <Accessibility size={28} className="hidden sm:block" aria-hidden />
