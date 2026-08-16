@@ -4,6 +4,7 @@ import { ThemeProvider } from '@/components/theme/ThemeProvider';
 import { AccessibilityProvider } from '@/components/accessibility/AccessibilityContext';
 import { AccessibilityInitScript } from '@/components/accessibility/AccessibilityInitScript';
 import { AccessibilityWidget } from '@/components/accessibility/AccessibilityWidget';
+import { SkipLink } from '@/components/accessibility/SkipLink';
 import { FloatingWhatsApp } from '@/components/landing/FloatingWhatsApp';
 import './globals.css';
 import '@/components/accessibility/accessibility.css';
@@ -29,6 +30,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="he" dir="rtl" className={`${rubik.variable} h-full`} suppressHydrationWarning>
       <body className="min-h-full antialiased">
+        {/* First element in the body ⇒ first tab stop on every route */}
+        <SkipLink />
         <AccessibilityInitScript />
         <ThemeProvider>
           <AccessibilityProvider>

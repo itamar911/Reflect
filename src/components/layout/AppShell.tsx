@@ -12,6 +12,7 @@ import RuleBlockedModal from '@/components/rules/RuleBlockedModal';
 import { fetchActiveRuleViolation, type RuleViolationResult } from '@/lib/rules/fetchActiveRuleViolation';
 import { logRuleViolations } from '@/lib/rules/logRuleViolation';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
+import { MAIN_CONTENT_ID } from '@/components/accessibility/SkipLink';
 import { Logo } from '@/components/ui/Logo';
 import { PageTransition } from '@/components/layout/PageTransition';
 import { getPlanLimits, type PlanTier } from '@/lib/plans/config';
@@ -527,9 +528,15 @@ export default function AppShell({
                 {(displayName || '?').charAt(0).toUpperCase()}
               </div>
             </span>
+            {/* `inert`, not `aria-hidden`: this block holds a real control
+                (ThemeToggle). aria-hidden hid it from assistive tech while
+                pointerEvents:none stopped only the mouse, so Tab still landed
+                on an invisible button. inert removes it from the tab order and
+                the accessibility tree together — the sibling label spans below
+                stay on aria-hidden because they hold no focusable content. */}
             <div
               className="relative flex-1 flex items-center gap-2 min-w-0"
-              aria-hidden={!expanded}
+              inert={!expanded}
               style={{
                 opacity: expanded ? 1 : 0,
                 transform: expanded ? 'translateX(0)' : 'translateX(6px)',
@@ -622,9 +629,15 @@ export default function AppShell({
             </a>
           </div>
         )}
-        <PageTransition>
-          {children}
-        </PageTransition>
+        {/* Page content landmark — the sidebar, the toggle handle and the demo
+            banner all sit outside it, so the skip link lands on the route's
+            own content. tabIndex={-1} makes it a valid focus target without
+            adding a tab stop. */}
+        <main id={MAIN_CONTENT_ID} tabIndex={-1}>
+          <PageTransition>
+            {children}
+          </PageTransition>
+        </main>
       </div>
 
       {isDemo && <DemoGuard />}

@@ -14,6 +14,7 @@ import { FaqSection } from '@/components/landing/FaqSection';
 import { ContactSection } from '@/components/landing/ContactSection';
 import { FinalCtaSection } from '@/components/landing/FinalCtaSection';
 import { LandingFooter } from '@/components/landing/LandingFooter';
+import { MAIN_CONTENT_ID } from '@/components/accessibility/SkipLink';
 import '@/components/landing/landing.css';
 
 export const metadata: Metadata = {
@@ -33,7 +34,7 @@ export default async function HomePage() {
   return (
     <div dir="rtl" className="landing">
       <LandingNav />
-      <main>
+      <main id={MAIN_CONTENT_ID} tabIndex={-1}>
         <HeroSection />
         <LoopSection />
         <DistinctionSection />

@@ -58,7 +58,7 @@ export default function AuthScreen({ mode }: AuthScreenProps) {
     setCallbackErrorDismissed(true);
 
     if (mode === 'signup') {
-      const { error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
@@ -68,7 +68,17 @@ export default function AuthScreen({ mode }: AuthScreenProps) {
       });
       if (error) {
         setError(error.message);
+      } else if (data.session) {
+        // The project runs with mailer_autoconfirm on, so signUp returns a
+        // live session and there is nothing to confirm — send the new user
+        // straight into onboarding instead of parking them on this screen.
+        router.push('/onboarding');
+        router.refresh();
+        return;
       } else {
+        // Only reachable if email confirmation is switched back on in the
+        // Supabase dashboard: then signUp returns user-without-session and
+        // the account really is gated behind the emailed link.
         setSuccess('בדוק את האימייל שלך לאישור החשבון');
       }
     } else {

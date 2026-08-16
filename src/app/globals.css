@@ -139,6 +139,36 @@ body {
   transform: translate(-50%, -50%);
 }
 
+/* ── Skip to content ──────────────────────────────────────
+   The first focusable element on every route (rendered at the top of <body>
+   by the root layout). Parked above the viewport until focused, then pinned
+   to the top inline-start corner — `inset-inline-start`, not `left`, so it
+   reveals at the top-right under the app's dir="rtl" and would flip
+   correctly in an LTR subtree.
+   z-index 101 clears the app's chrome (sidebar 40, modals 50, the app's
+   pre-existing 100 ceiling) while staying below the accessibility filter
+   overlay at 105, so grayscale / inverted contrast still recolour it. */
+.skip-link {
+  position: fixed;
+  top: 0.75rem;
+  inset-inline-start: 0.75rem;
+  z-index: 101;
+  padding: 0.625rem 1.25rem;
+  border-radius: 0.75rem;
+  background: var(--color-tg-primary);
+  color: #04262b;
+  font-size: 0.875rem;
+  font-weight: 700;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  transform: translateY(calc(-100% - 1.5rem));
+  transition: transform 0.15s ease;
+}
+.skip-link:focus {
+  transform: translateY(0);
+  outline: 2px solid var(--color-tg-text);
+  outline-offset: 2px;
+}
+
 /* ── Sidebar toggle handle ────────────────────────────────
    Half-pill tab attached to the sidebar's edge (RTL: rounded on the left,
    flat against the panel). The outer button (.sidebar-handle-btn, inline

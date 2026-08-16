@@ -11,6 +11,7 @@
 
 import type { Metadata } from 'next';
 import { Logo } from '@/components/ui/Logo';
+import { MAIN_CONTENT_ID } from '@/components/accessibility/SkipLink';
 import { DEMO_TABLES } from '@/lib/demo/fixtures';
 import { mapDashTrade, type DashTrade } from '@/lib/dashboard/trades';
 import { tradeMoneyPnl, hasMoneyPnl, isWinningTrade, tradeDirection, tradePointsPnl } from '@/lib/pnl';
@@ -140,7 +141,7 @@ export default function PhoneShowcasePage() {
           </span>
         </header>
 
-        <main className="flex flex-col gap-3 px-3 pt-4 pb-5">
+        <main id={MAIN_CONTENT_ID} tabIndex={-1} className="flex flex-col gap-3 px-3 pt-4 pb-5">
           {/* Greeting — same as the dashboard header */}
           <div className="px-1">
             <p style={{ fontSize: 12, fontWeight: 600, color: MUTED }}>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, useRef, useSyncExternalStore } from 'react';
+import { useState, useEffect, useCallback, useId, useMemo, useRef, useSyncExternalStore } from 'react';
 import { Check, AlertTriangle } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { validateTradePlan, DEFAULT_PRESET_RULES } from '@/lib/validators/RulesetValidator';
@@ -895,8 +895,9 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div ref={(el) => { fieldRefs.current.units = el; }} style={fieldHighlightStyle('units')} className="flex flex-col gap-1">
-                    <label className="text-xs font-medium text-tg-muted">יחידות/חוזים</label>
+                    <label htmlFor="trade-units" className="text-xs font-medium text-tg-muted">יחידות/חוזים</label>
                     <input
+                      id="trade-units"
                       type="number"
                       step="any"
                       placeholder="0"
@@ -910,8 +911,9 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                     />
                   </div>
                   <div className="flex flex-col gap-1">
-                    <label className="text-xs font-medium text-tg-muted">שווי נקודה ($)</label>
+                    <label htmlFor="trade-point-value" className="text-xs font-medium text-tg-muted">שווי נקודה ($)</label>
                     <input
+                      id="trade-point-value"
                       type="number"
                       step="any"
                       placeholder="1"
@@ -1259,12 +1261,17 @@ function PriceInput({
       ? 'var(--color-tg-success)'
       : 'var(--color-tg-border)';
 
+  // Generated per instance: the component renders three times in the form
+  // (entry / stop loss / take profit), so a fixed id would collide.
+  const inputId = useId();
+
   return (
     <div className="flex flex-col gap-1.5">
-      <label className="text-xs font-medium" style={{ color: borderColor }}>
+      <label htmlFor={inputId} className="text-xs font-medium" style={{ color: borderColor }}>
         {label}
       </label>
       <input
+        id={inputId}
         type="number"
         step="any"
         placeholder="0.00"

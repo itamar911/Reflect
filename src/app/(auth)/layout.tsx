@@ -1,4 +1,5 @@
 import { AuthShowcase } from '@/components/auth/AuthShowcase';
+import { MAIN_CONTENT_ID } from '@/components/accessibility/SkipLink';
 import '@/components/auth/auth.css';
 
 // One unified rounded container centered on the page: the form surface and
@@ -17,10 +18,16 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           boxShadow: '0 30px 80px rgba(0, 0, 0, 0.28), 0 8px 24px rgba(0, 0, 0, 0.14)',
         }}
       >
-        {/* Form half — first child ⇒ inline-start column, visually right in RTL */}
-        <div className="flex items-center justify-center px-6 py-10 sm:px-10 lg:overflow-y-auto">
+        {/* Form half — first child ⇒ inline-start column, visually right in RTL.
+            Also the route's content landmark and the skip link's target; the
+            decorative showcase half beside it stays aria-hidden. */}
+        <main
+          id={MAIN_CONTENT_ID}
+          tabIndex={-1}
+          className="flex items-center justify-center px-6 py-10 sm:px-10 lg:overflow-y-auto"
+        >
           {children}
-        </div>
+        </main>
 
         {/* Illustrated showcase half — flush against the form, lg+ only */}
         <aside className="hidden lg:block min-h-0" aria-hidden="true">
