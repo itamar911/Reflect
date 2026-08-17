@@ -56,6 +56,22 @@ function effectivePnl(t: DashTrade): number {
   return hasMoneyPnl(t) ? tradeMoneyPnl(t) : calcPnl(t) ?? 0;
 }
 function dayKey(iso: string) { return iso.slice(0, 10); }
+
+/** Accessible name for a "עסקאות אחרונות" row's open-detail button. Same
+    composition as the trades table's rowAccessibleName: title first so the
+    visible text is a prefix, then only what separates one row from another.
+    Kept local rather than shared — DashTrade is a narrower row shape than the
+    journal's Trade, and the two lists format their dates differently. */
+function recentRowName(t: DashTrade): string {
+  const title = t.symbol ?? t.strategy;
+  const dir   = tradeDir(t) === 'long' ? 'לונג' : 'שורט';
+  const win   = isWinningTrade(t);
+  if (win === null) return `${title}, ${dir}, פתוחה, ${fmtDateTime(t.submitted_at)}`;
+  const amount = hasMoneyPnl(t)
+    ? `${t.pnl_currency ?? '₪'}${Math.round(Math.abs(tradeMoneyPnl(t))).toLocaleString('en-US')}`
+    : `${Math.round(Math.abs(calcPnl(t) ?? 0))} נקודות`;
+  return `${title}, ${dir}, ${fmtDateTime(t.submitted_at)}, ${win ? 'רווח' : 'הפסד'} ${amount}`;
+}
 function fmtPnl(v: number) { return `${v >= 0 ? '+' : ''}${v.toFixed(2)}`; }
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit' });
@@ -1687,15 +1703,36 @@ export default function DashboardClient({
                   const pnl  = calcPnl(t);
                   const dir  = tradeDir(t);
                   return (
-                    <div key={t.id} className="flex items-center gap-2 py-3 cursor-pointer"
+                    // has-[…]:  the whole row is tinted while its open-control
+                    // has focus, so focus reads as "this row" and not "this
+                    // word". Keyed on the control rather than focus-within, so
+                    // a sibling control in the row can't claim the indicator.
+                    <div key={t.id}
+                      className="dash-recent-row flex items-center gap-2 py-3 cursor-pointer has-[.dash-row-open:focus-visible]:bg-tg-primary/10"
                       style={{ borderTop: i > 0 ? `1px solid ${BORDER}` : undefined }}
-                      onClick={() => setSelTrade(t)}>
+                      // Hand focus to the row's own control before opening, so
+                      // the sheet restores focus here on close instead of to
+                      // <main tabIndex={-1}>, which is what a click on a bare
+                      // <div> would otherwise leave as the active element.
+                      onClick={e => {
+                        e.currentTarget.querySelector<HTMLElement>('.dash-row-open')?.focus();
+                        setSelTrade(t);
+                      }}>
                       {/* Date + asset */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="text-sm font-semibold truncate" style={{ color: TEXT }}>
+                          {/* The row's keyboard control. Same pattern as the
+                              trades table: a real button on the row's title,
+                              while the row <div> keeps its click handler for
+                              the mouse. */}
+                          <button type="button"
+                            onClick={e => { e.stopPropagation(); setSelTrade(t); }}
+                            aria-label={recentRowName(t)}
+                            aria-haspopup="dialog"
+                            className="dash-row-open text-start min-w-0 rounded-md text-sm font-semibold truncate focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-tg-primary"
+                            style={{ color: TEXT }}>
                             {t.symbol ?? t.strategy}
-                          </span>
+                          </button>
                           <span className="text-[9px] px-1.5 py-0.5 rounded font-semibold"
                             style={{
                               background: dir === 'long' ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)',
@@ -1732,7 +1769,18 @@ export default function DashboardClient({
                         ) : (
                           <p className="text-xs font-semibold" style={{ color: ACCENT }}>פתוח</p>
                         )}
+                        {/* Mouse-only duplicate of the title button above —
+                            same row, same target. Removed from the tab order
+                            *and* from the accessibility tree together: a
+                            focusable node inside aria-hidden is the exact
+                            defect fixed in AppShell's collapsed ThemeToggle,
+                            so the two attributes must always travel as a pair.
+                            The difference from that case is that this button
+                            stays visible and mouse-operable — nothing is
+                            hidden from sight, only de-duplicated for AT. */}
                         <button onClick={e => { e.stopPropagation(); setSelTrade(t); }}
+                          tabIndex={-1}
+                          aria-hidden
                           className="hidden md:flex text-[10px] px-2 rounded-lg font-medium transition-opacity hover:opacity-80 min-h-[44px] items-center"
                           style={{ background: SURF2, color: TEXT2, fontWeight: 600, whiteSpace: 'nowrap' }}>
                           פרטים

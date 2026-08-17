@@ -87,6 +87,33 @@
   background: rgba(255, 255, 255, 0.03);
 }
 
+/* Row open-control: the button that carries each row's keyboard operability
+   (desktop table and mobile card alike). It replaced a plain <div>/<span>
+   pair, so it must not look like a button — only inherit the cell's RTL
+   alignment, which a <button> would otherwise centre. */
+.jr-row-open {
+  text-align: inherit;
+  border-radius: 8px;
+}
+.jr-row-open:focus-visible {
+  outline: 2px solid var(--color-tg-primary);
+  outline-offset: 2px;
+}
+
+/* Focus reads as "this row", not "this cell": the whole row is tinted and
+   ruled in turquoise while its open-control has focus. :has() rather than
+   :focus-within on purpose — the row checkbox and the ⋯ menu are separate
+   controls and must not claim the row indicator. Drawn with inset shadows
+   rather than borders so nothing shifts by a pixel when focus lands. */
+.jr-table tbody tr:has(.jr-row-open:focus-visible) {
+  background: rgba(0, 210, 210, 0.1);
+}
+.jr-table tbody tr:has(.jr-row-open:focus-visible) td {
+  box-shadow:
+    inset 0 1px 0 var(--color-tg-primary),
+    inset 0 -1px 0 var(--color-tg-primary);
+}
+
 /* Kebab: hidden until row hover on the desktop table, always visible on touch */
 .jr-table .jr-kebab {
   opacity: 0;

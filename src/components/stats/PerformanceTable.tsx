@@ -25,13 +25,19 @@ export default function PerformanceTable({ title, icon, unitLabel, rows, showRR 
     <Section title={title} icon={icon} count={`${rows.length} ${unitLabel}`}>
       <div className="stats-card overflow-x-auto">
         <table className="stats-table">
+          {/* Visually hidden: <Section> already renders `title` as a visible
+              heading directly above the table, so a visible caption would
+              duplicate it and push the card's first row out of alignment. */}
+          <caption className="sr-only">{`${title} — ${rows.length} ${unitLabel}`}</caption>
           <thead>
             <tr>
-              <th>שם</th>
-              <th>עסקאות</th>
-              <th>הצלחה %</th>
-              {showRR && <th>R:R</th>}
-              <th>רווח/הפסד</th>
+              {/* All five head cells label columns; this table has no row
+                  headers — the name cell is a <td> carrying a micro-bar. */}
+              <th scope="col">שם</th>
+              <th scope="col">עסקאות</th>
+              <th scope="col">הצלחה %</th>
+              {showRR && <th scope="col">R:R</th>}
+              <th scope="col">רווח/הפסד</th>
             </tr>
           </thead>
           <tbody>

@@ -47,8 +47,11 @@ export default function NotebookPageList({
           return (
             <div
               key={page.id}
-              onClick={() => onSelect(page.id)}
-              className="rounded-2xl"
+              onClick={e => {
+                e.currentTarget.querySelector<HTMLElement>('.nb-row-open')?.focus();
+                onSelect(page.id);
+              }}
+              className="nb-page-row rounded-2xl"
               style={{
                 padding: '12px', cursor: 'pointer',
                 background:   active ? 'rgba(0,210,210,0.08)' : 'var(--color-tg-bg)',
@@ -58,11 +61,28 @@ export default function NotebookPageList({
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ color: GOLD, display: 'flex', flexShrink: 0 }}>{tc?.icon}</span>
-                <span style={{ flex: 1, fontSize: 13.5, fontWeight: 700, color: active ? GOLD : TEXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {/* The row's keyboard control — the card <div> keeps its own
+                    click handler for the mouse. This one selects rather than
+                    opening a dialog, so it carries aria-current instead of
+                    aria-haspopup: the selected page is otherwise conveyed by
+                    colour alone. */}
+                <button
+                  type="button"
+                  onClick={e => { e.stopPropagation(); onSelect(page.id); }}
+                  aria-current={active ? 'true' : undefined}
+                  aria-label={`${page.title}, ${tc?.label ?? ''}, ${formatDateTime(page.created_at)}`}
+                  // No row-level tint here, unlike the trades table and the
+                  // dashboard: this row paints its own background inline
+                  // (selected vs not), and an inline style beats any class.
+                  // The ring on the control is the focus indicator.
+                  className="nb-row-open text-start rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-tg-primary"
+                  style={{ flex: 1, fontSize: 13.5, fontWeight: 700, color: active ? GOLD : TEXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                >
                   {page.title}
-                </span>
+                </button>
                 <button
                   onClick={e => { e.stopPropagation(); onDelete(page.id); }}
+                  aria-label={`מחיקת הדף ${page.title}`}
                   className="hit-40 relative"
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: MUTED, flexShrink: 0, padding: 2, borderRadius: 4 }}
                 >

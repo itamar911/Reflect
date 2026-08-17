@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useId, useRef } from 'react';
+import { useState, useMemo, useId, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { AlertTriangle, Bot, Eye, Inbox, MoreHorizontal, Pencil, Trash2, X } from 'lucide-react';
@@ -89,6 +89,38 @@ function fmtPrice(v: number) {
 
 const PAGE_SIZES = [15, 30, 50, 100];
 
+/**
+ * Accessible name for a row's open-detail control.
+ *
+ * The symbol leads, so the button's visible text is a prefix of its name;
+ * everything after it is only what actually tells one row from another —
+ * the same asset can be traded twice in a day, in both directions, with
+ * opposite outcomes, so direction, date and result all earn their place.
+ *
+ * Deliberately shorter than the visible row: the money figure is rounded
+ * (a screen reader saying "point zero zero" 30 times is noise) and the
+ * outcome is the word רווח/הפסד rather than a +/− glyph, which is read
+ * inconsistently at default punctuation levels. `formatPnlPoints` is not
+ * reused here for exactly that reason — it drops the sign entirely, so a
+ * loss and a win of the same size are indistinguishable in speech.
+ */
+function rowAccessibleName(t: Trade): string {
+  const title = t.symbol ?? t.strategy;
+  const dir   = inferDirection(t) === 'long' ? 'לונג' : 'שורט';
+
+  if (t.status !== 'closed') return `${title}, ${dir}, פתוחה, ${fmtDate(t.submitted_at)}`;
+
+  const win  = isWinningTrade(t);
+  const date = fmtDate(t.closed_at ?? t.submitted_at);
+  // Closed with no exit price recorded — the row shows סגור and no P&L.
+  if (win === null) return `${title}, ${dir}, סגורה, ${date}`;
+
+  const amount = hasMoneyPnl(t)
+    ? `${t.pnl_currency ?? '₪'}${Math.round(Math.abs(tradeMoneyPnl(t))).toLocaleString('en-US')}`
+    : `${Math.round(Math.abs(calcPnl(t) ?? 0))} נקודות`;
+  return `${title}, ${dir}, ${date}, ${win ? 'רווח' : 'הפסד'} ${amount}`;
+}
+
 // ── Mobile trade card (shown instead of table on small screens) ───────────────
 function MobileTradeCard({ t, onView, onEdit, onDelete, onClose, onDebrief, hasDebrief }: {
   t: Trade;
@@ -114,17 +146,29 @@ function MobileTradeCard({ t, onView, onEdit, onDelete, onClose, onDebrief, hasD
 
   return (
     <div
-      onClick={onView}
+      // Same focus hand-off as the desktop row — see the <tr> handler below.
+      onClick={e => {
+        e.currentTarget.querySelector<HTMLElement>('.jr-row-open')?.focus();
+        onView();
+      }}
       style={{ background: SURF, border: `1px solid ${BORDER}`, borderRadius: 14, cursor: 'pointer' }}
     >
       <div className="p-3 flex flex-col gap-2.5">
         {/* Row 1: asset + status + kebab */}
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5 min-w-0">
-            <AssetDot symbol={t.symbol} />
-            <span className="font-semibold truncate" style={{ fontSize: 16, color: TEXT }}>
-              {t.symbol ?? t.strategy}
-            </span>
+            {/* The card's keyboard control. The card <div> keeps its own click
+                handler for the mouse; this button is the only thing added. */}
+            <button type="button"
+              onClick={e => { e.stopPropagation(); onView(); }}
+              aria-label={rowAccessibleName(t)}
+              aria-haspopup="dialog"
+              className="jr-row-open flex items-center gap-1.5 min-w-0">
+              <AssetDot symbol={t.symbol} />
+              <span className="font-semibold truncate" style={{ fontSize: 16, color: TEXT }}>
+                {t.symbol ?? t.strategy}
+              </span>
+            </button>
             <Chip
               bg={dir === 'long' ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.1)'}
               color={dir === 'long' ? GREEN : RED}>
@@ -198,6 +242,13 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
   const deleteCancelRef = useRef<HTMLButtonElement>(null);
   // Task-shaped close-trade dialog — focus its first field, the exit price.
   const closeExitPriceRef = useRef<HTMLInputElement>(null);
+  // Row open-buttons by trade id, so focus can be placed on a *neighbouring*
+  // row after a delete. useModalDialog restores to whatever opened the dialog,
+  // which for a delete is the row's ⋯ button — a node that no longer exists
+  // once the row is gone, so the hook falls back to #main-content. Correct as
+  // a default, but the neighbouring row is the better landing spot here.
+  const rowRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const focusAfterDeleteRef = useRef<string | null>(null);
   const router = useRouter();
   const supabase = createClient();
 
@@ -271,6 +322,10 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
       setDeleteLoading(false);
       return;
     }
+    // Read the neighbour off the *current* page before the row disappears:
+    // the row below, or the row above when the deleted one was last.
+    const i = pageTrades.findIndex(t => t.id === id);
+    focusAfterDeleteRef.current = pageTrades[i + 1]?.id ?? pageTrades[i - 1]?.id ?? null;
     setTrades(prev => prev.filter(t => t.id !== id));
     setSelected(prev => {
       if (!prev.has(id)) return prev;
@@ -282,6 +337,19 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
     setDeletingTradeId(null);
     router.refresh();
   }
+
+  // Keyed on `trades` so it runs in the same commit that removes the row.
+  // React flushes every passive-effect *cleanup* before any passive effect,
+  // so the confirm dialog's restore-to-#main-content has already happened by
+  // the time this runs, and this wins. The ref is empty on an edit, and when
+  // the deleted row was the only one left there is no neighbour — both cases
+  // fall through to the hook's own fallback rather than guessing.
+  useEffect(() => {
+    const id = focusAfterDeleteRef.current;
+    if (!id) return;
+    focusAfterDeleteRef.current = null;
+    rowRefs.current[id]?.focus();
+  }, [trades]);
 
   function handleTradeUpdated(updated: Trade) {
     setTrades(prev => prev.map(t => t.id === updated.id ? updated : t));
@@ -419,6 +487,12 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
         style={{ border: `1px solid ${BORDER}`, background: SURF }}>
         <div className="overflow-auto" style={{ maxHeight: '70vh' }}>
           <table className="jr-table">
+            {/* Visually hidden: the page's <h1> already names this table on
+                screen, and a visible caption would sit above the rounded card
+                border, outside the surface it belongs to. */}
+            <caption className="sr-only">
+              {`טבלת עסקאות — ${filtered.length} עסקאות, עמוד ${page} מתוך ${totalPages}`}
+            </caption>
             <thead>
               <tr>
                 <TH>
@@ -467,7 +541,21 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
 
                 return (
                   <tr key={t.id}
-                    onClick={() => { setClosingTradeId(null); setViewTradeId(t.id); }}
+                    // Clicking a bare <td> focuses nothing, so the browser
+                    // lands focus on the nearest focusable ancestor — <main
+                    // id="main-content" tabIndex={-1}>, which is what the
+                    // dialog then captured and restored to. Handing focus to
+                    // the row's own control first makes the mouse path restore
+                    // to the row like the keyboard one. Whether a ring shows
+                    // afterwards is left to the browser's :focus-visible
+                    // heuristic — none in a pure mouse session, one if the
+                    // user has been on the keyboard, which is the behaviour
+                    // you want in both cases.
+                    onClick={() => {
+                      rowRefs.current[t.id]?.focus();
+                      setClosingTradeId(null);
+                      setViewTradeId(t.id);
+                    }}
                     style={isChecked ? { background: 'rgba(0,210,210,0.06)' } : undefined}>
 
                     {/* Checkbox */}
@@ -493,14 +581,26 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
                       }
                     </TD>
 
-                    {/* Asset */}
+                    {/* Asset — and the row's keyboard control.
+                        A real <button> inside the cell rather than a focusable
+                        <tr>: the row keeps role="row", so table navigation and
+                        the column/row counts are untouched, and Enter/Space
+                        both activate natively. The <tr> onClick above is
+                        unchanged, so clicking any cell still opens the detail;
+                        this button stops propagation only so a click on the
+                        symbol doesn't run the same handler twice. */}
                     <TD>
-                      <div className="flex items-center gap-2">
+                      <button type="button"
+                        ref={el => { rowRefs.current[t.id] = el; }}
+                        onClick={e => { e.stopPropagation(); setClosingTradeId(null); setViewTradeId(t.id); }}
+                        aria-label={rowAccessibleName(t)}
+                        aria-haspopup="dialog"
+                        className="jr-row-open flex items-center gap-2">
                         <AssetDot symbol={t.symbol} />
                         <span className="font-semibold text-base" style={{ color: TEXT }}>
                           {t.symbol ?? '—'}
                         </span>
-                      </div>
+                      </button>
                     </TD>
 
                     {/* Direction */}
@@ -752,7 +852,8 @@ function TH({ children, sortable, onSort, sortDir }: {
       <span style={{ color: GOLD, fontSize: 11 }}>{sortDir === 'desc' ? '↓' : '↑'}</span>
     </button>
   ) : children;
-  return <th>{inner}</th>;
+  // Every header in this table labels a column; there are no row headers.
+  return <th scope="col">{inner}</th>;
 }
 
 function TD({ children }: { children: React.ReactNode }) {
