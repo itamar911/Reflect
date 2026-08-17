@@ -77,6 +77,9 @@ interface CloseTradeProps {
   pnlCurrency: string | null;
   onClosed: () => void;
   onDebrief?: (result: AIDebriefResult) => void;
+  /** Lets the hosting dialog land initial focus on the exit-price field — the
+      first thing to fill in — instead of the modal header's close button. */
+  exitPriceRef?: React.RefObject<HTMLInputElement | null>;
 }
 
 const EXIT_REASONS = [
@@ -92,7 +95,8 @@ const EXIT_REASONS = [
 
 export default function CloseTrade({
   tradeId, entryPrice, stopLoss, takeProfit, rrRatio,
-  emotionalState, strategy, tradeReason, direction, units, pointValue, pnlCurrency, onClosed, onDebrief
+  emotionalState, strategy, tradeReason, direction, units, pointValue, pnlCurrency, onClosed, onDebrief,
+  exitPriceRef
 }: CloseTradeProps) {
   const [exitPrice, setExitPrice] = useState('');
   const [exitReason, setExitReason] = useState('');
@@ -243,7 +247,7 @@ export default function CloseTrade({
       <div className="flex flex-col gap-1">
         <label className="text-xs text-tg-muted">מחיר יציאה *</label>
         <div className="flex items-center gap-2 flex-wrap">
-          <input type="number" step="any" placeholder="0.00" value={exitPrice}
+          <input ref={exitPriceRef} type="number" step="any" placeholder="0.00" value={exitPrice}
             onChange={(e) => setExitPrice(e.target.value)}
             className="flex-1 min-w-0 h-10 px-3 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary"
             style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)' }}

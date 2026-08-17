@@ -1,10 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useId, useRef, useState } from 'react';
 import { Accessibility, RotateCcw, X } from 'lucide-react';
 import { useAccessibility } from './AccessibilityContext';
 import type { AccessibilityContrast } from './constants';
 import { TEXT_SCALE_MAX, TEXT_SCALE_MIN } from './constants';
+import { useModalDialog } from '@/lib/a11y/useModalDialog';
 
 const CONTRAST_OPTIONS: { value: AccessibilityContrast; label: string }[] = [
   { value: 'normal', label: 'רגיל' },
@@ -12,58 +13,28 @@ const CONTRAST_OPTIONS: { value: AccessibilityContrast; label: string }[] = [
   { value: 'inverted', label: 'הפוכה' },
 ];
 
-const FOCUSABLE_SELECTOR =
-  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
 export function AccessibilityWidget() {
   const a11y = useAccessibility();
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
   const baseId = useId();
   const headingId = `${baseId}-heading`;
   const panelId = `${baseId}-panel`;
 
-  const close = useCallback(() => {
-    setOpen(false);
-    triggerRef.current?.focus();
-  }, []);
+  const close = useCallback(() => setOpen(false), []);
 
-  // Focus trap: moves focus into the panel on open, cycles Tab/Shift+Tab
-  // within it, and closes on Escape — returning focus to the trigger.
-  useEffect(() => {
-    if (!open) return;
-
-    const panel = panelRef.current;
-    const firstFocusable = panel?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
-    firstFocusable?.focus();
-
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        close();
-        return;
-      }
-      if (e.key !== 'Tab' || !panel) return;
-
-      const focusable = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
-      if (focusable.length === 0) return;
-
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    }
-
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [open, close]);
+  // This panel's own trap was the reference implementation for the shared
+  // hook; it now uses it, which puts it on the same dialog stack as every
+  // other overlay. That matters because the trigger stays clickable while
+  // another modal is open (z-110, above every modal backdrop): opening the
+  // panel over one makes it topmost, so it owns Escape and the trap until it
+  // closes and hands both back. Focus restore is handled by the hook, which
+  // captures the trigger as the previously-focused element.
+  const { dialogProps } = useModalDialog<HTMLDivElement>({
+    open,
+    onClose: close,
+    labelledBy: headingId,
+  });
 
   return (
     <>
@@ -102,11 +73,8 @@ export function AccessibilityWidget() {
           }}
         >
           <div
-            ref={panelRef}
+            {...dialogProps}
             id={panelId}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby={headingId}
             dir="rtl"
             // Below sm this is a full-width bottom sheet — max-h caps it well
             // short of the viewport (dvh accounts for mobile browser chrome)

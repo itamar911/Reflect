@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Lock } from 'lucide-react';
 import { DEMO_UPSELL_EVENT } from '@/lib/demo/demoDb';
 import { useHydrated } from '@/lib/hooks';
+import { useModalDialog } from '@/lib/a11y/useModalDialog';
 
 /**
  * Mounted (only) on /demo pages. Hosts the signup-upsell modal raised by
@@ -15,6 +16,17 @@ import { useHydrated } from '@/lib/hooks';
 export default function DemoGuard() {
   const [upsellOpen, setUpsellOpen] = useState(false);
   const mounted = useHydrated();
+  const titleId = useId();
+  const dismissRef = useRef<HTMLButtonElement>(null);
+  const closeUpsell = useCallback(() => setUpsellOpen(false), []);
+  // Focus the dismiss button rather than the signup link — this dialog is
+  // raised by an intercepted mutation, not by the visitor asking for it.
+  const { dialogProps } = useModalDialog({
+    open: mounted && upsellOpen,
+    onClose: closeUpsell,
+    labelledBy: titleId,
+    initialFocusRef: dismissRef,
+  });
 
   // noindex meta
   useEffect(() => {
@@ -32,12 +44,8 @@ export default function DemoGuard() {
     return () => window.removeEventListener(DEMO_UPSELL_EVENT, open);
   }, []);
 
-  useEffect(() => {
-    if (!upsellOpen) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setUpsellOpen(false); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [upsellOpen]);
+  // Escape is handled by useModalDialog, which closes only the topmost dialog
+  // — this one can open over a journal modal in demo mode.
 
   if (!mounted || !upsellOpen) return null;
 
@@ -46,9 +54,10 @@ export default function DemoGuard() {
       dir="rtl"
       className="fixed inset-0 z-[100] flex items-center justify-center p-4"
       style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
-      onClick={() => setUpsellOpen(false)}
+      onClick={closeUpsell}
     >
       <div
+        {...dialogProps}
         className="w-full max-w-sm rounded-2xl p-6 flex flex-col items-center gap-4 text-center"
         style={{
           background: 'var(--color-tg-surface)',
@@ -63,7 +72,7 @@ export default function DemoGuard() {
         >
           <Lock size={20} color="#00d2d2" />
         </div>
-        <p className="text-base font-bold" style={{ color: 'var(--color-tg-text)' }}>
+        <p id={titleId} className="text-base font-bold" style={{ color: 'var(--color-tg-text)' }}>
           בדמו אי אפשר לשמור — התחילו לתעד בחשבון משלכם
         </p>
         <p className="text-sm" style={{ color: 'var(--color-tg-text-2)' }}>
@@ -78,7 +87,8 @@ export default function DemoGuard() {
             התחילו 5 ימי ניסיון
           </a>
           <button
-            onClick={() => setUpsellOpen(false)}
+            ref={dismissRef}
+            onClick={closeUpsell}
             className="w-full py-2.5 rounded-xl text-sm font-semibold transition-opacity hover:opacity-80"
             style={{ background: 'var(--color-tg-surface-2)', color: 'var(--color-tg-text-2)' }}
           >

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useId, useMemo, useRef, useSyncExtern
 import { Check, AlertTriangle } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { validateTradePlan, DEFAULT_PRESET_RULES } from '@/lib/validators/RulesetValidator';
+import { useModalDialog } from '@/lib/a11y/useModalDialog';
 import { calcRR } from '@/lib/utils';
 import ValidationResultBanner from './ValidationResultBanner';
 import EmotionalStateSlider from './EmotionalStateSlider';
@@ -133,6 +134,16 @@ interface TradePlanFormProps {
 
 export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess, initialWarning, disciplineAlertsEnabled }: TradePlanFormProps) {
   const limits = getPlanLimits(plan);
+  const titleId = useId();
+  const symbolRef = useRef<HTMLInputElement>(null);
+  // Task-shaped dialog: focus the symbol field, the first thing you fill in,
+  // rather than the close button. The sheet has no trigger element to hand
+  // back to — it opens from the sidebar CTA, from EmptyStateButton, or from a
+  // bare `open-trade-form` event — so useModalDialog captures whatever had
+  // focus at open time and restores that.
+  const { dialogProps } = useModalDialog({
+    open: isOpen, onClose, labelledBy: titleId, initialFocusRef: symbolRef,
+  });
   const [weekTradeCount, setWeekTradeCount] = useState(0);
   const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
   const [form, setForm] = useState<TradePlanInput>(EMPTY_FORM);
@@ -654,7 +665,8 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
       />
 
       {/* Bottom Sheet */}
-      <div className="fixed bottom-0 left-0 right-0 z-50 md:left-1/2 md:right-auto md:-translate-x-1/2 md:w-full md:max-w-4xl animate-slide-up rounded-t-3xl overflow-hidden"
+      <div {...dialogProps}
+        className="fixed bottom-0 left-0 right-0 z-50 md:left-1/2 md:right-auto md:-translate-x-1/2 md:w-full md:max-w-4xl animate-slide-up rounded-t-3xl overflow-hidden"
         style={{ background: 'var(--color-tg-surface)', maxHeight: '90vh' }}>
 
         {/* Handle */}
@@ -664,8 +676,8 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
 
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-tg-border">
-          <h2 className="text-base font-semibold text-tg-text">תוכנית עסקה</h2>
-          <button onClick={onClose} className="text-tg-muted hover:text-tg-text transition-colors p-1">
+          <h2 id={titleId} className="text-base font-semibold text-tg-text">תוכנית עסקה</h2>
+          <button onClick={onClose} aria-label="סגור" className="text-tg-muted hover:text-tg-text transition-colors p-1">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
             </svg>
@@ -731,6 +743,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
             <FormSection step={1} label="נכס ואסטרטגיה" active={activeStep === 1} done={activeStep > 1}>
               <div ref={(el) => { fieldRefs.current.symbol = el; }} style={fieldHighlightStyle('symbol')}>
                 <input
+                  ref={symbolRef}
                   type="text"
                   placeholder="סימול נייר (SPY, EURUSD, AAPL...)"
                   value={form.symbol}

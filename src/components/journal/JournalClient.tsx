@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect, useEffectEvent, useRef } from 'react';
+import { useState, useMemo, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { AlertTriangle, Bot, Eye, Inbox, MoreHorizontal, Pencil, Trash2, X } from 'lucide-react';
@@ -11,6 +11,7 @@ import { formatPnlIls, formatPnlPoints, calcRR } from '@/lib/utils';
 import { tradeMoneyPnl, hasMoneyPnl, isWinningTrade } from '@/lib/pnl';
 import type { PnlCurrency } from '@/lib/types';
 import { useHydrated } from '@/lib/hooks';
+import { useModalDialog } from '@/lib/a11y/useModalDialog';
 import './journal.css';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
@@ -190,6 +191,13 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
   const [deletingTradeId, setDeletingTradeId] = useState<string | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState('');
+  // Ids for the modal titles below, so each dialog's accessible name comes
+  // from the heading the user can already see.
+  const uid = useId();
+  // Destructive confirm — focus lands on ביטול, never on מחק עסקה.
+  const deleteCancelRef = useRef<HTMLButtonElement>(null);
+  // Task-shaped close-trade dialog — focus its first field, the exit price.
+  const closeExitPriceRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
   const supabase = createClient();
 
@@ -609,9 +617,13 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
         const t = trades.find(tr => tr.id === closingTradeId);
         if (!t) return null;
         return (
-          <Modal onClose={() => setClosingTradeId(null)}>
+          <Modal
+            onClose={() => setClosingTradeId(null)}
+            labelledBy={`${uid}-close`}
+            initialFocusRef={closeExitPriceRef}
+          >
             <div className="flex items-center justify-between mb-1">
-              <p className="text-base font-bold" style={{ color: TEXT }}>סגירת עסקה — {t.strategy}</p>
+              <p id={`${uid}-close`} className="text-base font-bold" style={{ color: TEXT }}>סגירת עסקה — {t.strategy}</p>
               <button onClick={() => setClosingTradeId(null)} style={{ color: MUTED, fontSize: 18, lineHeight: 1, fontWeight: 600 }}>×</button>
             </div>
             <CloseTrade
@@ -627,6 +639,7 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
               units={t.units ?? t.quantity}
               pointValue={t.point_value}
               pnlCurrency={t.pnl_currency}
+              exitPriceRef={closeExitPriceRef}
               onClosed={() => { setClosingTradeId(null); router.refresh(); }}
               onDebrief={result => setDebriefResults(prev => ({ ...prev, [t.id]: result }))}
             />
@@ -635,9 +648,9 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
       })()}
 
       {viewDebriefId && debriefResults[viewDebriefId] && (
-        <Modal onClose={() => setViewDebriefId(null)}>
+        <Modal onClose={() => setViewDebriefId(null)} labelledBy={`${uid}-debrief`}>
           <div className="flex items-center justify-between mb-1">
-            <p className="text-base font-bold" style={{ color: TEXT }}>ניתוח AI על העסקה</p>
+            <p id={`${uid}-debrief`} className="text-base font-bold" style={{ color: TEXT }}>ניתוח AI על העסקה</p>
             <button onClick={() => setViewDebriefId(null)} style={{ color: MUTED, fontSize: 18, lineHeight: 1, fontWeight: 600 }}>×</button>
           </div>
           <AIDebriefView result={debriefResults[viewDebriefId]} />
@@ -661,9 +674,13 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
         const t = trades.find(tr => tr.id === deletingTradeId);
         if (!t) return null;
         return (
-          <Modal onClose={() => { setDeletingTradeId(null); setDeleteError(''); }}>
+          <Modal
+            onClose={() => { setDeletingTradeId(null); setDeleteError(''); }}
+            labelledBy={`${uid}-delete`}
+            initialFocusRef={deleteCancelRef}
+          >
             <div className="flex items-center justify-between mb-1">
-              <p className="text-base font-bold" style={{ color: TEXT }}>מחיקת עסקה</p>
+              <p id={`${uid}-delete`} className="text-base font-bold" style={{ color: TEXT }}>מחיקת עסקה</p>
               <button onClick={() => { setDeletingTradeId(null); setDeleteError(''); }}
                 style={{ color: MUTED, fontSize: 18, lineHeight: 1, fontWeight: 600 }}>×</button>
             </div>
@@ -673,6 +690,7 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
             {deleteError && <p className="text-xs" style={{ color: RED }}>{deleteError}</p>}
             <div className="flex gap-2 pt-1">
               <button
+                ref={deleteCancelRef}
                 onClick={() => { setDeletingTradeId(null); setDeleteError(''); }}
                 className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all hover:opacity-80"
                 style={{ background: SURF2, color: TEXT2 }}>
@@ -802,7 +820,8 @@ function KebabMenu({ items, className = '' }: { items: KebabItem[]; className?: 
         <MoreHorizontal size={16} />
       </button>
       {open && createPortal(
-        <div className="fixed inset-0 z-50" onClick={e => { e.stopPropagation(); setOpen(false); }}>
+        <div className="fixed inset-0 z-50"
+          onClick={e => { e.stopPropagation(); setOpen(false); btnRef.current?.focus(); }}>
           <div dir="rtl"
             className="absolute rounded-xl p-1.5 flex flex-col gap-0.5"
             style={{
@@ -813,7 +832,17 @@ function KebabMenu({ items, className = '' }: { items: KebabItem[]; className?: 
             onClick={e => e.stopPropagation()}>
             {items.map(item => (
               <button key={item.label}
-                onClick={e => { e.stopPropagation(); setOpen(false); item.onClick(); }}
+                // Focus goes back to the ⋯ button *before* the item's action
+                // runs. Standard menu-button behaviour, and it also gives the
+                // modal these items open something live to restore focus to —
+                // the item itself unmounts with the menu, so a dialog that
+                // captured it would find a detached node on close.
+                onClick={e => {
+                  e.stopPropagation();
+                  setOpen(false);
+                  btnRef.current?.focus();
+                  item.onClick();
+                }}
                 className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-right transition-all hover:opacity-80"
                 style={{ color: item.color ?? TEXT2, fontWeight: 600 }}>
                 {item.icon}
@@ -894,27 +923,22 @@ function PgBtn({ children, onClick, disabled, active }: {
 
 // ── Modals ────────────────────────────────────────────────────────────────────
 
-// Open-modal stack — Escape closes only the topmost dialog.
-const modalStack: (() => void)[] = [];
-
-function Modal({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
+// The local open-modal stack this component used to keep (Escape closing only
+// the topmost dialog) now lives in useModalDialog, shared with every other
+// overlay in the app — including the demo upsell, which can open on top of
+// these in demo mode.
+function Modal({ onClose, labelledBy, initialFocusRef, initialFocus, children }: {
+  onClose: () => void;
+  /** Id of the modal's own visible title — becomes its accessible name. */
+  labelledBy: string;
+  initialFocusRef?: React.RefObject<HTMLElement | null>;
+  initialFocus?: 'first-tabbable' | 'container';
+  children: React.ReactNode;
+}) {
   const mounted = useHydrated();
-  // Always calls the latest onClose without resubscribing the key handler
-  const close = useEffectEvent(() => onClose());
-
-  useEffect(() => {
-    const entry = () => close();
-    modalStack.push(entry);
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && modalStack[modalStack.length - 1] === entry) entry();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => {
-      const i = modalStack.indexOf(entry);
-      if (i !== -1) modalStack.splice(i, 1);
-      window.removeEventListener('keydown', onKey);
-    };
-  }, []);
+  const { dialogProps } = useModalDialog({
+    open: mounted, onClose, labelledBy, initialFocusRef, initialFocus,
+  });
 
   if (!mounted) return null;
 
@@ -928,6 +952,7 @@ function Modal({ onClose, children }: { onClose: () => void; children: React.Rea
       onClick={onClose}
     >
       <div
+        {...dialogProps}
         className="w-full max-w-lg mx-auto max-h-[90dvh] overflow-y-auto rounded-2xl p-5 flex flex-col gap-3 my-auto"
         style={{ background: 'var(--color-tg-surface)', border: '1px solid var(--color-tg-border)', boxShadow: '0 24px 64px rgba(0,0,0,0.8)' }}
         onClick={e => e.stopPropagation()}
@@ -948,6 +973,7 @@ function TradeDetailModal({ trade, onClose, debriefResult, onDebrief }: {
   const [analyzing, setAnalyzing] = useState(false);
   const [localResult, setLocalResult] = useState<AIDebriefResult | null>(null);
   const [debriefOpen, setDebriefOpen] = useState(debriefResult != null);
+  const titleId = useId();
 
   const dir = trade.take_profit >= trade.entry_price ? 'long' : 'short';
   const pnlPoints = trade.status === 'closed' && trade.exit_price != null
@@ -1007,9 +1033,11 @@ function TradeDetailModal({ trade, onClose, debriefResult, onDebrief }: {
   ];
 
   return (
-    <Modal onClose={onClose}>
+    // Read-first: focus the dialog itself so a screen reader starts at the
+    // trade's name rather than at the × button that leads the markup.
+    <Modal onClose={onClose} labelledBy={titleId} initialFocus="container">
       <div className="flex items-center justify-between">
-        <p className="text-base font-bold flex items-center gap-2" style={{ color: 'var(--color-tg-text)' }}>
+        <p id={titleId} className="text-base font-bold flex items-center gap-2" style={{ color: 'var(--color-tg-text)' }}>
           {trade.symbol ?? trade.strategy}
           {pnlPoints !== null && (
             hasMoneyPnl(trade) ? (
@@ -1078,6 +1106,8 @@ function EditTradeModal({ trade, onClose, onSaved }: {
   onSaved: (updated: Trade) => void;
 }) {
   const supabase = createClient();
+  const editTitleId = useId();
+  const symbolRef = useRef<HTMLInputElement>(null);
   const [symbol, setSymbol] = useState(trade.symbol ?? '');
   const [direction, setDirection] = useState<'long' | 'short'>(inferDirection(trade));
   const [strategy, setStrategy] = useState(trade.strategy);
@@ -1142,15 +1172,17 @@ function EditTradeModal({ trade, onClose, onSaved }: {
   }
 
   return (
-    <Modal onClose={onClose}>
+    // Task-shaped: focus the first field (נכס). Without the ref this would
+    // land on the header's × button, which leads the markup.
+    <Modal onClose={onClose} labelledBy={editTitleId} initialFocusRef={symbolRef}>
       <div className="flex items-center justify-between mb-1">
-        <p className="text-base font-bold" style={{ color: TEXT }}>עריכת עסקה</p>
+        <p id={editTitleId} className="text-base font-bold" style={{ color: TEXT }}>עריכת עסקה</p>
         <button onClick={onClose} style={{ color: MUTED, fontSize: 18, lineHeight: 1, fontWeight: 600 }}>×</button>
       </div>
 
       <div className="grid grid-cols-2 gap-2">
         <Field label="נכס">
-          <input value={symbol} onChange={e => setSymbol(e.target.value.toUpperCase())}
+          <input ref={symbolRef} value={symbol} onChange={e => setSymbol(e.target.value.toUpperCase())}
             className={FIELD_CLASS} style={fieldStyle} />
         </Field>
         <Field label="כיוון">

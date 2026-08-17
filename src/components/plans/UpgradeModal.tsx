@@ -1,7 +1,9 @@
 'use client';
 
+import { useId, useRef } from 'react';
 import Link from 'next/link';
 import { Lock } from 'lucide-react';
+import { useModalDialog } from '@/lib/a11y/useModalDialog';
 
 export type UpgradeLimitType =
   | 'trades_per_week'
@@ -45,6 +47,15 @@ const COPY: Record<UpgradeLimitType, { title: string; body: string }> = {
 };
 
 export default function UpgradeModal({ open, onClose, limitType }: UpgradeModalProps) {
+  const titleId = useId();
+  const dismissRef = useRef<HTMLButtonElement>(null);
+  // Focus the dismiss button, not the upgrade link: several call sites raise
+  // this from an async PLAN_LIMIT response rather than a deliberate click, so
+  // the first thing under the user's hands should not be the paid conversion.
+  const { dialogProps } = useModalDialog({
+    open, onClose, labelledBy: titleId, initialFocusRef: dismissRef,
+  });
+
   if (!open) return null;
   const { title, body } = COPY[limitType];
 
@@ -56,6 +67,7 @@ export default function UpgradeModal({ open, onClose, limitType }: UpgradeModalP
       onClick={onClose}
     >
       <div
+        {...dialogProps}
         className="w-full max-w-sm mx-auto rounded-2xl p-6 flex flex-col items-center gap-3 text-center animate-fade-in"
         style={{ background: 'var(--color-tg-surface)', border: '1px solid var(--color-tg-border)', boxShadow: '0 24px 64px rgba(0,0,0,0.8)' }}
         onClick={(e) => e.stopPropagation()}
@@ -67,7 +79,7 @@ export default function UpgradeModal({ open, onClose, limitType }: UpgradeModalP
           <Lock size={26} style={{ color: '#00d2d2' }} />
         </div>
 
-        <p className="text-base font-bold" style={{ color: 'var(--color-tg-text)' }}>
+        <p id={titleId} className="text-base font-bold" style={{ color: 'var(--color-tg-text)' }}>
           {title}
         </p>
 
@@ -84,6 +96,7 @@ export default function UpgradeModal({ open, onClose, limitType }: UpgradeModalP
             שדרוג ל-Pro
           </Link>
           <button
+            ref={dismissRef}
             onClick={onClose}
             className="w-full py-2.5 rounded-xl text-sm font-semibold"
             style={{ background: 'var(--color-tg-surface-2)', color: 'var(--color-tg-text-2)' }}

@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { Maximize2, X } from 'lucide-react';
+import { useModalDialog } from '@/lib/a11y/useModalDialog';
 
 const TIMEFRAME_MAP: Record<string, string> = {
   '1m': '1',
@@ -238,16 +239,20 @@ export default function TradingViewChart({ symbol, timeframe, entryPrice, stopLo
 
   // CSS overlay, not the native Fullscreen API: iOS Safari doesn't support
   // Element.requestFullscreen() outside <video>. Escape is therefore our own
-  // listener rather than the browser's native fullscreenchange handling —
-  // same approach as the landing page's demo fullscreen (TryDemoSection).
-  useEffect(() => {
-    if (!expanded) return;
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') setExpanded(false);
-    }
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [expanded]);
+  // handling rather than the browser's native fullscreenchange — here via
+  // useModalDialog, which also matters because this opens *inside* the trade
+  // sheet: the shared stack makes Escape close the chart first, then the
+  // sheet, instead of both at once.
+  const collapse = useCallback(() => setExpanded(false), []);
+  const exitRef = useRef<HTMLButtonElement>(null);
+  // The chart itself is an unfocusable <div>, so the exit button is both the
+  // sensible landing spot and the only control in here.
+  const { dialogProps } = useModalDialog({
+    open: expanded,
+    onClose: collapse,
+    label: symbol ? `גרף מסך מלא — ${symbol}` : 'גרף מסך מלא',
+    initialFocusRef: exitRef,
+  });
 
   // Prevent the page (and the bottom sheet under it) from scrolling behind
   // the fullscreen overlay.
@@ -301,12 +306,13 @@ export default function TradingViewChart({ symbol, timeframe, entryPrice, stopLo
       )}
 
       {expanded && typeof document !== 'undefined' && createPortal(
-        <div className="fixed inset-0 z-[80] animate-fade-in" style={{ background: 'var(--color-tg-bg)' }}>
+        <div {...dialogProps} className="fixed inset-0 z-[80] animate-fade-in" style={{ background: 'var(--color-tg-bg)' }}>
           <div ref={fsContainerRef} className="w-full h-full" style={{ touchAction: 'auto' }} />
 
           <button
+            ref={exitRef}
             type="button"
-            onClick={() => setExpanded(false)}
+            onClick={collapse}
             aria-label="יציאה ממסך מלא"
             title="יציאה ממסך מלא"
             className="fixed z-10 flex items-center justify-center rounded-full transition-opacity hover:opacity-80"

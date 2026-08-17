@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect, useCallback, useSyncExternalStore } from 'react';
+import { useState, useMemo, useEffect, useCallback, useId, useSyncExternalStore } from 'react';
 import { Sparkles, TrendingUp, TrendingDown, RefreshCw, CheckCircle, AlertCircle, AlertTriangle, Heart, Target, ChevronRight, ChevronLeft, Quote, Clock, Lock } from 'lucide-react';
 import { formatPnlIls, formatPnlPoints } from '@/lib/utils';
 import { createClient } from '@/lib/supabase/client';
@@ -10,6 +10,7 @@ import { tradeMoneyPnl, hasMoneyPnl, isWinningTrade } from '@/lib/pnl';
 import { getPlanLimits, type PlanTier } from '@/lib/plans/config';
 import UpgradeModal from '@/components/plans/UpgradeModal';
 import { useMediaQuery } from '@/lib/hooks';
+import { useModalDialog } from '@/lib/a11y/useModalDialog';
 import { renderPlainAiText, segmentByLineMarker, joinLines, CHECK_CHARS, CROSS_CHARS } from '@/lib/ai/textFormatting';
 
 export type { DashTrade } from '@/lib/dashboard/trades';
@@ -848,6 +849,12 @@ function TradeDetailPanel({ trade, onClose, aiReview, aiLoading, onAiReview }: {
   const pnl = calcPnl(trade);
   const dir = tradeDir(trade);
   const [aiOpen, setAiOpen] = useState(false);
+  const titleId = useId();
+  // Read-first panel: focus the container rather than a control, so a screen
+  // reader starts at the trade's name instead of halfway down the sheet.
+  const { dialogProps } = useModalDialog({
+    open: true, onClose, labelledBy: titleId, initialFocus: 'container',
+  });
 
   // Mirrors the toggle pattern used for AI panels elsewhere in the app:
   // opening fetches only if nothing is cached/in-flight yet; closing never
@@ -861,7 +868,8 @@ function TradeDetailPanel({ trade, onClose, aiReview, aiLoading, onAiReview }: {
   return (
     <div className="fixed inset-0 z-50 flex items-end" style={{ background: 'rgba(0,0,0,0.7)' }}
       onClick={onClose}>
-      <div className="w-full max-h-[88vh] overflow-y-auto rounded-t-2xl"
+      <div {...dialogProps}
+        className="w-full max-h-[88vh] overflow-y-auto rounded-t-2xl"
         style={{ background: '#0d1117', border: `1px solid ${BORDER}` }}
         onClick={e => e.stopPropagation()}>
         <div className="flex justify-center pt-3 pb-1">
@@ -872,7 +880,7 @@ function TradeDetailPanel({ trade, onClose, aiReview, aiLoading, onAiReview }: {
           {/* Header */}
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-base font-bold" style={{ color: TEXT }}>{trade.strategy}</p>
+              <p id={titleId} className="text-base font-bold" style={{ color: TEXT }}>{trade.strategy}</p>
               <div className="flex items-center gap-2 mt-1 flex-wrap">
                 {trade.symbol && (
                   <span className="text-xs px-2 py-0.5 rounded-md font-semibold font-mono"

@@ -1,7 +1,9 @@
 'use client';
 
+import { useId } from 'react';
 import { Ban } from 'lucide-react';
 import { formatCooldownMinutes } from '@/lib/validators/RulesetValidator';
+import { useModalDialog } from '@/lib/a11y/useModalDialog';
 
 interface RuleBlockedModalProps {
   ruleName: string;
@@ -11,12 +13,18 @@ interface RuleBlockedModalProps {
 }
 
 export default function RuleBlockedModal({ ruleName, description, cooldownMinutes, onClose }: RuleBlockedModalProps) {
+  const titleId = useId();
+  // Mounted only while blocking, so mount is open. Initial focus falls to the
+  // single "סגור" button — the only control in the dialog.
+  const { dialogProps } = useModalDialog({ open: true, onClose, labelledBy: titleId });
+
   return (
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center p-4"
       style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
     >
       <div
+        {...dialogProps}
         className="w-full max-w-sm mx-auto rounded-2xl p-6 flex flex-col items-center gap-3 text-center"
         style={{ background: 'var(--color-tg-surface)', border: '1px solid var(--color-tg-border)', boxShadow: '0 24px 64px rgba(0,0,0,0.8)' }}
       >
@@ -27,7 +35,7 @@ export default function RuleBlockedModal({ ruleName, description, cooldownMinute
           <Ban size={28} style={{ color: 'var(--color-tg-danger)' }} />
         </div>
 
-        <p className="text-base font-bold" style={{ color: 'var(--color-tg-text)' }}>
+        <p id={titleId} className="text-base font-bold" style={{ color: 'var(--color-tg-text)' }}>
           לא ניתן לפתוח עסקה
         </p>
 
