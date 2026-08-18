@@ -32,7 +32,7 @@ export default function RuleBlockedModal({ ruleName, description, cooldownMinute
           className="w-14 h-14 rounded-full flex items-center justify-center"
           style={{ background: 'var(--color-tg-danger-muted)' }}
         >
-          <Ban size={28} style={{ color: 'var(--color-tg-danger)' }} />
+          <Ban aria-hidden="true" size={28} style={{ color: 'var(--color-tg-danger)' }} />
         </div>
 
         <p id={titleId} className="text-base font-bold" style={{ color: 'var(--color-tg-text)' }}>

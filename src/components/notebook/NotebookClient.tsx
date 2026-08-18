@@ -236,7 +236,7 @@ export default function NotebookClient({
               className="flex items-center gap-1.5 px-4 py-2 text-sm"
               style={{ background: SURF, borderBottom: `1px solid ${BORDER}`, color: TEXT, flexShrink: 0 }}
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="9 18 15 12 9 6"/>
               </svg>
               כל הדפים

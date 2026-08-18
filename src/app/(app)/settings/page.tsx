@@ -67,7 +67,7 @@ export default async function SettingsPage() {
 
         <Card className="opacity-75">
           <div className="flex items-start gap-3">
-            <Plug size={20} style={{ color: '#00d2d2' }} className="shrink-0 mt-0.5" />
+            <Plug aria-hidden="true" size={20} style={{ color: '#00d2d2' }} className="shrink-0 mt-0.5" />
             <div className="flex-1">
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-sm font-bold text-tg-text">חיבור ברוקר בזמן אמת</h3>

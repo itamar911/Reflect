@@ -27,9 +27,9 @@ export interface PageTypeConfig {
 // ── Config ────────────────────────────────────────────────────────────────────
 
 export const PAGE_TYPES: PageTypeConfig[] = [
-  { value: 'journal',  label: 'יומן יומי',     icon: <BookOpen size={14} />,      color: '#60A5FA' },
-  { value: 'insights', label: 'תובנות מסחר',   icon: <Lightbulb size={14} />,     color: '#00d2d2' },
-  { value: 'plan',     label: 'תוכנית מסחר',   icon: <ClipboardList size={14} />, color: '#4ade80' },
+  { value: 'journal',  label: 'יומן יומי',     icon: <BookOpen aria-hidden="true" size={14} />,      color: '#60A5FA' },
+  { value: 'insights', label: 'תובנות מסחר',   icon: <Lightbulb aria-hidden="true" size={14} />,     color: '#00d2d2' },
+  { value: 'plan',     label: 'תוכנית מסחר',   icon: <ClipboardList aria-hidden="true" size={14} />, color: '#4ade80' },
 ];
 
 export const PRESET_TAGS = ['חשוב', 'אסטרטגיה', 'פסיכולוגיה', 'ריגשי', 'ניהול סיכונים', 'לבדיקה'];

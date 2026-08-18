@@ -56,13 +56,13 @@ export default function TraderIdentityCard({ profile }: { profile: TraderProfile
         {/* Strengths */}
         <div>
           <p className="text-[10px] font-semibold text-tg-text-2 mb-2 flex items-center gap-1" style={{ color: '#00C853' }}>
-            <Dumbbell size={10} />
+            <Dumbbell aria-hidden="true" size={10} />
             חוזקות
           </p>
           <div className="flex flex-col gap-2">
             {strengths.map((s, i) => (
               <div key={i} className="flex items-start gap-1.5">
-                <Check size={9} className="shrink-0 mt-0.5" style={{ color: '#00C853' }} />
+                <Check aria-hidden="true" size={9} className="shrink-0 mt-0.5" style={{ color: '#00C853' }} />
                 <p className="text-[11px] text-tg-text-2 leading-tight">{s}</p>
               </div>
             ))}
@@ -72,13 +72,13 @@ export default function TraderIdentityCard({ profile }: { profile: TraderProfile
         {/* Weaknesses */}
         <div>
           <p className="text-[10px] font-semibold text-tg-text-2 mb-2 flex items-center gap-1" style={{ color: '#FF3B30' }}>
-            <AlertTriangle size={10} />
+            <AlertTriangle aria-hidden="true" size={10} />
             לשיפור
           </p>
           <div className="flex flex-col gap-2">
             {weaknesses.map((w, i) => (
               <div key={i} className="flex items-start gap-1.5">
-                <X size={9} className="shrink-0 mt-0.5" style={{ color: '#FF3B30' }} />
+                <X aria-hidden="true" size={9} className="shrink-0 mt-0.5" style={{ color: '#FF3B30' }} />
                 <p className="text-[11px] text-tg-text-2 leading-tight">{w}</p>
               </div>
             ))}
@@ -92,7 +92,7 @@ export default function TraderIdentityCard({ profile }: { profile: TraderProfile
         style={{ borderColor: `${color}15` }}
       >
         <p className="text-[10px] text-tg-muted">מבוסס על {totalTrades} עסקאות</p>
-        <p className="text-[10px] text-tg-muted flex items-center gap-1"><RefreshCw size={9} /> עודכן {updatedLabel}</p>
+        <p className="text-[10px] text-tg-muted flex items-center gap-1"><RefreshCw aria-hidden="true" size={9} /> עודכן {updatedLabel}</p>
       </div>
     </div>
   );

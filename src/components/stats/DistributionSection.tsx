@@ -36,7 +36,7 @@ export default function DistributionSection({ dayBars, hourBars }: Props) {
   const worst = withTrades.length ? withTrades.reduce((a, b) => b.pnl < a.pnl ? b : a) : null;
 
   return (
-    <Section title="התפלגות לפי יום ושעה" icon={<Calendar size={18} />}>
+    <Section title="התפלגות לפי יום ושעה" icon={<Calendar aria-hidden="true" size={18} />}>
       <div className="stats-card p-4 sm:p-5 flex flex-col gap-4">
 
         <div className="stats-seg self-start">
@@ -78,7 +78,7 @@ export default function DistributionSection({ dayBars, hourBars }: Props) {
             style={{ borderTop: '1px solid var(--color-tg-border-light)', fontSize: 12 }}>
             {best && best.pnl > 0 && (
               <span className="flex items-center gap-1.5" style={{ color: MUTED }}>
-                <TrendingUp size={13} style={{ color: GREEN }} />
+                <TrendingUp aria-hidden="true" size={13} style={{ color: GREEN }} />
                 {view === 'day' ? 'יום רווחי ביותר' : 'שעה רווחית ביותר'}:
                 <span style={{ fontWeight: 700, color: TEXT }}>{best.label}</span>
                 <span className="stats-num" style={{ fontWeight: 700, color: GREEN }}>{fmt(best.pnl)}</span>
@@ -86,7 +86,7 @@ export default function DistributionSection({ dayBars, hourBars }: Props) {
             )}
             {worst && worst.pnl < 0 && (
               <span className="flex items-center gap-1.5" style={{ color: MUTED }}>
-                <TrendingDown size={13} style={{ color: RED }} />
+                <TrendingDown aria-hidden="true" size={13} style={{ color: RED }} />
                 {view === 'day' ? 'יום הפסד ביותר' : 'שעה הפסדית ביותר'}:
                 <span style={{ fontWeight: 700, color: TEXT }}>{worst.label}</span>
                 <span className="stats-num" style={{ fontWeight: 700, color: RED }}>{fmt(worst.pnl)}</span>

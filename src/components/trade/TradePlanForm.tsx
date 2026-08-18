@@ -678,7 +678,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
         <div className="flex items-center justify-between px-4 py-3 border-b border-tg-border">
           <h2 id={titleId} className="text-base font-semibold text-tg-text">תוכנית עסקה</h2>
           <button onClick={onClose} aria-label="סגור" className="text-tg-muted hover:text-tg-text transition-colors p-1">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
             </svg>
           </button>
@@ -689,7 +689,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
           <div className="flex flex-col items-center justify-center py-16 px-4 animate-fade-in">
             <div className="w-16 h-16 rounded-full flex items-center justify-center mb-4"
               style={{ background: 'var(--color-tg-success-muted)' }}>
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--color-tg-success)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <svg aria-hidden="true" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--color-tg-success)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="20 6 9 17 4 12" />
               </svg>
             </div>
@@ -705,7 +705,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
 
             {loading && (
               <div className="flex items-center gap-2 text-sm text-tg-muted">
-                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                <svg aria-hidden="true" className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
@@ -717,7 +717,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
             {initialWarning && (
               <div className="flex items-start gap-2 px-4 py-3 rounded-xl text-sm"
                 style={{ background: 'var(--color-tg-warning-muted)', color: 'var(--color-tg-warning)', border: '1px solid rgba(0,210,210,0.3)' }}>
-                <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+                <AlertTriangle aria-hidden="true" size={16} className="shrink-0 mt-0.5" />
                 <span>{initialWarning}</span>
               </div>
             )}
@@ -1026,7 +1026,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                 {complianceFailed > 0 && (
                   <div className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs"
                     style={{ background: 'var(--color-tg-warning-muted)', color: 'var(--color-tg-warning)' }}>
-                    <AlertTriangle size={14} className="shrink-0" />
+                    <AlertTriangle aria-hidden="true" size={14} className="shrink-0" />
                     <span>העסקה סוטה מהאסטרטגיה שלך ב-{complianceFailed} קריטריונים</span>
                   </div>
                 )}
@@ -1134,7 +1134,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                   {validationResult.warningReasons.map((reason, i) => (
                     <div key={i} className="flex items-start gap-1.5 text-xs"
                       style={{ color: 'var(--color-tg-warning)' }}>
-                      <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+                      <AlertTriangle aria-hidden="true" size={12} className="shrink-0 mt-0.5" />
                       <span>{reason}</span>
                     </div>
                   ))}

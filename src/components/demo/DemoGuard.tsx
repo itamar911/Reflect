@@ -70,7 +70,7 @@ export default function DemoGuard() {
           className="w-12 h-12 rounded-full flex items-center justify-center"
           style={{ background: 'rgba(0,210,210,0.12)', border: '1px solid rgba(0,210,210,0.3)' }}
         >
-          <Lock size={20} color="#00d2d2" />
+          <Lock aria-hidden="true" size={20} color="#00d2d2" />
         </div>
         <p id={titleId} className="text-base font-bold" style={{ color: 'var(--color-tg-text)' }}>
           בדמו אי אפשר לשמור — התחילו לתעד בחשבון משלכם

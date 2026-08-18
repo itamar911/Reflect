@@ -339,7 +339,7 @@ export default function CloseTrade({
 
       <Card padding="sm" className="flex flex-col gap-0.5">
         <p className="text-xs font-semibold text-tg-text flex items-center gap-1.5 pb-1">
-          <ShieldCheck size={14} /> רשימת משמעת
+          <ShieldCheck aria-hidden="true" size={14} /> רשימת משמעת
         </p>
         <DisciplineToggle
           label="פעלתי לפי התוכנית"
@@ -440,13 +440,13 @@ export function AIDebriefView({ result }: { result: AIDebriefResult }) {
 
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-sm font-bold text-tg-text flex items-center gap-1.5"><Bot size={14} /> משוב AI על העסקה</p>
+      <p className="text-sm font-bold text-tg-text flex items-center gap-1.5"><Bot aria-hidden="true" size={14} /> משוב AI על העסקה</p>
 
       {result.score !== undefined && (
         <div className="flex items-center justify-between rounded-xl p-3"
           style={{ background: 'var(--color-tg-surface-2)', border: `1px solid ${scoreColor}` }}>
           <span className="text-sm font-semibold flex items-center gap-1.5" style={{ color: scoreColor }}>
-            <Target size={14} /> ציון תהליך
+            <Target aria-hidden="true" size={14} /> ציון תהליך
             {result.documented && (
               <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md"
                 style={{ background: 'var(--color-tg-primary-muted)', color: 'var(--color-tg-primary)' }}>
@@ -473,7 +473,7 @@ export function AIDebriefView({ result }: { result: AIDebriefResult }) {
       {outcomePoints && (
         <div className="flex items-center justify-between px-1">
           <span className="text-xs text-tg-muted flex items-center gap-1">
-            <BarChart3 size={12} /> תוצאה
+            <BarChart3 aria-hidden="true" size={12} /> תוצאה
           </span>
           <span className="text-xs font-semibold text-tg-text-2">
             {outcomePoints}{outcomeAmount ? ` (${outcomeAmount})` : ''}

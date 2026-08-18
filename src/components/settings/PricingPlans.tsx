@@ -195,7 +195,7 @@ function FeatureList({ features }: { features: FeatureItem[] }) {
 
 function CheckIcon() {
   return (
-    <svg
+    <svg role="img" aria-label="כלול"
       width="14" height="14" viewBox="0 0 24 24" fill="none"
       stroke="var(--color-tg-success)"
       strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
@@ -208,7 +208,7 @@ function CheckIcon() {
 
 function CrossIcon() {
   return (
-    <svg
+    <svg role="img" aria-label="לא כלול"
       width="14" height="14" viewBox="0 0 24 24" fill="none"
       stroke="var(--color-tg-danger)"
       strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"

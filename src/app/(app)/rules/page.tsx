@@ -41,7 +41,7 @@ export default async function RulesPage() {
             className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
             style={{ background: 'rgba(0,210,210,0.12)', border: '1px solid rgba(0,210,210,0.2)' }}
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#00d2d2" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+            <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#00d2d2" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
             </svg>
           </div>
@@ -109,9 +109,9 @@ function StatPill({ label, value, color }: { label: string; value: string; color
 
 function HowItWorks() {
   const steps = [
-    { icon: <FileText size={16} />, text: 'מגדיר חוק: "אם X קרה — אז Y"' },
-    { icon: <Zap size={16} />,     text: 'לפני כל עסקה — המערכת בודקת את כל החוקים' },
-    { icon: <Shield size={16} />,  text: 'חריגה מפעילה אזהרה, נעילה, או חסימה עצמית' },
+    { icon: <FileText aria-hidden="true" size={16} />, text: 'מגדיר חוק: "אם X קרה — אז Y"' },
+    { icon: <Zap aria-hidden="true" size={16} />,     text: 'לפני כל עסקה — המערכת בודקת את כל החוקים' },
+    { icon: <Shield aria-hidden="true" size={16} />,  text: 'חריגה מפעילה אזהרה, נעילה, או חסימה עצמית' },
   ];
 
   return (

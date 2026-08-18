@@ -154,7 +154,7 @@ export function DebriefMock() {
                 style={{ background: 'rgba(0,210,210,0.14)', border: '1px solid rgba(0,210,210,0.35)' }}
                 aria-hidden
               >
-                <Sparkles size={13} style={{ color: '#00d2d2' }} />
+                <Sparkles aria-hidden="true" size={13} style={{ color: '#00d2d2' }} />
               </span>
               <span className="text-sm font-bold text-white truncate">תחקיר עסקה</span>
             </span>

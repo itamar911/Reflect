@@ -34,14 +34,14 @@ function severity(pct: number | null) {
 
 export default function BehaviorChips({ deviatedPct, movedSlPct, fomoPct, revengePct }: Props) {
   const metrics = [
-    { label: 'סטייה מהתוכנית', pct: deviatedPct, icon: <Route size={15} /> },
-    { label: 'הזזת Stop Loss',  pct: movedSlPct,  icon: <ArrowUpDown size={15} /> },
-    { label: 'עסקאות FOMO',     pct: fomoPct,     icon: <Zap size={15} /> },
-    { label: 'Revenge Trades',  pct: revengePct,  icon: <Flame size={15} /> },
+    { label: 'סטייה מהתוכנית', pct: deviatedPct, icon: <Route aria-hidden="true" size={15} /> },
+    { label: 'הזזת Stop Loss',  pct: movedSlPct,  icon: <ArrowUpDown aria-hidden="true" size={15} /> },
+    { label: 'עסקאות FOMO',     pct: fomoPct,     icon: <Zap aria-hidden="true" size={15} /> },
+    { label: 'Revenge Trades',  pct: revengePct,  icon: <Flame aria-hidden="true" size={15} /> },
   ];
 
   return (
-    <Section title="מדדים התנהגותיים" icon={<ShieldAlert size={18} />}>
+    <Section title="מדדים התנהגותיים" icon={<ShieldAlert aria-hidden="true" size={18} />}>
       <div className="flex flex-wrap gap-3">
         {metrics.map((m) => {
           const s = severity(m.pct);

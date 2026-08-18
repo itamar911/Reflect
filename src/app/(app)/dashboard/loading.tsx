@@ -93,7 +93,7 @@ export default function Loading() {
           </div>
           {/* Wavy line stub */}
           <div className="rounded-xl overflow-hidden" style={{ height: 118, background: S2 }}>
-            <svg width="100%" height="100%" viewBox="0 0 400 100" preserveAspectRatio="none">
+            <svg aria-hidden="true" width="100%" height="100%" viewBox="0 0 400 100" preserveAspectRatio="none">
               <path
                 d="M0,60 C40,40 80,80 120,50 C160,20 200,70 240,45 C280,20 320,60 360,35 L400,40 L400,100 L0,100 Z"
                 fill="rgba(74,222,128,0.07)"

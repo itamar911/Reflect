@@ -44,7 +44,7 @@ export default function ForgotPasswordPage() {
         <div className="text-center">
           <div className="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4"
             style={{ background: 'var(--color-tg-success-muted)' }}>
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--color-tg-success)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg aria-hidden="true" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--color-tg-success)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="20 6 9 17 4 12" />
             </svg>
           </div>

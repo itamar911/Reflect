@@ -105,7 +105,7 @@ export default function OnboardingWizard({ userId, initialDisplayName = '' }: { 
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-10 h-10 rounded-xl mb-3"
             style={{ background: 'var(--color-tg-primary)' }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="22 7 13.5 15.5 8.5 10.5 2 17" />
               <polyline points="16 7 22 7 22 13" />
             </svg>
@@ -268,12 +268,12 @@ function NameStep({ value, onChange }: { value: string; onChange: (v: string) =>
 
 function Step1({ value, onToggle }: { value: TradingType[]; onToggle: (v: TradingType) => void }) {
   const icons: Record<TradingType, ReactNode> = {
-    scalping: <Zap size={24} />,
-    day: <Clock size={24} />,
-    swing: <Waves size={24} />,
-    position: <Mountain size={24} />,
-    crypto: <Coins size={24} />,
-    futures: <RefreshCw size={24} />,
+    scalping: <Zap aria-hidden="true" size={24} />,
+    day: <Clock aria-hidden="true" size={24} />,
+    swing: <Waves aria-hidden="true" size={24} />,
+    position: <Mountain aria-hidden="true" size={24} />,
+    crypto: <Coins aria-hidden="true" size={24} />,
+    futures: <RefreshCw aria-hidden="true" size={24} />,
   };
   return (
     <div>
@@ -295,9 +295,9 @@ function Step2({ value, onChange }: { value: ExperienceLevel; onChange: (v: Expe
       <h2 className="text-lg font-semibold text-tg-text mb-1">מה רמת הניסיון שלך?</h2>
       <p className="text-sm text-tg-text-2 mb-4">נעזור לך בהתאם</p>
       <div className="flex flex-col gap-3">
-        <OptionButton active={value === 'beginner'} onClick={() => onChange('beginner')} icon={<Leaf size={24} />} label="מתחיל" description="פחות משנה של מסחר" />
-        <OptionButton active={value === 'intermediate'} onClick={() => onChange('intermediate')} icon={<TrendingUp size={24} />} label="בינוני" description="1-3 שנות ניסיון" />
-        <OptionButton active={value === 'advanced'} onClick={() => onChange('advanced')} icon={<Target size={24} />} label="מתקדם" description="מעל 3 שנות ניסיון" />
+        <OptionButton active={value === 'beginner'} onClick={() => onChange('beginner')} icon={<Leaf aria-hidden="true" size={24} />} label="מתחיל" description="פחות משנה של מסחר" />
+        <OptionButton active={value === 'intermediate'} onClick={() => onChange('intermediate')} icon={<TrendingUp aria-hidden="true" size={24} />} label="בינוני" description="1-3 שנות ניסיון" />
+        <OptionButton active={value === 'advanced'} onClick={() => onChange('advanced')} icon={<Target aria-hidden="true" size={24} />} label="מתקדם" description="מעל 3 שנות ניסיון" />
       </div>
     </div>
   );
@@ -305,13 +305,13 @@ function Step2({ value, onChange }: { value: ExperienceLevel; onChange: (v: Expe
 
 function Step3({ value, onToggle }: { value: Market[]; onToggle: (v: Market) => void }) {
   const icons: Record<Market, ReactNode> = {
-    stocks: <Landmark size={24} />,
+    stocks: <Landmark aria-hidden="true" size={24} />,
     crypto: '₿',
-    forex: <RefreshCw size={24} />,
-    options: <Shuffle size={24} />,
-    futures: <CalendarClock size={24} />,
-    etf: <Layers size={24} />,
-    commodities: <Package size={24} />,
+    forex: <RefreshCw aria-hidden="true" size={24} />,
+    options: <Shuffle aria-hidden="true" size={24} />,
+    futures: <CalendarClock aria-hidden="true" size={24} />,
+    etf: <Layers aria-hidden="true" size={24} />,
+    commodities: <Package aria-hidden="true" size={24} />,
   };
   return (
     <div>
@@ -377,11 +377,11 @@ function Step4({
 
 function Step6({ value, onToggle }: { value: ChallengeId[]; onToggle: (v: ChallengeId) => void }) {
   const icons: Record<ChallengeId, ReactNode> = {
-    revenge: <Flame size={24} />,
-    early_exit: <TrendingDown size={24} />,
-    overtrading: <Repeat size={24} />,
-    rule_breaking: <ShieldOff size={24} />,
-    fear_entry: <Frown size={24} />,
+    revenge: <Flame aria-hidden="true" size={24} />,
+    early_exit: <TrendingDown aria-hidden="true" size={24} />,
+    overtrading: <Repeat aria-hidden="true" size={24} />,
+    rule_breaking: <ShieldOff aria-hidden="true" size={24} />,
+    fear_entry: <Frown aria-hidden="true" size={24} />,
   };
   return (
     <div>
@@ -399,10 +399,10 @@ function Step6({ value, onToggle }: { value: ChallengeId[]; onToggle: (v: Challe
 
 function Step7({ value, onChange }: { value: AfterLossId; onChange: (v: AfterLossId) => void }) {
   const icons: Record<AfterLossId, ReactNode> = {
-    immediate_revenge: <Zap size={24} />,
-    stop_for_day: <Pause size={24} />,
-    no_change: <Minus size={24} />,
-    lose_confidence: <Frown size={24} />,
+    immediate_revenge: <Zap aria-hidden="true" size={24} />,
+    stop_for_day: <Pause aria-hidden="true" size={24} />,
+    no_change: <Minus aria-hidden="true" size={24} />,
+    lose_confidence: <Frown aria-hidden="true" size={24} />,
   };
   return (
     <div>
@@ -422,7 +422,7 @@ function Step5({ data }: { data: WizardData }) {
   return (
     <div>
       <div className="text-center mb-5">
-        <div className="mb-2"><Target size={40} /></div>
+        <div className="mb-2"><Target aria-hidden="true" size={40} /></div>
         <h2 className="text-lg font-semibold text-tg-text">מוכן להתחיל!</h2>
         <p className="text-sm text-tg-text-2 mt-1">הנה הסיכום שלך</p>
       </div>

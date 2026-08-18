@@ -36,7 +36,7 @@ export default function DangerMode({
         <div className="flex items-start gap-3">
           <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-0.5"
             style={{ background: '#FF3B3030' }}>
-            <Siren size={16} />
+            <Siren aria-hidden="true" size={16} />
           </div>
           <div>
             <p className="text-sm font-bold" style={{ color: '#FF3B30' }}>מצב סיכון — Danger Mode</p>
@@ -50,8 +50,9 @@ export default function DangerMode({
         </div>
         <button
           onClick={() => setDismissed(true)}
+          aria-label="סגור התראה"
           className="text-tg-muted hover:text-tg-text transition-colors shrink-0 p-1">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <line x1="18" y1="6" x2="6" y2="18" />
             <line x1="6" y1="6" x2="18" y2="18" />
           </svg>

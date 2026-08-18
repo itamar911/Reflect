@@ -62,7 +62,7 @@ export default function RulesEditor({ presetRules: initialPreset, customRules: i
               <>
                 חוקים אישיים{customRules.length > 0 ? ` (${customRules.length})` : ''}
                 {plan === 'free' && (
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0110 0v4" />
                   </svg>
                 )}
@@ -106,7 +106,7 @@ function CustomRulesTab({
   if (plan === 'free') {
     return (
       <div className="text-center py-10">
-        <div className="mb-3"><Lock size={36} /></div>
+        <div className="mb-3"><Lock aria-hidden="true" size={36} /></div>
         <p className="text-sm font-medium text-tg-text mb-1">חוקים אישיים זמינים ב-Basic ומעלה</p>
         <p className="text-xs text-tg-muted mb-5">עד 3 חוקים ב-Basic · ללא הגבלה ב-Pro</p>
         <div className="flex flex-col gap-2 text-right px-2 mb-5">
@@ -138,7 +138,7 @@ function CustomRulesTab({
 
       {rules.length === 0 && !showBuilder && (
         <div className="text-center py-10">
-          <div className="mb-2"><ClipboardList size={36} /></div>
+          <div className="mb-2"><ClipboardList aria-hidden="true" size={36} /></div>
           <p className="text-sm text-tg-text-2 mb-4">אין עדיין חוקים אישיים</p>
           <Button onClick={() => setShowBuilder(true)}>+ הוסף חוק ראשון</Button>
         </div>
@@ -215,7 +215,7 @@ function CustomRuleCard({
           className="text-tg-muted hover:text-tg-danger transition-colors shrink-0"
           title="מחק חוק"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14H6L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4h6v2" />
           </svg>
         </button>
@@ -347,10 +347,11 @@ function CustomRuleBuilder({
       <h3 className="text-sm font-semibold text-tg-text">חוק חדש</h3>
 
       <div className="flex flex-col gap-1.5">
-        <label className="text-sm font-medium text-tg-text-2">שם החוק</label>
+        <label htmlFor="new-rule-name" className="text-sm font-medium text-tg-text-2">שם החוק</label>
         <input
           type="text"
           maxLength={50}
+          id="new-rule-name"
           value={form.name}
           onChange={(e) => setForm({ ...form, name: e.target.value, nameTouched: true })}
           className="w-full h-10 px-3 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors"
@@ -360,8 +361,9 @@ function CustomRuleBuilder({
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <label className="text-sm font-medium text-tg-text-2">תנאי</label>
+        <label htmlFor="new-rule-condition" className="text-sm font-medium text-tg-text-2">תנאי</label>
         <select
+          id="new-rule-condition"
           value={form.condition_type}
           onChange={(e) => applyCondition(e.target.value as ConditionType)}
           className="w-full h-10 px-3 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary"
@@ -375,9 +377,10 @@ function CustomRuleBuilder({
 
       {needsThreshold && (
         <div className="flex flex-col gap-1.5">
-          <label className="text-sm font-medium text-tg-text-2">ערך</label>
+          <label htmlFor="new-rule-threshold" className="text-sm font-medium text-tg-text-2">ערך</label>
           <input
             type="number"
+            id="new-rule-threshold"
             value={form.threshold_value}
             onChange={(e) => applyThreshold(e.target.value)}
             className="w-full h-10 px-3 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors"
@@ -388,8 +391,8 @@ function CustomRuleBuilder({
       )}
 
       <div className="flex flex-col gap-2">
-        <label className="text-sm font-medium text-tg-text-2">פעולה</label>
-        <div className="grid grid-cols-1 gap-2">
+        <p id="new-rule-action-label" className="text-sm font-medium text-tg-text-2">פעולה</p>
+        <div className="grid grid-cols-1 gap-2" role="group" aria-labelledby="new-rule-action-label">
           {ACTION_TYPES.map((key) => {
             const disabled = isBlockLocked && key !== 'warn';
             return (
@@ -419,8 +422,9 @@ function CustomRuleBuilder({
         {form.action_type === 'block_timer' && (
           <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl"
             style={{ background: 'var(--color-tg-surface-2)' }}>
-            <label className="text-xs font-medium text-tg-text-2">משך הנעילה</label>
+            <label htmlFor="new-rule-cooldown" className="text-xs font-medium text-tg-text-2">משך הנעילה</label>
             <select
+              id="new-rule-cooldown"
               value={form.cooldown_minutes}
               onChange={(e) => setForm({ ...form, cooldown_minutes: e.target.value })}
               className="w-24 h-9 px-3 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary text-center"

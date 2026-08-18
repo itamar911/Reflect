@@ -172,7 +172,7 @@ export default function SetupsClient({
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
             style={{ background: 'rgba(0,210,210,0.12)', border: `1px solid rgba(0,210,210,0.22)` }}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={GOLD} strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+            <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={GOLD} strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
               <path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/>
               <line x1="7" y1="7" x2="7.01" y2="7"/>
             </svg>
@@ -183,7 +183,7 @@ export default function SetupsClient({
           </div>
         </div>
         <button onClick={() => setView('create')} style={goldBtn}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+          <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
             <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
           </svg>
           סטאפ חדש
@@ -193,7 +193,7 @@ export default function SetupsClient({
       {/* Empty state */}
       {setups.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center py-20 gap-4">
-          <Target size={52} />
+          <Target aria-hidden="true" size={52} />
           <p className="text-base font-semibold" style={{ color: TEXT }}>אין סטאפים עדיין</p>
           <p className="text-sm text-center" style={{ color: MUTED }}>
             הגדר סטאפ, קשר אליו עסקאות<br/>וקבל ניתוח AI מפורט
@@ -303,7 +303,7 @@ function DetailView({ setup, stats, linked, unlinked, aiReview, aiLoading, onBac
       {/* Nav */}
       <div className="flex items-center justify-between">
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm" style={{ color: TEXT2 }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="9 18 15 12 9 6"/>
           </svg>
           כל הסטאפים
@@ -380,7 +380,7 @@ function DetailView({ setup, stats, linked, unlinked, aiReview, aiLoading, onBac
               background: aiOpen ? 'rgba(0,210,210,0.12)' : SURF2,
               color:      aiOpen ? GOLD : TEXT2,
             }}>
-            {aiLoading && aiOpen ? '⟳ מנתח...' : aiOpen ? 'סגור' : <><Sparkles size={12} /> קבל ביקורת AI</>}
+            {aiLoading && aiOpen ? '⟳ מנתח...' : aiOpen ? 'סגור' : <><Sparkles aria-hidden="true" size={12} /> קבל ביקורת AI</>}
           </button>
         </div>
 
@@ -552,8 +552,8 @@ function CreateForm({ userId, supabase, onSave, onCancel }: {
     <div dir="rtl" className="min-h-screen px-4 py-6 flex flex-col gap-4">
 
       <div className="flex items-center gap-3">
-        <button onClick={onCancel} style={{ color: TEXT2 }}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <button onClick={onCancel} aria-label="ביטול" style={{ color: TEXT2 }}>
+          <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
           </svg>
         </button>
@@ -612,10 +612,10 @@ function CreateForm({ userId, supabase, onSave, onCancel }: {
             <div className="relative">
               {/* eslint-disable-next-line @next/next/no-img-element -- local data-URL preview of the uploaded setup image; next/image can't optimize data URLs */}
               <img src={imgPreview} alt="Preview" className="w-full max-h-48 rounded-xl object-cover" />
-              <button onClick={() => { setImgFile(null); setImgPreview(null); }}
+              <button onClick={() => { setImgFile(null); setImgPreview(null); }} aria-label="הסר תמונה"
                 className="absolute top-2 left-2 w-7 h-7 rounded-full flex items-center justify-center"
                 style={{ background: 'rgba(0,0,0,0.6)', color: '#fff' }}>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
                 </svg>
               </button>
@@ -624,7 +624,7 @@ function CreateForm({ userId, supabase, onSave, onCancel }: {
             <button onClick={() => fileRef.current?.click()}
               className="w-full py-8 rounded-xl flex flex-col items-center gap-2 transition-colors hover:opacity-80"
               style={{ border: `2px dashed ${BORDER}`, background: SURF2 }}>
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={MUTED} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={MUTED} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="3" width="18" height="18" rx="2"/>
                 <circle cx="8.5" cy="8.5" r="1.5"/>
                 <polyline points="21 15 16 10 5 21"/>

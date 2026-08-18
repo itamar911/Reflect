@@ -23,7 +23,7 @@ export default function NotebookSidebar({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: SURF, padding: 12, gap: 16, overflowY: 'auto', direction: 'rtl' }}>
       <button onClick={onCreate} style={btnStyle}>
-        <Plus size={13} />
+        <Plus aria-hidden="true" size={13} />
         דף חדש
       </button>
 
@@ -37,13 +37,13 @@ export default function NotebookSidebar({
           fontSize: 13, fontWeight: allActive ? 600 : 500, textAlign: 'right',
         }}
       >
-        <Layers size={14} />
+        <Layers aria-hidden="true" size={14} />
         כל הדפים
       </button>
 
       <section>
         <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '0 2px', marginBottom: 6 }}>
-          <Folder size={11} color={MUTED} />
+          <Folder aria-hidden="true" size={11} color={MUTED} />
           <p style={{ fontSize: 11, fontWeight: 600, color: MUTED }}>תיקיות</p>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
@@ -73,7 +73,7 @@ export default function NotebookSidebar({
       {tagsInUse.length > 0 && (
         <section>
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '0 2px', marginBottom: 6 }}>
-            <TagIcon size={11} color={MUTED} />
+            <TagIcon aria-hidden="true" size={11} color={MUTED} />
             <p style={{ fontSize: 11, fontWeight: 600, color: MUTED }}>תגים</p>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>

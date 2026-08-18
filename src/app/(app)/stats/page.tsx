@@ -44,7 +44,7 @@ export default async function StatsPage() {
         <PageHeader />
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center py-16">
-            <div className="mb-4" style={{ color: MUTED }}><BarChart2 size={48} /></div>
+            <div className="mb-4" style={{ color: MUTED }}><BarChart2 aria-hidden="true" size={48} /></div>
             <p style={{ fontSize: 14, fontWeight: 700, color: TEXT }}>אין עדיין נתונים</p>
             <p style={{ fontSize: 12, color: MUTED, marginTop: 4 }}>תעד עסקאות כדי לראות סטטיסטיקות</p>
           </div>
@@ -295,7 +295,7 @@ export default async function StatsPage() {
       />
 
       {/* ── Section 2: Equity curve ────────────────────────────── */}
-      <Section title="רווח/הפסד לאורך זמן" icon={<TrendingUp size={18} />}>
+      <Section title="רווח/הפסד לאורך זמן" icon={<TrendingUp aria-hidden="true" size={18} />}>
         <PnlChart daily={daily} weekly={weekly} monthly={monthly} />
       </Section>
 
@@ -305,7 +305,7 @@ export default async function StatsPage() {
           {strategies.length > 0 && (
             <PerformanceTable
               title="ביצועים לפי אסטרטגיה"
-              icon={<Target size={18} />}
+              icon={<Target aria-hidden="true" size={18} />}
               unitLabel="אסטרטגיות"
               rows={strategyRows}
               showRR
@@ -314,7 +314,7 @@ export default async function StatsPage() {
           {symbols.length > 0 && (
             <PerformanceTable
               title="התפלגות לפי סמל"
-              icon={<CandlestickChart size={18} />}
+              icon={<CandlestickChart aria-hidden="true" size={18} />}
               unitLabel="סמלים"
               rows={symbolRows}
               showRR
@@ -361,7 +361,7 @@ function PageHeader() {
     <div className="flex items-center gap-3">
       <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
         style={{ background: 'rgba(0,210,210,0.12)', border: '1px solid rgba(0,210,210,0.2)' }}>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#00d2d2" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+        <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#00d2d2" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
           <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/>
           <line x1="6" y1="20" x2="6" y2="14"/><line x1="2" y1="20" x2="22" y2="20"/>
         </svg>

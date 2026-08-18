@@ -52,7 +52,7 @@ const RAIL_INSET = W_OPEN - W_SHUT; // px of the panel clipped away / handle off
 // ── Icon helper ───────────────────────────────────────────────────────────────
 function Svg({ children }: { children: React.ReactNode }) {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
       strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
       {children}
     </svg>
@@ -71,7 +71,7 @@ const IconStrategy   = () => <Svg><path d="M21 3H3v7h18V3z"/><path d="M21 14H3v7
 const IconSettings   = () => <Svg><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></Svg>;
 const IconFeedback   = () => <Svg><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="15" x2="12.01" y2="15"/></Svg>;
 const IconLogout     = () => <Svg><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></Svg>;
-const IconPlus       = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>;
+const IconPlus       = () => <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>;
 
 // ── Nav config ────────────────────────────────────────────────────────────────
 interface NavItem { href: string; label: string; icon: React.ReactNode }
@@ -113,9 +113,13 @@ function NavLink({ item, expanded, active, hardNav }: {
 }) {
   const LinkOrAnchor = hardNav ? 'a' : Link;
   return (
+    // aria-label, not just title: collapsed, the label span below is
+    // aria-hidden and the icon is the link's only content, which leaves the
+    // link with no computed name at all — title does not fill the gap here.
     <LinkOrAnchor
       href={item.href}
       {...(hardNav ? {} : { prefetch: true })}
+      aria-label={item.label}
       title={!expanded ? item.label : undefined}
       className="relative flex items-center rounded-xl select-none"
       style={{
@@ -355,50 +359,6 @@ export default function AppShell({
         onClick={() => setExpandedOverride(false)}
       />
 
-      {/* ── Toggle handle ────────────────────────────────────────────
-          The button owns positioning (differs per state/viewport, inline)
-          and the hit area; the inner .sidebar-handle span owns every visual
-          (gradient half-pill + glow + hover lift) — see globals.css. */}
-      <button
-        onClick={toggle}
-        aria-label={expanded ? 'כווץ סרגל' : 'הרחב סרגל'}
-        className="sidebar-handle-btn hit-40 fixed z-50 w-7 h-14"
-        style={
-          isMobile
-            ? {
-                // Open: vertically centered on the drawer's visible edge.
-                // Closed: the drawer is fully off-canvas, so there's no panel
-                // edge to attach to — sit flush on the screen edge instead.
-                right:     expanded ? W_OPEN : 0,
-                top:       '50%',
-                transform: 'translateY(-50%)',
-              }
-            : {
-                // Tracks the sidebar's visible edge via transform only (isolated
-                // fixed element — moving it doesn't reflow any sibling).
-                right:      W_SHUT,
-                top:        '50%',
-                transform:  `translate(${expanded ? -RAIL_INSET : 0}px, -50%)`,
-                transition: `transform ${SIDEBAR_TRANSITION}`,
-              }
-        }
-      >
-        <span className={`sidebar-handle${handleUsed ? '' : ' sidebar-handle-pulse'}`}>
-          <span className="sidebar-handle-icon flex items-center justify-center">
-            {/* translateX(1px) = optical centering, nudged toward the point;
-                it rides inside the rotation, so it flips with the chevron. */}
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-              strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
-              style={{
-                transform: `rotate(${expanded ? 0 : 180}deg) translateX(1px)`,
-                transition: `transform ${SIDEBAR_TRANSITION}`,
-              }}>
-              <polyline points="9 18 15 12 9 6"/>
-            </svg>
-          </span>
-        </span>
-      </button>
-
       {/* ── Right sidebar ─────────────────────────────────────────── */}
       <aside
         dir="rtl"
@@ -596,6 +556,50 @@ export default function AppShell({
 
         </div>
       </aside>
+
+      {/* ── Toggle handle ────────────────────────────────────────────
+          The button owns positioning (differs per state/viewport, inline)
+          and the hit area; the inner .sidebar-handle span owns every visual
+          (gradient half-pill + glow + hover lift) — see globals.css. */}
+      <button
+        onClick={toggle}
+        aria-label={expanded ? 'כווץ סרגל' : 'הרחב סרגל'}
+        className="sidebar-handle-btn hit-40 fixed z-50 w-7 h-14"
+        style={
+          isMobile
+            ? {
+                // Open: vertically centered on the drawer's visible edge.
+                // Closed: the drawer is fully off-canvas, so there's no panel
+                // edge to attach to — sit flush on the screen edge instead.
+                right:     expanded ? W_OPEN : 0,
+                top:       '50%',
+                transform: 'translateY(-50%)',
+              }
+            : {
+                // Tracks the sidebar's visible edge via transform only (isolated
+                // fixed element — moving it doesn't reflow any sibling).
+                right:      W_SHUT,
+                top:        '50%',
+                transform:  `translate(${expanded ? -RAIL_INSET : 0}px, -50%)`,
+                transition: `transform ${SIDEBAR_TRANSITION}`,
+              }
+        }
+      >
+        <span className={`sidebar-handle${handleUsed ? '' : ' sidebar-handle-pulse'}`}>
+          <span className="sidebar-handle-icon flex items-center justify-center">
+            {/* translateX(1px) = optical centering, nudged toward the point;
+                it rides inside the rotation, so it flips with the chevron. */}
+            <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
+              style={{
+                transform: `rotate(${expanded ? 0 : 180}deg) translateX(1px)`,
+                transition: `transform ${SIDEBAR_TRANSITION}`,
+              }}>
+              <polyline points="9 18 15 12 9 6"/>
+            </svg>
+          </span>
+        </span>
+      </button>
 
       {/* ── Main content ───────────────────────────────────────────
           margin-right animates on the exact same spec as the sidebar so the

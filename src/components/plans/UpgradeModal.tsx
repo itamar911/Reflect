@@ -76,7 +76,7 @@ export default function UpgradeModal({ open, onClose, limitType }: UpgradeModalP
           className="w-14 h-14 rounded-full flex items-center justify-center"
           style={{ background: 'rgba(0,210,210,0.12)' }}
         >
-          <Lock size={26} style={{ color: '#00d2d2' }} />
+          <Lock aria-hidden="true" size={26} style={{ color: '#00d2d2' }} />
         </div>
 
         <p id={titleId} className="text-base font-bold" style={{ color: 'var(--color-tg-text)' }}>

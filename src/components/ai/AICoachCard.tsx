@@ -21,12 +21,12 @@ interface Trade {
 }
 
 const TYPE_CONFIG: Record<string, { icon: ReactNode; color: string; label: string }> = {
-  time:        { icon: <Clock size={14} />,         color: '#00d2d2', label: 'שעות מסחר' },
-  emotional:   { icon: <Heart size={14} />,         color: '#60A5FA', label: 'מצב רגשי' },
-  revenge:     { icon: <AlertTriangle size={14} />, color: '#FF3B30', label: 'Revenge Trading' },
-  performance: { icon: <TrendingUp size={14} />,    color: '#00C853', label: 'ביצועים' },
-  pattern:     { icon: <Search size={14} />,        color: '#A78BFA', label: 'דפוס' },
-  discipline:  { icon: <Target size={14} />,        color: '#00d2d2', label: 'משמעת' },
+  time:        { icon: <Clock aria-hidden="true" size={14} />,         color: '#00d2d2', label: 'שעות מסחר' },
+  emotional:   { icon: <Heart aria-hidden="true" size={14} />,         color: '#60A5FA', label: 'מצב רגשי' },
+  revenge:     { icon: <AlertTriangle aria-hidden="true" size={14} />, color: '#FF3B30', label: 'Revenge Trading' },
+  performance: { icon: <TrendingUp aria-hidden="true" size={14} />,    color: '#00C853', label: 'ביצועים' },
+  pattern:     { icon: <Search aria-hidden="true" size={14} />,        color: '#A78BFA', label: 'דפוס' },
+  discipline:  { icon: <Target aria-hidden="true" size={14} />,        color: '#00d2d2', label: 'משמעת' },
 };
 
 export default function AICoachCard({ trades }: { trades: Trade[] }) {
@@ -68,7 +68,7 @@ export default function AICoachCard({ trades }: { trades: Trade[] }) {
     return (
       <Card>
         <div className="flex items-center gap-2 mb-3">
-          <DollarSign size={18} />
+          <DollarSign aria-hidden="true" size={18} />
           <h3 className="text-sm font-semibold text-tg-text">ניתוח השפעה פיננסית</h3>
         </div>
         <p className="text-xs text-tg-text-2">נדרשות לפחות 3 עסקאות כדי לחשב כמה אתה חוסך ומרוויח</p>
@@ -82,7 +82,7 @@ export default function AICoachCard({ trades }: { trades: Trade[] }) {
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-lg flex items-center justify-center"
             style={{ background: 'var(--color-tg-primary-muted)', border: '1px solid var(--color-tg-primary)' }}>
-            <DollarSign size={14} />
+            <DollarSign aria-hidden="true" size={14} />
           </div>
           <h3 className="text-sm font-semibold text-tg-text">ניתוח השפעה פיננסית</h3>
         </div>

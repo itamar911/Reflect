@@ -81,7 +81,7 @@ export default function TraderIdentityReveal({
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-4 px-4"
         style={{ background: 'var(--color-tg-bg)' }}>
-        <Loader2 size={36} className="animate-spin" style={{ color: '#00d2d2' }} />
+        <Loader2 aria-hidden="true" size={36} className="animate-spin" style={{ color: '#00d2d2' }} />
         <p className="text-sm text-tg-text-2">מנתח את הפרופיל שלך...</p>
       </div>
     );

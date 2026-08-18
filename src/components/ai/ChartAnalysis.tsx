@@ -87,7 +87,7 @@ export default function ChartAnalysis() {
   return (
     <Card>
       <div className="flex items-center gap-2 mb-4">
-        <BarChart2 size={16} />
+        <BarChart2 aria-hidden="true" size={16} />
         <h3 className="text-sm font-semibold text-tg-text">ניתוח גרף AI</h3>
       </div>
 
@@ -95,7 +95,7 @@ export default function ChartAnalysis() {
         <button onClick={() => fileRef.current?.click()}
           className="w-full py-10 rounded-xl border-2 border-dashed flex flex-col items-center gap-2 transition-colors active:scale-[0.98]"
           style={{ borderColor: 'var(--color-tg-border)', background: 'var(--color-tg-surface-2)' }}>
-          <Upload size={32} />
+          <Upload aria-hidden="true" size={32} />
           <span className="text-sm text-tg-text-2">העלה גרף לניתוח טכני</span>
           <span className="text-xs text-tg-muted">PNG, JPG, WEBP — עד 5MB</span>
         </button>
@@ -111,11 +111,12 @@ export default function ChartAnalysis() {
         </div>
       )}
 
-      <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={handleFile} />
+      <input ref={fileRef} type="file" aria-label="העלאת גרף לניתוח" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={handleFile} />
 
       {preview && !analysis && (
         <div className="flex flex-col gap-2">
           <input type="text"
+            aria-label="הקשר נוסף לגרף"
             placeholder="הקשר נוסף — למשל: SPY 1H, NQ Futures"
             value={context}
             onChange={(e) => setContext(e.target.value)}
@@ -131,7 +132,7 @@ export default function ChartAnalysis() {
       {error && (
         <div className="mt-3 p-3 rounded-xl text-sm flex items-center gap-1.5"
           style={{ background: 'var(--color-tg-danger-muted)', color: 'var(--color-tg-danger)' }}>
-          <AlertTriangle size={14} />
+          <AlertTriangle aria-hidden="true" size={14} />
           {error}
         </div>
       )}

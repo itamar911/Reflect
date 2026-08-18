@@ -254,7 +254,7 @@ function PlanCard({
           {features.map((f) => (
             <li key={f.text} className="flex items-start gap-2.5">
               <span className="pricing-check" aria-hidden>
-                <Check size={12} strokeWidth={3.25} />
+                <Check aria-hidden="true" size={12} strokeWidth={3.25} />
               </span>
               <span className="text-base leading-snug" style={{ color: 'rgba(255,255,255,0.9)' }}>
                 {f.text}

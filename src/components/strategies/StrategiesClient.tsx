@@ -101,7 +101,7 @@ const BUILTIN_STRATEGIES: BuiltinDef[] = [
     name: 'Trend Following',
     description: 'מסחר בכיוון המגמה הראשית',
     detail: 'מזהה מגמה ברורה על Higher Timeframe ונכנס בכיוונה. מחפש Higher Highs / Higher Lows לעלייה ו-Lower Highs / Lower Lows לירידה. כניסה על תיקון לעבר EMA/אזור תמיכה.',
-    icon: <TrendingUp size={22} />,
+    icon: <TrendingUp aria-hidden="true" size={22} />,
     direction: 'both',
   },
   {
@@ -109,7 +109,7 @@ const BUILTIN_STRATEGIES: BuiltinDef[] = [
     name: 'Breakout',
     description: 'פריצת רמות תמיכה/התנגדות',
     detail: 'כניסה על פריצה מעל התנגדות ידועה או מתחת לתמיכה, עם נר סגירה מחוץ לטווח. מחפש עלייה בנפח לאישור. SL מתחת/מעל לרמה הנפרצת.',
-    icon: <Rocket size={22} />,
+    icon: <Rocket aria-hidden="true" size={22} />,
     direction: 'both',
   },
   {
@@ -117,7 +117,7 @@ const BUILTIN_STRATEGIES: BuiltinDef[] = [
     name: 'Range Reversal',
     description: 'היפוך בטווח מסחר',
     detail: 'מזהה שוק בטווח (Range) ברור עם תמיכה והתנגדות. כניסה בהיפוך מקצוות הטווח עם אישור rejection candle. TP בצד השני של הטווח.',
-    icon: <ArrowLeftRight size={22} />,
+    icon: <ArrowLeftRight aria-hidden="true" size={22} />,
     direction: 'both',
   },
   {
@@ -125,7 +125,7 @@ const BUILTIN_STRATEGIES: BuiltinDef[] = [
     name: 'Pullback Entry',
     description: 'כניסה בנסיגה בכיוון המגמה',
     detail: 'ממתין לנסיגה (Pullback) אל EMA, Fibonacci 50-61.8%, או אזור Supply/Demand קודם. כניסה עם אישור נר מגמה. Stop מתחת לנסיגה.',
-    icon: <RefreshCw size={22} />,
+    icon: <RefreshCw aria-hidden="true" size={22} />,
     direction: 'both',
   },
   {
@@ -133,7 +133,7 @@ const BUILTIN_STRATEGIES: BuiltinDef[] = [
     name: 'SMC / Order Blocks',
     description: 'Smart Money Concepts — Order Blocks',
     detail: 'כניסה על Order Blocks (OB) — הנר האחרון לפני תנועה חזקה. מחפש Liquidity Grab, Break of Structure (BOS) לאישור כיוון, ו-Fair Value Gap (FVG) לדיוק כניסה.',
-    icon: <Building2 size={22} />,
+    icon: <Building2 aria-hidden="true" size={22} />,
     direction: 'both',
   },
   {
@@ -141,7 +141,7 @@ const BUILTIN_STRATEGIES: BuiltinDef[] = [
     name: 'VWAP Reversion',
     description: 'חזרה ל-VWAP אחרי סטייה',
     detail: 'מחפש סטייה גדולה מ-VWAP (מעל/מתחת ל-1-2 Standard Deviations). כניסה בהיפוך עם momentum חלש ו-Volume יורד. TP ב-VWAP, SL מעל/מתחת לנקודת הקיצון.',
-    icon: <Activity size={22} />,
+    icon: <Activity aria-hidden="true" size={22} />,
     direction: 'both',
   },
 ];
@@ -396,7 +396,7 @@ export default function StrategiesClient({
                     </div>
                     <p className="text-xs mt-0.5" style={{ color: TEXT2 }}>{b.description}</p>
                   </div>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={MUTED} strokeWidth="2"
+                  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={MUTED} strokeWidth="2"
                     strokeLinecap="round" strokeLinejoin="round" className="shrink-0 mt-1"
                     style={{ transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>
                     <polyline points="6 9 12 15 18 9"/>
@@ -526,7 +526,7 @@ export default function StrategiesClient({
       {strategies.length === 0 && !showForm && (
         <div className="text-center py-14 rounded-2xl flex flex-col items-center gap-3"
           style={{ background: SURF, border: `1px solid ${BORDER}` }}>
-          <Ruler size={48} />
+          <Ruler aria-hidden="true" size={48} />
           <p className="text-base font-semibold" style={{ color: TEXT }}>אין אסטרטגיות עדיין</p>
           <p className="text-sm" style={{ color: MUTED }}>הוסף אסטרטגיה ראשונה או בחר תבנית</p>
         </div>
@@ -561,12 +561,12 @@ export default function StrategiesClient({
                   </p>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
-                  <button onClick={() => openEdit(s)}
+                  <button onClick={() => openEdit(s)} aria-label={`עריכת האסטרטגיה ${s.name}`}
                     className="hit-40 relative p-1.5 rounded-lg transition-colors"
                     style={{ background: SURF2, color: MUTED }}>
                     <PencilIcon />
                   </button>
-                  <button onClick={() => handleDelete(s.id)} disabled={deletingId === s.id}
+                  <button onClick={() => handleDelete(s.id)} disabled={deletingId === s.id} aria-label={`מחיקת האסטרטגיה ${s.name}`}
                     className="hit-40 relative p-1.5 rounded-lg transition-colors disabled:opacity-40"
                     style={{ background: 'rgba(248,113,113,0.1)', color: RED }}>
                     <TrashIcon />
@@ -921,19 +921,19 @@ const inputSt: CSSProperties = {
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
 function PencilIcon() {
-  return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  return <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
     <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
   </svg>;
 }
 function TrashIcon() {
-  return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  return <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
     <path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
   </svg>;
 }
 function ListIcon() {
-  return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  return <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
     <circle cx="3" cy="6" r="1" fill="currentColor" stroke="none"/>
     <circle cx="3" cy="12" r="1" fill="currentColor" stroke="none"/>
@@ -941,7 +941,7 @@ function ListIcon() {
   </svg>;
 }
 function SparkIcon() {
-  return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  return <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M12 2l2.4 5.2 5.6.8-4 4 .9 5.6-5-2.7-5 2.7.9-5.6-4-4 5.6-.8L12 2z"/>
   </svg>;
 }

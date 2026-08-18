@@ -414,7 +414,7 @@ export function PlanCheckMock() {
           {ROWS.map((row) => (
             <div key={row.text} className="flex items-center gap-2.5">
               <span className={`${row.appearClass} flex shrink-0`}>
-                <Check size={16} style={{ color: '#22c55e' }} />
+                <Check aria-hidden="true" size={16} style={{ color: '#22c55e' }} />
               </span>
               <span className="text-white/85" style={{ fontSize: 14.5 }}>{row.text}</span>
             </div>

@@ -46,7 +46,7 @@ export function TestimonialCard({ video }: { video: PlaceholderVideo }) {
                 className="flex items-center justify-center w-16 h-16 rounded-full"
                 style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.14)' }}
               >
-                <PlayCircle size={36} style={{ color: 'rgba(255,255,255,0.3)' }} />
+                <PlayCircle aria-hidden="true" size={36} style={{ color: 'rgba(255,255,255,0.3)' }} />
               </span>
               <span className="text-sm text-tg-muted/45">בקרוב</span>
             </div>

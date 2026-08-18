@@ -159,7 +159,7 @@ export function CoachMock() {
             style={{ background: 'rgba(0,210,210,0.14)', border: '1px solid rgba(0,210,210,0.35)' }}
             aria-hidden
           >
-            <Bot size={13} style={{ color: '#00d2d2' }} />
+            <Bot aria-hidden="true" size={13} style={{ color: '#00d2d2' }} />
           </span>
           <span className="flex flex-col gap-0.5 min-w-0">
             <span className="text-sm font-bold text-white leading-none">מאמן AI</span>
@@ -220,7 +220,7 @@ export function CoachMock() {
           >
             {/* Mirrored: SendHorizontal points right, which is backwards for a
                 send action in an RTL composer. */}
-            <SendHorizontal size={12} style={{ color: '#00d2d2', transform: 'scaleX(-1)' }} />
+            <SendHorizontal aria-hidden="true" size={12} style={{ color: '#00d2d2', transform: 'scaleX(-1)' }} />
           </span>
         </div>
       </div>
@@ -315,7 +315,7 @@ function CoachBubble({ tokens, count, typing }: { tokens: Token[]; count: number
         style={{ background: 'rgba(0,210,210,0.14)', border: '1px solid rgba(0,210,210,0.35)' }}
         aria-hidden
       >
-        <Bot size={12} style={{ color: '#00d2d2' }} />
+        <Bot aria-hidden="true" size={12} style={{ color: '#00d2d2' }} />
       </span>
     </div>
   );

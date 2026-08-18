@@ -137,11 +137,11 @@ function MobileTradeCard({ t, onView, onEdit, onDelete, onClose, onDebrief, hasD
   const isClosed = t.status === 'closed';
 
   const menuItems: KebabItem[] = [
-    { label: 'צפייה', icon: <Eye size={13} />, onClick: onView },
-    { label: 'עריכה', icon: <Pencil size={13} />, onClick: onEdit },
-    ...(t.status === 'open' ? [{ label: 'סגור עסקה', icon: <X size={13} />, onClick: onClose }] : []),
-    ...(hasDebrief ? [{ label: 'ניתוח AI', icon: <Bot size={13} />, color: GOLD, onClick: onDebrief }] : []),
-    { label: 'מחיקה', icon: <Trash2 size={13} />, color: RED, onClick: onDelete },
+    { label: 'צפייה', icon: <Eye aria-hidden="true" size={13} />, onClick: onView },
+    { label: 'עריכה', icon: <Pencil aria-hidden="true" size={13} />, onClick: onEdit },
+    ...(t.status === 'open' ? [{ label: 'סגור עסקה', icon: <X aria-hidden="true" size={13} />, onClick: onClose }] : []),
+    ...(hasDebrief ? [{ label: 'ניתוח AI', icon: <Bot aria-hidden="true" size={13} />, color: GOLD, onClick: onDebrief }] : []),
+    { label: 'מחיקה', icon: <Trash2 aria-hidden="true" size={13} />, color: RED, onClick: onDelete },
   ];
 
   return (
@@ -188,7 +188,7 @@ function MobileTradeCard({ t, onView, onEdit, onDelete, onClose, onDebrief, hasD
             {isClosed && <ScoreRing score={t.plan_score} size={30} />}
             {t.has_rule_violation && (
               <span title="חוק הופר" className="flex items-center">
-                <AlertTriangle size={14} color={AMBER} />
+                <AlertTriangle role="img" aria-label="חוק הופר" size={14} color={AMBER} />
               </span>
             )}
           </div>
@@ -449,7 +449,7 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
 
         {/* Search */}
         <div className="relative flex-1 max-w-xs">
-          <svg className="absolute right-3 top-1/2 -translate-y-1/2" width="15" height="15"
+          <svg aria-hidden="true" className="absolute right-3 top-1/2 -translate-y-1/2" width="15" height="15"
             viewBox="0 0 24 24" fill="none" stroke={MUTED} strokeWidth="2"
             strokeLinecap="round" strokeLinejoin="round">
             <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
@@ -528,15 +528,15 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
                 const isChecked = selected.has(t.id);
 
                 const menuItems: KebabItem[] = [
-                  { label: 'צפייה', icon: <Eye size={13} />, onClick: () => { setClosingTradeId(null); setViewTradeId(t.id); } },
-                  { label: 'עריכה', icon: <Pencil size={13} />, onClick: () => setEditingTradeId(t.id) },
+                  { label: 'צפייה', icon: <Eye aria-hidden="true" size={13} />, onClick: () => { setClosingTradeId(null); setViewTradeId(t.id); } },
+                  { label: 'עריכה', icon: <Pencil aria-hidden="true" size={13} />, onClick: () => setEditingTradeId(t.id) },
                   ...(t.status === 'open'
-                    ? [{ label: 'סגור עסקה', icon: <X size={13} />, onClick: () => { setViewTradeId(null); setClosingTradeId(t.id); } }]
+                    ? [{ label: 'סגור עסקה', icon: <X aria-hidden="true" size={13} />, onClick: () => { setViewTradeId(null); setClosingTradeId(t.id); } }]
                     : []),
                   ...(debriefResults[t.id]
-                    ? [{ label: 'ניתוח AI', icon: <Bot size={13} />, color: GOLD, onClick: () => setViewDebriefId(t.id) }]
+                    ? [{ label: 'ניתוח AI', icon: <Bot aria-hidden="true" size={13} />, color: GOLD, onClick: () => setViewDebriefId(t.id) }]
                     : []),
-                  { label: 'מחיקה', icon: <Trash2 size={13} />, color: RED, onClick: () => { setDeletingTradeId(t.id); setDeleteError(''); } },
+                  { label: 'מחיקה', icon: <Trash2 aria-hidden="true" size={13} />, color: RED, onClick: () => { setDeletingTradeId(t.id); setDeleteError(''); } },
                 ];
 
                 return (
@@ -645,7 +645,7 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
                         <ScoreRing score={isClosed ? t.plan_score : null} />
                         {t.has_rule_violation && (
                           <span title="חוק הופר" className="flex items-center">
-                            <AlertTriangle size={14} color={AMBER} />
+                            <AlertTriangle role="img" aria-label="חוק הופר" size={14} color={AMBER} />
                           </span>
                         )}
                       </div>
@@ -869,7 +869,7 @@ function ScoreRing({ score, size = 34 }: { score: number | null; size?: number }
   const r = c - 3;
   const circ = 2 * Math.PI * r;
   return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-label={`ציון ${clamped}`} className="shrink-0">
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={`ציון ${clamped}`} className="shrink-0">
       <circle cx={c} cy={c} r={r} fill="none" stroke="rgba(128,128,128,0.22)" strokeWidth={2.5} />
       <circle cx={c} cy={c} r={r} fill="none" stroke={color} strokeWidth={2.5}
         strokeDasharray={`${(clamped / 100) * circ} ${circ}`}
@@ -918,7 +918,7 @@ function KebabMenu({ items, className = '' }: { items: KebabItem[]; className?: 
         title="פעולות"
         aria-haspopup="menu"
         aria-expanded={open}>
-        <MoreHorizontal size={16} />
+        <MoreHorizontal aria-hidden="true" size={16} />
       </button>
       {open && createPortal(
         <div className="fixed inset-0 z-50"
@@ -961,7 +961,7 @@ function KebabMenu({ items, className = '' }: { items: KebabItem[]; className?: 
 function EmptyState() {
   return (
     <div className="flex flex-col items-center gap-2 py-16">
-      <Inbox size={28} color={MUTED} strokeWidth={1.5} />
+      <Inbox aria-hidden="true" size={28} color={MUTED} strokeWidth={1.5} />
       <p className="text-sm" style={{ color: TEXT, fontWeight: 700 }}>לא נמצאו עסקאות</p>
       <p className="text-xs" style={{ color: MUTED, fontWeight: 600 }}>נסה לשנות את החיפוש או הסינון</p>
     </div>
@@ -1178,7 +1178,7 @@ function TradeDetailModal({ trade, onClose, debriefResult, onDebrief }: {
               color: 'var(--color-tg-primary)',
               border: '1px solid rgba(0,210,210,0.3)',
             }}>
-            <Bot size={14} /> {analyzing && debriefOpen ? 'מנתח...' : debriefOpen ? 'סגור ניתוח AI' : 'נתח עסקה עם AI'}
+            <Bot aria-hidden="true" size={14} /> {analyzing && debriefOpen ? 'מנתח...' : debriefOpen ? 'סגור ניתוח AI' : 'נתח עסקה עם AI'}
           </button>
           {(debriefOpen || result != null) && (
             <div className={`ai-collapse ${debriefOpen ? 'ai-collapse-open' : ''}`}>
@@ -1381,7 +1381,7 @@ function EditTradeModal({ trade, onClose, onSaved }: {
 
 function FilterIcon() {
   return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+    <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
       strokeLinecap="round" strokeLinejoin="round">
       <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
     </svg>
@@ -1390,7 +1390,7 @@ function FilterIcon() {
 
 function ChevronIcon() {
   return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+    <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
       strokeLinecap="round" strokeLinejoin="round">
       <polyline points="6 9 12 15 18 9"/>
     </svg>

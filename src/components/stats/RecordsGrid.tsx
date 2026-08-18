@@ -20,16 +20,16 @@ export default function RecordsGrid({
   maxWinStreak, maxLossStreak, bestTrade, worstTrade, bestDay, worstDay,
 }: Props) {
   const records: { label: string; icon: ReactNode; color: string; data: RecordValue | null }[] = [
-    { label: 'רצף רווחים ארוך ביותר', icon: <Flame size={14} />,        color: GREEN, data: { value: String(maxWinStreak) } },
-    { label: 'רצף הפסדים ארוך ביותר', icon: <Zap size={14} />,          color: RED,   data: { value: String(maxLossStreak) } },
-    { label: 'עסקה טובה ביותר',       icon: <Trophy size={14} />,       color: GREEN, data: bestTrade },
-    { label: 'עסקה גרועה ביותר',      icon: <TrendingDown size={14} />, color: RED,   data: worstTrade },
-    { label: 'יום טוב ביותר',          icon: <CalendarCheck size={14} />, color: GREEN, data: bestDay },
-    { label: 'יום גרוע ביותר',         icon: <CalendarX size={14} />,     color: RED,   data: worstDay },
+    { label: 'רצף רווחים ארוך ביותר', icon: <Flame aria-hidden="true" size={14} />,        color: GREEN, data: { value: String(maxWinStreak) } },
+    { label: 'רצף הפסדים ארוך ביותר', icon: <Zap aria-hidden="true" size={14} />,          color: RED,   data: { value: String(maxLossStreak) } },
+    { label: 'עסקה טובה ביותר',       icon: <Trophy aria-hidden="true" size={14} />,       color: GREEN, data: bestTrade },
+    { label: 'עסקה גרועה ביותר',      icon: <TrendingDown aria-hidden="true" size={14} />, color: RED,   data: worstTrade },
+    { label: 'יום טוב ביותר',          icon: <CalendarCheck aria-hidden="true" size={14} />, color: GREEN, data: bestDay },
+    { label: 'יום גרוע ביותר',         icon: <CalendarX aria-hidden="true" size={14} />,     color: RED,   data: worstDay },
   ];
 
   return (
-    <Section title="רצפים ושיאים" icon={<Trophy size={18} />}>
+    <Section title="רצפים ושיאים" icon={<Trophy aria-hidden="true" size={18} />}>
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         {records.map((r) => (
           <div key={r.label} className="stats-card p-4 flex flex-col gap-1">

@@ -24,9 +24,9 @@ export default function NotebookPageList({
       {/* Header */}
       <div style={{ padding: '12px', borderBottom: `1px solid ${BORDER}`, display: 'flex', flexDirection: 'column', gap: '8px' }}>
         <div style={{ position: 'relative' }}>
-          <Search size={13} color={MUTED} style={{ position: 'absolute', top: '50%', right: 10, transform: 'translateY(-50%)', pointerEvents: 'none' }} />
+          <Search aria-hidden="true" size={13} color={MUTED} style={{ position: 'absolute', top: '50%', right: 10, transform: 'translateY(-50%)', pointerEvents: 'none' }} />
           <input
-            type="text" placeholder="חיפוש דפים..." value={search}
+            type="text" aria-label="חיפוש דפים" placeholder="חיפוש דפים..." value={search}
             onChange={e => onSearchChange(e.target.value)}
             style={{ ...inputBase, fontSize: 12, padding: '6px 30px 6px 10px', direction: 'rtl' }}
           />
@@ -38,7 +38,7 @@ export default function NotebookPageList({
       <div style={{ flex: 1, overflowY: 'auto', padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
         {pages.length === 0 ? (
           <div style={{ padding: 24, textAlign: 'center', color: MUTED, fontSize: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-            <BookOpen size={28} />
+            <BookOpen aria-hidden="true" size={28} />
             {search ? 'אין תוצאות' : 'אין דפים עדיין'}
           </div>
         ) : pages.map(page => {
@@ -60,7 +60,7 @@ export default function NotebookPageList({
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ color: GOLD, display: 'flex', flexShrink: 0 }}>{tc?.icon}</span>
+                <span role="img" aria-label={tc?.label} style={{ color: GOLD, display: 'flex', flexShrink: 0 }}>{tc?.icon}</span>
                 {/* The row's keyboard control — the card <div> keeps its own
                     click handler for the mouse. This one selects rather than
                     opening a dialog, so it carries aria-current instead of
@@ -86,7 +86,7 @@ export default function NotebookPageList({
                   className="hit-40 relative"
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: MUTED, flexShrink: 0, padding: 2, borderRadius: 4 }}
                 >
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <svg aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
                   </svg>
                 </button>

@@ -262,7 +262,7 @@ export function DistinctionSection() {
                   a default-weight chip. */}
               <div className="shrink-0 self-center z-10">
                 <span className="dist-plus-node flex items-center justify-center rounded-full">
-                  <Plus size={22} strokeWidth={2.75} style={{ color: TURQUOISE }} />
+                  <Plus aria-hidden="true" size={22} strokeWidth={2.75} style={{ color: TURQUOISE }} />
                 </span>
               </div>
 
@@ -291,7 +291,7 @@ export function DistinctionSection() {
               transition: 'opacity 0.5s ease, transform 0.6s cubic-bezier(0.16,1,0.3,1)',
             }}
           >
-            <Unlink size={20} className="shrink-0" style={{ color: TURQUOISE }} />
+            <Unlink aria-hidden="true" size={20} className="shrink-0" style={{ color: TURQUOISE }} />
             <span className="text-lg md:text-xl font-bold text-white">יחד — הלופ נשבר</span>
           </span>
         </div>
@@ -429,7 +429,7 @@ function DecisionPanel({
           transition: 'background-color 0.35s ease, border-color 0.35s ease, opacity 0.4s ease',
         }}
       >
-        <AlertTriangle
+        <AlertTriangle aria-hidden="true"
           size={15}
           className="shrink-0"
           style={{ color: fired ? AMBER : 'rgba(255,255,255,0.3)', transition: 'color 0.35s ease' }}
@@ -475,7 +475,7 @@ function DecisionPanel({
             {`סיכון שנמנע — ${RISK_PCT}% מהחשבון`}
           </p>
           <p className="flex items-center gap-1.5 mt-1.5">
-            <Lock size={13} className="shrink-0" style={{ color: '#f87171' }} />
+            <Lock aria-hidden="true" size={13} className="shrink-0" style={{ color: '#f87171' }} />
             <span className="font-semibold" style={{ fontSize: 12.5, color: '#f87171' }}>
               פתיחת העסקה נחסמה
             </span>
@@ -496,7 +496,7 @@ function CheckRow({ shown, text }: { shown: boolean; text: string }) {
         transition: 'opacity 0.4s ease, transform 0.5s cubic-bezier(0.16,1,0.3,1)',
       }}
     >
-      <Check size={15} className="shrink-0" style={{ color: '#22c55e' }} />
+      <Check aria-hidden="true" size={15} className="shrink-0" style={{ color: '#22c55e' }} />
       <span className="text-white/85" style={{ fontSize: 13.5 }}>
         {text}
       </span>

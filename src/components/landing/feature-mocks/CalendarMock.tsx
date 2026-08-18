@@ -330,7 +330,7 @@ export function CalendarMock() {
         <div className="flex items-start justify-between gap-3">
           <div className="flex flex-col gap-0.5">
             <span className="flex items-center gap-1.5">
-              <CalendarDays size={14} className="shrink-0" style={{ color: '#00d2d2' }} />
+              <CalendarDays aria-hidden="true" size={14} className="shrink-0" style={{ color: '#00d2d2' }} />
               <span className="font-bold text-white" style={{ fontSize: 15 }}>
                 {MONTH_LABEL}
               </span>
@@ -491,7 +491,7 @@ export function CalendarMock() {
             }}
             aria-hidden
           >
-            <MousePointer2
+            <MousePointer2 aria-hidden="true"
               size={15}
               style={{ color: '#fff', fill: '#00d2d2', filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.5))' }}
             />
@@ -536,7 +536,7 @@ export function CalendarMock() {
                   className="flex items-center gap-1.5 mt-0.5 pt-1.5"
                   style={{ borderTop: '1px solid rgba(255,255,255,0.1)' }}
                 >
-                  <AlertTriangle size={11} className="shrink-0" style={{ color: AMBER }} />
+                  <AlertTriangle aria-hidden="true" size={11} className="shrink-0" style={{ color: AMBER }} />
                   <span style={{ fontSize: 10.5, fontWeight: 700, color: AMBER }}>
                     {activeData.violations} הפרות חוקים
                   </span>

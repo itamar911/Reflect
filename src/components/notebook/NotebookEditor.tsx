@@ -24,7 +24,7 @@ export default function NotebookEditor({
   if (!selected) {
     return (
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, direction: 'rtl', height: '100%', color: MUTED }}>
-        <BookOpen size={48} />
+        <BookOpen aria-hidden="true" size={48} />
         <p style={{ fontSize: 14 }}>בחר דף קיים או צור אחד חדש</p>
         <button onClick={onCreate} style={{ ...btnStyle, width: 'auto', padding: '9px 20px' }}>+ דף חדש</button>
       </div>
@@ -40,6 +40,7 @@ export default function NotebookEditor({
         {/* Title + save status */}
         <div style={{ padding: '12px 16px 8px', display: 'flex', alignItems: 'center', gap: 10 }}>
           <input
+            aria-label="כותרת הדף"
             value={selected.title}
             onChange={e => onUpdateField('title', e.target.value)}
             style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', fontSize: 18, fontWeight: 700, color: TEXT, direction: 'rtl' }}
@@ -99,6 +100,7 @@ export default function NotebookEditor({
           ))}
 
           <input
+            aria-label="תגית חדשה"
             value={tagInput}
             onChange={e => onTagInputChange(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && onAddTag()}
@@ -110,6 +112,7 @@ export default function NotebookEditor({
 
       {/* Body */}
       <textarea
+        aria-label="תוכן הדף"
         value={selected.content}
         onChange={e => onUpdateField('content', e.target.value)}
         placeholder="התחל לכתוב..."

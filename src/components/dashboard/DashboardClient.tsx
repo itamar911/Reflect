@@ -774,13 +774,13 @@ function MonthCalendar({
     <div className="flex flex-col gap-2">
       {/* Nav */}
       <div className="flex items-center justify-between mb-1">
-        <button onClick={onPrev} className="p-3 rounded-lg" style={{ background: SURF2, color: TEXT2 }}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+        <button onClick={onPrev} aria-label="החודש הקודם" className="p-3 rounded-lg" style={{ background: SURF2, color: TEXT2 }}>
+          <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
             strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
         </button>
         <p className="text-sm font-semibold" style={{ color: TEXT }}>{MONTHS_HE[mo]} {yr}</p>
-        <button onClick={onNext} className="p-3 rounded-lg" style={{ background: SURF2, color: TEXT2 }}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+        <button onClick={onNext} aria-label="החודש הבא" className="p-3 rounded-lg" style={{ background: SURF2, color: TEXT2 }}>
+          <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
             strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
         </button>
       </div>
@@ -981,7 +981,7 @@ function TradeDetailPanel({ trade, onClose, aiReview, aiLoading, onAiReview }: {
               color: ACCENT,
               border: `1px solid rgba(0,210,210,0.25)`,
             }}>
-            <Sparkles size={14} /> {aiLoading && aiOpen ? 'מנתח...' : aiOpen ? 'סגור ניתוח AI' : 'ניתוח AI על העסקה'}
+            <Sparkles aria-hidden="true" size={14} /> {aiLoading && aiOpen ? 'מנתח...' : aiOpen ? 'סגור ניתוח AI' : 'ניתוח AI על העסקה'}
           </button>
           {(aiOpen || aiReview != null) && (
             <div className={`ai-collapse ${aiOpen ? 'ai-collapse-open' : ''}`}>
@@ -1096,10 +1096,10 @@ function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
     const m = part.match(/^\*\*([^*]+)\*\*$/);
     if (m) return <strong key={`${keyPrefix}-${i}`} style={{ fontWeight: 700, color: TEXT }}>{m[1]}</strong>;
     if (CHECK_RE.test(part)) {
-      return <CheckCircle key={`${keyPrefix}-${i}`} size={14} style={{ color: ICON_GRAY, display: 'inline-block', verticalAlign: 'middle', margin: '0 2px' }} />;
+      return <CheckCircle key={`${keyPrefix}-${i}`} role="img" aria-label="תקין" size={14} style={{ color: ICON_GRAY, display: 'inline-block', verticalAlign: 'middle', margin: '0 2px' }} />;
     }
     if (CROSS_RE.test(part)) {
-      return <AlertCircle key={`${keyPrefix}-${i}`} size={14} style={{ color: ICON_GRAY, display: 'inline-block', verticalAlign: 'middle', margin: '0 2px' }} />;
+      return <AlertCircle key={`${keyPrefix}-${i}`} role="img" aria-label="לא תקין" size={14} style={{ color: ICON_GRAY, display: 'inline-block', verticalAlign: 'middle', margin: '0 2px' }} />;
     }
     if (EMOJI_RE.test(part)) return null;
     return part;
@@ -1157,7 +1157,7 @@ function SummaryQuote({ segments }: { segments: { heading: string; lines: string
       padding: '10px 12px',
     }}>
       <p style={{ fontSize: 12, lineHeight: 1.6, color: MUTED, fontWeight: 600, fontStyle: 'italic', textAlign: 'center', padding: '2px 8px' }}>
-        <Quote size={12} style={{ display: 'inline-block', verticalAlign: 'middle', marginInlineEnd: 4, color: ICON_GRAY }} />
+        <Quote aria-hidden="true" size={12} style={{ display: 'inline-block', verticalAlign: 'middle', marginInlineEnd: 4, color: ICON_GRAY }} />
         {renderInline(text, 'quote')}
       </p>
     </div>
@@ -1484,7 +1484,7 @@ export default function DashboardClient({
       {/* ── Empty state ───────────────────────────────────────────────────── */}
       {trades.length === 0 && (
         <Card className="text-center py-12 flex flex-col items-center gap-3">
-          <TrendingUp size={48} />
+          <TrendingUp aria-hidden="true" size={48} />
           <p className="text-base font-semibold" style={{ color: TEXT }}>ברוך הבא ל-Reflect</p>
           <p className="text-sm" style={{ color: TEXT2, fontWeight: 600 }}>תעד עסקה ראשונה כדי להתחיל</p>
         </Card>
@@ -1800,7 +1800,7 @@ export default function DashboardClient({
         <Card>
           <div className="flex flex-col items-center text-center gap-3 py-4">
             <div className="w-12 h-12 rounded-full flex items-center justify-center" style={{ background: 'rgba(0,210,210,0.12)' }}>
-              <Lock size={22} style={{ color: ACCENT }} />
+              <Lock aria-hidden="true" size={22} style={{ color: ACCENT }} />
             </div>
             <p style={{ fontSize: 13, fontWeight: 700, color: TEXT }}>סיכום שבועי AI זמין ב-Pro בלבד</p>
             <p style={{ fontSize: 12, color: MUTED, fontWeight: 600 }}>שדרג ל-Pro כדי לקבל ניתוח AI שבועי מלא עם תובנות והשוואה לשבועות קודמים</p>
@@ -1836,7 +1836,7 @@ export default function DashboardClient({
           </div>
           <button onClick={refreshWeeklySummary} disabled={weeklyLoading}
             className="flex items-center gap-1.5 transition-all active:scale-95 disabled:opacity-50">
-            <RefreshCw size={12} className={weeklyLoading ? 'animate-spin' : ''} />
+            <RefreshCw aria-hidden="true" size={12} className={weeklyLoading ? 'animate-spin' : ''} />
             <span style={{
               background: 'rgba(0,210,210,0.12)',
               color: ACCENT,
@@ -1854,26 +1854,26 @@ export default function DashboardClient({
         {weeklyError && (
           <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-lg"
             style={{ background: 'rgba(239,68,68,0.1)', border: `1px solid rgba(239,68,68,0.3)` }}>
-            <AlertCircle size={14} style={{ color: RED, flexShrink: 0 }} />
+            <AlertCircle aria-hidden="true" size={14} style={{ color: RED, flexShrink: 0 }} />
             <p style={{ fontSize: 12, color: TEXT2, fontWeight: 600 }}>{weeklyError}</p>
           </div>
         )}
 
         <div className="flex items-center justify-between mb-3">
-          <button onClick={goToPrevWeek} disabled={weeklyLoading}
+          <button onClick={goToPrevWeek} disabled={weeklyLoading} aria-label="השבוע הקודם"
             className="p-3 rounded-lg transition-opacity disabled:opacity-40"
             style={{ background: SURF2, color: TEXT2 }}>
-            <ChevronRight size={16} />
+            <ChevronRight aria-hidden="true" size={16} />
           </button>
           {weeklySummary && !isCurrentWeek ? (
             <p style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>
               נוצר ב-{fmtDate(weeklySummary.created_at)}
             </p>
           ) : <span />}
-          <button onClick={goToNextWeek} disabled={weeklyLoading || viewedWeekStart === latestWeekStart}
+          <button onClick={goToNextWeek} disabled={weeklyLoading || viewedWeekStart === latestWeekStart} aria-label="השבוע הבא"
             className="p-3 rounded-lg transition-opacity disabled:opacity-40"
             style={{ background: SURF2, color: TEXT2 }}>
-            <ChevronLeft size={16} />
+            <ChevronLeft aria-hidden="true" size={16} />
           </button>
         </div>
 
@@ -1981,7 +1981,7 @@ export default function DashboardClient({
       {/* ── Coming soon banner ───────────────────────────────────────────── */}
       <div className="flex items-center justify-center gap-2 text-sm py-4"
         style={{ borderTop: `1px solid ${BORDER}`, color: TEXT2 }}>
-        <Clock size={14} />
+        <Clock aria-hidden="true" size={14} />
         <span>בקרוב - חיבור ברוקר בזמן אמת</span>
       </div>
 

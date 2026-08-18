@@ -197,7 +197,7 @@ export function RulesMock() {
               {locked && (
                 <span className="relative w-4 h-4 flex items-center justify-center shrink-0">
                   <span className="mock-lock-halo" aria-hidden />
-                  <Lock size={14} style={{ color: blockColor, position: 'relative' }} />
+                  <Lock aria-hidden="true" size={14} style={{ color: blockColor, position: 'relative' }} />
                 </span>
               )}
               פתח עסקה
@@ -212,7 +212,7 @@ export function RulesMock() {
                 style={{ left: '50%', top: '52%' }}
                 aria-hidden
               >
-                <MousePointer2
+                <MousePointer2 aria-hidden="true"
                   size={16}
                   style={{ color: '#fff', fill: '#00d2d2', filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.55))' }}
                 />
@@ -224,7 +224,7 @@ export function RulesMock() {
           <span className="flex items-center justify-center gap-1.5" style={{ height: 16 }}>
             {locked && (
               <>
-                <AlertTriangle size={12} className="shrink-0" style={{ color: blockColor }} />
+                <AlertTriangle aria-hidden="true" size={12} className="shrink-0" style={{ color: blockColor }} />
                 <span style={{ fontSize: 11.5, fontWeight: 600, color: blockColor }}>
                   נחסם — 2 הפסדים היום, סיימת
                 </span>

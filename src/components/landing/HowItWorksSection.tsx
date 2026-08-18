@@ -356,7 +356,7 @@ function RailToNext({ index }: { index: number }) {
             background: `linear-gradient(to left, rgba(0,210,210,${from}), rgba(0,210,210,${to}))`,
           }}
         />
-        <ChevronLeft
+        <ChevronLeft aria-hidden="true"
           size={14}
           className="hiw-fade absolute"
           style={{ ...headDelay, insetInlineEnd: 0, top: '50%', marginTop: -7, color: headColor }}
@@ -381,7 +381,7 @@ function RailToNext({ index }: { index: number }) {
             background: `linear-gradient(to bottom, rgba(0,210,210,${from}), rgba(0,210,210,${to}))`,
           }}
         />
-        <ChevronDown
+        <ChevronDown aria-hidden="true"
           size={14}
           className="hiw-fade absolute"
           style={{ ...headDelay, bottom: 0, left: '50%', marginLeft: -7, color: headColor }}
@@ -506,7 +506,7 @@ function RulesMock() {
                 border: '1px solid rgba(0,210,210,0.35)',
               }}
             >
-              <Check size={9} className="shrink-0" />
+              <Check aria-hidden="true" size={9} className="shrink-0" />
               {strategy}
             </span>
           ))}
@@ -562,7 +562,7 @@ function GateMock() {
               border: `1px solid ${AMBER}`,
             }}
           >
-            <Ban size={11} className="shrink-0" style={{ color: AMBER }} />
+            <Ban aria-hidden="true" size={11} className="shrink-0" style={{ color: AMBER }} />
             <span className="font-bold" style={{ fontSize: 10, color: AMBER }}>
               {stopped.symbol}
             </span>
@@ -584,7 +584,7 @@ function GateMock() {
               background: '#11151b',
             }}
           >
-            <ShieldAlert size={13} style={{ color: TURQUOISE }} />
+            <ShieldAlert aria-hidden="true" size={13} style={{ color: TURQUOISE }} />
           </span>
         </span>
 
@@ -609,7 +609,7 @@ function GateMock() {
                 border: '1px solid rgba(0,210,210,0.32)',
               }}
             >
-              <Check size={11} style={{ color: TURQUOISE }} />
+              <Check aria-hidden="true" size={11} style={{ color: TURQUOISE }} />
             </span>
           ))}
         </span>
@@ -653,7 +653,7 @@ function LessonMock() {
     <MockPanel title="אחרי הסגירה" cue="30 הימים האחרונים" cueColor="rgba(255,255,255,0.55)">
       <div className="flex items-center gap-3">
         <span className="relative shrink-0" style={{ width: 52, height: 52 }}>
-          <svg width={52} height={52} viewBox="0 0 52 52">
+          <svg aria-hidden="true" width={52} height={52} viewBox="0 0 52 52">
             <circle cx={26} cy={26} r={RING_R} fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth={5} />
             <circle
               className="hiw-arc"
@@ -703,12 +703,12 @@ function LessonMock() {
           border: '1px solid rgba(0,210,210,0.22)',
         }}
       >
-        <Sparkles size={13} className="shrink-0" style={{ color: TURQUOISE, marginTop: 2 }} />
+        <Sparkles aria-hidden="true" size={13} className="shrink-0" style={{ color: TURQUOISE, marginTop: 2 }} />
         <span style={{ fontSize: 11.5, lineHeight: 1.5, color: 'rgba(255,255,255,0.85)' }}>{DEBRIEF_INSIGHT}</span>
       </div>
 
       <div className="hiw-fade flex items-center gap-2" style={vars({ '--hiw-d': `${DELAY.pattern}ms` })}>
-        <Radar size={13} className="shrink-0" style={{ color: AMBER }} />
+        <Radar aria-hidden="true" size={13} className="shrink-0" style={{ color: AMBER }} />
         <span
           className="shrink-0 rounded-md px-1.5 py-0.5 font-bold whitespace-nowrap"
           style={{

@@ -9,9 +9,9 @@ type FeedbackType = 'bug' | 'feature' | 'question';
 type SubmitState = 'idle' | 'sending' | 'success' | 'error';
 
 const TYPES: { value: FeedbackType; label: string; icon: ReactNode; color: string; desc: string }[] = [
-  { value: 'bug',      label: 'דיווח על באג',  icon: <Bug size={16} />,        color: '#f87171', desc: 'משהו לא עובד כמו שצריך' },
-  { value: 'feature',  label: 'הצעה לשיפור',   icon: <Lightbulb size={16} />,  color: '#00d2d2', desc: 'רעיון לפיצ׳ר חדש' },
-  { value: 'question', label: 'שאלה',          icon: <HelpCircle size={16} />, color: '#60A5FA', desc: 'שאלה כללית' },
+  { value: 'bug',      label: 'דיווח על באג',  icon: <Bug aria-hidden="true" size={16} />,        color: '#f87171', desc: 'משהו לא עובד כמו שצריך' },
+  { value: 'feature',  label: 'הצעה לשיפור',   icon: <Lightbulb aria-hidden="true" size={16} />,  color: '#00d2d2', desc: 'רעיון לפיצ׳ר חדש' },
+  { value: 'question', label: 'שאלה',          icon: <HelpCircle aria-hidden="true" size={16} />, color: '#60A5FA', desc: 'שאלה כללית' },
 ];
 
 const MAX_IMG_MB = 3;
@@ -102,7 +102,7 @@ export default function FeedbackPage() {
       <div dir="rtl" className="min-h-screen flex flex-col items-center justify-center px-6 gap-5">
         <div className="rounded-full w-20 h-20 flex items-center justify-center animate-fade-in"
           style={{ background: 'rgba(74,222,128,0.12)', border: '2px solid rgba(74,222,128,0.3)' }}>
-          <CheckCircle size={40} style={{ color: '#4ade80' }} />
+          <CheckCircle aria-hidden="true" size={40} style={{ color: '#4ade80' }} />
         </div>
         <div className="text-center">
           <h2 className="text-xl font-bold mb-2" style={{ color: TEXT }}>הפנייה נשלחה!</h2>
@@ -136,7 +136,7 @@ export default function FeedbackPage() {
       <div className="flex items-center gap-3">
         <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
           style={{ background: 'rgba(96,165,250,0.12)', border: '1px solid rgba(96,165,250,0.2)' }}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#60A5FA"
+          <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#60A5FA"
             strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
             <line x1="9" y1="9" x2="15" y2="9"/>
@@ -187,10 +187,11 @@ export default function FeedbackPage() {
 
         {/* Title */}
         <div className="flex flex-col gap-1.5">
-          <label className="text-sm font-medium" style={{ color: TEXT2 }}>
+          <label htmlFor="feedback-title" className="text-sm font-medium" style={{ color: TEXT2 }}>
             כותרת <span style={{ color: '#f87171' }}>*</span>
           </label>
           <input
+            id="feedback-title"
             value={title}
             onChange={e => setTitle(e.target.value)}
             maxLength={120}
@@ -208,10 +209,11 @@ export default function FeedbackPage() {
 
         {/* Description */}
         <div className="flex flex-col gap-1.5">
-          <label className="text-sm font-medium" style={{ color: TEXT2 }}>
+          <label htmlFor="feedback-description" className="text-sm font-medium" style={{ color: TEXT2 }}>
             תיאור מפורט <span style={{ color: '#f87171' }}>*</span>
           </label>
           <textarea
+            id="feedback-description"
             value={description}
             onChange={e => setDescription(e.target.value)}
             rows={6}
@@ -228,14 +230,14 @@ export default function FeedbackPage() {
 
         {/* Screenshot upload */}
         <div className="flex flex-col gap-1.5">
-          <label className="text-sm font-medium" style={{ color: TEXT2 }}>
+          <label htmlFor="feedback-screenshot" className="text-sm font-medium" style={{ color: TEXT2 }}>
             סקרינשוט / תמונה
             <span className="text-[10px] mr-2" style={{ color: MUTED, fontWeight: 500 }}>
               (אופציונלי · עד {MAX_IMG_MB}MB)
             </span>
           </label>
 
-          <input ref={fileRef} type="file" accept="image/*" onChange={onFileChange} className="hidden" />
+          <input id="feedback-screenshot" ref={fileRef} type="file" accept="image/*" onChange={onFileChange} className="hidden" />
 
           {imgDataUrl ? (
             <div className="relative rounded-xl overflow-hidden">
@@ -247,9 +249,10 @@ export default function FeedbackPage() {
                 <span className="text-xs text-white/80 truncate max-w-[70%]">{imgName}</span>
                 <button
                   onClick={removeImage}
+                  aria-label="הסר תמונה"
                   className="w-6 h-6 rounded-full flex items-center justify-center"
                   style={{ background: 'rgba(0,0,0,0.6)', color: '#fff' }}>
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <svg aria-hidden="true" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                     <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
                   </svg>
                 </button>
@@ -260,7 +263,7 @@ export default function FeedbackPage() {
               onClick={() => fileRef.current?.click()}
               className="w-full py-6 rounded-xl flex flex-col items-center gap-2 transition-opacity hover:opacity-70"
               style={{ border: `2px dashed ${BORDER}`, background: SURF2 }}>
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={MUTED}
+              <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={MUTED}
                 strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="3" width="18" height="18" rx="2"/>
                 <circle cx="8.5" cy="8.5" r="1.5"/>

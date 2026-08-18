@@ -270,11 +270,11 @@ export function HeroMock() {
 
         <div className="flex flex-col gap-3 mb-5">
           <div className="flex items-center gap-2.5">
-            <Check size={17} className="shrink-0" style={{ color: '#22c55e' }} />
+            <Check aria-hidden="true" size={17} className="shrink-0" style={{ color: '#22c55e' }} />
             <span className="text-base text-white/85">סטופ מוגדר · יחס 1:2.5</span>
           </div>
           <div className="flex items-center gap-2.5">
-            <Check size={17} className="shrink-0" style={{ color: '#22c55e' }} />
+            <Check aria-hidden="true" size={17} className="shrink-0" style={{ color: '#22c55e' }} />
             <span className="text-base text-white/85">מתאים לאסטרטגיה שלך</span>
           </div>
 
@@ -289,7 +289,7 @@ export function HeroMock() {
             }}
           >
             {ignited && <span className="hero-row-bloom" aria-hidden />}
-            <AlertTriangle
+            <AlertTriangle aria-hidden="true"
               size={17}
               className="shrink-0"
               style={{
@@ -342,7 +342,7 @@ export function HeroMock() {
                   }
             }
           >
-            {locked && <Lock size={16} />}
+            {locked && <Lock aria-hidden="true" size={16} />}
             פתח עסקה
           </button>
 

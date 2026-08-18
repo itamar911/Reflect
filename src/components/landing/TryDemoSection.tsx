@@ -121,7 +121,7 @@ export function TryDemoSection() {
                     boxShadow: '0 8px 32px rgba(0,210,210,0.4)',
                   }}
                 >
-                  <MousePointerClick size={19} />
+                  <MousePointerClick aria-hidden="true" size={19} />
                   לחצו כדי להתנסות
                 </span>
                 <span className="text-sm font-medium" style={{ color: 'rgba(255,255,255,0.75)' }}>
@@ -140,7 +140,7 @@ export function TryDemoSection() {
                   backdropFilter: 'blur(8px)',
                 }}
               >
-                <Maximize2 size={12} />
+                <Maximize2 aria-hidden="true" size={12} />
                 מסך מלא
               </button>
             </div>

@@ -99,7 +99,7 @@ export default function ResetPasswordPage() {
 
         {status === 'invalid' && (
           <div className="text-center py-4 animate-fade-in">
-            <div className="mb-3"><Ban size={36} /></div>
+            <div className="mb-3"><Ban aria-hidden="true" size={36} /></div>
             <p className="text-sm font-semibold text-tg-text mb-1">הלינק לא תקין או פג תוקף</p>
             <p className="text-xs text-tg-muted mb-4">לינקים לאיפוס סיסמא תקפים למשך שעה אחת</p>
             <a href="/forgot-password"
@@ -116,7 +116,7 @@ export default function ResetPasswordPage() {
               <div className="text-center py-4 animate-fade-in">
                 <div className="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4"
                   style={{ background: 'var(--color-tg-success-muted)' }}>
-                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--color-tg-success)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <svg aria-hidden="true" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--color-tg-success)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <polyline points="20 6 9 17 4 12" />
                   </svg>
                 </div>

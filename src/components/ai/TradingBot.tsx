@@ -222,7 +222,7 @@ export default function TradingBot() {
               <div className="rounded-2xl p-4"
                 style={{ background: 'var(--color-tg-surface-2)' }}>
                 <div className="flex items-center gap-2 mb-2">
-                  <Bot size={18} />
+                  <Bot aria-hidden="true" size={18} />
                   <p className="text-sm font-bold text-tg-text">יועץ המסחר שלי</p>
                 </div>
                 <p className="text-xs text-tg-text-2 leading-relaxed">
@@ -258,7 +258,7 @@ export default function TradingBot() {
                   {msg.role === 'assistant' && (
                     <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-0.5 mr-2"
                       style={{ background: 'var(--color-tg-primary-muted)' }}>
-                      <Bot size={13} />
+                      <Bot aria-hidden="true" size={13} />
                     </div>
                   )}
                   <div className="max-w-[85%] rounded-2xl px-3 py-2.5"
@@ -291,7 +291,7 @@ export default function TradingBot() {
           <button onClick={scrollToBottom} aria-label="גלול למטה"
             className="absolute bottom-2 left-1/2 -translate-x-1/2 w-8 h-8 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95 z-10"
             style={{ background: 'var(--color-tg-surface-2)', border: '1px solid var(--color-tg-border)' }}>
-            <ArrowDown size={16} />
+            <ArrowDown aria-hidden="true" size={16} />
           </button>
         )}
       </div>
@@ -317,6 +317,7 @@ export default function TradingBot() {
           <textarea
             ref={inputRef}
             rows={1}
+            aria-label="שאלה ליועץ המסחר"
             placeholder="שאל אותי כל דבר על המסחר שלך..."
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -332,11 +333,12 @@ export default function TradingBot() {
           />
           <button
             onClick={() => send()}
+            aria-label="שלח"
             disabled={!input.trim() || loading}
             className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-all active:scale-95 disabled:opacity-40"
             style={{ background: 'var(--color-tg-primary)' }}
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="black" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="black" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <line x1="22" y1="2" x2="11" y2="13" />
               <polygon points="22 2 15 22 11 13 2 9 22 2" />
             </svg>

@@ -34,7 +34,7 @@ export default function MindStateSection({ panels }: { panels: ScalePanelData[] 
   );
 
   return (
-    <Section title="המצב הפנימי שלך" icon={<Brain size={18} />} aside={legend}>
+    <Section title="המצב הפנימי שלך" icon={<Brain aria-hidden="true" size={18} />} aside={legend}>
       <div className={`grid grid-cols-1 ${panels.length > 1 ? 'lg:grid-cols-2' : ''} gap-4 items-start`}>
         {panels.map((p) => <ScalePanel key={p.title} {...p} />)}
       </div>
@@ -95,7 +95,7 @@ function ScalePanel({ title, buckets, insights }: ScalePanelData) {
       {insights.map((s, i) => (
         <div key={i} className="flex items-center gap-2 rounded-lg px-3 py-2"
           style={{ background: 'var(--color-tg-surface-2)', fontSize: 12, color: 'var(--color-tg-text-2)' }}>
-          <Lightbulb size={13} style={{ color: '#f59e0b', flexShrink: 0 }} />
+          <Lightbulb aria-hidden="true" size={13} style={{ color: '#f59e0b', flexShrink: 0 }} />
           {s}
         </div>
       ))}

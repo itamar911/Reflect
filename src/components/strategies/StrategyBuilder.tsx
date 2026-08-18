@@ -243,7 +243,7 @@ export default function StrategyBuilder({ initialStrategies, plan }: StrategyBui
       {strategies.length === 0 && !showForm && (
         <div className="text-center py-8 rounded-xl"
           style={{ background: 'var(--color-tg-surface-2)' }}>
-          <div className="mb-2"><Ruler size={36} /></div>
+          <div className="mb-2"><Ruler aria-hidden="true" size={36} /></div>
           <p className="text-sm text-tg-text-2 mb-1">אין אסטרטגיות עדיין</p>
           <p className="text-xs text-tg-muted">הוסף את האסטרטגיה הראשונה שלך או בחר תבנית</p>
         </div>
@@ -278,19 +278,19 @@ export default function StrategyBuilder({ initialStrategies, plan }: StrategyBui
               </div>
             </div>
             <div className="flex items-center gap-1 shrink-0">
-              <button onClick={() => openEdit(s)}
+              <button onClick={() => openEdit(s)} aria-label={`עריכת האסטרטגיה ${s.name}`}
                 className="p-1.5 rounded-lg text-tg-muted hover:text-tg-text transition-colors"
                 style={{ background: 'var(--color-tg-surface)' }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
                   <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
                 </svg>
               </button>
-              <button onClick={() => handleDelete(s.id)}
+              <button onClick={() => handleDelete(s.id)} aria-label={`מחיקת האסטרטגיה ${s.name}`}
                 disabled={deletingId === s.id}
                 className="p-1.5 rounded-lg transition-colors"
                 style={{ background: 'var(--color-tg-danger-muted)', color: 'var(--color-tg-danger)' }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14H6L5 6" />
                   <path d="M10 11v6M14 11v6" /><path d="M9 6V4h6v2" />
                 </svg>

@@ -132,7 +132,7 @@ export function LandingNav() {
             className="lnav-mobile p-2 text-tg-text-2"
             aria-label={open ? 'סגור תפריט' : 'פתח תפריט'}
           >
-            {open ? <X size={26} /> : <Menu size={26} />}
+            {open ? <X aria-hidden="true" size={26} /> : <Menu aria-hidden="true" size={26} />}
           </button>
         </nav>
 

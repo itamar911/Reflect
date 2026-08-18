@@ -77,7 +77,7 @@ export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: Prese
       {readOnly ? (
         <div className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs"
           style={{ background: 'var(--color-tg-surface-2)', color: 'var(--color-tg-text-2)' }}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--color-tg-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--color-tg-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0110 0v4" />
           </svg>
           <span>במסלול חינמי החוקים קבועים ולא ניתנים לעריכה · <span style={{ color: 'var(--color-tg-primary)' }}>שדרג ל-Basic לעריכה מלאה</span></span>
@@ -90,6 +90,7 @@ export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: Prese
 
       {/* R:R Minimum */}
       <RuleRow
+        controlId="rule-min-rr"
         label="R:R מינימלי לעסקה"
         description="עסקה תחסם אם יחס הסיכון/תגמול נמוך מערך זה"
         score="20 נק׳ משמעת"
@@ -101,6 +102,8 @@ export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: Prese
             min={0.5}
             max={10}
             step={0.5}
+            id="rule-min-rr"
+            aria-describedby="rule-min-rr-label-desc"
             value={form.min_rr_ratio}
             onChange={(e) => !readOnly && setForm({ ...form, min_rr_ratio: e.target.value })}
             readOnly={readOnly}
@@ -112,6 +115,7 @@ export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: Prese
 
       {/* Max daily trades */}
       <RuleRow
+        controlId="rule-max-daily-trades"
         label="מקסימום עסקאות ביום"
         description="חריגה מהמגבלה תפעיל את מנגנון ה-Cooldown"
         score="15 נק׳ משמעת"
@@ -121,6 +125,8 @@ export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: Prese
           min={1}
           max={50}
           step={1}
+          id="rule-max-daily-trades"
+          aria-describedby="rule-max-daily-trades-label-desc"
           value={form.max_daily_trades}
           onChange={(e) => !readOnly && setForm({ ...form, max_daily_trades: e.target.value })}
           readOnly={readOnly}
@@ -131,6 +137,7 @@ export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: Prese
 
       {/* Cooldown after losses */}
       <RuleRow
+        controlId="rule-cooldown-after-losses"
         label="Cooldown אחרי N הפסדים רצופים"
         description="נעילה זמנית אחרי סדרת הפסדות"
       >
@@ -139,6 +146,8 @@ export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: Prese
           min={1}
           max={10}
           step={1}
+          id="rule-cooldown-after-losses"
+          aria-describedby="rule-cooldown-after-losses-label-desc"
           value={form.cooldown_after_losses}
           onChange={(e) => !readOnly && setForm({ ...form, cooldown_after_losses: e.target.value })}
           readOnly={readOnly}
@@ -149,10 +158,13 @@ export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: Prese
 
       {/* Cooldown duration */}
       <RuleRow
+        controlId="rule-cooldown-minutes"
         label="משך ה-Cooldown"
         description="כמה זמן תיחסם כניסה לעסקה חדשה לאחר הפעלת ה-Cooldown — ריק = ללא הגבלת זמן"
       >
         <select
+          id="rule-cooldown-minutes"
+          aria-describedby="rule-cooldown-minutes-label-desc"
           value={form.cooldown_minutes}
           onChange={(e) => !readOnly && setForm({ ...form, cooldown_minutes: e.target.value })}
           disabled={readOnly}
@@ -168,6 +180,7 @@ export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: Prese
 
       {/* Max daily loss */}
       <RuleRow
+        controlId="rule-max-daily-loss"
         label="הפסד יומי מקסימלי ($)"
         description="עצירה כשחורגים מגבול ההפסד — ריק = ללא הגבלה"
       >
@@ -176,6 +189,8 @@ export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: Prese
           min={0}
           step={10}
           placeholder="ללא הגבלה"
+          id="rule-max-daily-loss"
+          aria-describedby="rule-max-daily-loss-label-desc"
           value={form.max_daily_loss}
           onChange={(e) => !readOnly && setForm({ ...form, max_daily_loss: e.target.value })}
           readOnly={readOnly}
@@ -258,22 +273,40 @@ export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: Prese
   );
 }
 
+/**
+ * The row's visible heading is the control's label — `controlId` wires it up as
+ * a real `<label for>` so clicking it focuses the field and screen readers
+ * announce it. Rows whose control is a group of buttons (no single labelable
+ * element) pass no `controlId` and get `role="group"` + `aria-labelledby`
+ * instead. The description below the heading becomes the field's
+ * `aria-describedby`, so the "what this rule does" text is announced too.
+ */
 function RuleRow({
   label,
   description,
   score,
+  controlId,
   children,
 }: {
   label: string;
   description: string;
   score?: string;
+  controlId?: string;
   children: React.ReactNode;
 }) {
+  const labelId = `${controlId ?? label}-label`;
+  const Heading = controlId ? 'label' : 'p';
   return (
     <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 pb-5 border-b border-tg-border last:border-0 last:pb-0">
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <p className="text-sm font-medium text-tg-text">{label}</p>
+          <Heading
+            id={labelId}
+            htmlFor={controlId}
+            className="text-sm font-medium text-tg-text"
+          >
+            {label}
+          </Heading>
           {score && (
             <span className="px-1.5 py-0.5 rounded-md text-[10px] font-semibold"
               style={{ background: 'var(--color-tg-primary-muted)', color: 'var(--color-tg-primary)' }}>
@@ -281,9 +314,15 @@ function RuleRow({
             </span>
           )}
         </div>
-        <p className="text-xs text-tg-text-2 mt-0.5">{description}</p>
+        <p id={`${labelId}-desc`} className="text-xs text-tg-text-2 mt-0.5">{description}</p>
       </div>
-      <div className="shrink-0">{children}</div>
+      {controlId ? (
+        <div className="shrink-0">{children}</div>
+      ) : (
+        <div className="shrink-0" role="group" aria-labelledby={labelId} aria-describedby={`${labelId}-desc`}>
+          {children}
+        </div>
+      )}
     </div>
   );
 }
