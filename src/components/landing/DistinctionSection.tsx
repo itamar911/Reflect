@@ -15,8 +15,8 @@ import { SectionHeading } from './SectionHeading';
  * should still see one panel as happening and the other as history — so the
  * decision panel is turquoise, lit and pulsing, and the archive panel is slate,
  * desaturated and stamped with a past timestamp. They share a header/body/footer
- * skeleton and a fixed height so they still read as a matched pair rather than
- * two unrelated cards.
+ * skeleton and a common height floor so they still read as a matched pair rather
+ * than two unrelated cards.
  *
  * They are aria-hidden: they are an illustration of the argument, and the two
  * paragraphs beside them carry the same content in prose. A screen reader gets
