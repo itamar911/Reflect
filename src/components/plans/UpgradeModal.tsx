@@ -91,7 +91,7 @@ export default function UpgradeModal({ open, onClose, limitType }: UpgradeModalP
           <Link
             href="/settings#pricing"
             onClick={onClose}
-            className="shimmer-btn w-full py-2.5 rounded-xl text-sm font-semibold text-black transition-all duration-150 active:scale-95 text-center"
+            className="link-button shimmer-btn w-full py-2.5 rounded-xl text-sm font-semibold text-black transition-all duration-150 active:scale-95 text-center"
           >
             שדרוג ל-Pro
           </Link>

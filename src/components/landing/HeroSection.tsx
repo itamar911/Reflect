@@ -60,7 +60,7 @@ export function HeroSection() {
               <div className="flex flex-col items-center lg:items-start gap-3 mt-2">
                 <Link
                   href="/signup"
-                  className="landing-cta px-9 py-4 rounded-xl text-base md:text-lg font-bold text-black"
+                  className="link-button landing-cta px-9 py-4 rounded-xl text-base md:text-lg font-bold text-black"
                 >
                   התחל 5 ימי ניסיון — בלי כרטיס אשראי
                 </Link>

@@ -17,7 +17,7 @@ export function SkipLink() {
   return (
     <a
       href={`#${MAIN_CONTENT_ID}`}
-      className="skip-link"
+      className="link-button skip-link"
       onClick={(e) => {
         const target = document.getElementById(MAIN_CONTENT_ID);
         if (!target) return;

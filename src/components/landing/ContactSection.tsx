@@ -33,7 +33,7 @@ export function ContactSection() {
               href={WHATSAPP_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="landing-cta cta-shine inline-flex items-center gap-2.5 px-7 py-3.5 rounded-xl text-base font-bold text-black"
+              className="link-button landing-cta cta-shine inline-flex items-center gap-2.5 px-7 py-3.5 rounded-xl text-base font-bold text-black"
             >
               <WhatsAppIcon size={20} className="text-white" />
               שלחו הודעה בוואטסאפ

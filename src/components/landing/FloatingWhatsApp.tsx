@@ -55,7 +55,7 @@ export function FloatingWhatsApp() {
       aria-label="פתחו שיחה בוואטסאפ"
       // Slot 1 of the shared floating stack (globals.css) — one button-height
       // above the accessibility trigger, which owns the corner on every route.
-      className={`fixed z-40 flex items-center justify-center rounded-full text-white transition-all duration-300 ${
+      className={`link-button fixed z-40 flex items-center justify-center rounded-full text-white transition-all duration-300 ${
         visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'
       }`}
       style={{

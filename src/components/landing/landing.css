@@ -73,6 +73,16 @@
   100% { background-position: 300% 50%; }
 }
 
+/* ── Marker: anchors that present as buttons ────────────────
+   Carries no styling of its own — it is a hook for rules that should treat
+   an element as a button rather than as body text. Today its only consumer
+   is the underline-links exclusion in accessibility.css, whose `padding`
+   shorthand would otherwise overwrite these anchors' padding utilities.
+
+   Put it on any <a>/<Link> that renders as a button (its own padded, filled
+   or outlined box). Do not put it on inline text links — they are supposed
+   to pick up the underline treatment. */
+
 /* ── Primary CTA: gradient fill + glow + hover lift ────────── */
 
 .landing-cta {

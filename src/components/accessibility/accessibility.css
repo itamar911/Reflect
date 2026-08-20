@@ -87,19 +87,24 @@ html[data-a11y-text-scale='150'] { font-size: 150%; }
    element's box without reserving space for itself. That's exactly why a
    *fully* negative margin canceling the padding is wrong: it makes the
    whole padding+outline expansion "free" too, so two adjacent outlined
-   elements (e.g. the two nav CTA buttons, gap-3 apart) paint their
-   outlines right through each other with nothing forcing them apart.
-   Real elements must actually claim more layout space for their
-   neighbors to be pushed away from — margin here is a small *positive*
-   value on top of the padding, not a canceling one, so part of the
-   breathing room is real. Tuned so that even a gap-3 (12px) pair —
-   the tightest spacing in this codebase — clears the outlines.
+   elements paint their outlines right through each other with nothing
+   forcing them apart. Real elements must actually claim more layout
+   space for their neighbors to be pushed away from — margin here is a
+   small *positive* value on top of the padding, not a canceling one, so
+   part of the breathing room is real. Tuned so that even a gap-3 (12px)
+   pair — the tightest spacing in this codebase — clears the outlines.
+
+   `.link-button` is excluded: anchors styled as buttons already read as
+   interactive, and this rule's `padding` shorthand would overwrite their
+   padding utilities (it is unlayered, so it beats Tailwind's utilities
+   layer), collapsing a 60px-tall CTA to 34px. They are not text links and
+   must not be restyled as ones — see .link-button in landing.css.
 
    currentColor ties the outline to whatever color the link already renders
    in, so it stays visible under grayscale/high-contrast/inverted too: those
    modes are a backdrop-filter overlay recoloring every painted pixel
    (see the overlay rule above), and that includes this outline. */
-html[data-a11y-underline-links='true'] a {
+html[data-a11y-underline-links='true'] a:not(.link-button) {
   text-decoration: underline !important;
   text-decoration-thickness: 3px !important;
   text-underline-offset: 4px;

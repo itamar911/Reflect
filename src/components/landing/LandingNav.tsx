@@ -111,7 +111,7 @@ export function LandingNav() {
           <div className="lnav-desktop items-center gap-3">
             <Link
               href="/login"
-              className="px-4 py-2.5 rounded-xl text-sm font-semibold border border-tg-border text-tg-text-2 hover:border-tg-primary hover:text-tg-primary transition-colors"
+              className="link-button px-4 py-2.5 rounded-xl text-sm font-semibold border border-tg-border text-tg-text-2 hover:border-tg-primary hover:text-tg-primary transition-colors"
             >
               כניסה למערכת
             </Link>
@@ -120,7 +120,7 @@ export function LandingNav() {
                 since the nav's own width thresholds are measured against it. */}
             <Link
               href="/signup"
-              className="landing-cta cta-shine px-5 py-2.5 rounded-xl text-[0.9375rem] font-bold text-black"
+              className="link-button landing-cta cta-shine px-5 py-2.5 rounded-xl text-[0.9375rem] font-bold text-black"
             >
               התחל ניסיון חינם
             </Link>
@@ -170,7 +170,7 @@ export function LandingNav() {
             <Link
               href="/login"
               onClick={() => setOpen(false)}
-              className="px-4 py-3 rounded-xl text-sm font-semibold border border-tg-border text-tg-text-2 text-center"
+              className="link-button px-4 py-3 rounded-xl text-sm font-semibold border border-tg-border text-tg-text-2 text-center"
             >
               כניסה למערכת
             </Link>
@@ -178,7 +178,7 @@ export function LandingNav() {
             <Link
               href="/signup"
               onClick={() => setOpen(false)}
-              className="landing-cta cta-shine px-4 py-3 rounded-xl text-[0.9375rem] font-bold text-black text-center"
+              className="link-button landing-cta cta-shine px-4 py-3 rounded-xl text-[0.9375rem] font-bold text-black text-center"
             >
               התחל ניסיון חינם
             </Link>

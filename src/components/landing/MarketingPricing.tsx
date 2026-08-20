@@ -303,7 +303,7 @@ function PlanCard({
       <div className="mt-6 flex flex-col items-center gap-2.5">
         <Link
           href="/signup"
-          className={`w-full py-3.5 rounded-xl text-base font-bold text-center ${
+          className={`link-button w-full py-3.5 rounded-xl text-base font-bold text-center ${
             highlighted ? 'landing-cta cta-shine text-black' : 'pricing-cta-ghost'
           }`}
         >

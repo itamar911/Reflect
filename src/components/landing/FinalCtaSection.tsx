@@ -37,7 +37,7 @@ export function FinalCtaSection() {
         <ScrollReveal delay={260}>
           <Link
             href="/signup"
-            className="landing-cta px-10 py-4.5 rounded-xl text-lg font-bold text-black mt-2 inline-block"
+            className="link-button landing-cta px-10 py-4.5 rounded-xl text-lg font-bold text-black mt-2 inline-block"
           >
             התחל 5 ימי ניסיון עכשיו — בלי כרטיס אשראי
           </Link>
