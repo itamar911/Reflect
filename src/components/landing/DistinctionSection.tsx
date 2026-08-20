@@ -217,8 +217,10 @@ export function DistinctionSection() {
           {/* The two paragraphs below are rem, not px: this is the section's
               reading copy, so it has to follow the browser's font-size
               preference and the widget's text scale. 1.15625rem is the 18.5px
-              they already used. The panels to their left stay pinned in px —
-              see the note above PANEL_MIN_H. */}
+              they already used. The panels to their left stay pinned in px for
+              the same reason the feature mocks do — they are aria-hidden
+              illustrations of UI, not copy, and their text sits inside fixed
+              geometry. See the note in feature-mocks/MockFrame.tsx. */}
           <div className="flex flex-col gap-7">
             <ScrollReveal delay={80}>
               <p

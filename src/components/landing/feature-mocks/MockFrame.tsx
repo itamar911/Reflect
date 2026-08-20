@@ -21,7 +21,8 @@
  * converting them to rem would grow the text inside a frame sized in px and
  * re-open the clipping that the min-height + flex-1 arrangement above closed.
  * The landing page's actual reading copy (section headings, body paragraphs,
- * FAQ questions, CTA labels) is rem — see SectionHeading/FeaturesSection.
+ * FAQ questions, CTA labels) is rem, so it follows the browser's font-size
+ * preference and the widget's text scale.
  *
  * .mock-ambient-glow is a slow-drifting radial blob sitting at z-index:-1
  * (behind normal-flow content, in front of the card background) that gives
