@@ -14,11 +14,30 @@ import '@/components/accessibility/accessibility.css';
 // latin-only font silently falls back to the OS system font for it.
 const rubik = Rubik({ variable: '--font-rubik', subsets: ['hebrew', 'latin'], display: 'swap' });
 
+const SITE_TITLE = 'Reflect — השוק בוחן את האסטרטגיה שלך';
+const SITE_DESCRIPTION =
+  'השוק בוחן את האסטרטגיה שלך. Reflect בוחן אותך. מערכת משמעת מסחר מבוססת AI.';
+
 export const metadata: Metadata = {
-  title: 'Reflect — השוק בוחן את האסטרטגיה שלך',
-  description: 'השוק בוחן את האסטרטגיה שלך. Reflect בוחן אותך. מערכת משמעת מסחר מבוססת AI.',
+  // Hardcoded apex — the app is served from exactly one origin. Every relative
+  // URL in the metadata below (and in any route that adds its own) resolves
+  // against this, so Open Graph tags ship absolute as the spec requires.
+  metadataBase: new URL('https://reflecttrading.app'),
+  title: SITE_TITLE,
+  description: SITE_DESCRIPTION,
   icons: {
     icon: '/icon.svg',
+  },
+  openGraph: {
+    type: 'website',
+    locale: 'he_IL',
+    siteName: 'Reflect',
+    url: '/',
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+  },
+  twitter: {
+    card: 'summary_large_image',
   },
 };
 

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
-const FROM_EMAIL = 'Reflect Trading <onboarding@resend.dev>';
+const FROM_EMAIL = 'Reflect <hello@reflecttrading.app>';
 
 // ── Email sender ────────────────────────────────────────────────────────────
 
@@ -95,7 +95,7 @@ function dailySummaryHtml(
   </div>
 
   <p style="margin-top:20px;font-size:11px;color:#3d5068;text-align:center">
-    Reflect Trading Journal &bull; <a href="#" style="color:#3d5068">ביטול הרשמה</a>
+    Reflect Trading Journal &bull; <a href="https://reflecttrading.app/settings" style="color:#3d5068">ביטול הרשמה</a>
   </p>
 </div>
 </body></html>`;

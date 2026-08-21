@@ -128,6 +128,13 @@ export async function proxy(request: NextRequest) {
 // assets under public/ are public by definition, and without the exclusion the
 // auth gate below sends the landing page's testimonial clip to /login for every
 // logged-out visitor (the request path is not '/', so it fails isPublicRoute).
+//
+// robots.txt and sitemap.xml are excluded for that same reason — they are
+// generated routes rather than files under public/, but they fail
+// isPublicRoute identically and were being redirected to /login, which every
+// crawler would have followed. Excluded here rather than added to
+// isPublicRoute so the two files skip the Supabase getUser() round trip
+// entirely; one mechanism, not both.
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|mp4)$).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|robots\\.txt|sitemap\\.xml|.*\\.(?:svg|png|jpg|jpeg|gif|webp|mp4)$).*)'],
 };

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 
 const RESEND_KEY   = process.env.RESEND_API_KEY;
-const FROM_EMAIL   = 'Reflect App <onboarding@resend.dev>';
+const FROM_EMAIL   = 'Reflect <feedback@reflecttrading.app>';
 const TO_EMAIL     = 'seince33@gmail.com';
 
 const TYPE_META = {
@@ -92,7 +92,7 @@ export async function POST(request: Request) {
   const subject = `${TYPE_META[type].icon} [Reflect] ${TYPE_META[type].label}: ${title.trim()}`;
 
   // Build Resend payload
-  const payload: Record<string, unknown> = { from: FROM_EMAIL, to: TO_EMAIL, subject, html };
+  const payload: Record<string, unknown> = { from: FROM_EMAIL, to: TO_EMAIL, reply_to: userEmail, subject, html };
 
   // Attach screenshot if provided
   if (screenshot && screenshotName) {
