@@ -11,7 +11,11 @@ import { AuthShell } from '@/components/auth/AuthShell';
 type Mode = 'login' | 'signup';
 
 const CALLBACK_ERROR_MESSAGES: Record<string, string> = {
-  link_expired: 'הקישור פג תוקף או שכבר נעשה בו שימוש. נסה לשלוח קישור חדש.',
+  verifier_missing:
+    'יש לפתוח את הקישור באותו דפדפן שממנו ביקשת אותו. אם זה לא אפשרי, בקש קישור חדש.',
+  link_used: 'כבר נעשה שימוש בקישור הזה. בקש קישור חדש.',
+  link_expired: 'הקישור פג תוקף. בקש קישור חדש.',
+  service_error: 'שירות ההתחברות אינו זמין כרגע. הקישור שלך עדיין תקף — נסה שוב בעוד רגע.',
   auth_callback_error: 'משהו השתבש באימות. נסה שוב או בקש קישור חדש.',
 };
 

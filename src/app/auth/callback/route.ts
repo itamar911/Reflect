@@ -1,11 +1,12 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextResponse } from 'next/server';
+import { classifyAuthError, safeNextPath } from '@/lib/auth/authRedirects';
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get('code');
   const type = searchParams.get('type');
-  const next = searchParams.get('next') ?? '/dashboard';
+  const next = safeNextPath(searchParams.get('next'));
 
   // Supabase appends error/error_description (no code) when the link is expired or already used
   const errorCode = searchParams.get('error_code');
@@ -28,11 +29,13 @@ export async function GET(request: Request) {
     if (!error) {
       return NextResponse.redirect(`${origin}${next}`);
     }
-    // PKCE limitation: the code verifier lives in a cookie in the browser that
-    // initiated the flow. Opening the email link in a different browser (common
-    // on mobile) always fails the exchange — the fix for the user is the same
-    // as an expired link: request a new one.
-    return NextResponse.redirect(`${origin}/login?error=link_expired`);
+    // Six distinct failures land here and only two of them are expiry, so the
+    // error is classified rather than discarded. The cross-browser PKCE case
+    // (verifier_missing) is no longer something the user has to work around:
+    // links minted from {{ .TokenHash }} go to /auth/confirm, which carries no
+    // PKCE state and works on any device. It stays in the mapping as a canary
+    // for links issued before that switch.
+    return NextResponse.redirect(`${origin}/login?error=${classifyAuthError(error)}`);
   }
 
   return NextResponse.redirect(`${origin}/login?error=auth_callback_error`);

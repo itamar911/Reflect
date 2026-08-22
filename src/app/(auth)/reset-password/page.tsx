@@ -10,6 +10,12 @@ import { AuthShell } from '@/components/auth/AuthShell';
 
 type PageStatus = 'loading' | 'ready' | 'invalid';
 
+// updateUser reports a dropped or never-established recovery session as
+// "Auth session missing!". That is not expiry, so it gets its own message —
+// and its own identity, so the "request a new link" affordance below keys off
+// the message rather than sniffing it for the word "expired".
+const SESSION_LOST_MESSAGE = 'החיבור לאיפוס הסיסמא אבד. פתח שוב את הקישור מהאימייל, או בקש קישור חדש.';
+
 export default function ResetPasswordPage() {
   const [status, setStatus] = useState<PageStatus>('loading');
   const [password, setPassword] = useState('');
@@ -75,7 +81,7 @@ export default function ResetPasswordPage() {
     if (updateError) {
       setError(
         updateError.message === 'Auth session missing!'
-          ? 'הלינק פג תוקף — בקש לינק חדש'
+          ? SESSION_LOST_MESSAGE
           : updateError.message
       );
       setLoading(false);
@@ -100,8 +106,10 @@ export default function ResetPasswordPage() {
         {status === 'invalid' && (
           <div className="text-center py-4 animate-fade-in">
             <div className="mb-3"><Ban aria-hidden="true" size={36} /></div>
-            <p className="text-sm font-semibold text-tg-text mb-1">הלינק לא תקין או פג תוקף</p>
-            <p className="text-xs text-tg-muted mb-4">לינקים לאיפוס סיסמא תקפים למשך שעה אחת</p>
+            <p className="text-sm font-semibold text-tg-text mb-1">לא הצלחנו לאמת את הקישור</p>
+            <p className="text-xs text-tg-muted mb-4">
+              ייתכן שכבר נעשה בו שימוש, שפג תוקפו, או שנפתח בדפדפן אחר מזה שממנו ביקשת אותו.
+            </p>
             <a href="/forgot-password"
               className="hit-40 relative inline-block text-sm font-medium underline"
               style={{ color: 'var(--color-tg-primary)' }}>
@@ -149,7 +157,7 @@ export default function ResetPasswordPage() {
                   <div className="text-sm text-tg-danger rounded-xl px-3 py-2"
                     style={{ background: 'var(--color-tg-danger-muted)' }}>
                     {error}
-                    {error.includes('פג תוקף') && (
+                    {error === SESSION_LOST_MESSAGE && (
                       <a href="/forgot-password" className="hit-40 relative block mt-1 text-xs underline"
                         style={{ color: 'var(--color-tg-primary)' }}>
                         שלח לינק חדש
