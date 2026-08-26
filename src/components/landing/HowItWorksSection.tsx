@@ -13,6 +13,7 @@ import {
   Radar,
   type LucideIcon,
 } from 'lucide-react';
+import { IllustrativeBadge } from '@/components/legal/IllustrativeBadge';
 import { SectionHeading } from './SectionHeading';
 import { DISCIPLINE_SCORE, DISCIPLINE_SCORE_DELTA } from './landingStats';
 
@@ -107,7 +108,16 @@ const STOPPED = GATE_QUEUE.filter((trade) => !trade.cleared);
 
 // ── What came back (card 3) ──────────────────────────────────
 
-const DEBRIEF_INSIGHT = 'בימים שבהם עצרת אחרי 2 עסקאות — 78% יצאו ירוקים';
+/**
+ * The example insight this card shows off.
+ *
+ * It deliberately describes *behaviour* rather than an outcome. It used to read
+ * "78% יצאו ירוקים", which is a numeric success-rate claim — not something a
+ * label on the visual can rehabilitate, so the figure is gone rather than
+ * merely disclosed. Any replacement has to stay on the same side of that line:
+ * this product measures whether you followed your own plan, not what you made.
+ */
+const DEBRIEF_INSIGHT = 'בימים שבהם עצרת אחרי 2 עסקאות — הנאמנות לתוכנית נשמרה';
 const PATTERN = { tag: 'מסחר נקמה', note: 'זוהה ב-3 מתוך 5 הימים האדומים' };
 
 // ── Steps ────────────────────────────────────────────────────
@@ -221,7 +231,7 @@ export function HowItWorksSection() {
       <div className="section-glow" aria-hidden />
       <div className="max-w-[1360px] mx-auto relative">
         {/* Ends in a full stop like the page's other declarative headings
-            (LoopSection, SocialProofSection, DistinctionSection). The colon was
+            (LoopSection, DistinctionSection). The colon was
             promising a list the heading never delivered — the subheading does
             that job now, and does it in words. */}
         <SectionHeading sub="שלושה שלבים. את הראשון עושים פעם אחת — השניים הבאים רצים מעצמם, בכל עסקה.">
@@ -290,10 +300,14 @@ export function HowItWorksSection() {
                   {step.body}
                 </p>
 
-                <div className="mt-auto pt-5">
+                {/* All three stage mocks show figures — the rule thresholds,
+                    the gate's counts, the score and the debrief line — so all
+                    three carry the label, not just the last one. */}
+                <div className="mt-auto pt-5 flex flex-col gap-3">
                   {i === 0 && <RulesMock />}
                   {i === 1 && <GateMock />}
                   {i === 2 && <LessonMock />}
+                  <IllustrativeBadge className="self-center" />
                 </div>
 
                 {/* ── The rail out of this station. Both variants hang off the

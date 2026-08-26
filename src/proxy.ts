@@ -101,7 +101,8 @@ export async function proxy(request: NextRequest) {
 
   const isMarketingRoute =
     pathname.startsWith('/terms') ||
-    pathname.startsWith('/privacy');
+    pathname.startsWith('/privacy') ||
+    pathname.startsWith('/risk-disclosure');
 
   const isPublicRoute = pathname === '/' || isAuthRoute || isApiRoute || isMarketingRoute;
 
@@ -126,8 +127,10 @@ export async function proxy(request: NextRequest) {
 
 // mp4 is excluded alongside the image extensions for the same reason: static
 // assets under public/ are public by definition, and without the exclusion the
-// auth gate below sends the landing page's testimonial clip to /login for every
+// auth gate below sends any clip served from public/ to /login for every
 // logged-out visitor (the request path is not '/', so it fails isPublicRoute).
+// The landing page's testimonial clips were the original case; the section was
+// removed pending real customer footage, but the rule holds for any media.
 //
 // robots.txt and sitemap.xml are excluded for that same reason — they are
 // generated routes rather than files under public/, but they fail

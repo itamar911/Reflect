@@ -6,14 +6,25 @@ import { usePrefersReducedMotion } from '@/lib/hooks';
 import { MockFrame } from './MockFrame';
 
 /**
- * A real month grid (September 2025) rather than an abstract 7×5 block of
+ * A real month's grid shape (September 2025 — see MONTH_LABEL) rather than an abstract 7×5 block of
  * squares. Sept 2025 starts on a Monday and has 30 days, so 1 leading day
  * (Aug 31) + 30 + 4 trailing (Oct 1-4) lands on exactly 35 cells — five rows,
  * no sixth-row overflow to design around.
  */
 const YEAR = 2025;
 const MONTH = 8; // 0-based → September
-const MONTH_LABEL = 'ספטמבר 2025';
+
+/**
+ * The header deliberately does NOT name a month.
+ *
+ * September 2025 is still the *shape* of the grid — it starts on a Monday and
+ * has 30 days, which is what makes 1 leading and 4 trailing cells the right
+ * fill — but naming it put a date on a set of figures, and dated figures are
+ * performance data that has to be refreshed on a fixed cadence or pulled. A
+ * grid with no month attached is an illustration of the feature, which is what
+ * it always actually was, and it never goes stale.
+ */
+const MONTH_LABEL = 'חודש מסחר';
 
 /** The cell that gets the turquoise "today" ring. The 30th is the month's last
  *  traded day, so every cell in the grid has already happened — no future days

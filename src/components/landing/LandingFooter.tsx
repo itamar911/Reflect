@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Logo } from '@/components/ui/Logo';
+import { RiskDisclosure } from '@/components/legal/RiskDisclosure';
 
 const FOOTER_LINKS = [
   { href: '/login', label: 'כניסה' },
@@ -34,12 +35,22 @@ export function LandingFooter() {
           <Link href="/privacy" className="inline-block py-2 -my-2 text-sm text-tg-muted hover:text-tg-primary transition-colors">
             מדיניות פרטיות
           </Link>
+          <Link href="/risk-disclosure" className="inline-block py-2 -my-2 text-sm text-tg-muted hover:text-tg-primary transition-colors">
+            גילוי נאות בדבר סיכון
+          </Link>
         </div>
 
+        {/* The product disclaimer stays — it says what Reflect is, which the
+            prescribed risk wording below deliberately does not. It sits above
+            the disclosure rather than below it so the mandated block is the
+            last thing on the page, not a postscript to ours. */}
         <p className="text-sm text-tg-muted max-w-xl leading-relaxed">
-          מסחר בשוקי ההון והקריפטו כרוך בסיכון משמעותי ועלול להוביל לאובדן מלוא ההון המושקע.
           Reflect הינו כלי לניהול משמעת ותיעוד מסחר בלבד, ואינו מהווה ייעוץ השקעות מכל סוג שהוא.
         </p>
+
+        {/* Body-size, primary-colour, full width — not a grey footnote. See the
+            presentation note in disclosureText.ts. */}
+        <RiskDisclosure className="mt-2 max-w-[900px] text-start" />
       </div>
     </footer>
   );

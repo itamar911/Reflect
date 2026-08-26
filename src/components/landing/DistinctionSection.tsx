@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Plus, ShieldCheck, Check, AlertTriangle, Lock, Archive, Unlink } from 'lucide-react';
 import { usePrefersReducedMotion } from '@/lib/hooks';
+import { IllustrativeBadge } from '@/components/legal/IllustrativeBadge';
 import { ScrollReveal } from './ScrollReveal';
 import { SectionHeading } from './SectionHeading';
 
@@ -279,6 +280,14 @@ export function DistinctionSection() {
                 </span>
               )}
             </div>
+
+            {/* One label for the pair rather than one per panel: the two are a
+                single illustration of one trade, read together, and two badges
+                would read as two separate disclosures about two data sets.
+                Outside the aria-hidden row above, so it reaches everyone. */}
+            <div className="mt-4 flex justify-center">
+              <IllustrativeBadge />
+            </div>
           </ScrollReveal>
         </div>
 
@@ -294,7 +303,9 @@ export function DistinctionSection() {
             }}
           >
             <Unlink aria-hidden="true" size={20} className="shrink-0" style={{ color: TURQUOISE }} />
-            <span className="text-lg md:text-xl font-bold text-white">יחד — הלופ נשבר</span>
+            {/* "יכול להישבר", not "נשבר" — the section's closing beat is the
+                one line most likely to be read as a guaranteed outcome. */}
+            <span className="text-lg md:text-xl font-bold text-white">יחד — הלופ יכול להישבר</span>
           </span>
         </div>
       </div>

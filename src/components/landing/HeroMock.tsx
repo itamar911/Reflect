@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import { Lock, Check, AlertTriangle } from 'lucide-react';
 import { usePrefersReducedMotion } from '@/lib/hooks';
+import { IllustrativeBadge } from '@/components/legal/IllustrativeBadge';
 import { DISCIPLINE_SCORE } from './landingStats';
 
 /**
@@ -358,6 +359,16 @@ export function HeroMock() {
         <p className="text-sm text-tg-muted text-center mt-3 leading-relaxed">
           Reflect עצר אותך. לפני הכניסה — לא אחרי ההפסד.
         </p>
+      </div>
+
+      {/* Below the card, not inside it: the card carries the two floating
+          badges at its corners and a scan overlay, and this label must not be
+          mistaken for part of the mocked UI it is labelling. It is also the
+          only real text in an otherwise aria-hidden illustration — the score
+          and money pills above are decorative — so it is what a screen reader
+          meets here. */}
+      <div className="mt-5 flex justify-center">
+        <IllustrativeBadge />
       </div>
     </div>
   );

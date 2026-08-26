@@ -17,6 +17,7 @@ import { Logo } from '@/components/ui/Logo';
 import { PageTransition } from '@/components/layout/PageTransition';
 import { getPlanLimits, type PlanTier } from '@/lib/plans/config';
 import { SIDEBAR_TRANSITION } from '@/lib/motion';
+import { SiteDisclosureFooter } from '@/components/legal/SiteDisclosureFooter';
 
 // Demo-only chrome (fetch interception + upsell modal) — loaded only on /demo
 // so the fixtures never enter the regular app bundle.
@@ -642,6 +643,12 @@ export default function AppShell({
             {children}
           </PageTransition>
         </main>
+
+        {/* Risk disclosure. Inside the margin-shifted content column, not a
+            sibling of it, so it never runs under the fixed sidebar. Every
+            route in the (app) group and every /demo route renders through
+            this shell, so mounting it here covers all of them at once. */}
+        <SiteDisclosureFooter />
       </div>
 
       {isDemo && <DemoGuard />}

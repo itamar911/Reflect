@@ -29,8 +29,10 @@ export function FinalCtaSection() {
 
         <ScrollReveal delay={160}>
           <p className="text-lg text-tg-muted leading-relaxed max-w-xl mx-auto">
-            עוד חודש מעכשיו תהיה באחד משני מקומות: בתוך הלופ — או בפעם הראשונה מחוץ לו. ההבדל הוא
-            לא עוד קורס. הוא ההחלטה שאף עסקה לא נכנסת יותר בלי לעבור דרכך קודם.
+            {/* "יכול להיות", never "תהיה": a forward-looking statement about a
+                visitor's outcome has to be possibility, not a promise. */}
+            עוד חודש מעכשיו אתה יכול להיות באחד משני מקומות: בתוך הלופ — או בפעם הראשונה מחוץ לו.
+            ההבדל הוא לא עוד קורס. הוא ההחלטה שאף עסקה לא נכנסת יותר בלי לעבור דרכך קודם.
           </p>
         </ScrollReveal>
 

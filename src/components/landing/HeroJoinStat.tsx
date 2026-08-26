@@ -3,13 +3,30 @@
 import { useEffect, useRef, useState } from 'react';
 import { usePrefersReducedMotion } from '@/lib/hooks';
 
-// Update this as the real number grows.
-const NEW_USERS_THIS_MONTH = 247;
+/**
+ * Registered Reflect accounts, cumulative. Update as the real number grows.
+ *
+ * Two things about this figure are deliberate and should not be casually
+ * changed back:
+ *
+ *   - It is cumulative, with no timeframe. The line used to read "בחודש
+ *     האחרון", which is a time-bound claim that a hardcoded constant starts
+ *     falsifying the day after it is written. A cumulative total only ever
+ *     understates itself, which is the safe direction to be wrong in.
+ *   - It counts *registrations*, and the copy says exactly that ("נרשמו").
+ *     Signups, trial starts and paying customers are three different numbers;
+ *     "traders joined" quietly claimed the strongest of the three while
+ *     counting the weakest.
+ *
+ * Worth replacing with a real count read from the database — the honest
+ * source — rather than a constant anyone has to remember to bump.
+ */
+const REGISTERED_TRADERS = 147;
 
 const COUNT_DURATION_MS = 1700;
 
 // Social-proof line under the hero CTA: a live-style pulsing dot and a
-// count-up to NEW_USERS_THIS_MONTH, started once when the element enters
+// count-up to REGISTERED_TRADERS, started once when the element enters
 // the viewport. Reduced motion skips straight to the final number (the dot's
 // pulse is killed by landing.css's global reduced-motion rule).
 export function HeroJoinStat() {
@@ -39,7 +56,7 @@ export function HeroJoinStat() {
         const tick = (now: number) => {
           const t = Math.min((now - t0) / COUNT_DURATION_MS, 1);
           const eased = 1 - Math.pow(1 - t, 3); // ease-out: fast start, slow settle
-          setValue(Math.round(eased * NEW_USERS_THIS_MONTH));
+          setValue(Math.round(eased * REGISTERED_TRADERS));
           if (t < 1) raf = requestAnimationFrame(tick);
         };
         raf = requestAnimationFrame(tick);
@@ -54,7 +71,7 @@ export function HeroJoinStat() {
     };
   }, [reducedMotion]);
 
-  const display = reducedMotion ? NEW_USERS_THIS_MONTH : value;
+  const display = reducedMotion ? REGISTERED_TRADERS : value;
 
   return (
     <span
@@ -70,7 +87,7 @@ export function HeroJoinStat() {
         className="text-base font-extrabold"
         style={{
           color: '#00d2d2',
-          // Fixed-width LTR box sized for the final "+247" so the count-up
+          // Fixed-width LTR box sized for a three-digit total so the count-up
           // never pushes the surrounding text around; left-aligned so the
           // number stays glued to the text (which follows on its left in RTL).
           fontVariantNumeric: 'tabular-nums',
@@ -82,7 +99,7 @@ export function HeroJoinStat() {
       >
         +{display}
       </span>
-      סוחרים הצטרפו בחודש האחרון
+      סוחרים נרשמו ל-Reflect
     </span>
   );
 }

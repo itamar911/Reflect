@@ -1,3 +1,5 @@
+import { IllustrativeBadge } from '@/components/legal/IllustrativeBadge';
+
 /**
  * Shared shell for the 6 feature mini-mocks: dark glass card, static
  * ambient box-shadow glow, and the same tilted-perspective treatment as
@@ -28,6 +30,19 @@
  * (behind normal-flow content, in front of the card background) that gives
  * any leftover empty space inside a mock a sense of depth instead of reading
  * as dead space.
+ *
+ * ── The illustrative label ──
+ *
+ * Every one of the six mocks shows figures, and every one of those figures is
+ * hand-authored fixture data. The label therefore lives here rather than in
+ * each mock: a seventh mock cannot be added without one, and the wording
+ * cannot drift across six copies.
+ *
+ * It sits *outside* the card, below it, deliberately. Everything inside the
+ * card is pinned to fixed px geometry against this frame's min-height, and a
+ * row in there would eat into it. Outside, it also escapes the card's rotateY
+ * tilt — the one line a visitor actually has to read is the one line that is
+ * never skewed.
  */
 export function MockFrame({
   children,
@@ -39,7 +54,7 @@ export function MockFrame({
   height?: number;
 }) {
   return (
-    <div className="feature-mock-wrap w-full">
+    <div className="feature-mock-wrap w-full flex flex-col items-center gap-3">
       <div
         className={`feature-mock-card relative w-full rounded-2xl border p-4 overflow-hidden flex flex-col ${className}`}
         style={{
@@ -52,6 +67,8 @@ export function MockFrame({
         <span className="mock-ambient-glow" aria-hidden />
         {children}
       </div>
+
+      <IllustrativeBadge />
     </div>
   );
 }

@@ -269,9 +269,12 @@ function parseHour(time: string | null | undefined, fallback: string): number {
 }
 
 export async function GET(request: Request) {
-  // Verify Vercel cron secret
+  // Verify Vercel cron secret. Rejects when CRON_SECRET is missing rather than
+  // skipping the check — this route uses the service-role client and mails
+  // every user, so an unset/renamed env var must fail closed, not open.
+  const cronSecret = process.env.CRON_SECRET;
   const authHeader = request.headers.get('authorization');
-  if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

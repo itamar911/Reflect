@@ -8,7 +8,7 @@ import { DistinctionSection } from '@/components/landing/DistinctionSection';
 import { HowItWorksSection } from '@/components/landing/HowItWorksSection';
 import { TryDemoSection } from '@/components/landing/TryDemoSection';
 import { FeaturesSection } from '@/components/landing/FeaturesSection';
-import { SocialProofSection } from '@/components/landing/SocialProofSection';
+import { PlatformsSection } from '@/components/landing/PlatformsSection';
 import { PricingSection } from '@/components/landing/PricingSection';
 import { FaqSection } from '@/components/landing/FaqSection';
 import { ContactSection } from '@/components/landing/ContactSection';
@@ -41,7 +41,7 @@ export default async function HomePage() {
         <HowItWorksSection />
         <TryDemoSection />
         <FeaturesSection />
-        <SocialProofSection />
+        <PlatformsSection />
         <PricingSection />
         <FaqSection />
         <ContactSection />
