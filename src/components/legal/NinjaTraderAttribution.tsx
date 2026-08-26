@@ -1,9 +1,15 @@
 import { NINJATRADER_ATTRIBUTION } from './disclosureText';
+import { disclosureTextProps, type DisclosureVariant } from './disclosureStyle';
 
 /**
- * Trademark attribution for the NinjaTrader platform. Required prominently on
- * every page that mentions NinjaTrader — drop this component onto any such
- * page rather than retyping the sentence, so the wording can never drift.
+ * Trademark attribution for the NinjaTrader platform. Required on every page
+ * that mentions NinjaTrader.
+ *
+ * It is rendered from the site footer (see FooterDisclosures), which every
+ * route mounts — so the requirement is met on every page at once, including
+ * any future page that names the platform. Drop this component in directly
+ * only on a page that has no footer of its own; /risk-disclosure is the one
+ * such page today.
  *
  * English only and dir="ltr" on purpose: it is a trademark notice in its
  * prescribed language, not copy to be localised.
@@ -17,13 +23,17 @@ import { NINJATRADER_ATTRIBUTION } from './disclosureText';
  *   - No product name, URL, route slug, meta title or social handle may
  *     contain a NinjaTrader trademark.
  */
-export function NinjaTraderAttribution({ className = '' }: { className?: string }) {
+export function NinjaTraderAttribution({
+  className = '',
+  variant = 'footnote',
+}: {
+  className?: string;
+  variant?: DisclosureVariant;
+}) {
+  const text = disclosureTextProps(variant);
+
   return (
-    <p
-      dir="ltr"
-      className={`text-base leading-relaxed text-start ${className}`}
-      style={{ color: 'var(--color-tg-text)' }}
-    >
+    <p dir="ltr" style={text.style} className={`${text.className} text-start ${className}`}>
       {NINJATRADER_ATTRIBUTION}
     </p>
   );

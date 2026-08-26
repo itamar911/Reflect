@@ -1,10 +1,13 @@
 import Link from 'next/link';
-import { RiskDisclosure } from './RiskDisclosure';
+import { FooterDisclosures } from './FooterDisclosures';
 
 /**
  * The risk disclosure as a page footer, for every route that is not the
  * landing page (which has its own richer footer and renders RiskDisclosure
  * inside it).
+ *
+ * It carries the risk disclosure and the NinjaTrader trademark attribution
+ * together (see FooterDisclosures).
  *
  * The guideline is "every page", so this is mounted at the layout level of
  * each route group rather than per page — that way nested and dynamic routes
@@ -24,7 +27,7 @@ export function SiteDisclosureFooter({ className = '' }: { className?: string })
       style={{ borderColor: 'var(--color-tg-border)' }}
     >
       <div className="max-w-[900px] mx-auto flex flex-col gap-4">
-        <RiskDisclosure />
+        <FooterDisclosures />
 
         <div className="flex flex-wrap gap-x-6 gap-y-2">
           <Link href="/risk-disclosure" className="text-sm text-tg-muted hover:text-tg-primary transition-colors">

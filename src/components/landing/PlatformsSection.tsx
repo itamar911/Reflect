@@ -1,7 +1,6 @@
 import Image from 'next/image';
 import { ScrollReveal } from './ScrollReveal';
 import { SectionHeading } from './SectionHeading';
-import { NinjaTraderAttribution } from '@/components/legal/NinjaTraderAttribution';
 
 /**
  * Supported platforms.
@@ -21,8 +20,12 @@ import { NinjaTraderAttribution } from '@/components/legal/NinjaTraderAttributio
  *      is why the logo sits alone in its own padded box rather than inside the
  *      card's normal padding with text beside it.
  *   3. The trademark attribution renders on every page that mentions
- *      NinjaTrader. It lives inside this component so it cannot be left behind
- *      when the section is moved to another page.
+ *      NinjaTrader. It is no longer rendered here: it lives in the site footer
+ *      (FooterDisclosures), which every route mounts, so the requirement is
+ *      met on this page and on every other one — including any future page
+ *      that names the platform — without a block of legal text landing in the
+ *      middle of the section. If this section is ever lifted onto a page with
+ *      no site footer, that page must render NinjaTraderAttribution itself.
  *
  * Naming: "NinjaTrader" — one word, capital N, capital T. "Kinetick" — capital
  * K. And no route slug, meta title, product name or social handle may contain
@@ -144,11 +147,6 @@ export function PlatformsSection() {
           ))}
         </div>
 
-        {/* Required wherever NinjaTrader is named. Body-size and in the primary
-            text colour, like every other disclosure on the site. */}
-        <div className="max-w-[820px] mx-auto mt-8">
-          <NinjaTraderAttribution />
-        </div>
       </div>
     </section>
   );

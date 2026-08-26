@@ -51,6 +51,17 @@
   --shell-sidebar-shadow: 4px 0 32px rgba(0,0,0,0.5);
   --shell-header-shadow:  0 1px 0 rgba(0,210,210,0.06), 0 4px 32px rgba(0,0,0,0.5);
   --shell-nav-shadow:     0 -1px 0 rgba(0,210,210,0.05), 0 -4px 32px rgba(0,0,0,0.6);
+
+  /* Legal disclosures (src/components/legal/). Its own token rather than
+     --color-tg-muted, because in dark mode that token is #ffffff — brighter
+     than body text, not dimmer — and every muted-looking thing on the dark
+     surfaces is really --color-tg-muted plus a per-use opacity. Disclosure
+     text is legally required to be legible, so it cannot be tuned by eye at
+     each call site; it gets one value, set once.
+
+     0.72 white measures ~8.4:1 on the landing and shell backgrounds — well
+     past AA at 16px, and clearly subordinate to the near-white body copy. */
+  --color-tg-disclosure: rgba(255, 255, 255, 0.72);
 }
 
 /* ── Light mode token overrides ─────────────────────────────── */
@@ -82,7 +93,12 @@ html.light {
   /* Sync existing tg-text tokens to the new hierarchy */
   --color-tg-text:    #131722;
   --color-tg-text-2:  #3e4451;  /* was #787b86 → now passes WCAG AA */
-  --color-tg-muted:   #5c6370;  /* was #b2b5be → now passes WCAG AA */
+  --color-tg-muted:   #5c6370;  /*  5.9:1 — medium grey                */
+
+  /* Light mode has a genuinely muted grey already, so the disclosure token
+     reuses it rather than layering opacity on top — 0.72 alpha over a near
+     white surface would land around 3.5:1 and fail AA. */
+  --color-tg-disclosure: #5c6370;
 
   --color-tg-success:      #26a69a;
   --color-tg-success-muted: rgba(38, 166, 154, 0.12);

@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { Logo } from '@/components/ui/Logo';
-import { RiskDisclosure } from '@/components/legal/RiskDisclosure';
+import { FooterDisclosures } from '@/components/legal/FooterDisclosures';
 
 const FOOTER_LINKS = [
   { href: '/login', label: 'כניסה' },
@@ -48,9 +48,15 @@ export function LandingFooter() {
           Reflect הינו כלי לניהול משמעת ותיעוד מסחר בלבד, ואינו מהווה ייעוץ השקעות מכל סוג שהוא.
         </p>
 
-        {/* Body-size, primary-colour, full width — not a grey footnote. See the
-            presentation note in disclosureText.ts. */}
-        <RiskDisclosure className="mt-2 max-w-[900px] text-start" />
+        {/* The mandated wording, in full, as fine print rather than as a card.
+            The hairline above separates it from the footer's own content so it
+            reads as the legal block it is. */}
+        <div
+          className="w-full max-w-[900px] mt-4 pt-8"
+          style={{ borderTop: '1px solid var(--color-tg-border)' }}
+        >
+          <FooterDisclosures />
+        </div>
       </div>
     </footer>
   );

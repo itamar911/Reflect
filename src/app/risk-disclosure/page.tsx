@@ -39,7 +39,7 @@ export default function RiskDisclosurePage() {
         גילוי נאות בדבר סיכון
       </h1>
 
-      <RiskDisclosure showHeading={false} />
+      <RiskDisclosure showHeading={false} variant="page" />
 
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-bold" style={{ color: 'var(--color-tg-text-2)' }}>
@@ -72,7 +72,7 @@ export default function RiskDisclosurePage() {
         <h2 className="text-lg font-bold" style={{ color: 'var(--color-tg-text-2)' }}>
           Trademarks
         </h2>
-        <NinjaTraderAttribution />
+        <NinjaTraderAttribution variant="page" />
       </section>
 
       <div className="flex flex-wrap gap-x-6 gap-y-2 pt-2">
