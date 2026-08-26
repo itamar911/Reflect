@@ -1,36 +1,51 @@
 import Link from 'next/link';
 import { RiskDisclosure } from './RiskDisclosure';
-import { NinjaTraderAttribution } from './NinjaTraderAttribution';
 
 /**
- * The two page-level disclosures that belong to the site rather than to any
- * one section: the risk disclosure and the NinjaTrader trademark attribution.
+ * The site-level risk disclosure as it appears in a footer: the Hebrew
+ * wording in full, with a link to the complete bilingual text beneath it.
  *
- * Grouped and pushed to the footer deliberately. Both were previously
- * mid-page — the risk text under the hero's own footer block, the attribution
- * inside the supported-platforms section — where they carried the visual
- * weight of content. In the footer they are still on every page (both footers
- * render on every route), still complete, and no longer competing with the
- * page's argument.
+ * The link is *in addition to* the text, never instead of it. The guideline
+ * requires the full wording to be visible on the page and permits a link only
+ * as a supplement, so do not "tidy" this into a link-only footer — dropping
+ * the paragraph breaks compliance even though the link still works.
  *
- * The link is *in addition to* the text, never instead of it: the guideline
- * requires the full wording to be visible on the page, and permits a link only
- * as a supplement. Removing either paragraph in favour of the link would
- * break compliance, so do not "tidy" this into a link-only footer.
+ * What is deliberately NOT here:
  *
- * The testimonial disclosure is deliberately NOT here — it qualifies a
- * specific claim and has to stay adjacent to the testimonials themselves.
+ *   - **The English risk wording.** It lives on /risk-disclosure, which this
+ *     block links to. Printing both languages in every footer doubled the
+ *     block's height for a reader who needs one of them.
+ *   - **The NinjaTrader trademark attribution.** It moved to
+ *     PlatformsSection, adjacent to the logo and the platform's name. It is
+ *     English-only by prescription and has no Hebrew twin, so it could not be
+ *     shortened the way the risk text could — and it is required on any page
+ *     that names the platform. Sitting next to the mention satisfies that more
+ *     directly than a footer did. A future page that names NinjaTrader without
+ *     rendering PlatformsSection must render NinjaTraderAttribution itself.
+ *   - **The testimonial disclosure.** It qualifies a specific claim and stays
+ *     with the testimonials.
  */
-export function FooterDisclosures({ className = '' }: { className?: string }) {
-  return (
-    <div dir="rtl" className={`w-full flex flex-col gap-4 text-start ${className}`}>
-      <RiskDisclosure />
+export function FooterDisclosures({
+  className = '',
+  /** Match the surrounding footer: the landing footer is a centred column,
+      the app-shell footer is start-aligned. */
+  align = 'start',
+}: {
+  className?: string;
+  align?: 'center' | 'start';
+}) {
+  const centred = align === 'center';
 
-      <NinjaTraderAttribution />
+  return (
+    <div
+      dir="rtl"
+      className={`w-full flex flex-col gap-3 ${centred ? 'items-center text-center' : 'items-start text-start'} ${className}`}
+    >
+      <RiskDisclosure languages="he" />
 
       <Link
         href="/risk-disclosure"
-        className="text-sm font-normal self-start underline underline-offset-4 transition-colors hover:text-tg-primary"
+        className="text-xs font-normal underline underline-offset-4 transition-colors hover:text-tg-primary"
         style={{ color: 'var(--color-tg-disclosure)' }}
       >
         קראו את הגילוי הנאות המלא

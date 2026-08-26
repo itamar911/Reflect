@@ -1,49 +1,60 @@
 import { RISK_DISCLOSURE_EN, RISK_DISCLOSURE_HE } from './disclosureText';
-import { disclosureTextProps, type DisclosureVariant } from './disclosureStyle';
+import { disclosureTextProps, DISCLOSURE_MEASURE, type DisclosureVariant } from './disclosureStyle';
 
 /**
- * The site-wide risk disclosure, in both languages.
+ * The site-wide risk disclosure.
  *
- * Both paragraphs are mandatory and mandatory *together*: NinjaTrader
- * prescribes the English wording, and the app is Hebrew-first, so a Hebrew
- * reader has to be able to read it too. The English block carries dir="ltr"
- * for the same reason the recharts containers do — it is genuinely LTR content
- * sitting inside an RTL shell, and letting the shell reorder its punctuation
- * would corrupt prescribed wording.
+ * `languages` decides how much of it renders:
  *
- * No border, no card, no fill: the text has to be present and legible, not
- * framed as a feature. See disclosureStyle.ts for how the weight is set.
+ *   'both'  — the Hebrew and the prescribed English. Used on
+ *             /risk-disclosure, the canonical home of the full text.
+ *   'he'    — Hebrew only. Used in the site footer, where printing both
+ *             doubled the block's height for a reader who only needs one of
+ *             them. The English is not dropped from the site: /risk-disclosure
+ *             carries it, and the footer links straight there.
+ *
+ * The prescribed English wording must remain reachable and complete somewhere
+ * on the site — 'he' is a footer-density decision, not licence to retire it.
+ *
+ * The English block carries dir="ltr" for the same reason the recharts
+ * containers do: it is genuinely LTR content inside an RTL shell, and letting
+ * the shell reorder its punctuation would corrupt prescribed wording.
  */
 export function RiskDisclosure({
   className = '',
   /** Off on /risk-disclosure, where the page's own <h1> already says this. */
   showHeading = true,
   variant = 'footnote',
+  languages = 'both',
 }: {
   className?: string;
   showHeading?: boolean;
   variant?: DisclosureVariant;
+  languages?: 'both' | 'he';
 }) {
   const text = disclosureTextProps(variant);
+  const measure = variant === 'footnote' ? DISCLOSURE_MEASURE : '';
 
   return (
     <section
       aria-label="גילוי נאות בדבר סיכון"
-      className={`w-full flex flex-col gap-3 ${className}`}
+      className={`flex flex-col gap-3 ${className}`}
     >
       {showHeading && (
-        <h2 className="text-sm font-semibold" style={{ color: 'var(--color-tg-disclosure)' }}>
+        <h2 className="text-xs font-semibold" style={{ color: 'var(--color-tg-disclosure)' }}>
           גילוי נאות בדבר סיכון
         </h2>
       )}
 
-      <p dir="rtl" {...text}>
+      <p dir="rtl" style={text.style} className={`${text.className} ${measure}`}>
         {RISK_DISCLOSURE_HE}
       </p>
 
-      <p dir="ltr" {...text} className={`${text.className} text-start`}>
-        {RISK_DISCLOSURE_EN}
-      </p>
+      {languages === 'both' && (
+        <p dir="ltr" style={text.style} className={`${text.className} ${measure} text-start`}>
+          {RISK_DISCLOSURE_EN}
+        </p>
+      )}
     </section>
   );
 }

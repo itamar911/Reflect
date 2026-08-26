@@ -1,6 +1,8 @@
 import Image from 'next/image';
 import { ScrollReveal } from './ScrollReveal';
 import { SectionHeading } from './SectionHeading';
+import { NinjaTraderAttribution } from '@/components/legal/NinjaTraderAttribution';
+import { DISCLOSURE_MEASURE } from '@/components/legal/disclosureStyle';
 
 /**
  * Supported platforms.
@@ -20,20 +22,24 @@ import { SectionHeading } from './SectionHeading';
  *      is why the logo sits alone in its own padded box rather than inside the
  *      card's normal padding with text beside it.
  *   3. The trademark attribution renders on every page that mentions
- *      NinjaTrader. It is no longer rendered here: it lives in the site footer
- *      (FooterDisclosures), which every route mounts, so the requirement is
- *      met on this page and on every other one — including any future page
- *      that names the platform — without a block of legal text landing in the
- *      middle of the section. If this section is ever lifted onto a page with
- *      no site footer, that page must render NinjaTraderAttribution itself.
+ *      NinjaTrader. It lives here, directly under the card that carries the
+ *      mark, rather than in the site footer: it is English-only by
+ *      prescription, so it could not be halved the way the footer's bilingual
+ *      risk text was, and next to the logo it is more prominent than it was
+ *      at the very bottom of the page. Any future page that names NinjaTrader
+ *      without rendering this section must render NinjaTraderAttribution
+ *      itself.
  *
  * Naming: "NinjaTrader" — one word, capital N, capital T. "Kinetick" — capital
- * K. And no route slug, meta title, product name or social handle may contain
- * either.
+ * K. And no route slug, meta title, product name, social handle or served
+ * asset URL may contain either.
  */
 
 /** Media-kit minimum, in px, on all four sides of every logo. */
 const LOGO_CLEAR_SPACE = 18;
+
+/** Rendered width cap for a wordmark logo. Height follows the aspect ratio. */
+const LOGO_MAX_W = 240;
 
 interface Platform {
   id: string;
@@ -42,18 +48,17 @@ interface Platform {
   /** One line on how Reflect relates to it. Never an endorsement claim. */
   body: string;
   /**
-   * Media-kit artwork, served from /public. Leave null until the approved file
-   * is in place — the card falls back to the wordmark as plain text, which is
-   * always safer than shipping a broken image or a logo pulled from anywhere
-   * other than the vendor's own kit.
+   * Media-kit artwork under /public. Null falls back to the wordmark as plain
+   * text, which is what ships until an approved file is in place — always
+   * safer than a broken image or a logo pulled from anywhere but the kit.
    */
   logoSrc: string | null;
+  /** Intrinsic pixel dimensions of logoSrc — next/image uses them for the
+   *  aspect ratio, not for the rendered size (LOGO_MAX_W sets that). */
   logoWidth?: number;
   logoHeight?: number;
-  /**
-   * The vendor-supplied tracking URL. Null until it is supplied; the card then
-   * renders as a plain card rather than a dead link.
-   */
+  /** The vendor-supplied tracking URL. Null renders a plain card, not a dead
+   *  link. */
   href: string | null;
 }
 
@@ -62,17 +67,13 @@ const PLATFORMS: Platform[] = [
     id: 'ninjatrader',
     name: 'NinjaTrader',
     body: 'מתכננים ומתעדים ב-Reflect, מבצעים בפלטפורמה שלכם. Reflect אינו ברוקר ואינו מבצע פעולות בחשבון המסחר.',
-    // TODO(owner): drop the media-kit logo at public/platforms/nt-logo.svg
-    // and set this, together with `href` from the tracking URLs in the
-    // media-kit email. Until both are filled in the card renders as a
-    // typographic wordmark with no link — compliant, just plainer.
-    //
-    // The filename is deliberately abbreviated: no URL this site serves may
+    // Media-kit PNG: 2376x300, transparent, single opaque colour #FF4200.
+    // The filename is deliberately abbreviated — no URL this site serves may
     // contain a NinjaTrader trademark, and an asset path is a URL.
-    logoSrc: null,
-    logoWidth: 200,
-    logoHeight: 40,
-    href: null,
+    logoSrc: '/platforms/nt-logo.png',
+    logoWidth: 2376,
+    logoHeight: 300,
+    href: 'https://ninjatraderdomesticvendor.sjv.io/1GKkKd',
   },
 ];
 
@@ -91,8 +92,13 @@ function PlatformCard({ platform }: { platform: Platform }) {
             alt={platform.name}
             width={platform.logoWidth ?? 200}
             height={platform.logoHeight ?? 40}
-            className="h-auto max-w-full"
-            unoptimized
+            // The source is ~10x the rendered width, so `sizes` is what stops
+            // next/image shipping a 2376px file to a 240px slot. Capped by
+            // max-width rather than a hard width so it shrinks with the card
+            // on narrow screens instead of overflowing its clear space.
+            sizes={`${LOGO_MAX_W}px`}
+            className="w-full h-auto"
+            style={{ maxWidth: LOGO_MAX_W }}
           />
         ) : (
           <span dir="ltr" className="text-2xl font-bold" style={{ color: 'var(--color-tg-text-2)' }}>
@@ -147,6 +153,11 @@ export function PlatformsSection() {
           ))}
         </div>
 
+        {/* Required wherever the mark appears. Fine print, on the same measure
+            as every other disclosure, directly under the card carrying it. */}
+        <div className="flex justify-center mt-8">
+          <NinjaTraderAttribution className={DISCLOSURE_MEASURE} />
+        </div>
       </div>
     </section>
   );

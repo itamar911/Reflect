@@ -48,14 +48,14 @@ export function LandingFooter() {
           Reflect הינו כלי לניהול משמעת ותיעוד מסחר בלבד, ואינו מהווה ייעוץ השקעות מכל סוג שהוא.
         </p>
 
-        {/* The mandated wording, in full, as fine print rather than as a card.
-            The hairline above separates it from the footer's own content so it
-            reads as the legal block it is. */}
+        {/* Fine print, last, under a hairline — navigation and product copy
+            above it, legal text below. Centred to match the rest of this
+            footer's column rather than spanning the full page width. */}
         <div
-          className="w-full max-w-[900px] mt-4 pt-8"
+          className="w-full max-w-[720px] mt-4 pt-8"
           style={{ borderTop: '1px solid var(--color-tg-border)' }}
         >
-          <FooterDisclosures />
+          <FooterDisclosures align="center" />
         </div>
       </div>
     </footer>
