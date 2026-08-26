@@ -47,7 +47,7 @@ export function SocialProofSection() {
         </ScrollReveal>
 
         <ScrollReveal delay={200}>
-          <TestimonialDisclosure className="mt-10 max-w-[900px] mx-auto" />
+          <TestimonialDisclosure className="mt-10 mx-auto" />
         </ScrollReveal>
       </div>
     </section>

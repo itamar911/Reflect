@@ -12,7 +12,7 @@ const FOOTER_LINKS = [
 
 export function LandingFooter() {
   return (
-    <footer className="relative border-t border-tg-border py-14 px-4 md:px-8 lg:px-10">
+    <footer className="relative border-t border-tg-border pt-14 pb-40 px-4 md:px-8 lg:px-10">
       <div className="max-w-[1360px] mx-auto flex flex-col items-center gap-6 text-center">
         <Logo />
 
@@ -36,7 +36,7 @@ export function LandingFooter() {
             מדיניות פרטיות
           </Link>
           <Link href="/risk-disclosure" className="inline-block py-2 -my-2 text-sm text-tg-muted hover:text-tg-primary transition-colors">
-            גילוי נאות בדבר סיכון
+            גילוי סיכון
           </Link>
         </div>
 
@@ -48,15 +48,12 @@ export function LandingFooter() {
           Reflect הינו כלי לניהול משמעת ותיעוד מסחר בלבד, ואינו מהווה ייעוץ השקעות מכל סוג שהוא.
         </p>
 
-        {/* Fine print, last, under a hairline — navigation and product copy
-            above it, legal text below. Centred to match the rest of this
-            footer's column rather than spanning the full page width. */}
-        <div
-          className="w-full max-w-[720px] mt-4 pt-8"
-          style={{ borderTop: '1px solid var(--color-tg-border)' }}
-        >
-          <FooterDisclosures align="center" />
-        </div>
+        {/* Fine print, last. Spans the footer's own width and is start-aligned
+            rather than following the centred column above it: these are
+            flowing paragraphs, and centring multi-line text this small reads
+            as a pull quote. The bold inline labels are what mark them out —
+            no rule, no box, no narrow measure. */}
+        <FooterDisclosures className="mt-6" />
       </div>
     </footer>
   );

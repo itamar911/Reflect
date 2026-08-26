@@ -5,11 +5,11 @@ import { disclosureTextProps, type DisclosureVariant } from './disclosureStyle';
  * Trademark attribution for the NinjaTrader platform. Required on every page
  * that mentions NinjaTrader.
  *
- * It is rendered from the site footer (see FooterDisclosures), which every
- * route mounts — so the requirement is met on every page at once, including
- * any future page that names the platform. Drop this component in directly
- * only on a page that has no footer of its own; /risk-disclosure is the one
- * such page today.
+ * The footer is what actually satisfies that on every route: FooterDisclosures
+ * prints this same wording, from the same constant, as a labelled inline
+ * paragraph. Use this component only on a page that has no site footer of its
+ * own — /risk-disclosure is the one such page today, and it wants the text
+ * under its own "Trademarks" heading at body size rather than as fine print.
  *
  * English only and dir="ltr" on purpose: it is a trademark notice in its
  * prescribed language, not copy to be localised.

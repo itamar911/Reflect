@@ -1,162 +1,210 @@
 import Image from 'next/image';
 import { ScrollReveal } from './ScrollReveal';
 import { SectionHeading } from './SectionHeading';
-import { NinjaTraderAttribution } from '@/components/legal/NinjaTraderAttribution';
-import { DISCLOSURE_MEASURE } from '@/components/legal/disclosureStyle';
 
 /**
- * Supported platforms.
+ * Supported platforms, as a logo grid.
  *
- * Plural in the heading and built as a list from the start, so Colmex and
- * whoever follows drop in as another entry rather than as a redesign.
+ * Everything visible here is driven by PLATFORMS and CATEGORIES below — adding
+ * a platform is one array entry, never a layout change, and a category with no
+ * entries renders nothing at all rather than an empty heading.
  *
- * Three compliance constraints shape this section, and none of them are
- * cosmetic:
+ * Compliance constraints that shape this section, none of them cosmetic:
  *
- *   1. Nothing here may imply endorsement, certification, premium status or
- *      partnership. The copy says what is true — Reflect runs alongside the
- *      platform you already trade on — and stops there. No "official",
- *      "certified", "integration partner", no platform mark in a headline.
- *   2. Logos come from the vendor's own media kit and nowhere else, and each
- *      needs at least LOGO_CLEAR_SPACE px of clear space on every side. That
- *      is why the logo sits alone in its own padded box rather than inside the
- *      card's normal padding with text beside it.
- *   3. The trademark attribution renders on every page that mentions
- *      NinjaTrader. It lives here, directly under the card that carries the
- *      mark, rather than in the site footer: it is English-only by
- *      prescription, so it could not be halved the way the footer's bilingual
- *      risk text was, and next to the logo it is more prominent than it was
- *      at the very bottom of the page. Any future page that names NinjaTrader
- *      without rendering this section must render NinjaTraderAttribution
- *      itself.
+ *   1. Nothing may imply endorsement, certification, premium status or
+ *      partnership. The copy says what is true — your trades sync, or you
+ *      import them — and stops there.
+ *   2. Logos come from the vendor's own media kit and nowhere else, and only
+ *      where we hold permission to display the mark. A platform we support but
+ *      cannot show a logo for is named in text instead (see the category note),
+ *      never given a tile.
+ *   3. Each logo keeps at least LOGO_CLEAR_SPACE px of clear space on all four
+ *      sides — which is why the tile's padding is that figure and the logo is
+ *      the only thing inside it.
+ *   4. No served URL, filename or CSS class may contain a platform trademark.
+ *      Hence /platforms/nt-logo.png, and no bespoke class names here at all.
  *
- * Naming: "NinjaTrader" — one word, capital N, capital T. "Kinetick" — capital
- * K. And no route slug, meta title, product name, social handle or served
- * asset URL may contain either.
+ * The trademark attribution is NOT repeated in this section: FooterDisclosures
+ * carries it, and the footer renders on every route, so this page already has
+ * it once. A second copy beside the grid would print the same paragraph twice.
  */
 
 /** Media-kit minimum, in px, on all four sides of every logo. */
 const LOGO_CLEAR_SPACE = 18;
 
-/** Rendered width cap for a wordmark logo. Height follows the aspect ratio. */
-const LOGO_MAX_W = 240;
+type CategoryId = 'auto' | 'csv';
 
 interface Platform {
   id: string;
   /** Exactly as the trademark owner writes it. */
   name: string;
-  /** One line on how Reflect relates to it. Never an endorsement claim. */
-  body: string;
-  /**
-   * Media-kit artwork under /public. Null falls back to the wordmark as plain
-   * text, which is what ships until an approved file is in place — always
-   * safer than a broken image or a logo pulled from anywhere but the kit.
-   */
-  logoSrc: string | null;
-  /** Intrinsic pixel dimensions of logoSrc — next/image uses them for the
-   *  aspect ratio, not for the rendered size (LOGO_MAX_W sets that). */
-  logoWidth?: number;
-  logoHeight?: number;
-  /** The vendor-supplied tracking URL. Null renders a plain card, not a dead
-   *  link. */
+  logoSrc: string;
+  /** Intrinsic pixel dimensions — next/image uses them for the aspect ratio,
+   *  not for the rendered size, which the tile decides. */
+  logoWidth: number;
+  logoHeight: number;
+  /** Vendor-supplied tracking URL, or null for an unlinked tile. */
   href: string | null;
+  category: CategoryId;
 }
 
 const PLATFORMS: Platform[] = [
   {
-    id: 'ninjatrader',
+    id: 'nt',
     name: 'NinjaTrader',
-    body: 'מתכננים ומתעדים ב-Reflect, מבצעים בפלטפורמה שלכם. Reflect אינו ברוקר ואינו מבצע פעולות בחשבון המסחר.',
     // Media-kit PNG: 2376x300, transparent, single opaque colour #FF4200.
-    // The filename is deliberately abbreviated — no URL this site serves may
-    // contain a NinjaTrader trademark, and an asset path is a URL.
     logoSrc: '/platforms/nt-logo.png',
     logoWidth: 2376,
     logoHeight: 300,
     href: 'https://ninjatraderdomesticvendor.sjv.io/1GKkKd',
+    category: 'auto',
+  },
+  // TODO(owner): CSV import is not built yet, so the 'csv' category is empty
+  // and renders nothing. Do not list a platform here before import actually
+  // works for it — a logo in this grid is a claim that we support it.
+];
+
+/**
+ * The distinction is the product one, not a filing detail: an automatic
+ * connection is what lets Reflect check a trade against your rules *before*
+ * you enter it. A CSV uploaded afterwards can only ever be a record, so a
+ * platform in the second group gets the journal and the debrief but not the
+ * real-time enforcement.
+ */
+const CATEGORIES: { id: CategoryId; heading: string; note?: string }[] = [
+  {
+    id: 'auto',
+    heading: 'חיבור אוטומטי',
+    // Named in text, not shown as a logo: the connection genuinely covers
+    // these accounts, but permission to display the mark covers NinjaTrader
+    // only. Naming a platform to say what works is nominative use; putting up
+    // its logo would not be.
+    note: 'אותו חיבור משרת גם חשבונות המבוססים על Tradovate, כולל חברות פרופ הפועלות עליה.',
+  },
+  {
+    id: 'csv',
+    heading: 'ייבוא נתמך',
   },
 ];
 
-function PlatformCard({ platform }: { platform: Platform }) {
-  const inner = (
+/**
+ * One tile: a dark rounded rectangle with the logo centred inside it, the
+ * platform name beneath. The tile is the logo's clear-space box — nothing,
+ * including the tile's own border, comes within LOGO_CLEAR_SPACE of the mark.
+ *
+ * 3:2 rather than square. The clear space caps a logo's width, and a wordmark
+ * this wide (7.9:1) is then only ~19px tall — in a square that left the mark
+ * covering 8% of the tile, reading as an empty box with a stripe in it. The
+ * shorter tile does not change the logo at all; it removes the dead height
+ * above and below it, roughly halving the tile's area and lifting the mark to
+ * ~12% of it. Anything shorter starts crowding the 18px floor at this width.
+ */
+function PlatformTile({ platform }: { platform: Platform }) {
+  const tile = (
     <>
-      {/* The logo's own box. Its padding IS the clear-space rule — nothing,
-          including the card's border, comes closer than LOGO_CLEAR_SPACE. */}
       <div
-        className="flex items-center justify-center w-full"
-        style={{ padding: LOGO_CLEAR_SPACE, minHeight: 40 + LOGO_CLEAR_SPACE * 2 }}
+        className="w-full aspect-[3/2] rounded-2xl border flex items-center justify-center"
+        style={{
+          padding: LOGO_CLEAR_SPACE,
+          borderColor: 'rgba(255,255,255,0.1)',
+          background: 'rgba(255,255,255,0.04)',
+        }}
       >
-        {platform.logoSrc ? (
-          <Image
-            src={platform.logoSrc}
-            alt={platform.name}
-            width={platform.logoWidth ?? 200}
-            height={platform.logoHeight ?? 40}
-            // The source is ~10x the rendered width, so `sizes` is what stops
-            // next/image shipping a 2376px file to a 240px slot. Capped by
-            // max-width rather than a hard width so it shrinks with the card
-            // on narrow screens instead of overflowing its clear space.
-            sizes={`${LOGO_MAX_W}px`}
-            className="w-full h-auto"
-            style={{ maxWidth: LOGO_MAX_W }}
-          />
-        ) : (
-          <span dir="ltr" className="text-2xl font-bold" style={{ color: 'var(--color-tg-text-2)' }}>
-            {platform.name}
-          </span>
-        )}
+        <Image
+          src={platform.logoSrc}
+          alt={platform.name}
+          width={platform.logoWidth}
+          height={platform.logoHeight}
+          // The source is many times the rendered width, so `sizes` is what
+          // stops next/image shipping the full-size file to a ~150px slot.
+          sizes="200px"
+          className="w-full h-auto"
+        />
       </div>
-
-      <p className="text-base leading-relaxed text-tg-muted">{platform.body}</p>
+      <p
+        dir="ltr"
+        className="mt-2.5 text-sm font-semibold text-center"
+        style={{ color: 'var(--color-tg-text-2)' }}
+      >
+        {platform.name}
+      </p>
     </>
   );
 
-  const className = 'glass-card rounded-2xl p-6 flex flex-col gap-3 h-full';
-
+  // The tile and the name are one link, so the accessible name comes from the
+  // logo's alt plus the caption rather than from a wrapper with no text.
   return platform.href ? (
-    <a
-      href={platform.href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={`${className} card-hover`}
-    >
-      {inner}
+    <a href={platform.href} target="_blank" rel="noopener noreferrer" className="block card-hover">
+      {tile}
     </a>
   ) : (
-    <div className={className}>{inner}</div>
+    <div>{tile}</div>
+  );
+}
+
+/**
+ * Flex-wrap with justify-center rather than CSS grid, deliberately.
+ *
+ * A grid's last row is start-packed: with one platform in a five-column track
+ * the tile lands hard against the start edge with four empty cells beside it,
+ * which reads as missing content rather than as a short list. Wrapping and
+ * centring makes any count — one, three, seven — look like the whole set,
+ * which is what it is.
+ *
+ * The basis calculations are the column counts: 2 up to sm, 3 to lg, 5 above,
+ * each subtracting the gap the row spends between its tiles. max-width keeps a
+ * lone tile from inflating toward a fifth of the container.
+ */
+function PlatformGrid({ platforms }: { platforms: Platform[] }) {
+  return (
+    <div className="flex flex-wrap justify-center gap-4 max-w-[900px] mx-auto">
+      {platforms.map((platform) => (
+        <div
+          key={platform.id}
+          className="basis-[calc((100%-1rem)/2)] sm:basis-[calc((100%-2rem)/3)] lg:basis-[calc((100%-4rem)/5)] grow-0 shrink-0 max-w-[190px]"
+        >
+          <PlatformTile platform={platform} />
+        </div>
+      ))}
+    </div>
   );
 }
 
 export function PlatformsSection() {
+  // A category with nothing in it renders nothing — no heading, no empty row.
+  const groups = CATEGORIES.map((category) => ({
+    category,
+    platforms: PLATFORMS.filter((p) => p.category === category.id),
+  })).filter((group) => group.platforms.length > 0);
+
+  if (groups.length === 0) return null;
+
   return (
     <section id="platforms" className="cv-auto relative py-24 px-4 md:px-8 lg:px-10">
       <div className="section-glow" aria-hidden />
       <div className="max-w-[1360px] mx-auto relative">
-        <SectionHeading sub="Reflect עובד לצד פלטפורמת המסחר שלכם, בלי תלות בברוקר. התכנון והתיעוד קורים כאן; הביצוע נשאר אצלכם.">
+        <SectionHeading sub="העסקאות שלך מסונכרנות אוטומטית, בלי הזנה ידנית.">
           פלטפורמות נתמכות
         </SectionHeading>
 
-        {/* Centred flex-wrap rather than a grid, because the list is currently
-            one item long and a two-column grid leaves a card stranded in one
-            half of the row with the other half empty. Wrapping centres a lone
-            card, pairs two, and rows three — no per-count special case, and no
-            relayout when the second platform lands. */}
-        <div className="flex flex-wrap justify-center gap-6 max-w-[820px] mx-auto">
-          {PLATFORMS.map((platform, i) => (
-            <ScrollReveal
-              key={platform.id}
-              delay={(i % 2) * 120}
-              className="w-full sm:w-[calc(50%-0.75rem)] max-w-[380px]"
-            >
-              <PlatformCard platform={platform} />
+        <div className="flex flex-col gap-12">
+          {groups.map(({ category, platforms }, i) => (
+            <ScrollReveal key={category.id} delay={i * 120}>
+              {/* Small heading, no rule: the grouping has to be legible without
+                  turning two short lists into two sections. */}
+              <h3 className="text-sm font-bold text-center mb-5" style={{ color: 'rgba(0,210,210,0.9)' }}>
+                {category.heading}
+              </h3>
+
+              <PlatformGrid platforms={platforms} />
+
+              {category.note && (
+                <p className="mt-5 text-base leading-relaxed text-center text-tg-muted max-w-[620px] mx-auto">
+                  {category.note}
+                </p>
+              )}
             </ScrollReveal>
           ))}
-        </div>
-
-        {/* Required wherever the mark appears. Fine print, on the same measure
-            as every other disclosure, directly under the card carrying it. */}
-        <div className="flex justify-center mt-8">
-          <NinjaTraderAttribution className={DISCLOSURE_MEASURE} />
         </div>
       </div>
     </section>

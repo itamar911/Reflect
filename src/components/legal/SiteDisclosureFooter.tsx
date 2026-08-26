@@ -23,7 +23,7 @@ export function SiteDisclosureFooter({ className = '' }: { className?: string })
   return (
     <footer
       dir="rtl"
-      className={`border-t px-4 md:px-8 lg:px-10 py-10 ${className}`}
+      className={`border-t px-4 md:px-8 lg:px-10 pt-10 pb-40 ${className}`}
       style={{ borderColor: 'var(--color-tg-border)' }}
     >
       {/* Reading order is navigation first, fine print last — the same order
@@ -31,7 +31,7 @@ export function SiteDisclosureFooter({ className = '' }: { className?: string })
       <div className="max-w-[900px] mx-auto flex flex-col gap-6">
         <div className="flex flex-wrap gap-x-6 gap-y-2">
           <Link href="/risk-disclosure" className="text-sm text-tg-muted hover:text-tg-primary transition-colors">
-            גילוי נאות בדבר סיכון
+            גילוי סיכון
           </Link>
           <Link href="/terms" className="text-sm text-tg-muted hover:text-tg-primary transition-colors">
             תנאי שימוש
@@ -41,9 +41,7 @@ export function SiteDisclosureFooter({ className = '' }: { className?: string })
           </Link>
         </div>
 
-        <div className="pt-6" style={{ borderTop: '1px solid var(--color-tg-border)' }}>
-          <FooterDisclosures />
-        </div>
+        <FooterDisclosures />
       </div>
     </footer>
   );
