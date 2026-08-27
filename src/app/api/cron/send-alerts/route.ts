@@ -1,188 +1,35 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import {
+  dailySummaryEmail,
+  preMarketEmail,
+  weeklySummaryEmail,
+  type AlertEmail,
+} from '@/lib/email/alerts';
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const FROM_EMAIL = 'Reflect <hello@reflecttrading.app>';
 
 // ── Email sender ────────────────────────────────────────────────────────────
 
-async function sendEmail(to: string, subject: string, html: string) {
+// Each builder carries its own subject — the summaries put live figures in it.
+async function sendEmail(to: string, mail: AlertEmail) {
   if (!RESEND_API_KEY) throw new Error('RESEND_API_KEY not configured');
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from: FROM_EMAIL, to, subject, html }),
+    body: JSON.stringify({
+      from: FROM_EMAIL,
+      to,
+      subject: mail.subject,
+      html: mail.html,
+      text: mail.text,
+    }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error((err as { message?: string }).message ?? 'Resend error');
   }
-}
-
-// ── Motivational message ─────────────────────────────────────────────────────
-
-function motivation(trades: number, winRate: number, totalPL: number): string {
-  if (trades === 0)
-    return '🌙 יום ללא עסקאות — לפעמים ההמתנה לסטאפ הנכון היא ההחלטה הנכונה ביותר.';
-  if (totalPL > 0 && winRate >= 60)
-    return '🔥 יום מצוין! אחוז הצלחה גבוה ורווחי — המשך לשמור על הגישה הזאת.';
-  if (totalPL > 0 && winRate >= 50)
-    return '✅ יום רווחי — שמור על המשמעת ותן לרווחים לרוץ.';
-  if (totalPL > 0)
-    return '💚 יום בצד החיובי — בדוק אם ה-R:R תומך בגדילה לטווח ארוך.';
-  if (totalPL < 0 && winRate >= 50)
-    return '📊 אחוז הצלחה טוב למרות ההפסד — שפר את ה-R:R כדי שהרווחים יכסו את ההפסדים.';
-  if (totalPL < 0 && trades <= 2)
-    return '💡 יום קשה, אבל רק ' + trades + ' עסקאות — שמור על הסבלנות למחר.';
-  if (totalPL < 0)
-    return '🛡️ יום קשה. הכי חשוב: האם שמרת על חוקי המסחר? מחר מתחילים מחדש.';
-  return '📈 ממשיך לנסוע — כל יום הוא הזדמנות ללמוד.';
-}
-
-// ── Email builders ───────────────────────────────────────────────────────────
-
-function dailySummaryHtml(
-  name: string,
-  stats: { trades: number; winRate: number; avgRR: number; totalPL: number },
-  dateLabel: string
-) {
-  const plColor     = stats.totalPL >= 0 ? '#00C853' : '#FF3B30';
-  const plFormatted = (stats.totalPL >= 0 ? '+$' : '-$') + Math.abs(stats.totalPL).toFixed(2);
-  const wrColor     = stats.winRate >= 50 ? '#00C853' : '#FF3B30';
-  const rrColor     = stats.avgRR  >= 2   ? '#00C853' : '#F59E0B';
-  const msg         = motivation(stats.trades, stats.winRate, stats.totalPL);
-
-  // The font-size:…px values in the templates in this file are correct as px
-  // and must stay that way. This HTML is rendered by mail clients, not by the
-  // app in a browser; rem is unreliable across them and there is no root
-  // font-size to resolve against. The app's rem/accessibility rules stop here.
-  return `<!DOCTYPE html><html dir="rtl" lang="he">
-<body style="font-family:sans-serif;background:#0a0a0f;color:#fff;padding:24px;max-width:600px;margin:0 auto">
-<div style="background:#0d1117;border:1px solid #1a2535;border-radius:16px;padding:24px">
-
-  <div style="border-bottom:1px solid #1a2535;padding-bottom:16px;margin-bottom:20px">
-    <div style="display:inline-flex;align-items:center;gap:8px;margin-bottom:8px">
-      <div style="width:26px;height:26px;background:linear-gradient(135deg,#F5C518,#D4A017);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px">📈</div>
-      <span style="font-weight:bold;color:#F5C518;font-size:15px">Reflect</span>
-    </div>
-    <h2 style="color:#e8edf5;margin:0;font-size:20px">📊 סיכום יומי</h2>
-    <p style="color:#7b8fa8;margin:6px 0 0;font-size:13px">${dateLabel}</p>
-  </div>
-
-  <p style="color:#7b8fa8;margin:0 0 20px;font-size:14px">שלום ${name},</p>
-
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px">
-    <div style="background:#111827;border:1px solid #1a2535;border-radius:12px;padding:16px;text-align:center">
-      <div style="font-size:26px;font-weight:bold;color:${plColor}">${plFormatted}</div>
-      <div style="font-size:12px;color:#7b8fa8;margin-top:5px">P&L היום</div>
-    </div>
-    <div style="background:#111827;border:1px solid #1a2535;border-radius:12px;padding:16px;text-align:center">
-      <div style="font-size:26px;font-weight:bold;color:#F5C518">${stats.trades}</div>
-      <div style="font-size:12px;color:#7b8fa8;margin-top:5px">עסקאות</div>
-    </div>
-    <div style="background:#111827;border:1px solid #1a2535;border-radius:12px;padding:16px;text-align:center">
-      <div style="font-size:26px;font-weight:bold;color:${wrColor}">${stats.winRate}%</div>
-      <div style="font-size:12px;color:#7b8fa8;margin-top:5px">אחוז הצלחה</div>
-    </div>
-    <div style="background:#111827;border:1px solid #1a2535;border-radius:12px;padding:16px;text-align:center">
-      <div style="font-size:26px;font-weight:bold;color:${rrColor}">1:${stats.avgRR}</div>
-      <div style="font-size:12px;color:#7b8fa8;margin-top:5px">R:R ממוצע</div>
-    </div>
-  </div>
-
-  <div style="background:#111827;border:1px solid rgba(245,197,24,0.2);border-right:3px solid #F5C518;border-radius:12px;padding:16px">
-    <p style="color:#e8edf5;margin:0;font-size:14px;line-height:1.65">${msg}</p>
-  </div>
-
-  <p style="margin-top:20px;font-size:11px;color:#3d5068;text-align:center">
-    Reflect Trading Journal &bull; <a href="https://reflecttrading.app/settings" style="color:#3d5068">ביטול הרשמה</a>
-  </p>
-</div>
-</body></html>`;
-}
-
-function preMarketHtml(name: string) {
-  return `<!DOCTYPE html><html dir="rtl" lang="he">
-<body style="font-family:sans-serif;background:#0a0a0f;color:#fff;padding:24px;max-width:600px;margin:0 auto">
-<div style="background:#0d1117;border:1px solid #1a2535;border-radius:16px;padding:24px">
-  <div style="border-bottom:1px solid #1a2535;padding-bottom:16px;margin-bottom:20px">
-    <div style="display:inline-flex;align-items:center;gap:8px;margin-bottom:8px">
-      <div style="width:26px;height:26px;background:linear-gradient(135deg,#F5C518,#D4A017);border-radius:7px;font-size:14px;display:flex;align-items:center;justify-content:center">📈</div>
-      <span style="font-weight:bold;color:#F5C518;font-size:15px">Reflect</span>
-    </div>
-    <h2 style="color:#e8edf5;margin:0;font-size:20px">☀️ תזכורת לפני פתיחת השוק</h2>
-  </div>
-  <p style="color:#7b8fa8;margin:0 0 16px;font-size:14px">שלום ${name}, הבוקר מתחיל ביומן.</p>
-  <p style="color:#e8edf5;margin:0 0 12px;font-size:14px">לפני שנכנסים לעסקה — 3 שאלות:</p>
-  <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px">
-    <div style="background:#111827;border:1px solid #1a2535;border-radius:10px;padding:14px;display:flex;align-items:center;gap:12px">
-      <span style="font-size:20px">📋</span>
-      <span style="color:#e8edf5;font-size:14px">מה התוכנית שלי להיום?</span>
-    </div>
-    <div style="background:#111827;border:1px solid #1a2535;border-radius:10px;padding:14px;display:flex;align-items:center;gap:12px">
-      <span style="font-size:20px">🧠</span>
-      <span style="color:#e8edf5;font-size:14px">האם אני במצב רגשי מתאים למסחר?</span>
-    </div>
-    <div style="background:#111827;border:1px solid #1a2535;border-radius:10px;padding:14px;display:flex;align-items:center;gap:12px">
-      <span style="font-size:20px">🛡️</span>
-      <span style="color:#e8edf5;font-size:14px">מה גבולות הסיכון שלי היום?</span>
-    </div>
-  </div>
-  <div style="background:#111827;border:1px solid rgba(245,197,24,0.2);border-right:3px solid #F5C518;border-radius:12px;padding:14px">
-    <p style="color:#F5C518;margin:0;font-size:13px">💡 לעולם לא להסתכן ביותר מ-1–2% מההון בעסקה אחת</p>
-  </div>
-  <p style="margin-top:20px;font-size:11px;color:#3d5068;text-align:center">Reflect Trading Journal</p>
-</div>
-</body></html>`;
-}
-
-function weeklySummaryHtml(
-  name: string,
-  stats: { trades: number; winRate: number; avgRR: number; totalPL: number }
-) {
-  const plColor     = stats.totalPL >= 0 ? '#00C853' : '#FF3B30';
-  const plFormatted = (stats.totalPL >= 0 ? '+$' : '-$') + Math.abs(stats.totalPL).toFixed(2);
-  const tip =
-    stats.winRate < 40  ? 'אחוז הצלחה נמוך — בדוק את תנאי הכניסה שלך ואת ה-R:R' :
-    stats.avgRR  < 1.5  ? 'שפר את יחס ה-R:R — חפש סטאפים עם לפחות 1:2' :
-                          'כל הכבוד — המשך לפי התוכנית!';
-
-  return `<!DOCTYPE html><html dir="rtl" lang="he">
-<body style="font-family:sans-serif;background:#0a0a0f;color:#fff;padding:24px;max-width:600px;margin:0 auto">
-<div style="background:#0d1117;border:1px solid #1a2535;border-radius:16px;padding:24px">
-  <div style="border-bottom:1px solid #1a2535;padding-bottom:16px;margin-bottom:20px">
-    <div style="display:inline-flex;align-items:center;gap:8px;margin-bottom:8px">
-      <div style="width:26px;height:26px;background:linear-gradient(135deg,#F5C518,#D4A017);border-radius:7px;font-size:14px;display:flex;align-items:center;justify-content:center">📈</div>
-      <span style="font-weight:bold;color:#F5C518;font-size:15px">Reflect</span>
-    </div>
-    <h2 style="color:#e8edf5;margin:0;font-size:20px">📅 סיכום שבועי</h2>
-  </div>
-  <p style="color:#7b8fa8;margin:0 0 20px;font-size:14px">שלום ${name}, הנה השפעת Reflect על הארנק שלך השבוע:</p>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px">
-    <div style="background:#111827;border:1px solid #1a2535;border-radius:12px;padding:16px;text-align:center">
-      <div style="font-size:26px;font-weight:bold;color:#F5C518">${stats.trades}</div>
-      <div style="font-size:12px;color:#7b8fa8;margin-top:5px">עסקאות השבוע</div>
-    </div>
-    <div style="background:#111827;border:1px solid #1a2535;border-radius:12px;padding:16px;text-align:center">
-      <div style="font-size:26px;font-weight:bold;color:${stats.winRate >= 50 ? '#00C853' : '#FF3B30'}">${stats.winRate}%</div>
-      <div style="font-size:12px;color:#7b8fa8;margin-top:5px">אחוז הצלחה</div>
-    </div>
-    <div style="background:#111827;border:1px solid #1a2535;border-radius:12px;padding:16px;text-align:center">
-      <div style="font-size:26px;font-weight:bold;color:${stats.avgRR >= 2 ? '#00C853' : '#F59E0B'}">1:${stats.avgRR}</div>
-      <div style="font-size:12px;color:#7b8fa8;margin-top:5px">R:R ממוצע</div>
-    </div>
-    <div style="background:#111827;border:1px solid #1a2535;border-radius:12px;padding:16px;text-align:center">
-      <div style="font-size:26px;font-weight:bold;color:${plColor}">${plFormatted}</div>
-      <div style="font-size:12px;color:#7b8fa8;margin-top:5px">P&L השבוע</div>
-    </div>
-  </div>
-  <div style="background:#111827;border:1px solid rgba(245,197,24,0.2);border-right:3px solid #F5C518;border-radius:12px;padding:16px">
-    <p style="color:#F5C518;font-weight:bold;margin:0 0 6px;font-size:13px">💡 טיפ לשבוע הבא</p>
-    <p style="color:#e8edf5;margin:0;font-size:14px">${tip}</p>
-  </div>
-  <p style="margin-top:20px;font-size:11px;color:#3d5068;text-align:center">Reflect Trading Journal</p>
-</div>
-</body></html>`;
 }
 
 // ── Per-user email dispatch ──────────────────────────────────────────────────
@@ -237,20 +84,14 @@ async function dispatchAlert(
 
   const dateLabel = now.toLocaleDateString('he-IL', { weekday: 'long', day: 'numeric', month: 'long' });
 
+  const stats = { trades: allTrades.length, winRate, avgRR, totalPL };
+
   if (type === 'pre_market') {
-    await sendEmail(email, '☀️ תזכורת לפני פתיחת השוק — Reflect', preMarketHtml(name));
+    await sendEmail(email, preMarketEmail(name));
   } else if (type === 'end_of_day') {
-    await sendEmail(
-      email,
-      `📊 סיכום יומי — Reflect`,
-      dailySummaryHtml(name, { trades: allTrades.length, winRate, avgRR, totalPL }, dateLabel)
-    );
+    await sendEmail(email, dailySummaryEmail(name, stats, dateLabel));
   } else {
-    await sendEmail(
-      email,
-      '📅 סיכום שבועי — Reflect',
-      weeklySummaryHtml(name, { trades: allTrades.length, winRate, avgRR, totalPL })
-    );
+    await sendEmail(email, weeklySummaryEmail(name, stats));
   }
 }
 

@@ -1,16 +1,21 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import {
+  EMAIL_COLORS,
+  callout,
+  cardRows,
+  escapeHtml,
+  paragraph,
+  renderEmail,
+  renderPlainText,
+  statGrid,
+} from '@/lib/email/template';
+import type { EmailContent } from '@/lib/email/alerts';
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const FROM_EMAIL = 'Reflect <hello@reflecttrading.app>';
 
-interface EmailPayload {
-  to: string;
-  subject: string;
-  html: string;
-}
-
-async function sendEmail({ to, subject, html }: EmailPayload) {
+async function sendEmail({ to, subject, content }: { to: string; subject: string; content: EmailContent }) {
   if (!RESEND_API_KEY) throw new Error('RESEND_API_KEY not configured');
 
   const res = await fetch('https://api.resend.com/emails', {
@@ -19,7 +24,13 @@ async function sendEmail({ to, subject, html }: EmailPayload) {
       'Authorization': `Bearer ${RESEND_API_KEY}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ from: FROM_EMAIL, to, subject, html }),
+    body: JSON.stringify({
+      from: FROM_EMAIL,
+      to,
+      subject,
+      html: content.html,
+      text: content.text,
+    }),
   });
 
   if (!res.ok) {
@@ -29,89 +40,149 @@ async function sendEmail({ to, subject, html }: EmailPayload) {
   return res.json();
 }
 
-// The font-size:…px values in the templates below are correct as px and must
-// stay that way. This HTML is rendered by mail clients, not by the app in a
-// browser; rem is unreliable across them and there is no root font-size to
-// resolve against. The app's own rem/accessibility rules do not apply here.
-function buildPreMarketEmail(name: string) {
-  return `
-<!DOCTYPE html><html dir="rtl" lang="he"><body style="font-family:sans-serif;background:#0a0a1a;color:#fff;padding:24px;max-width:600px;margin:0 auto">
-<div style="background:#111;border:1px solid #222;border-radius:16px;padding:24px">
-  <h2 style="color:#F5C518;margin:0 0 16px">📈 תזכורת לפני פתיחת השוק</h2>
-  <p style="color:#888;margin:0 0 16px">שלום ${name},</p>
-  <p>לפני שמתחיל יום המסחר — 3 שאלות לבדיקה עצמית:</p>
-  <ol style="color:#ccc;line-height:2">
-    <li>מה התוכנית שלי להיום?</li>
-    <li>האם אני במצב רגשי מתאים למסחר?</li>
-    <li>מה גבולות הסיכון שלי היום?</li>
-  </ol>
-  <div style="background:#1a1a1a;border-radius:12px;padding:16px;margin-top:16px">
-    <p style="color:#F5C518;margin:0;font-size:14px">💡 תזכורת: לעולם לא להסתכן ביותר מ-1-2% מההון בעסקה אחת</p>
-  </div>
-  <p style="margin-top:16px;font-size:12px;color:#555">Reflect Trading Journal</p>
-</div></body></html>`;
+// The templates below share the shell in `@/lib/email/template` with the cron
+// alerts, but keep their own copy: this route's wording and its stat set differ
+// from `@/lib/email/alerts` (no P&L tile on the daily, no motivational line, no
+// unsubscribe link, R:R shown bare rather than as `1:x`). They are deliberately
+// not merged — folding them together would silently rewrite what this route
+// sends.
+const FOOTER_TEXT = 'Reflect Trading Journal';
+
+function buildPreMarketEmail(name: string): EmailContent {
+  const title = 'תזכורת לפני פתיחת השוק';
+  const questions = [
+    'מה התוכנית שלי להיום?',
+    'האם אני במצב רגשי מתאים למסחר?',
+    'מה גבולות הסיכון שלי היום?',
+  ];
+  const tip = 'תזכורת: לעולם לא להסתכן ביותר מ-1-2% מההון בעסקה אחת';
+
+  return {
+    html: renderEmail({
+      title,
+      footerText: FOOTER_TEXT,
+      bodyHtml:
+        paragraph(`שלום ${escapeHtml(name)},`, { color: EMAIL_COLORS.muted }) +
+        paragraph('לפני שמתחיל יום המסחר — 3 שאלות לבדיקה עצמית:', { bottom: 12 }) +
+        cardRows(questions) +
+        callout(paragraph(tip, { color: EMAIL_COLORS.primary, size: 14, bottom: 0 })),
+    }),
+    text: renderPlainText({
+      title,
+      footerText: FOOTER_TEXT,
+      lines: [
+        `שלום ${name},`,
+        '',
+        'לפני שמתחיל יום המסחר — 3 שאלות לבדיקה עצמית:',
+        ...questions.map((q, i) => `${i + 1}. ${q}`),
+        '',
+        tip,
+      ],
+    }),
+  };
 }
 
-function buildDailySummaryEmail(name: string, stats: { trades: number; winRate: number; avgRR: number }) {
-  return `
-<!DOCTYPE html><html dir="rtl" lang="he"><body style="font-family:sans-serif;background:#0a0a1a;color:#fff;padding:24px;max-width:600px;margin:0 auto">
-<div style="background:#111;border:1px solid #222;border-radius:16px;padding:24px">
-  <h2 style="color:#F5C518;margin:0 0 16px">📊 סיכום יומי</h2>
-  <p style="color:#888;margin:0 0 16px">שלום ${name}, הנה סיכום יום המסחר שלך:</p>
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
-    <div style="background:#1a1a1a;border-radius:12px;padding:12px;text-align:center">
-      <div style="font-size:24px;font-weight:bold;color:#F5C518">${stats.trades}</div>
-      <div style="font-size:12px;color:#888">עסקאות</div>
-    </div>
-    <div style="background:#1a1a1a;border-radius:12px;padding:12px;text-align:center">
-      <div style="font-size:24px;font-weight:bold;color:${stats.winRate >= 50 ? '#00C853' : '#FF3B30'}">${stats.winRate}%</div>
-      <div style="font-size:12px;color:#888">הצלחה</div>
-    </div>
-    <div style="background:#1a1a1a;border-radius:12px;padding:12px;text-align:center">
-      <div style="font-size:24px;font-weight:bold;color:${stats.avgRR >= 2 ? '#00C853' : '#F59E0B'}">${stats.avgRR}</div>
-      <div style="font-size:12px;color:#888">R:R ממוצע</div>
-    </div>
-  </div>
-  <p style="font-size:12px;color:#555">Reflect Trading Journal</p>
-</div></body></html>`;
+function buildDailySummaryEmail(
+  name: string,
+  stats: { trades: number; winRate: number; avgRR: number }
+): EmailContent {
+  const title = 'סיכום יומי';
+  const cells = [
+    { value: String(stats.trades), label: 'עסקאות', color: EMAIL_COLORS.primary },
+    {
+      value: `${stats.winRate}%`,
+      label: 'הצלחה',
+      color: stats.winRate >= 50 ? EMAIL_COLORS.success : EMAIL_COLORS.danger,
+    },
+    {
+      value: String(stats.avgRR),
+      label: 'R:R ממוצע',
+      color: stats.avgRR >= 2 ? EMAIL_COLORS.success : EMAIL_COLORS.warning,
+    },
+  ];
+
+  return {
+    html: renderEmail({
+      title,
+      footerText: FOOTER_TEXT,
+      bodyHtml:
+        paragraph(`שלום ${escapeHtml(name)}, הנה סיכום יום המסחר שלך:`, {
+          color: EMAIL_COLORS.muted,
+          bottom: 20,
+        }) + statGrid(cells, 3),
+    }),
+    text: renderPlainText({
+      title,
+      footerText: FOOTER_TEXT,
+      lines: [
+        `שלום ${name}, הנה סיכום יום המסחר שלך:`,
+        '',
+        `עסקאות: ${stats.trades}`,
+        `הצלחה: ${stats.winRate}%`,
+        `R:R ממוצע: ${stats.avgRR}`,
+      ],
+    }),
+  };
 }
 
-function buildWeeklySummaryEmail(name: string, stats: { trades: number; winRate: number; avgRR: number; totalPL: number }) {
-  const plColor = stats.totalPL >= 0 ? '#00C853' : '#FF3B30';
+function buildWeeklySummaryEmail(
+  name: string,
+  stats: { trades: number; winRate: number; avgRR: number; totalPL: number }
+): EmailContent {
+  const plColor = stats.totalPL >= 0 ? EMAIL_COLORS.success : EMAIL_COLORS.danger;
   const plFormatted = (stats.totalPL >= 0 ? '+$' : '-$') + Math.abs(stats.totalPL).toFixed(2);
-  return `
-<!DOCTYPE html><html dir="rtl" lang="he"><body style="font-family:sans-serif;background:#0a0a1a;color:#fff;padding:24px;max-width:600px;margin:0 auto">
-<div style="background:#111;border:1px solid #222;border-radius:16px;padding:24px">
-  <h2 style="color:#F5C518;margin:0 0 16px">📅 סיכום שבועי — Reflect</h2>
-  <p style="color:#888;margin:0 0 16px">שלום ${name}, הנה השפעת Reflect על הארנק שלך השבוע:</p>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
-    <div style="background:#1a1a1a;border-radius:12px;padding:16px;text-align:center">
-      <div style="font-size:28px;font-weight:bold;color:#F5C518">${stats.trades}</div>
-      <div style="font-size:12px;color:#888">עסקאות השבוע</div>
-    </div>
-    <div style="background:#1a1a1a;border-radius:12px;padding:16px;text-align:center">
-      <div style="font-size:28px;font-weight:bold;color:${stats.winRate >= 50 ? '#00C853' : '#FF3B30'}">${stats.winRate}%</div>
-      <div style="font-size:12px;color:#888">אחוז הצלחה</div>
-    </div>
-    <div style="background:#1a1a1a;border-radius:12px;padding:16px;text-align:center">
-      <div style="font-size:28px;font-weight:bold;color:${stats.avgRR >= 2 ? '#00C853' : '#F59E0B'}">${stats.avgRR}</div>
-      <div style="font-size:12px;color:#888">R:R ממוצע</div>
-    </div>
-    <div style="background:#1a1a1a;border-radius:12px;padding:16px;text-align:center">
-      <div style="font-size:28px;font-weight:bold;color:${plColor}">${plFormatted}</div>
-      <div style="font-size:12px;color:#888">P&L השבוע</div>
-    </div>
-  </div>
-  <div style="background:#1a1a1a;border-radius:12px;padding:16px">
-    <p style="color:#F5C518;font-weight:bold;margin:0 0 8px">💡 טיפ לשבוע הבא</p>
-    <p style="color:#ccc;margin:0;font-size:14px">
-      ${stats.winRate < 40 ? 'אחוז הצלחה נמוך — בדוק את תנאי הכניסה שלך ואת ה-R:R' :
-        stats.avgRR < 1.5 ? 'שפר את יחס ה-R:R — חפש סטאפים עם לפחות 1:2' :
-        'כל הכבוד — המשך לפי התוכנית!'}
-    </p>
-  </div>
-  <p style="margin-top:16px;font-size:12px;color:#555">Reflect Trading Journal</p>
-</div></body></html>`;
+  const tip =
+    stats.winRate < 40 ? 'אחוז הצלחה נמוך — בדוק את תנאי הכניסה שלך ואת ה-R:R' :
+    stats.avgRR < 1.5  ? 'שפר את יחס ה-R:R — חפש סטאפים עם לפחות 1:2' :
+                         'כל הכבוד — המשך לפי התוכנית!';
+  const title = 'סיכום שבועי — Reflect';
+  const tipHeading = 'טיפ לשבוע הבא';
+
+  const cells = [
+    { value: String(stats.trades), label: 'עסקאות השבוע', color: EMAIL_COLORS.primary },
+    {
+      value: `${stats.winRate}%`,
+      label: 'אחוז הצלחה',
+      color: stats.winRate >= 50 ? EMAIL_COLORS.success : EMAIL_COLORS.danger,
+    },
+    {
+      value: String(stats.avgRR),
+      label: 'R:R ממוצע',
+      color: stats.avgRR >= 2 ? EMAIL_COLORS.success : EMAIL_COLORS.warning,
+    },
+    { value: plFormatted, label: 'P&amp;L השבוע', color: plColor },
+  ];
+
+  return {
+    html: renderEmail({
+      title,
+      footerText: FOOTER_TEXT,
+      bodyHtml:
+        paragraph(`שלום ${escapeHtml(name)}, הנה השפעת Reflect על הארנק שלך השבוע:`, {
+          color: EMAIL_COLORS.muted,
+          bottom: 20,
+        }) +
+        statGrid(cells, 2) +
+        callout(
+          paragraph(tipHeading, { color: EMAIL_COLORS.primary, size: 14, bold: true, bottom: 8 }) +
+            paragraph(tip, { bottom: 0 })
+        ),
+    }),
+    text: renderPlainText({
+      title,
+      footerText: FOOTER_TEXT,
+      lines: [
+        `שלום ${name}, הנה השפעת Reflect על הארנק שלך השבוע:`,
+        '',
+        `עסקאות השבוע: ${stats.trades}`,
+        `אחוז הצלחה: ${stats.winRate}%`,
+        `R:R ממוצע: ${stats.avgRR}`,
+        `P&L השבוע: ${plFormatted}`,
+        '',
+        `${tipHeading}: ${tip}`,
+      ],
+    }),
+  };
 }
 
 export async function POST(request: Request) {
@@ -146,22 +217,22 @@ export async function POST(request: Request) {
   const emailMap = {
     pre_market: {
       subject: '📈 תזכורת לפני פתיחת השוק — Reflect',
-      html: buildPreMarketEmail(name),
+      content: buildPreMarketEmail(name),
     },
     daily_summary: {
       subject: '📊 סיכום יומי — Reflect',
-      html: buildDailySummaryEmail(name, { trades: allTrades.length, winRate, avgRR }),
+      content: buildDailySummaryEmail(name, { trades: allTrades.length, winRate, avgRR }),
     },
     weekly_summary: {
       subject: '📅 סיכום שבועי — Reflect',
-      html: buildWeeklySummaryEmail(name, { trades: allTrades.length, winRate, avgRR, totalPL }),
+      content: buildWeeklySummaryEmail(name, { trades: allTrades.length, winRate, avgRR, totalPL }),
     },
   };
 
-  const { subject, html } = emailMap[type];
+  const { subject, content } = emailMap[type];
 
   try {
-    await sendEmail({ to: email, subject, html });
+    await sendEmail({ to: email, subject, content });
     return NextResponse.json({ ok: true });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Failed';

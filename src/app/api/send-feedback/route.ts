@@ -1,66 +1,77 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import {
+  EMAIL_COLORS,
+  EMAIL_FONT_STACK,
+  callout,
+  detailRows,
+  escapeHtml,
+  renderEmail,
+  renderPlainText,
+} from '@/lib/email/template';
+import type { EmailContent } from '@/lib/email/alerts';
 
 const RESEND_KEY   = process.env.RESEND_API_KEY;
 const FROM_EMAIL   = 'Reflect <feedback@reflecttrading.app>';
 const TO_EMAIL     = 'seince33@gmail.com';
 
+// `icon` is still carried here because it is part of the subject line, which is
+// out of scope for this pass. It is no longer rendered in the body — the type
+// now reads through `color` and heading weight instead.
 const TYPE_META = {
-  bug:      { label: 'דיווח על באג',   icon: '🐛', color: '#f87171' },
-  feature:  { label: 'הצעה לשיפור',    icon: '💡', color: '#D4AF37' },
-  question: { label: 'שאלה',           icon: '❓', color: '#60A5FA' },
+  bug:      { label: 'דיווח על באג',   icon: '🐛', color: EMAIL_COLORS.danger },
+  feature:  { label: 'הצעה לשיפור',    icon: '💡', color: EMAIL_COLORS.warning },
+  question: { label: 'שאלה',           icon: '❓', color: EMAIL_COLORS.primary },
 } as const;
 
-function buildHtml(
+function buildEmail(
   type: keyof typeof TYPE_META,
   title: string,
   description: string,
   userName: string,
   userEmail: string,
-) {
-  const { label, icon, color } = TYPE_META[type];
+): EmailContent {
+  const { label, color } = TYPE_META[type];
   const date = new Date().toLocaleString('he-IL', {
     dateStyle: 'long', timeStyle: 'short', timeZone: 'Asia/Jerusalem',
   });
-  const descEscaped = description.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const sender = `${userName} <${userEmail}>`;
+  const footerText = `נשלח מ-Reflect Trading Journal · ${date}`;
 
-  // The font-size:…px values in this template are correct as px and must stay
-  // that way. This HTML is rendered by mail clients, not by the app in a
-  // browser; rem is unreliable across them and there is no root font-size to
-  // resolve against. The app's own rem/accessibility rules do not apply here.
-  return `<!DOCTYPE html>
-<html dir="rtl" lang="he">
-<body style="font-family:Arial,sans-serif;background:#0a0a1a;color:#eee;padding:24px;max-width:640px;margin:0 auto">
-  <div style="background:#111827;border:1px solid #1f2937;border-radius:16px;padding:28px">
+  const descriptionBlock = callout(
+    `<p style="margin:0 0 8px;font-family:${EMAIL_FONT_STACK};font-size:11px;color:${EMAIL_COLORS.muted};text-transform:uppercase;letter-spacing:1px;">תיאור</p>
+     <p style="margin:0;font-family:${EMAIL_FONT_STACK};white-space:pre-wrap;line-height:1.7;color:${EMAIL_COLORS.text};font-size:14px;">${escapeHtml(description)}</p>`,
+    color,
+    EMAIL_COLORS.border,
+  );
 
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
-      <span style="font-size:28px">${icon}</span>
-      <div>
-        <h1 style="margin:0;font-size:18px;color:${color}">${label}</h1>
-        <p style="margin:4px 0 0;font-size:12px;color:#6b7280">Reflect Trading Journal — פנייה למפתח</p>
-      </div>
-    </div>
-
-    <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
-      <tr><td style="color:#9ca3af;padding:5px 0;width:90px;font-size:13px">שולח</td>
-          <td style="color:#e5e7eb;font-size:13px">${userName} &lt;${userEmail}&gt;</td></tr>
-      <tr><td style="color:#9ca3af;padding:5px 0;font-size:13px">תאריך</td>
-          <td style="color:#e5e7eb;font-size:13px">${date}</td></tr>
-      <tr><td style="color:#9ca3af;padding:5px 0;font-size:13px">כותרת</td>
-          <td style="color:#fff;font-size:14px;font-weight:bold">${title}</td></tr>
-    </table>
-
-    <div style="background:#1f2937;border-radius:12px;padding:16px;border-right:3px solid ${color}">
-      <p style="margin:0 0 8px;font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:1px">תיאור</p>
-      <p style="margin:0;white-space:pre-wrap;line-height:1.7;color:#d1d5db;font-size:14px">${descEscaped}</p>
-    </div>
-
-    <p style="margin-top:20px;font-size:11px;color:#374151;text-align:center">
-      נשלח מ-Reflect Trading Journal · ${date}
-    </p>
-  </div>
-</body>
-</html>`;
+  return {
+    html: renderEmail({
+      title: label,
+      titleColor: color,
+      subtitle: 'Reflect Trading Journal — פנייה למפתח',
+      footerText,
+      bodyHtml:
+        detailRows([
+          { label: 'שולח', value: escapeHtml(sender) },
+          { label: 'תאריך', value: escapeHtml(date) },
+          { label: 'כותרת', value: escapeHtml(title), bold: true },
+        ]) + descriptionBlock,
+    }),
+    text: renderPlainText({
+      title: label,
+      subtitle: 'Reflect Trading Journal — פנייה למפתח',
+      footerText,
+      lines: [
+        `שולח: ${sender}`,
+        `תאריך: ${date}`,
+        `כותרת: ${title}`,
+        '',
+        'תיאור',
+        description,
+      ],
+    }),
+  };
 }
 
 export async function POST(request: Request) {
@@ -88,11 +99,18 @@ export async function POST(request: Request) {
   const userName  = profile?.display_name ?? 'משתמש Reflect';
   const userEmail = profile?.email ?? user.email ?? '';
 
-  const html    = buildHtml(type, title.trim(), description.trim(), userName, userEmail);
+  const content = buildEmail(type, title.trim(), description.trim(), userName, userEmail);
   const subject = `${TYPE_META[type].icon} [Reflect] ${TYPE_META[type].label}: ${title.trim()}`;
 
   // Build Resend payload
-  const payload: Record<string, unknown> = { from: FROM_EMAIL, to: TO_EMAIL, reply_to: userEmail, subject, html };
+  const payload: Record<string, unknown> = {
+    from: FROM_EMAIL,
+    to: TO_EMAIL,
+    reply_to: userEmail,
+    subject,
+    html: content.html,
+    text: content.text,
+  };
 
   // Attach screenshot if provided
   if (screenshot && screenshotName) {
