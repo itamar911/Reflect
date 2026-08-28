@@ -1,0 +1,83 @@
+/* Long-form legal pages (/privacy, and /terms when it gets real content).
+   Colocated and imported by the page that uses it, the same way stats.css and
+   journal.css are. */
+
+/* Prose tables — deliberately NOT .stats-table / .jr-table.
+   Those two are dense numeric data UI: they set `white-space: nowrap` and size
+   in px as a documented hold-out (see the comment in stats.css). Both are wrong
+   here. These cells hold sentences, so they must wrap, and this is marketing-
+   side reading copy, which is rem for WCAG 1.4.4 like the rest of the landing
+   and legal routes.
+
+   What IS reused is the overflow pattern: a scroll container wrapping the
+   table (PerformanceTable.tsx, TradeHeatmap.tsx, TradeCalendar.tsx all do
+   this), so a wide table scrolls inside its own box and never widens the page.
+
+   `text-align: start`, not `right`: these pages are RTL but carry LTR runs, and
+   start follows whichever direction the cell actually inherits. */
+.legal-table-scroll {
+  overflow-x: auto;
+}
+
+.legal-table {
+  width: 100%;
+  /* The floor at which the columns stay readable rather than breaking
+     mid-word. 20rem = 320px at the browser default, which still fits inside
+     the content box of a 375px phone — so in practice the scroll container
+     above only engages below that, instead of on every phone. */
+  min-width: 20rem;
+  border-collapse: collapse;
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+.legal-table th,
+.legal-table td {
+  text-align: start;
+  vertical-align: top;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--color-tg-border-light);
+}
+
+.legal-table thead th {
+  font-weight: 700;
+  color: var(--color-tg-text-2);
+  background: var(--color-tg-surface);
+  border-bottom: 1px solid var(--color-tg-border);
+}
+
+.legal-table tbody td {
+  color: var(--color-tg-text);
+}
+
+.legal-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* Rounded card edges without `overflow: hidden` on the scroll container,
+   which would clip the scroll instead of allowing it. */
+.legal-table thead tr :first-child { border-start-start-radius: 12px; }
+.legal-table thead tr :last-child  { border-start-end-radius: 12px; }
+
+@media (max-width: 480px) {
+  .legal-table th,
+  .legal-table td {
+    padding: 0.625rem 0.75rem;
+  }
+}
+
+/* An inline run of Latin text inside the RTL copy, isolated from its
+   neighbours — same mechanism as .stats-num / .jr-num.
+
+   Only for runs the bidi algorithm actually gets wrong: ones whose edges are
+   neutral characters (`support@…app`, `050-225-5903`, `HTTPS/TLS`), or a
+   multi-word Latin name sitting against Hebrew punctuation. A bare single word
+   in a Hebrew sentence — Stripe, Supabase, OAuth, GDPR — resolves correctly on
+   its own and must be left alone; wrapping every Latin word is noise.
+
+   inline-block also keeps an address or a number from breaking across lines. */
+.legal-ltr {
+  direction: ltr;
+  unicode-bidi: isolate;
+  display: inline-block;
+}
