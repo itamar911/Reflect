@@ -45,16 +45,23 @@ try {
   // half-loaded webfont bakes the fallback metrics into the PNG.
   await page.evaluate(() => document.fonts.ready);
 
-  // The floating widgets come from the root layout and sit on top of the
-  // composition — the accessibility button lands in the bottom-left corner,
-  // over the last trade row. They are real app chrome, but they are not part of
-  // the mockup, so hide them for the shot rather than removing them from the
-  // page. (The first capture after the recompose shipped with the a11y button
-  // baked in; this is why.)
+  // Page furniture that belongs on the route but not inside the phone.
+  //
+  //   - The floating widgets come from the root layout and sit on top of the
+  //     composition — the accessibility button lands in the bottom-left corner,
+  //     over the last trade row. (The first capture after the recompose shipped
+  //     with it baked in; this is why.)
+  //   - The disclosure footer is required on the route, which is publicly
+  //     reachable at /demo/phone-showcase, but it is not part of the mockup.
+  //     Hidden here, never removed from the page.
+  //
+  // Hidden for the shot only. If a future change means one of these *should*
+  // appear in the image, take it out of this list rather than off the page.
   await page.addStyleTag({
     content: `
       [aria-label="הגדרות נגישות"],
       [aria-label="שיחה בוואטסאפ"],
+      footer,
       .skip-link { display: none !important; }
     `,
   });

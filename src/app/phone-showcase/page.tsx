@@ -31,6 +31,7 @@
 import type { Metadata } from 'next';
 import { Logo } from '@/components/ui/Logo';
 import { MAIN_CONTENT_ID } from '@/components/accessibility/SkipLink';
+import { SiteDisclosureFooter } from '@/components/legal/SiteDisclosureFooter';
 import { DEMO_TABLES } from '@/lib/demo/fixtures';
 import { mapDashTrade, type DashTrade } from '@/lib/dashboard/trades';
 import { tradeDirection } from '@/lib/pnl';
@@ -278,6 +279,19 @@ export default function PhoneShowcasePage() {
           </Card>
         </main>
       </div>
+
+      {/* Outside the 390px phone column, so it is page furniture rather than
+          part of the mockup.
+
+          This route is reachable without auth at /demo/phone-showcase, and it
+          renders a trading interface — so it needs the risk disclosure like any
+          other public page, noindex or not. It was the one public route without
+          one.
+
+          The capture script hides it before shooting, the same way it hides the
+          floating accessibility button: it belongs on the page, not in the
+          phone. */}
+      <SiteDisclosureFooter />
     </div>
   );
 }

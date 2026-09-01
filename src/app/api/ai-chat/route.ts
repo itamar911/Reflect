@@ -226,7 +226,13 @@ function buildUserContext(data: {
   // Recent trades summary
   const recent = trades.slice(0, 5).map(t => {
     const r = Number(t.rr_ratio || 0);
-    const status = t.status === 'closed' ? (Number(t.exit_price) > Number(t.entry_price) ? '✓' : '✗') : '⏳';
+    // Words, not ✓/✗/⏳: symbols in the prompt invite the model to answer in
+    // them, and stripFormatting (lib/ai/textFormatting.ts) then has to catch
+    // them on the way back out. Cheaper not to teach the habit — and the words
+    // carry more meaning than the glyphs did.
+    const status = t.status === 'closed'
+      ? (Number(t.exit_price) > Number(t.entry_price) ? '[רווח]' : '[הפסד]')
+      : '[פתוחה]';
     const line = `${status} ${t.strategy} R:R ${r.toFixed(1)} מצב-רגשי:${t.emotional_state}`;
     // Truncated per trade to protect the token budget of the system prompt.
     const notes = typeof t.post_trade_notes === 'string' ? t.post_trade_notes.trim() : '';
