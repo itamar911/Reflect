@@ -19,24 +19,39 @@ async function sendEmail(to: string, subject: string, html: string) {
   }
 }
 
-// ── Motivational message ─────────────────────────────────────────────────────
+// ── Daily observation ────────────────────────────────────────────────────────
 
+/**
+ * One line describing what the day's figures show — deliberately NOT advice.
+ *
+ * Section 2.2 of the terms states that Reflect does not provide investment
+ * advice, investment marketing or portfolio management, and that nothing in the
+ * service is a recommendation to make or avoid a trade. That is a promise the
+ * copy in this file has to keep, so every line here reports what happened or
+ * points at the journal, and none of them tells the reader what to do next.
+ *
+ * The distinction is not stylistic. "Let your profits run" and "improve your
+ * R:R" are instructions about how to trade; "most trades closed green while the
+ * overall result was negative" is a description of the reader's own record.
+ * The product measures behaviour — it does not prescribe it. Do not reintroduce
+ * an imperative here, however encouraging it sounds.
+ */
 function motivation(trades: number, winRate: number, totalPL: number): string {
   if (trades === 0)
-    return '🌙 יום ללא עסקאות — לפעמים ההמתנה לסטאפ הנכון היא ההחלטה הנכונה ביותר.';
+    return 'יום ללא עסקאות. אין מה לתעד היום — היומן ממשיך מחר.';
   if (totalPL > 0 && winRate >= 60)
-    return '🔥 יום מצוין! אחוז הצלחה גבוה ורווחי — המשך לשמור על הגישה הזאת.';
+    return 'יום עם אחוז הצלחה גבוה ותוצאה חיובית. הנתונים נרשמו ביומן.';
   if (totalPL > 0 && winRate >= 50)
-    return '✅ יום רווחי — שמור על המשמעת ותן לרווחים לרוץ.';
+    return 'יום בתוצאה חיובית. התחקיר ביומן מפרט אילו עסקאות בוצעו לפי התוכנית.';
   if (totalPL > 0)
-    return '💚 יום בצד החיובי — בדוק אם ה-R:R תומך בגדילה לטווח ארוך.';
+    return 'יום בתוצאה חיובית, עם אחוז הצלחה נמוך ממחצית העסקאות. הפירוט ביומן.';
   if (totalPL < 0 && winRate >= 50)
-    return '📊 אחוז הצלחה טוב למרות ההפסד — שפר את ה-R:R כדי שהרווחים יכסו את ההפסדים.';
+    return 'רוב העסקאות נסגרו בירוק, והתוצאה הכוללת שלילית. הפירוט המלא ביומן.';
   if (totalPL < 0 && trades <= 2)
-    return '💡 יום קשה, אבל רק ' + trades + ' עסקאות — שמור על הסבלנות למחר.';
+    return 'יום בתוצאה שלילית, ב-' + trades + ' עסקאות בלבד.';
   if (totalPL < 0)
-    return '🛡️ יום קשה. הכי חשוב: האם שמרת על חוקי המסחר? מחר מתחילים מחדש.';
-  return '📈 ממשיך לנסוע — כל יום הוא הזדמנות ללמוד.';
+    return 'יום בתוצאה שלילית. ציון המשמעת ביומן מראה אילו כללים נשמרו היום.';
+  return 'הנתונים של היום נרשמו ביומן.';
 }
 
 // ── Email builders ───────────────────────────────────────────────────────────
@@ -62,10 +77,10 @@ function dailySummaryHtml(
 
   <div style="border-bottom:1px solid #1a2535;padding-bottom:16px;margin-bottom:20px">
     <div style="display:inline-flex;align-items:center;gap:8px;margin-bottom:8px">
-      <div style="width:26px;height:26px;background:linear-gradient(135deg,#F5C518,#D4A017);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px">📈</div>
+      <div style="width:26px;height:26px;background:linear-gradient(135deg,#F5C518,#D4A017);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px">R</div>
       <span style="font-weight:bold;color:#F5C518;font-size:15px">Reflect</span>
     </div>
-    <h2 style="color:#e8edf5;margin:0;font-size:20px">📊 סיכום יומי</h2>
+    <h2 style="color:#e8edf5;margin:0;font-size:20px">סיכום יומי</h2>
     <p style="color:#7b8fa8;margin:6px 0 0;font-size:13px">${dateLabel}</p>
   </div>
 
@@ -107,29 +122,26 @@ function preMarketHtml(name: string) {
 <div style="background:#0d1117;border:1px solid #1a2535;border-radius:16px;padding:24px">
   <div style="border-bottom:1px solid #1a2535;padding-bottom:16px;margin-bottom:20px">
     <div style="display:inline-flex;align-items:center;gap:8px;margin-bottom:8px">
-      <div style="width:26px;height:26px;background:linear-gradient(135deg,#F5C518,#D4A017);border-radius:7px;font-size:14px;display:flex;align-items:center;justify-content:center">📈</div>
+      <div style="width:26px;height:26px;background:linear-gradient(135deg,#F5C518,#D4A017);border-radius:7px;font-size:14px;display:flex;align-items:center;justify-content:center">R</div>
       <span style="font-weight:bold;color:#F5C518;font-size:15px">Reflect</span>
     </div>
-    <h2 style="color:#e8edf5;margin:0;font-size:20px">☀️ תזכורת לפני פתיחת השוק</h2>
+    <h2 style="color:#e8edf5;margin:0;font-size:20px">תזכורת לפני פתיחת השוק</h2>
   </div>
   <p style="color:#7b8fa8;margin:0 0 16px;font-size:14px">שלום ${name}, הבוקר מתחיל ביומן.</p>
   <p style="color:#e8edf5;margin:0 0 12px;font-size:14px">לפני שנכנסים לעסקה — 3 שאלות:</p>
   <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px">
-    <div style="background:#111827;border:1px solid #1a2535;border-radius:10px;padding:14px;display:flex;align-items:center;gap:12px">
-      <span style="font-size:20px">📋</span>
+    <div style="background:#111827;border:1px solid #1a2535;border-radius:10px;padding:14px">
       <span style="color:#e8edf5;font-size:14px">מה התוכנית שלי להיום?</span>
     </div>
-    <div style="background:#111827;border:1px solid #1a2535;border-radius:10px;padding:14px;display:flex;align-items:center;gap:12px">
-      <span style="font-size:20px">🧠</span>
+    <div style="background:#111827;border:1px solid #1a2535;border-radius:10px;padding:14px">
       <span style="color:#e8edf5;font-size:14px">האם אני במצב רגשי מתאים למסחר?</span>
     </div>
-    <div style="background:#111827;border:1px solid #1a2535;border-radius:10px;padding:14px;display:flex;align-items:center;gap:12px">
-      <span style="font-size:20px">🛡️</span>
+    <div style="background:#111827;border:1px solid #1a2535;border-radius:10px;padding:14px">
       <span style="color:#e8edf5;font-size:14px">מה גבולות הסיכון שלי היום?</span>
     </div>
   </div>
   <div style="background:#111827;border:1px solid rgba(245,197,24,0.2);border-right:3px solid #F5C518;border-radius:12px;padding:14px">
-    <p style="color:#F5C518;margin:0;font-size:13px">💡 לעולם לא להסתכן ביותר מ-1–2% מההון בעסקה אחת</p>
+    <p style="color:#F5C518;margin:0;font-size:13px">גבולות הסיכון שלך הם אלה שהגדרת בכללים — Reflect בודק כל תוכנית מולם.</p>
   </div>
   <p style="margin-top:20px;font-size:11px;color:#3d5068;text-align:center">Reflect Trading Journal</p>
 </div>
@@ -142,22 +154,25 @@ function weeklySummaryHtml(
 ) {
   const plColor     = stats.totalPL >= 0 ? '#00C853' : '#FF3B30';
   const plFormatted = (stats.totalPL >= 0 ? '+$' : '-$') + Math.abs(stats.totalPL).toFixed(2);
-  const tip =
-    stats.winRate < 40  ? 'אחוז הצלחה נמוך — בדוק את תנאי הכניסה שלך ואת ה-R:R' :
-    stats.avgRR  < 1.5  ? 'שפר את יחס ה-R:R — חפש סטאפים עם לפחות 1:2' :
-                          'כל הכבוד — המשך לפי התוכנית!';
+  // Reports what the week's figures show; never what to do about them. See the
+  // note on motivation() above — the terms disclaim investment advice, and a
+  // weekly "tip" that says "look for setups with at least 1:2" is advice.
+  const observation =
+    stats.winRate < 40  ? 'אחוז ההצלחה השבוע היה מתחת ל-40%. התחקירים ביומן מפרטים מה קרה בכל עסקה.' :
+    stats.avgRR  < 1.5  ? 'יחס הסיכון-סיכוי הממוצע השבוע היה מתחת ל-1.5.' :
+                          'הנתונים של השבוע נרשמו במלואם ביומן.';
 
   return `<!DOCTYPE html><html dir="rtl" lang="he">
 <body style="font-family:sans-serif;background:#0a0a0f;color:#fff;padding:24px;max-width:600px;margin:0 auto">
 <div style="background:#0d1117;border:1px solid #1a2535;border-radius:16px;padding:24px">
   <div style="border-bottom:1px solid #1a2535;padding-bottom:16px;margin-bottom:20px">
     <div style="display:inline-flex;align-items:center;gap:8px;margin-bottom:8px">
-      <div style="width:26px;height:26px;background:linear-gradient(135deg,#F5C518,#D4A017);border-radius:7px;font-size:14px;display:flex;align-items:center;justify-content:center">📈</div>
+      <div style="width:26px;height:26px;background:linear-gradient(135deg,#F5C518,#D4A017);border-radius:7px;font-size:14px;display:flex;align-items:center;justify-content:center">R</div>
       <span style="font-weight:bold;color:#F5C518;font-size:15px">Reflect</span>
     </div>
-    <h2 style="color:#e8edf5;margin:0;font-size:20px">📅 סיכום שבועי</h2>
+    <h2 style="color:#e8edf5;margin:0;font-size:20px">סיכום שבועי</h2>
   </div>
-  <p style="color:#7b8fa8;margin:0 0 20px;font-size:14px">שלום ${name}, הנה השפעת Reflect על הארנק שלך השבוע:</p>
+  <p style="color:#7b8fa8;margin:0 0 20px;font-size:14px">שלום ${name}, הנה מה שהיומן שלך מראה על השבוע:</p>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px">
     <div style="background:#111827;border:1px solid #1a2535;border-radius:12px;padding:16px;text-align:center">
       <div style="font-size:26px;font-weight:bold;color:#F5C518">${stats.trades}</div>
@@ -177,8 +192,8 @@ function weeklySummaryHtml(
     </div>
   </div>
   <div style="background:#111827;border:1px solid rgba(245,197,24,0.2);border-right:3px solid #F5C518;border-radius:12px;padding:16px">
-    <p style="color:#F5C518;font-weight:bold;margin:0 0 6px;font-size:13px">💡 טיפ לשבוע הבא</p>
-    <p style="color:#e8edf5;margin:0;font-size:14px">${tip}</p>
+    <p style="color:#F5C518;font-weight:bold;margin:0 0 6px;font-size:13px">מה היומן מראה</p>
+    <p style="color:#e8edf5;margin:0;font-size:14px">${observation}</p>
   </div>
   <p style="margin-top:20px;font-size:11px;color:#3d5068;text-align:center">Reflect Trading Journal</p>
 </div>
@@ -238,17 +253,17 @@ async function dispatchAlert(
   const dateLabel = now.toLocaleDateString('he-IL', { weekday: 'long', day: 'numeric', month: 'long' });
 
   if (type === 'pre_market') {
-    await sendEmail(email, '☀️ תזכורת לפני פתיחת השוק — Reflect', preMarketHtml(name));
+    await sendEmail(email, 'תזכורת לפני פתיחת השוק — Reflect', preMarketHtml(name));
   } else if (type === 'end_of_day') {
     await sendEmail(
       email,
-      `📊 סיכום יומי — Reflect`,
+      `סיכום יומי — Reflect`,
       dailySummaryHtml(name, { trades: allTrades.length, winRate, avgRR, totalPL }, dateLabel)
     );
   } else {
     await sendEmail(
       email,
-      '📅 סיכום שבועי — Reflect',
+      'סיכום שבועי — Reflect',
       weeklySummaryHtml(name, { trades: allTrades.length, winRate, avgRR, totalPL })
     );
   }

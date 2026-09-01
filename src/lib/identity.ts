@@ -2,9 +2,21 @@ import type { TraderIdentity } from './types';
 
 export type { TraderIdentity };
 
+/**
+ * Which Lucide glyph represents each identity.
+ *
+ * A key, not a component reference: TraderProfile crosses a server/client
+ * boundary as props, and a component is not serialisable. The card maps this
+ * to the icon (see TraderIdentityCard).
+ *
+ * These were emoji until the no-emoji rule in CLAUDE.md was applied across the
+ * app — icons are Lucide only, including here.
+ */
+export type IdentityIcon = 'target' | 'flame' | 'rocket' | 'zap' | 'sprout';
+
 export interface TraderProfile {
   identity: TraderIdentity;
-  icon: string;
+  icon: IdentityIcon;
   color: string;
   tagline: string;
   strengths: string[];
@@ -23,29 +35,29 @@ interface TradeStat {
   strategy: string;
 }
 
-const IDENTITY_CONFIG: Record<TraderIdentity, { icon: string; color: string; tagline: string }> = {
+const IDENTITY_CONFIG: Record<TraderIdentity, { icon: IdentityIcon; color: string; tagline: string }> = {
   'Disciplined Sniper': {
-    icon: '🎯',
+    icon: 'target',
     color: '#00d2d2',
     tagline: 'מחכה לסטאפ המושלם — מכה ברגע הנכון',
   },
   'Emotional Trader': {
-    icon: '😤',
+    icon: 'flame',
     color: '#FF3B30',
     tagline: 'רגשות קובעים את הכניסות — הגיע הזמן לשנות',
   },
   'Risk Taker': {
-    icon: '🚀',
+    icon: 'rocket',
     color: '#A78BFA',
     tagline: 'שואף לרווחים גדולים — סיכון גבוה, תגמול גבוה',
   },
   'Aggressive Scalper': {
-    icon: '',
+    icon: 'zap',
     color: '#F59E0B',
     tagline: 'הרבה עסקאות, מהיר — קונסיסטנטיות היא האתגר',
   },
   'Developing Trader': {
-    icon: '🌱',
+    icon: 'sprout',
     color: '#60A5FA',
     tagline: 'בונה בסיס ומפתח גישה — ממשיך קדימה',
   },

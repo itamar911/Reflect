@@ -2,7 +2,7 @@
 
 import { useState, type CSSProperties, type ReactNode } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { TrendingUp, Rocket, ArrowLeftRight, RefreshCw, Building2, Activity, Ruler } from 'lucide-react';
+import { TrendingUp, Rocket, ArrowLeftRight, RefreshCw, Building2, Activity, Ruler, X } from 'lucide-react';
 import { getPlanLimits, isPro, type PlanTier } from '@/lib/plans/config';
 import UpgradeModal from '@/components/plans/UpgradeModal';
 import { renderPlainAiText } from '@/lib/ai/textFormatting';
@@ -838,7 +838,9 @@ export default function StrategiesClient({
                   <div key={i} className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-lg text-xs"
                     style={{ background: SURF2 }}>
                     <span style={{ color: TEXT }}>{c}</span>
-                    <button onClick={() => removeCondition(i)} style={{ color: RED }} className="shrink-0">✕</button>
+                    <button onClick={() => removeCondition(i)} style={{ color: RED }} className="shrink-0" aria-label="הסר תנאי">
+                      <X aria-hidden="true" size={14} />
+                    </button>
                   </div>
                 ))}
               </div>

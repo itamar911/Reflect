@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { NINJATRADER_ATTRIBUTION, RISK_DISCLOSURE_HE } from './disclosureText';
+import { NINJATRADER_ATTRIBUTION, RISK_DISCLOSURE_EN, RISK_DISCLOSURE_HE } from './disclosureText';
 import { DISCLOSURE_TEXT_CLASS, DISCLOSURE_TEXT_STYLE } from './disclosureStyle';
 
 /**
@@ -19,15 +19,17 @@ import { DISCLOSURE_TEXT_CLASS, DISCLOSURE_TEXT_STYLE } from './disclosureStyle'
  * as a supplement, so do not "tidy" this into a link-only footer — dropping
  * the paragraph breaks compliance even though the link still works.
  *
- * Two deliberate absences:
+ * **Both languages of the risk disclosure render here, on every route.** An
+ * earlier revision printed only the Hebrew and left the English to
+ * /risk-disclosure, on the grounds that two paragraphs doubled the block's
+ * height for a reader who needs one of them. That traded the prescribed
+ * wording for footer density, and the prescribed wording wins: the English is
+ * the text the guidelines actually specify, and the Hebrew travels with it as
+ * the approved translation rather than as a replacement for it. Do not drop
+ * the English again — see the matching note in disclosureText.ts.
  *
- *   - **The English risk wording.** It lives on /risk-disclosure, which the
- *     inline link points at. Printing both languages in every footer doubled
- *     the block's height for a reader who needs one of them. The prescribed
- *     English must stay reachable and complete somewhere on the site — this is
- *     a footer-density decision, not licence to retire it.
- *   - **The testimonial disclosure.** It qualifies a specific claim and stays
- *     with the testimonials it refers to.
+ * One deliberate absence remains: **the testimonial disclosure**. It qualifies
+ * a specific claim and stays with the testimonials it refers to.
  *
  * The trademark attribution IS here, and stays here: it is required on every
  * page that names the platform, and the footer is the only thing that renders
@@ -54,6 +56,14 @@ export function FooterDisclosures({ className = '' }: { className?: string }) {
         >
           קראו את הגילוי הנאות המלא
         </Link>
+      </p>
+
+      {/* dir="ltr" for the same reason the RiskDisclosure component sets it:
+          this is genuinely LTR content inside an RTL shell, and letting the
+          shell reorder its punctuation would corrupt prescribed wording. */}
+      <p dir="ltr" className={`${DISCLOSURE_TEXT_CLASS} text-start`} style={DISCLOSURE_TEXT_STYLE}>
+        <strong className="font-bold">Risk Disclosure: </strong>
+        {RISK_DISCLOSURE_EN}
       </p>
 
       <p dir="ltr" className={`${DISCLOSURE_TEXT_CLASS} text-start`} style={DISCLOSURE_TEXT_STYLE}>

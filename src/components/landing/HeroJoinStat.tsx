@@ -1,12 +1,7 @@
-'use client';
-
-import { useEffect, useRef, useState } from 'react';
-import { usePrefersReducedMotion } from '@/lib/hooks';
-
 /**
  * Registered Reflect accounts, cumulative. Update as the real number grows.
  *
- * Two things about this figure are deliberate and should not be casually
+ * Three things about this figure are deliberate and should not be casually
  * changed back:
  *
  *   - It is cumulative, with no timeframe. The line used to read "בחודש
@@ -17,87 +12,46 @@ import { usePrefersReducedMotion } from '@/lib/hooks';
  *     Signups, trial starts and paying customers are three different numbers;
  *     "traders joined" quietly claimed the strongest of the three while
  *     counting the weakest.
+ *   - **It is presented as a static figure, not as live data.** This used to
+ *     sit behind a pulsing "live" dot and count up from zero when scrolled
+ *     into view, which told the reader it was a real-time reading of the
+ *     database. It is a constant that changes only when someone edits this
+ *     file, so the animation was asserting something untrue about the number's
+ *     provenance. The dot and the count-up are gone; the figure stays.
  *
- * Worth replacing with a real count read from the database — the honest
- * source — rather than a constant anyone has to remember to bump.
+ * If this is ever wired to a real count, the definition has to be settled
+ * first — registrations, confirmed accounts and active accounts are three
+ * different figures, and a COUNT(*) silently picks one and makes it look
+ * authoritative. An anonymous read of profiles is also blocked by RLS, so it
+ * would mean a service-role query on the most-hit public route. Only then does
+ * a live treatment become honest.
+ *
+ * Removing the animation removed the last hook here, so this is no longer a
+ * client component.
  */
 const REGISTERED_TRADERS = 147;
 
-const COUNT_DURATION_MS = 1700;
-
-// Social-proof line under the hero CTA: a live-style pulsing dot and a
-// count-up to REGISTERED_TRADERS, started once when the element enters
-// the viewport. Reduced motion skips straight to the final number (the dot's
-// pulse is killed by landing.css's global reduced-motion rule).
 export function HeroJoinStat() {
-  const [value, setValue] = useState(0);
-  const ref = useRef<HTMLSpanElement>(null);
-  const started = useRef(false);
-  const reducedMotion = usePrefersReducedMotion();
-
-  useEffect(() => {
-    // Reduced motion (OS setting or the accessibility widget's toggle) skips
-    // the count-up entirely; the final number is shown from `display` below.
-    // Flipping the toggle on mid-count re-runs this effect, and the cleanup
-    // cancels the in-flight frame.
-    if (reducedMotion) return;
-
-    const el = ref.current;
-    if (!el) return;
-
-    let raf = 0;
-    const io = new IntersectionObserver(
-      ([entry]) => {
-        if (!entry.isIntersecting || started.current) return;
-        started.current = true;
-        io.disconnect();
-
-        const t0 = performance.now();
-        const tick = (now: number) => {
-          const t = Math.min((now - t0) / COUNT_DURATION_MS, 1);
-          const eased = 1 - Math.pow(1 - t, 3); // ease-out: fast start, slow settle
-          setValue(Math.round(eased * REGISTERED_TRADERS));
-          if (t < 1) raf = requestAnimationFrame(tick);
-        };
-        raf = requestAnimationFrame(tick);
-      },
-      { threshold: 0.4 }
-    );
-
-    io.observe(el);
-    return () => {
-      io.disconnect();
-      cancelAnimationFrame(raf);
-    };
-  }, [reducedMotion]);
-
-  const display = reducedMotion ? REGISTERED_TRADERS : value;
-
   return (
     <span
-      ref={ref}
       className="inline-flex items-center gap-2.5 rounded-full px-4 py-1.5 text-sm text-tg-muted"
       style={{
         background: 'rgba(0, 210, 210, 0.07)',
         border: '1px solid rgba(0, 210, 210, 0.25)',
       }}
     >
-      <span className="hero-live-dot" aria-hidden />
       <span
         className="text-base font-extrabold"
         style={{
           color: '#00d2d2',
-          // Fixed-width LTR box sized for a three-digit total so the count-up
-          // never pushes the surrounding text around; left-aligned so the
-          // number stays glued to the text (which follows on its left in RTL).
+          // LTR-isolated so the "+" stays glued to the left of the digits
+          // inside the RTL line, rather than being reordered to its right.
           fontVariantNumeric: 'tabular-nums',
           direction: 'ltr',
           unicodeBidi: 'isolate',
-          minWidth: '3.8ch',
-          textAlign: 'left',
         }}
       >
-        +{display}
+        +{REGISTERED_TRADERS}
       </span>
       סוחרים נרשמו ל-Reflect
     </span>

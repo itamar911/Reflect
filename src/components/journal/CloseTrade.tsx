@@ -450,7 +450,7 @@ export function AIDebriefView({ result }: { result: AIDebriefResult }) {
             {result.documented && (
               <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md"
                 style={{ background: 'var(--color-tg-primary-muted)', color: 'var(--color-tg-primary)' }}>
-                ⭐ תועד
+                תועד
               </span>
             )}
           </span>

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useId, useMemo, useRef, useSyncExternalStore } from 'react';
-import { Check, AlertTriangle } from 'lucide-react';
+import { Check, AlertTriangle, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { validateTradePlan, DEFAULT_PRESET_RULES } from '@/lib/validators/RulesetValidator';
 import { useModalDialog } from '@/lib/a11y/useModalDialog';
@@ -1008,8 +1008,13 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                     {complianceChecks.map((c) => (
                       <div key={c.label} className="flex items-center justify-between text-xs">
                         <span style={{ color: 'var(--color-tg-text-2)' }}>{c.label}</span>
+                        {/* The icon is decorative; the sr-only word carries the
+                            pass/fail state, which colour alone never did. */}
                         <span style={{ color: c.passed ? 'var(--color-tg-success)' : 'var(--color-tg-danger)' }}>
-                          {c.passed ? '✓' : '✗'}
+                          {c.passed
+                            ? <Check aria-hidden="true" size={14} />
+                            : <X aria-hidden="true" size={14} />}
+                          <span className="sr-only">{c.passed ? 'עומד בתנאי' : 'לא עומד בתנאי'}</span>
                         </span>
                       </div>
                     ))}

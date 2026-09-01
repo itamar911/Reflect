@@ -6,9 +6,9 @@ const FROM_EMAIL   = 'Reflect <feedback@reflecttrading.app>';
 const TO_EMAIL     = 'seince33@gmail.com';
 
 const TYPE_META = {
-  bug:      { label: 'דיווח על באג',   icon: '🐛', color: '#f87171' },
-  feature:  { label: 'הצעה לשיפור',    icon: '💡', color: '#D4AF37' },
-  question: { label: 'שאלה',           icon: '❓', color: '#60A5FA' },
+  bug:      { label: 'דיווח על באג',   color: '#f87171' },
+  feature:  { label: 'הצעה לשיפור',    color: '#D4AF37' },
+  question: { label: 'שאלה',           color: '#60A5FA' },
 } as const;
 
 function buildHtml(
@@ -18,7 +18,7 @@ function buildHtml(
   userName: string,
   userEmail: string,
 ) {
-  const { label, icon, color } = TYPE_META[type];
+  const { label, color } = TYPE_META[type];
   const date = new Date().toLocaleString('he-IL', {
     dateStyle: 'long', timeStyle: 'short', timeZone: 'Asia/Jerusalem',
   });
@@ -34,7 +34,6 @@ function buildHtml(
   <div style="background:#111827;border:1px solid #1f2937;border-radius:16px;padding:28px">
 
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
-      <span style="font-size:28px">${icon}</span>
       <div>
         <h1 style="margin:0;font-size:18px;color:${color}">${label}</h1>
         <p style="margin:4px 0 0;font-size:12px;color:#6b7280">Reflect Trading Journal — פנייה למפתח</p>
@@ -89,7 +88,7 @@ export async function POST(request: Request) {
   const userEmail = profile?.email ?? user.email ?? '';
 
   const html    = buildHtml(type, title.trim(), description.trim(), userName, userEmail);
-  const subject = `${TYPE_META[type].icon} [Reflect] ${TYPE_META[type].label}: ${title.trim()}`;
+  const subject = `[Reflect] ${TYPE_META[type].label}: ${title.trim()}`;
 
   // Build Resend payload
   const payload: Record<string, unknown> = { from: FROM_EMAIL, to: TO_EMAIL, reply_to: userEmail, subject, html };

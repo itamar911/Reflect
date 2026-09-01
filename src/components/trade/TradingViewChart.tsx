@@ -301,7 +301,7 @@ export default function TradingViewChart({ symbol, timeframe, entryPrice, stopLo
       </div>
       {symbol && (
         <p className="text-[10px] mt-1 text-center" style={{ color: 'var(--color-tg-muted)' }}>
-          ⚠️ הנתונים המוצגים הם אינדיקטיביים בלבד ועשויים שלא לשקף את המחיר המדויק של הנכס. יש לאמת מול פלטפורמת המסחר שלך.
+          הנתונים המוצגים הם אינדיקטיביים בלבד ועשויים שלא לשקף את המחיר המדויק של הנכס. יש לאמת מול פלטפורמת המסחר שלך.
         </p>
       )}
 

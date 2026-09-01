@@ -133,8 +133,20 @@ function PlatformTile({ platform }: { platform: Platform }) {
 
   // The tile and the name are one link, so the accessible name comes from the
   // logo's alt plus the caption rather than from a wrapper with no text.
+  //
+  // rel="sponsored" because href is a vendor tracking URL, not a plain link to
+  // the platform: the destination is monetised, and `sponsored` is the token
+  // that declares exactly that. It sits alongside noopener/noreferrer rather
+  // than replacing them — they cover a different risk (the opened tab's access
+  // back to this one). Any future tile whose href is also a tracking URL needs
+  // the same treatment.
   return platform.href ? (
-    <a href={platform.href} target="_blank" rel="noopener noreferrer" className="block card-hover">
+    <a
+      href={platform.href}
+      target="_blank"
+      rel="sponsored noopener noreferrer"
+      className="block card-hover"
+    >
       {tile}
     </a>
   ) : (

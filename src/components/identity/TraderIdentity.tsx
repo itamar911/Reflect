@@ -1,8 +1,23 @@
-import type { TraderProfile } from '@/lib/identity';
-import { AlertTriangle, Dumbbell, RefreshCw, Check, X } from 'lucide-react';
+import type { IdentityIcon, TraderProfile } from '@/lib/identity';
+import {
+  AlertTriangle, Dumbbell, RefreshCw, Check, X,
+  Target, Flame, Rocket, Zap, Sprout,
+} from 'lucide-react';
+
+/* The identity's glyph. identity.ts carries a serialisable key rather than a
+   component, because TraderProfile is passed across a server/client boundary;
+   this is where the key becomes an icon. */
+const IDENTITY_ICONS: Record<IdentityIcon, typeof Target> = {
+  target: Target,
+  flame: Flame,
+  rocket: Rocket,
+  zap: Zap,
+  sprout: Sprout,
+};
 
 export default function TraderIdentityCard({ profile }: { profile: TraderProfile }) {
   const { identity, icon, color, tagline, strengths, weaknesses, totalTrades } = profile;
+  const IdentityGlyph = IDENTITY_ICONS[icon];
 
   const updatedLabel = new Date().toLocaleDateString('he-IL', { day: 'numeric', month: 'short' });
 
@@ -27,14 +42,14 @@ export default function TraderIdentityCard({ profile }: { profile: TraderProfile
       {/* Header */}
       <div className="flex items-center gap-3 mb-4 relative">
         <div
-          className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl shrink-0"
+          className="w-14 h-14 rounded-2xl flex items-center justify-center shrink-0"
           style={{
             background: `${color}18`,
             border: `1.5px solid ${color}40`,
             boxShadow: `0 0 18px ${color}25`,
           }}
         >
-          {icon}
+          <IdentityGlyph aria-hidden="true" size={26} style={{ color }} />
         </div>
         <div className="flex-1 min-w-0">
           <p

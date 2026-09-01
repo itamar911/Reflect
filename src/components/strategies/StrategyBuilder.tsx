@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
-import { Ruler } from 'lucide-react';
+import { Ruler, X } from 'lucide-react';
 import { getPlanLimits, isPro, type PlanTier } from '@/lib/plans/config';
 import UpgradeModal from '@/components/plans/UpgradeModal';
 import { renderPlainAiText } from '@/lib/ai/textFormatting';
@@ -443,7 +443,9 @@ export default function StrategyBuilder({ initialStrategies, plan }: StrategyBui
                   <div key={i} className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-lg text-xs"
                     style={{ background: 'var(--color-tg-surface)' }}>
                     <span className="text-tg-text">{c}</span>
-                    <button onClick={() => removeCondition(i)} className="text-tg-danger shrink-0">✕</button>
+                    <button onClick={() => removeCondition(i)} className="text-tg-danger shrink-0" aria-label="הסר תנאי">
+                      <X aria-hidden="true" size={14} />
+                    </button>
                   </div>
                 ))}
               </div>

@@ -150,7 +150,7 @@ export default function TradeDebrief({ trade, existingAnswer }: TradeDebriefProp
                   {aiResult.documented && (
                     <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md"
                       style={{ background: 'var(--color-tg-surface)', color: 'var(--color-tg-primary)' }}>
-                      ⭐ תועד
+                      תועד
                     </span>
                   )}
                 </span>

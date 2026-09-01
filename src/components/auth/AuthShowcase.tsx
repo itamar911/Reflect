@@ -49,9 +49,16 @@ export function AuthShowcase() {
               <div className="auth-phone-body">
                 <div className="auth-phone-screen">
                   <div className="auth-phone-island" />
+                  {/* Not alt="": the image is the only place an unsighted
+                      visitor to the auth screens learns what the product looks
+                      like, and it carries figures. The text names what is on
+                      screen and marks it as an illustration, which is the part
+                      a screen-reader user would otherwise never receive.
+                      Regenerate with scripts/capture-phone-demo.mjs — if the
+                      composition changes, this sentence has to change with it. */}
                   <Image
                     src="/auth/phone-demo.png"
-                    alt=""
+                    alt="תצוגה להמחשה של Reflect בטלפון: ציון משמעת 93 מתוך 100, שלושת כללי המסחר שהוגדרו, ורשימת העסקאות האחרונות עם סימון אילו בוצעו לפי התוכנית. נתונים לדוגמה."
                     width={780}
                     height={1688}
                     priority

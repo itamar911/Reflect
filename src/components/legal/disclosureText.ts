@@ -5,8 +5,15 @@
  * Every string in this file is prescribed wording. Do not paraphrase, shorten,
  * translate, or "tighten" any of it — including the punctuation and the
  * "ones'" in the English risk disclosure, which is how NinjaTrader writes it.
- * The Hebrew risk text is the approved translation and travels with the
- * English one; both must render together, never one alone.
+ *
+ * The Hebrew risk text is the approved translation and travels with the English
+ * one; both must render together, never one alone. Both are in the site footer
+ * (FooterDisclosures), which every route renders, and both again in full on
+ * /risk-disclosure (RiskDisclosure). A revision once shipped the Hebrew alone
+ * in the footer to save vertical space; that is the one change to this
+ * arrangement that must not be repeated, because the English is the wording the
+ * guidelines specify and the Hebrew stands beside it rather than in place of
+ * it.
  *
  * Presentation rule that comes with the wording: these must be rendered at the
  * same (or similar) style and size as the primary page content and be easily
@@ -40,9 +47,15 @@ export const ILLUSTRATIVE_LABEL = 'תצוגה להמחשה · נתונים לד�
 
 /**
  * Required alongside testimonials, prominently displayed, whenever real ones
- * exist. Nothing renders these today — the testimonial section was removed
- * until real customer clips are available — but they are the wording to use
- * when it comes back. Paid testimonials must additionally be disclosed as paid.
+ * exist. Both strings are live: TestimonialDisclosure renders them beneath the
+ * card strip in SocialProofSection, which carries real customer clips.
+ *
+ * (An earlier version of this note said the testimonial section had been
+ * removed and that nothing rendered these. That stopped being true when the
+ * clips landed, and the stale note was the kind that licenses a wrong deletion
+ * later — hence the correction rather than a trim.)
+ *
+ * Paid testimonials must additionally be disclosed as paid.
  */
 export const TESTIMONIAL_DISCLOSURE_EN =
   'Testimonials appearing on this website may not be representative of other clients or customers and is not a guarantee of future performance or success.';

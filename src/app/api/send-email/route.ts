@@ -37,7 +37,7 @@ function buildPreMarketEmail(name: string) {
   return `
 <!DOCTYPE html><html dir="rtl" lang="he"><body style="font-family:sans-serif;background:#0a0a1a;color:#fff;padding:24px;max-width:600px;margin:0 auto">
 <div style="background:#111;border:1px solid #222;border-radius:16px;padding:24px">
-  <h2 style="color:#F5C518;margin:0 0 16px">📈 תזכורת לפני פתיחת השוק</h2>
+  <h2 style="color:#F5C518;margin:0 0 16px">תזכורת לפני פתיחת השוק</h2>
   <p style="color:#888;margin:0 0 16px">שלום ${name},</p>
   <p>לפני שמתחיל יום המסחר — 3 שאלות לבדיקה עצמית:</p>
   <ol style="color:#ccc;line-height:2">
@@ -46,7 +46,7 @@ function buildPreMarketEmail(name: string) {
     <li>מה גבולות הסיכון שלי היום?</li>
   </ol>
   <div style="background:#1a1a1a;border-radius:12px;padding:16px;margin-top:16px">
-    <p style="color:#F5C518;margin:0;font-size:14px">💡 תזכורת: לעולם לא להסתכן ביותר מ-1-2% מההון בעסקה אחת</p>
+    <p style="color:#F5C518;margin:0;font-size:14px">גבולות הסיכון שלך הם אלה שהגדרת בכללים — Reflect בודק כל תוכנית מולם.</p>
   </div>
   <p style="margin-top:16px;font-size:12px;color:#555">Reflect Trading Journal</p>
 </div></body></html>`;
@@ -56,7 +56,7 @@ function buildDailySummaryEmail(name: string, stats: { trades: number; winRate: 
   return `
 <!DOCTYPE html><html dir="rtl" lang="he"><body style="font-family:sans-serif;background:#0a0a1a;color:#fff;padding:24px;max-width:600px;margin:0 auto">
 <div style="background:#111;border:1px solid #222;border-radius:16px;padding:24px">
-  <h2 style="color:#F5C518;margin:0 0 16px">📊 סיכום יומי</h2>
+  <h2 style="color:#F5C518;margin:0 0 16px">סיכום יומי</h2>
   <p style="color:#888;margin:0 0 16px">שלום ${name}, הנה סיכום יום המסחר שלך:</p>
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
     <div style="background:#1a1a1a;border-radius:12px;padding:12px;text-align:center">
@@ -82,7 +82,7 @@ function buildWeeklySummaryEmail(name: string, stats: { trades: number; winRate:
   return `
 <!DOCTYPE html><html dir="rtl" lang="he"><body style="font-family:sans-serif;background:#0a0a1a;color:#fff;padding:24px;max-width:600px;margin:0 auto">
 <div style="background:#111;border:1px solid #222;border-radius:16px;padding:24px">
-  <h2 style="color:#F5C518;margin:0 0 16px">📅 סיכום שבועי — Reflect</h2>
+  <h2 style="color:#F5C518;margin:0 0 16px">סיכום שבועי — Reflect</h2>
   <p style="color:#888;margin:0 0 16px">שלום ${name}, הנה השפעת Reflect על הארנק שלך השבוע:</p>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
     <div style="background:#1a1a1a;border-radius:12px;padding:16px;text-align:center">
@@ -103,11 +103,11 @@ function buildWeeklySummaryEmail(name: string, stats: { trades: number; winRate:
     </div>
   </div>
   <div style="background:#1a1a1a;border-radius:12px;padding:16px">
-    <p style="color:#F5C518;font-weight:bold;margin:0 0 8px">💡 טיפ לשבוע הבא</p>
+    <p style="color:#F5C518;font-weight:bold;margin:0 0 8px">מה היומן מראה</p>
     <p style="color:#ccc;margin:0;font-size:14px">
-      ${stats.winRate < 40 ? 'אחוז הצלחה נמוך — בדוק את תנאי הכניסה שלך ואת ה-R:R' :
-        stats.avgRR < 1.5 ? 'שפר את יחס ה-R:R — חפש סטאפים עם לפחות 1:2' :
-        'כל הכבוד — המשך לפי התוכנית!'}
+      ${stats.winRate < 40 ? 'אחוז ההצלחה השבוע היה מתחת ל-40%. התחקירים ביומן מפרטים מה קרה בכל עסקה.' :
+        stats.avgRR < 1.5 ? 'יחס הסיכון-סיכוי הממוצע השבוע היה מתחת ל-1.5.' :
+        'הנתונים של השבוע נרשמו במלואם ביומן.'}
     </p>
   </div>
   <p style="margin-top:16px;font-size:12px;color:#555">Reflect Trading Journal</p>
@@ -145,15 +145,15 @@ export async function POST(request: Request) {
 
   const emailMap = {
     pre_market: {
-      subject: '📈 תזכורת לפני פתיחת השוק — Reflect',
+      subject: 'תזכורת לפני פתיחת השוק — Reflect',
       html: buildPreMarketEmail(name),
     },
     daily_summary: {
-      subject: '📊 סיכום יומי — Reflect',
+      subject: 'סיכום יומי — Reflect',
       html: buildDailySummaryEmail(name, { trades: allTrades.length, winRate, avgRR }),
     },
     weekly_summary: {
-      subject: '📅 סיכום שבועי — Reflect',
+      subject: 'סיכום שבועי — Reflect',
       html: buildWeeklySummaryEmail(name, { trades: allTrades.length, winRate, avgRR, totalPL }),
     },
   };
