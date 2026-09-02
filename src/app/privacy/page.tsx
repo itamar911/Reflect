@@ -232,46 +232,41 @@ export default function PrivacyPage() {
         <Section n={6} title="צדדים שלישיים">
           <div className="legal-table-scroll">
             <table className="legal-table">
-              <caption className="sr-only">
-                ספקי צד שלישי, תפקידם בשירות ומיקום השרתים שלהם
-              </caption>
+              <caption className="sr-only">ספקי צד שלישי ותפקידם בשירות</caption>
               <thead>
                 <tr>
                   <th scope="col">הספק</th>
                   <th scope="col">תפקיד</th>
-                  <th scope="col">מיקום השרתים</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
                   <td>Supabase</td>
                   <td>בסיס נתונים ואימות משתמשים</td>
-                  <td>סידני, אוסטרליה</td>
                 </tr>
                 <tr>
                   <td>Vercel</td>
                   <td>אחסון ופריסת האתר</td>
-                  <td>ארה&quot;ב ואירופה</td>
+                </tr>
+                <tr>
+                  <td>Cloudflare</td>
+                  <td>DNS וניתוב דואר</td>
                 </tr>
                 <tr>
                   <td>Stripe</td>
-                  <td>יופעל עם פתיחת השירות לתשלום</td>
-                  <td>ארה&quot;ב ואירופה</td>
+                  <td>עיבוד תשלומים — יופעל עם פתיחת השירות לתשלום</td>
                 </tr>
                 <tr>
                   <td>Anthropic</td>
                   <td>עיבוד בינה מלאכותית</td>
-                  <td>ארה&quot;ב</td>
                 </tr>
                 <tr>
                   <td>Resend</td>
                   <td>שליחת מיילים תפעוליים</td>
-                  <td>ארה&quot;ב</td>
                 </tr>
                 <tr>
                   <td>פלטפורמות מסחר מחוברות</td>
                   <td>סנכרון עסקאות</td>
-                  <td>לפי הפלטפורמה</td>
                 </tr>
               </tbody>
             </table>
@@ -369,10 +364,10 @@ export default function PrivacyPage() {
 
         <Section n={11} title="העברת מידע מחוץ לישראל">
           <P>
-            חלק מספקי השירות שלנו פועלים מחוץ לישראל — בעיקר בארצות הברית, באיחוד האירופי
-            ובאוסטרליה, כמפורט בסעיף 6.
+            חלק מספקי השירות שלנו פועלים מחוץ לישראל, ולכן מידע עשוי להיות מועבר ומאוחסן מחוץ
+            לגבולות ישראל. בשימוש בשירות אתם מסכימים להעברה ולאחסון אלה.
           </P>
-          <P>בשימוש בשירות אתם מסכימים להעברת המידע ולאחסונו מחוץ לגבולות ישראל.</P>
+          <P>בסיס הנתונים שבו נשמר המידע שלכם מאוחסן בסידני שבאוסטרליה.</P>
         </Section>
 
         <Section n={12} title="קטינים">
