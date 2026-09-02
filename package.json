@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "tradovate:verify": "tsx --env-file-if-exists=.env.local scripts/tradovate-verify.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.96.0",
@@ -30,6 +31,7 @@
     "eslint-config-next": "16.2.6",
     "playwright": "^1.62.1",
     "tailwindcss": "^4",
+    "tsx": "^4.23.13",
     "typescript": "^5"
   }
 }

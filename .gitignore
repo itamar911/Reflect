@@ -32,6 +32,8 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# ...except the credential template, which holds only empty variable names.
+!.env.example
 
 # vercel
 .vercel
@@ -49,3 +51,7 @@ next-env.d.ts
 **/.claude/*
 !.claude/skills/
 !.claude/settings.json
+
+# Tradovate spike: local credentials and raw API dumps
+scripts/spike/.env
+scripts/spike/out/
