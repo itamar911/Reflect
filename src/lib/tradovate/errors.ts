@@ -71,3 +71,51 @@ export class TradovateRequestError extends TradovateError {
     this.body = body;
   }
 }
+
+/**
+ * The OAuth flow failed in a way that is about the flow itself rather than the
+ * transport: a state mismatch, a missing code, or an `error` field in the token
+ * response.
+ *
+ * `oauthError` carries Tradovate's own machine-readable code (`access_denied`,
+ * `invalid_grant`, …) when it gave one, so a route can branch on it — notably to
+ * treat `access_denied` as the user simply declining, not a failure.
+ *
+ * The message is expected to have been through redactSecrets() already; nothing
+ * here re-reads a response body.
+ */
+export class TradovateOAuthError extends TradovateError {
+  /** Tradovate's `error` field, when present. */
+  readonly oauthError?: string;
+  /** The stage that failed, for triage without exposing values. */
+  readonly stage: 'authorize' | 'state' | 'exchange' | 'identify' | 'revoke';
+
+  constructor(
+    message: string,
+    opts: { stage: TradovateOAuthError['stage']; oauthError?: string } = { stage: 'exchange' }
+  ) {
+    super(message);
+    this.name = 'TradovateOAuthError';
+    this.stage = opts.stage;
+    this.oauthError = opts.oauthError;
+  }
+}
+
+/**
+ * A user has no usable Tradovate connection: never connected, disconnected, or
+ * the token lapsed and OAuth gives us no refresh token to recover with.
+ *
+ * Distinct from TradovateAuthError because the remedy is different — this one is
+ * fixed by the user reconnecting, not by correcting server configuration.
+ */
+export class TradovateNotConnectedError extends TradovateError {
+  readonly userId: string;
+  readonly status: 'missing' | 'expired' | 'revoked';
+
+  constructor(userId: string, status: TradovateNotConnectedError['status']) {
+    super(`No usable Tradovate connection for this user (${status}). They need to reconnect.`);
+    this.name = 'TradovateNotConnectedError';
+    this.userId = userId;
+    this.status = status;
+  }
+}

@@ -19,7 +19,18 @@
  */
 
 export { loadConfig, describeConfigError, TRADOVATE_ENV_VARS } from './config';
-export type { ConfigResult, TradovateEnvVar } from './config';
+export type { ConfigFailure, ConfigResult, TradovateEnvVar } from './config';
+
+export {
+  loadOAuthConfig,
+  TRADOVATE_OAUTH_ENV_VARS,
+  TRADOVATE_OAUTH_OPTIONAL_ENV_VARS,
+} from './oauth-config';
+export type {
+  OAuthConfigResult,
+  TradovateOAuthConfig,
+  TradovateOAuthEnvVar,
+} from './oauth-config';
 
 export { requestAccessToken, renewAccessToken, snapshotFromResponse } from './auth';
 
@@ -34,13 +45,43 @@ export {
   TradovateAuthError,
   TradovatePenaltyError,
   TradovateRequestError,
+  TradovateOAuthError,
+  TradovateNotConnectedError,
 } from './errors';
+
+// --- OAuth: connecting an end user's Tradovate account ----------------------
+//
+// Read-only, like the rest of this module. The flow is driven by the routes
+// under src/app/api/tradovate/; what follows is what they and any future
+// execution-import job need.
+//
+// Note what is NOT exported: token-crypto.ts. Encryption and decryption stay
+// private to ./connections.ts, which is the only module that should hold a raw
+// token alongside the key.
+
+export { ACCESS_DENIED, buildAuthorizeUrl, exchangeCodeForToken, fetchTradovateUser } from './oauth';
+export type { ExchangedToken } from './oauth';
+
+export {
+  getUserAccessToken,
+  getConnectionSummary,
+  saveConnection,
+  disconnectUser,
+  forgetCachedToken,
+  clearAllCachedTokens,
+} from './connections';
+export type { ConnectionStatus, ConnectionSummary } from './connections';
+
+export { redactSecrets, redactUrl } from './redact';
 
 export { isPenaltyResponse } from './types';
 export type {
   AccessTokenRequestBody,
   AccessTokenResponse,
+  OAuthTokenResponse,
   PenaltyResponse,
   TokenSnapshot,
+  TradovateMeResponse,
   TradovateConfig,
+  UserTokenSnapshot,
 } from './types';

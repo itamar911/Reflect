@@ -102,3 +102,50 @@ export interface TokenSnapshot {
   name?: string;
   userStatus?: AccessTokenResponse['userStatus'];
 }
+
+/**
+ * Response from POST /auth/oauthtoken.
+ *
+ * Note what is NOT here: `refresh_token`. Tradovate's OAuth token endpoint
+ * issues an access token and nothing else — sessions are extended in place with
+ * GET /auth/renewaccesstoken, using the access token itself as the credential.
+ * The field is typed as optional only so that we store one if Tradovate ever
+ * starts returning it; do not write code that assumes it will be there.
+ *
+ * `expires_in` is seconds, unlike the ISO `expirationTime` on the password-grant
+ * response — the two auth paths report expiry in different units.
+ */
+export interface OAuthTokenResponse {
+  access_token?: string;
+  /** Seconds until the access token expires. */
+  expires_in?: number;
+  token_type?: string;
+  /** Not currently issued by Tradovate. See above. */
+  refresh_token?: string;
+  /** OAuth 2.0 error code, e.g. 'access_denied', 'invalid_grant'. */
+  error?: string;
+  error_description?: string;
+}
+
+/**
+ * Response from GET /auth/me — who a token belongs to.
+ *
+ * Used once, right after the exchange, to record `tradovate_user_id`. Only
+ * `userId` is relied on; the rest is typed because the endpoint returns it.
+ */
+export interface TradovateMeResponse {
+  userId: number;
+  name?: string;
+  fullName?: string;
+  email?: string;
+  emailVerified?: boolean;
+  isTrial?: boolean;
+}
+
+/** A connected user's token, as ./connections.ts hands it out. */
+export interface UserTokenSnapshot {
+  accessToken: string;
+  /** Epoch milliseconds. */
+  expiresAt: number;
+  tradovateUserId: number | null;
+}

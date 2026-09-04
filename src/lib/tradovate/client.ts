@@ -26,6 +26,21 @@ export interface RequestOptions {
   method?: 'GET' | 'POST';
   /** Override the resolved configuration; mainly for tests and the CLI. */
   config?: TradovateConfig;
+  /**
+   * Use this token instead of the shared application session.
+   *
+   * For OAuth: a connected user's token is theirs, not the app's, so it must not
+   * come from — or be invalidated in — the module-level cache in ./session.ts.
+   * When set, the 401 retry is also skipped: this layer has no way to renew
+   * someone else's token, and ./connections.ts owns that decision.
+   */
+  accessToken?: string;
+  /**
+   * Override just the REST base URL. Lets an OAuth caller supply the apiUrl from
+   * loadOAuthConfig() without also having to satisfy the password-grant
+   * variables that a full TradovateConfig requires.
+   */
+  apiUrl?: string;
   signal?: AbortSignal;
 }
 
@@ -58,10 +73,10 @@ function buildUrl(apiUrl: string, path: string, query: RequestOptions['query']):
  *   once, which covers a session evicted by the two-session cap.
  */
 export async function tradovateRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { query, body, method, config, signal } = options;
+  const { query, body, method, config, accessToken, apiUrl: apiUrlOverride, signal } = options;
   const verb = method ?? (body !== undefined ? 'POST' : 'GET');
 
-  const apiUrl = resolveApiUrl(config);
+  const apiUrl = apiUrlOverride?.replace(/\/+$/, '') ?? resolveApiUrl(config);
   const url = buildUrl(apiUrl, path, query);
 
   // Two independent budgets: a stale token is worth exactly one re-auth, and a
@@ -71,12 +86,12 @@ export async function tradovateRequest<T>(path: string, options: RequestOptions 
   let penaltyAttempts = 0;
 
   for (;;) {
-    const token = await getAccessToken({ config });
+    const bearer = accessToken ?? (await getAccessToken({ config })).accessToken;
 
     const res = await fetch(url, {
       method: verb,
       headers: {
-        Authorization: `Bearer ${token.accessToken}`,
+        Authorization: `Bearer ${bearer}`,
         ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -87,8 +102,10 @@ export async function tradovateRequest<T>(path: string, options: RequestOptions 
     const text = await res.text();
 
     // A session closed by the two-session cap shows up here. Re-authenticate
-    // once; a second 401 is a real failure, not a stale token.
-    if (res.status === 401 && !retriedAfter401) {
+    // once; a second 401 is a real failure, not a stale token. Skipped for a
+    // caller-supplied token: clearToken() would evict the *application's*
+    // session, which has nothing to do with this request.
+    if (res.status === 401 && !retriedAfter401 && !accessToken) {
       retriedAfter401 = true;
       clearToken();
       continue;

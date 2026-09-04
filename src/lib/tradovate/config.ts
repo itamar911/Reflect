@@ -26,9 +26,20 @@ export const TRADOVATE_ENV_VARS = [
 
 export type TradovateEnvVar = (typeof TRADOVATE_ENV_VARS)[number];
 
+/**
+ * A failed configuration load. Generic over the variable-name union so the
+ * OAuth configuration in ./oauth-config.ts — a different set of variables, same
+ * report-don't-throw contract — can reuse {@link describeConfigError}.
+ */
+export interface ConfigFailure<Name extends string = string> {
+  ok: false;
+  missing: Name[];
+  invalid: { name: Name; reason: string }[];
+}
+
 export type ConfigResult =
   | { ok: true; config: TradovateConfig }
-  | { ok: false; missing: TradovateEnvVar[]; invalid: { name: TradovateEnvVar; reason: string }[] };
+  | ConfigFailure<TradovateEnvVar>;
 
 function assertServerOnly(): void {
   if (typeof window !== 'undefined') {
@@ -93,8 +104,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConfigResult {
   };
 }
 
-/** Human-readable explanation of a failed {@link loadConfig}, ready to print. */
-export function describeConfigError(result: Extract<ConfigResult, { ok: false }>): string {
+/** Human-readable explanation of a failed config load, ready to print. */
+export function describeConfigError(result: ConfigFailure): string {
   const lines: string[] = ['Tradovate configuration is incomplete.'];
 
   if (result.missing.length > 0) {

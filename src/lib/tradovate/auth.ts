@@ -179,7 +179,10 @@ export async function requestAccessToken(config: TradovateConfig): Promise<Acces
  * not affect us because we never use it.
  */
 export async function renewAccessToken(
-  config: TradovateConfig,
+  // Only the base URL is needed. Widened from the full TradovateConfig so an
+  // OAuth-connected user's token can be renewed through the same code path
+  // without the password-grant credentials, which do not apply to it.
+  config: Pick<TradovateConfig, 'apiUrl'>,
   accessToken: string
 ): Promise<AccessTokenResponse> {
   const url = `${config.apiUrl}/auth/renewaccesstoken`;
