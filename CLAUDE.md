@@ -71,3 +71,8 @@ actually renders. `MockFrame.tsx` provides the shared chrome.
 - The `verify` skill (`.claude/skills/verify/SKILL.md`) has the build/launch/Playwright
   recipe for driving the app end-to-end.
 - Primary shell on this machine is PowerShell; the Bash tool is also available.
+- The `.env` deny rules in `.claude/settings.json` are **enumerated, not a
+  catch-all** — `.env`, `.env.local`, `.env.*.local`, `.env.development`,
+  `.env.production`, `.env.test`, plus `**/` variants. `.env.example` is
+  deliberately allowed. A new variant such as `.env.staging` is NOT covered by
+  anything: add it to that deny list explicitly, or it is readable and writable.
