@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "tradovate:verify": "tsx --env-file-if-exists=.env.local scripts/tradovate-verify.ts"
+    "tradovate:verify": "tsx --env-file-if-exists=.env.local scripts/tradovate-verify.ts",
+    "tradovate:verify-key": "tsx --env-file-if-exists=.env.local scripts/tradovate-verify-key.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.96.0",
