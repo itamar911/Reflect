@@ -8,6 +8,14 @@ interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   error?: string;
   hint?: string;
   suffix?: React.ReactNode;
+  /**
+   * Password-manager opt-out attributes — data-lpignore (LastPass),
+   * data-1p-ignore (1Password), data-bwignore (Bitwarden), data-form-type.
+   * Typed explicitly because InputHTMLAttributes covers no data-* keys, and
+   * React only allows them unchecked on intrinsic elements, not through a
+   * component's props. See DeleteAccountSection for why any field needs them.
+   */
+  [dataAttr: `data-${string}`]: string | undefined;
 }
 
 const Input = forwardRef<HTMLInputElement, InputProps>(

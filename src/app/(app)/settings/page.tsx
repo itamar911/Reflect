@@ -6,6 +6,7 @@ import AlertsPanel from '@/components/settings/AlertsPanel';
 import type { AlertSettingsData } from '@/components/settings/AlertsPanel';
 import { Plug } from 'lucide-react';
 import PricingPlans from '@/components/settings/PricingPlans';
+import DeleteAccountSection from '@/components/settings/DeleteAccountSection';
 
 export const metadata = { title: 'הגדרות — Reflect' };
 
@@ -88,6 +89,12 @@ export default async function SettingsPage() {
             </div>
           </div>
         </Card>
+      </div>
+
+      {/* Account deletion — last on the page, and separated by extra space so
+          it is never the thing under a thumb reaching for the section above. */}
+      <div className="mt-4">
+        <DeleteAccountSection />
       </div>
     </div>
   );
