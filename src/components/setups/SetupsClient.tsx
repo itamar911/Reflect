@@ -380,7 +380,25 @@ function DetailView({ setup, stats, linked, unlinked, aiReview, aiLoading, onBac
               background: aiOpen ? 'rgba(0,210,210,0.12)' : SURF2,
               color:      aiOpen ? GOLD : TEXT2,
             }}>
-            {aiLoading && aiOpen ? '⟳ מנתח...' : aiOpen ? 'סגור' : <><Sparkles aria-hidden="true" size={12} /> קבל ביקורת AI</>}
+            {/* Every branch is an element with its own key, not a bare string.
+                This one position used to swap between two plain strings and a
+                fragment, so toggling it made React remove the text node it had
+                recorded here — and under browser translation that node has been
+                replaced by a <font> wrapper, so removeChild throws and the page
+                comes down. Distinct keys make React replace the whole <span>
+                instead: it only ever removes the top element of the outgoing
+                subtree, which is still a real child of this button. The gap-1
+                moves onto the icon branch so the icon/label spacing is
+                unchanged. */}
+            {aiLoading && aiOpen ? (
+              <span key="analyzing">⟳ מנתח...</span>
+            ) : aiOpen ? (
+              <span key="close">סגור</span>
+            ) : (
+              <span key="idle" className="inline-flex items-center gap-1">
+                <Sparkles aria-hidden="true" size={12} /> קבל ביקורת AI
+              </span>
+            )}
           </button>
         </div>
 

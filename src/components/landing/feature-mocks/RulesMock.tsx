@@ -200,7 +200,16 @@ export function RulesMock() {
                   <Lock aria-hidden="true" size={14} style={{ color: blockColor, position: 'relative' }} />
                 </span>
               )}
-              פתח עסקה
+              {/* Wrapped, not bare — the same hazard as HeroMock’s CTA. This
+                  text is the sibling React hands to insertBefore when `locked`
+                  flips and the lock badge above has to go in front of it.
+                  Browser translation swaps a bare text node for a <font>
+                  wrapper, so that reference stops being a child of the button
+                  and the insert throws, taking the whole page down. Inside a
+                  <span> the translator rewrites text within an element React
+                  still owns. Layout-neutral: this was already an anonymous
+                  flex item of the `flex gap-2` button. */}
+              <span>פתח עסקה</span>
             </button>
 
             {/* Simulated pointer — the same ghost-cursor device CalendarMock
