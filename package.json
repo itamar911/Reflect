@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "tradovate:verify": "tsx --env-file-if-exists=.env.local scripts/tradovate-verify.ts",
-    "tradovate:verify-key": "tsx --env-file-if-exists=.env.local scripts/tradovate-verify-key.ts"
+    "tradovate:verify-key": "tsx --env-file-if-exists=.env.local scripts/tradovate-verify-key.ts",
+    "test:translation": "node scripts/translation-check.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.96.0",
