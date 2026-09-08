@@ -344,7 +344,16 @@ export function HeroMock() {
             }
           >
             {locked && <Lock aria-hidden="true" size={16} />}
-            פתח עסקה
+            {/* Wrapped, not bare. A bare text node here is the sibling React
+                hands to insertBefore when `locked` flips and the <Lock> has to
+                go in front of it — and Chrome/Google translation replaces every
+                bare text node with a <font> wrapper, so that reference stops
+                being a child of the button and the insert throws, unmounting
+                the whole page. Inside a <span> the translator rewrites the text
+                *within* the span and the element React holds on to survives.
+                Layout-neutral: the text was already an anonymous flex item of
+                this `flex gap-2` button. */}
+            <span>פתח עסקה</span>
           </button>
 
           {/* Ripple out of the button's own centre — the hero's replacement for
