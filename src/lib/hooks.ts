@@ -98,3 +98,73 @@ export function useMediaQuery(query: string, serverDefault = false): boolean {
     () => serverDefault,
   );
 }
+
+// ── Browser translation ──────────────────────────────────────────────────────
+
+/**
+ * Class Google's translate widget puts on <html>. Chrome's built-in translate
+ * sets it too; the translate.goog proxy, measured against production, does NOT
+ * — which is why the <font> probe below is the primary signal and this is only
+ * a cheap corroborating one.
+ */
+const TRANSLATED_CLASSES = ['translated-ltr', 'translated-rtl'];
+
+function getBrowserTranslated(): boolean {
+  const root = document.documentElement;
+  if (TRANSLATED_CLASSES.some((c) => root.classList.contains(c))) return true;
+  // Every Google-family translator (Chrome's built-in and the proxy alike)
+  // rewrites each text node into nested <font> wrappers. The app itself never
+  // renders <font>, so their presence means the page has been translated.
+  // A live HTMLCollection, so reading .length stays O(1) per check.
+  return document.getElementsByTagName('font').length > 0;
+}
+
+function subscribeBrowserTranslated(onChange: () => void) {
+  // Translation rewrites thousands of nodes in a burst, so the callback is
+  // coalesced to one frame — without that this fires once per mutation across
+  // the whole document.
+  let frame = 0;
+  const ping = () => {
+    if (frame) return;
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      onChange();
+    });
+  };
+  const observer = new MutationObserver(ping);
+  observer.observe(document.documentElement, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    attributeFilter: ['class'],
+  });
+  return () => {
+    observer.disconnect();
+    if (frame) cancelAnimationFrame(frame);
+  };
+}
+
+/**
+ * True once a browser translator has rewritten the page's text.
+ *
+ * Exists for one narrow reason: browser translators never walk into SVG
+ * subtrees, so chart labels drawn as SVG <text> stay Hebrew on a page that is
+ * otherwise fully English — which reads as a broken page rather than an
+ * untranslated one. Consumers swap those few labels for real English strings.
+ *
+ * False on the server and through hydration, like every other hook here, so it
+ * cannot introduce a server/client text mismatch: the server and the hydrating
+ * client both render Hebrew, and the swap happens on a later render, long
+ * after the translator has run.
+ *
+ * Deliberately NOT a general i18n signal. It says "some translator rewrote the
+ * DOM", not which language was picked, so it is only sound for swapping text
+ * the translator provably cannot reach.
+ */
+export function useBrowserTranslated(): boolean {
+  return useSyncExternalStore(
+    subscribeBrowserTranslated,
+    getBrowserTranslated,
+    () => false,
+  );
+}

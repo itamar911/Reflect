@@ -7,6 +7,7 @@ import {
   ResponsiveContainer, CartesianGrid, Cell,
 } from 'recharts';
 import { GREEN, RED, MUTED, TEXT, fmt, pnlColor, Section, TooltipCard } from './shared';
+import { useBrowserTranslated } from '@/lib/hooks';
 
 interface TooltipContentProps<T> {
   active?: boolean;
@@ -27,9 +28,34 @@ interface Props {
 
 const VIEWS = [['day', 'לפי יום'], ['hour', 'לפי שעה']] as const;
 
+/**
+ * Recharts draws axis ticks as SVG <text>, which browser translators never
+ * walk into — so these day names stayed Hebrew on an otherwise English page.
+ * Keyed by the Hebrew label built in stats/page.tsx; hour bars are clock
+ * times ('09:00') and need no mapping.
+ */
+const DAY_LABELS_EN: Record<string, string> = {
+  'ראשון': 'Sunday',
+  'שני': 'Monday',
+  'שלישי': 'Tuesday',
+  'רביעי': 'Wednesday',
+  'חמישי': 'Thursday',
+  'שישי': 'Friday',
+  'שבת': 'Saturday',
+};
+
 export default function DistributionSection({ dayBars, hourBars }: Props) {
   const [view, setView] = useState<'day' | 'hour'>('day');
   const bars = view === 'day' ? dayBars : hourBars;
+
+  // Only the array the chart consumes is relabelled. The best/worst lines
+  // below keep the Hebrew `bars`, because those are plain HTML that the
+  // translator already handles — swapping them too would make React rewrite
+  // text nodes translation had replaced, for no visible gain.
+  const translated = useBrowserTranslated();
+  const chartBars = translated
+    ? bars.map((b) => (DAY_LABELS_EN[b.label] ? { ...b, label: DAY_LABELS_EN[b.label] } : b))
+    : bars;
 
   const withTrades = bars.filter(b => b.trades > 0);
   const best  = withTrades.length ? withTrades.reduce((a, b) => b.pnl > a.pnl ? b : a) : null;
@@ -53,14 +79,14 @@ export default function DistributionSection({ dayBars, hourBars }: Props) {
         ) : (
           <div dir="ltr" className="h-[200px] sm:h-[220px]">
             <ResponsiveContainer debounce={60} width="100%" height="100%">
-              <BarChart data={bars} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
+              <BarChart data={chartBars} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--color-tg-border-light)" vertical={false} />
                 <XAxis dataKey="label" tick={{ fontSize: 10, fill: MUTED }} axisLine={false} tickLine={false} />
                 <YAxis hide />
                 <Tooltip cursor={false} content={<DistTooltip />} />
                 <Bar dataKey="pnl" maxBarSize={18} radius={[3, 3, 0, 0]}
                   activeBar={{ opacity: 1, stroke: 'rgba(255,255,255,0.35)', strokeWidth: 1.5 }}>
-                  {bars.map((b, i) => (
+                  {chartBars.map((b, i) => (
                     <Cell key={i}
                       fill={b.trades === 0 ? 'var(--color-tg-border-light)' : b.pnl >= 0 ? GREEN : RED}
                       opacity={b.trades === 0 ? 1 : 0.85}

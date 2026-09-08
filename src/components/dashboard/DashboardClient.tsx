@@ -9,7 +9,7 @@ import type { DashTrade } from '@/lib/dashboard/trades';
 import { tradeMoneyPnl, hasMoneyPnl, isWinningTrade } from '@/lib/pnl';
 import { getPlanLimits, type PlanTier } from '@/lib/plans/config';
 import UpgradeModal from '@/components/plans/UpgradeModal';
-import { useMediaQuery } from '@/lib/hooks';
+import { useMediaQuery, useBrowserTranslated } from '@/lib/hooks';
 import { useModalDialog } from '@/lib/a11y/useModalDialog';
 import { renderPlainAiText, segmentByLineMarker, joinLines, CHECK_CHARS, CROSS_CHARS } from '@/lib/ai/textFormatting';
 
@@ -442,6 +442,11 @@ function miniNumColor(score: number): string {
 
 // ── Discipline radar config ───────────────────────────────────────────────────
 const D_LABELS = ['ציון תהליך', 'נאמנות לאסטרטגיה', 'שמירה על SL', 'סבלנות', 'כניסות נקיות', 'שליטה רגשית'];
+// Axis labels only, used when a browser translator is running. These are SVG
+// <text>, which no translator walks into, so without this the radar stays
+// Hebrew on an otherwise fully English page. Index-aligned with D_LABELS —
+// the two are sliced together below, so they must stay the same length.
+const D_LABELS_EN = ['Process score', 'Strategy adherence', 'Stop-loss discipline', 'Patience', 'Clean entries', 'Emotional control'];
 const D_DESCS  = [
   'ממוצע ציון תהליך לעסקאות סגורות',
   'אחוז עסקאות שבהן נשמרה האסטרטגיה',
@@ -461,6 +466,8 @@ const D_TIPS = [
 
 // ── Performance radar config ──────────────────────────────────────────────────
 const P_LABELS = ['אחוז הצלחה', 'פקטור רווח', 'עקביות', 'יחס רווח/הפסד', 'שליטה בירידת ערך'];
+/** Index-aligned with P_LABELS; see D_LABELS_EN. */
+const P_LABELS_EN = ['Win rate', 'Profit factor', 'Consistency', 'Profit/loss ratio', 'Drawdown control'];
 const P_DESCS  = [
   'אחוז הצלחה מבין עסקאות סגורות',
   'רווח גולמי חלקי הפסד גולמי',
@@ -480,6 +487,7 @@ const P_TIPS = [
 function RadarCard({
   title,
   labels,
+  labelsEn,
   descs,
   tips,
   scores,
@@ -489,6 +497,7 @@ function RadarCard({
 }: {
   title: string;
   labels: string[];
+  labelsEn: string[];
   descs: string[];
   tips: string[];
   scores: number[];
@@ -496,6 +505,11 @@ function RadarCard({
   miniCards?: { label: string; score: number | null }[];
   trend?: number | null;
 }) {
+  // Swaps the SVG axis labels — and nothing else — once a translator is
+  // running. Everything else in this card is HTML the translator handles
+  // itself, and leaving it alone keeps React from touching nodes translation
+  // has already rewritten.
+  const axisLabels = useBrowserTranslated() ? labelsEn : labels;
   const [hov, setHov] = useState<number | null>(null);
   const [animated, setAnimated] = useState(false);
 
@@ -601,7 +615,7 @@ function RadarCard({
             <text key={i} x={x} y={y} textAnchor="middle" dominantBaseline="middle"
               fontSize={13} fontWeight={600}
               fill={hov === i ? ACCENT : MUTED}>
-              {labels[i]}
+              {axisLabels[i]}
             </text>
           );
         })}
@@ -1265,9 +1279,11 @@ export default function DashboardClient({
 
   const stats = useMemo(() => computeAll(trades, now ?? EPOCH), [trades, now]);
   const dLabels = stats.hasStrategyConditions ? D_LABELS : [D_LABELS[0], ...D_LABELS.slice(2)];
+  const dLabelsEn = stats.hasStrategyConditions ? D_LABELS_EN : [D_LABELS_EN[0], ...D_LABELS_EN.slice(2)];
   const dDescs  = stats.hasStrategyConditions ? D_DESCS  : [D_DESCS[0],  ...D_DESCS.slice(2)];
   const dTips   = stats.hasStrategyConditions ? D_TIPS   : [D_TIPS[0],   ...D_TIPS.slice(2)];
   const pLabels    = stats.hasDrawdownCtrl ? P_LABELS : P_LABELS.slice(0, 4);
+  const pLabelsEn  = stats.hasDrawdownCtrl ? P_LABELS_EN : P_LABELS_EN.slice(0, 4);
   const pDescs     = stats.hasDrawdownCtrl ? P_DESCS  : P_DESCS.slice(0, 4);
   const pTips      = stats.hasDrawdownCtrl ? P_TIPS   : P_TIPS.slice(0, 4);
   const pMiniCards = P_LABELS.map((label, i) => ({
@@ -1601,6 +1617,7 @@ export default function DashboardClient({
             <RadarCard
               title="ניקוד משמעת"
               labels={dLabels}
+              labelsEn={dLabelsEn}
               descs={dDescs}
               tips={dTips}
               scores={stats.disciplineScores}
@@ -1610,6 +1627,7 @@ export default function DashboardClient({
             <RadarCard
               title="ניקוד ביצועים"
               labels={pLabels}
+              labelsEn={pLabelsEn}
               descs={pDescs}
               tips={pTips}
               scores={stats.performanceScores}
