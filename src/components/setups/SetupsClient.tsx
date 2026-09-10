@@ -1,9 +1,11 @@
 'use client';
 
 import { useState, useRef, type CSSProperties } from 'react';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import { Sparkles, Target } from 'lucide-react';
+import { Sparkles, Target, ImageOff } from 'lucide-react';
 import { renderPlainAiText } from '@/lib/ai/textFormatting';
+import { SIGNED_URL_TTL_SECONDS } from '@/lib/setups/imageUrls';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -17,6 +19,13 @@ export interface Setup {
   stop_loss: string | null;
   take_profit: string | null;
   market_context: string | null;
+  /** Object key in the setup-images bucket. The source of truth for the image. */
+  image_path: string | null;
+  /**
+   * Display URL only. Signed by the server component on every render (see
+   * lib/setups/imageUrls); never read from the database row directly, and
+   * null whenever the path is missing, malformed, or could not be signed.
+   */
   image_url: string | null;
   created_at: string;
   updated_at: string;
@@ -216,6 +225,54 @@ export default function SetupsClient({
 
 // ── Setup card ────────────────────────────────────────────────────────────────
 
+/**
+ * A setup image behind a signed, expiring URL.
+ *
+ * What the user sees when a URL expires with the page still open: nothing
+ * changes. The browser is not re-requesting images it has already decoded, so
+ * everything on screen stays on screen. The URL only matters again if the
+ * bytes are asked for a second time -- a remount, a cache eviction, a
+ * navigation back to a cached route. When that happens the storage API refuses
+ * the stale URL and this fires.
+ *
+ * The first failure refreshes the route, which re-runs the server component
+ * and mints fresh URLs; the image then loads normally and the user sees a
+ * flicker at worst. Only if it fails again -- meaning the object is genuinely
+ * gone, not merely expired -- does it settle into a placeholder, so a missing
+ * object cannot spin in a refresh loop.
+ */
+function SetupImage({ src, className }: { src: string; className: string }) {
+  const router = useRouter();
+  const refreshed = useRef(false);
+  const [dead, setDead] = useState(false);
+
+  if (dead) {
+    return (
+      <div
+        className={`${className} flex items-center justify-center`}
+        style={{ background: SURF, border: `1px solid ${BORDER}` }}
+        title="התמונה אינה זמינה"
+      >
+        <ImageOff aria-hidden="true" size={14} style={{ color: MUTED }} />
+      </div>
+    );
+  }
+
+  return (
+    // eslint-disable-next-line @next/next/no-img-element -- user-uploaded Supabase-storage thumbnail; host isn't in the optimizer allowlist and the render is tiny
+    <img
+      src={src}
+      alt=""
+      className={className}
+      onError={() => {
+        if (refreshed.current) { setDead(true); return; }
+        refreshed.current = true;
+        router.refresh();
+      }}
+    />
+  );
+}
+
 function SetupCard({ setup, stats, onClick }: {
   setup: Setup;
   stats: ReturnType<typeof computeStats>;
@@ -238,8 +295,7 @@ function SetupCard({ setup, stats, onClick }: {
           )}
         </div>
         {setup.image_url && (
-          // eslint-disable-next-line @next/next/no-img-element -- user-uploaded Supabase-storage thumbnail; host isn't in the optimizer allowlist and the render is tiny
-          <img src={setup.image_url} alt="" className="w-14 h-10 rounded-lg object-cover shrink-0" />
+          <SetupImage src={setup.image_url} className="w-14 h-10 rounded-lg object-cover shrink-0" />
         )}
       </div>
 
@@ -327,8 +383,7 @@ function DetailView({ setup, stats, linked, unlinked, aiReview, aiLoading, onBac
             )}
           </div>
           {setup.image_url && (
-            // eslint-disable-next-line @next/next/no-img-element -- user-uploaded Supabase-storage thumbnail; host isn't in the optimizer allowlist and the render is tiny
-            <img src={setup.image_url} alt="" className="w-24 h-16 rounded-xl object-cover shrink-0" />
+            <SetupImage src={setup.image_url} className="w-24 h-16 rounded-xl object-cover shrink-0" />
           )}
         </div>
         {(setup.entry_conditions || setup.stop_loss || setup.take_profit || setup.market_context)
@@ -531,6 +586,7 @@ function CreateForm({ userId, supabase, onSave, onCancel }: {
     setSaving(true);
     setError('');
 
+    let image_path: string | null = null;
     let image_url: string | null = null;
 
     if (imgFile) {
@@ -560,6 +616,11 @@ function CreateForm({ userId, supabase, onSave, onCancel }: {
         setSaving(false);
         return;
       }
+      image_path = path;
+      // Still written so 019 stays reversible: while this column holds a
+      // working public URL, rolling back is redeploy + re-open the bucket,
+      // with no data to restore. Dead once 020 makes the bucket private, and
+      // never read for display -- the server component signs image_path.
       const { data } = supabase.storage.from('setup-images').getPublicUrl(path);
       image_url = data.publicUrl;
     }
@@ -575,6 +636,7 @@ function CreateForm({ userId, supabase, onSave, onCancel }: {
         stop_loss:        form.stopLoss.trim()        || null,
         take_profit:      form.takeProfit.trim()      || null,
         market_context:   form.marketContext.trim()   || null,
+        image_path,
         image_url,
       })
       .select().single();
@@ -582,7 +644,16 @@ function CreateForm({ userId, supabase, onSave, onCancel }: {
     if (dbErr || !data) {
       setError('שגיאה בשמירה. נסה שוב.');
     } else {
-      onSave(data as Setup);
+      // This row never passes through the server component, so nothing has
+      // signed it. Mint a URL here so the new setup shows its image straight
+      // away instead of waiting for the next full page load.
+      let saved = data as Setup;
+      if (image_path) {
+        const { data: signed } = await supabase.storage
+          .from('setup-images').createSignedUrl(image_path, SIGNED_URL_TTL_SECONDS);
+        saved = { ...saved, image_url: signed?.signedUrl ?? null };
+      }
+      onSave(saved);
     }
     setSaving(false);
   }

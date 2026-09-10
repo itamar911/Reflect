@@ -1,0 +1,31 @@
+-- 020 · REF-69 — close the public read endpoint on setup-images
+--
+-- DO NOT RUN THIS UNTIL THE CODE FROM 019's STEP IS DEPLOYED.
+--
+-- This is the statement that actually closes the exposure. Until now the
+-- bucket has been public: /storage/v1/object/public/setup-images/<path>
+-- served any known key to anyone, with no credential and no RLS involved --
+-- verified live, HTTP 200 and 128KB of a real user's chart screenshot. 018
+-- stopped attackers *discovering* keys; only this stops them *using* one.
+--
+-- Ordering matters and is not reversible in the other direction: the moment
+-- this runs, every stored image_url stops resolving. If the deployed build is
+-- still rendering image_url rather than a signed image_path, every setup image
+-- in the app breaks at once. Confirm the signing build is live first.
+--
+-- Prerequisites, all three:
+--   1. 019 has run and both of its verification queries return zero rows
+--   2. the build that signs image_path is deployed to production
+--   3. /setups renders images on that build with the bucket still public
+--
+-- After running, verify with scripts/probe-bucket.mjs:
+--   A1  anon list  -> 200 with zero entries   (unchanged, 018)
+--   A2  no apikey  -> 400                     (unchanged)
+--   A4  public GET -> 400/404                 (THIS is what 020 changes)
+--
+-- Rollback -- immediate and complete, because image_url is still populated:
+--   UPDATE storage.buckets SET public = true WHERE id = 'setup-images';
+-- The previous build then works unchanged. Nothing to restore. Note this
+-- reopens the exposure, so it is a break-glass step, not a resting state.
+
+UPDATE storage.buckets SET public = false WHERE id = 'setup-images';
