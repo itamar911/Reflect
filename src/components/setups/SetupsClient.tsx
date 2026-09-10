@@ -537,10 +537,17 @@ function CreateForm({ userId, supabase, onSave, onCancel }: {
       const path = `${userId}/${Date.now()}-${imgFile.name}`;
       const { error: uploadErr } = await supabase.storage
         .from('setup-images').upload(path, imgFile, { upsert: true });
-      if (!uploadErr) {
-        const { data } = supabase.storage.from('setup-images').getPublicUrl(path);
-        image_url = data.publicUrl;
+      if (uploadErr) {
+        // Previously swallowed: the row saved with a null image_url and the
+        // user got a setup whose screenshot had silently vanished. A storage
+        // failure now aborts the save, so what is on screen matches the DB.
+        console.error('setup-images upload failed:', uploadErr);
+        setError('העלאת התמונה נכשלה. הסטאפ לא נשמר — נסה שוב.');
+        setSaving(false);
+        return;
       }
+      const { data } = supabase.storage.from('setup-images').getPublicUrl(path);
+      image_url = data.publicUrl;
     }
 
     const { data, error: dbErr } = await supabase
