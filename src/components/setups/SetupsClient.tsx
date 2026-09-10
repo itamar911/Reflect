@@ -534,9 +534,23 @@ function CreateForm({ userId, supabase, onSave, onCancel }: {
     let image_url: string | null = null;
 
     if (imgFile) {
-      const path = `${userId}/${Date.now()}-${imgFile.name}`;
+      // The user's own filename used to be interpolated into the storage key
+      // raw, which broke two ways. Storage rejects non-ASCII keys outright
+      // with 400 "Invalid key" — and in a Hebrew app a screenshot is usually
+      // Hebrew-named, so this was the common case, not the edge one. Worse,
+      // '#' and '%' were accepted and then landed the object under a key that
+      // getPublicUrl() does not reproduce, giving a saved row pointing at
+      // nothing. Nothing displays the filename (image_url is only ever an
+      // <img> src), so a random key costs nothing and also keeps original
+      // filenames out of the bucket listing.
+      const ext = (imgFile.name.match(/\.([a-zA-Z0-9]{1,5})$/)?.[1] ?? 'png').toLowerCase();
+      const path = `${userId}/${Date.now()}-${crypto.randomUUID()}.${ext}`;
+      // No upsert: a random key cannot collide, and upsert compiles to
+      // INSERT ... ON CONFLICT DO UPDATE, which would need an UPDATE policy
+      // the bucket deliberately does not have. Without one, nothing can
+      // overwrite an existing object at all.
       const { error: uploadErr } = await supabase.storage
-        .from('setup-images').upload(path, imgFile, { upsert: true });
+        .from('setup-images').upload(path, imgFile, { contentType: imgFile.type });
       if (uploadErr) {
         // Previously swallowed: the row saved with a null image_url and the
         // user got a setup whose screenshot had silently vanished. A storage
