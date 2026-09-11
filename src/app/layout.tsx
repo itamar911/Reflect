@@ -28,6 +28,14 @@ export const metadata: Metadata = {
   icons: {
     icon: '/icon.svg',
   },
+  // The commit this document was built from, as <meta name="build-sha">. A tab
+  // keeps running the JS it loaded after the deployment URL has moved on to a
+  // newer build, so "what is deployed" and "what is this tab running" can
+  // differ -- this answers the second. In the console:
+  //   document.querySelector('meta[name="build-sha"]').content
+  // VERCEL_GIT_COMMIT_SHA is a Vercel system variable; 'unknown' means the
+  // build ran off Vercel or without system variables exposed.
+  other: { 'build-sha': process.env.VERCEL_GIT_COMMIT_SHA ?? 'unknown' },
   openGraph: {
     type: 'website',
     locale: 'he_IL',
