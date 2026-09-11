@@ -1,8 +1,14 @@
 /**
  * Isolate the post-018 upload regression on `setup-images`.
  *
- *   SUPABASE_TEST_EMAIL=you@example.com SUPABASE_TEST_PASSWORD=... \
- *     node scripts/repro-upload.mjs
+ *   node scripts/repro-upload.mjs
+ *
+ * Signs in with SUPABASE_TEST_EMAIL and SUPABASE_TEST_PASSWORD, read from
+ * .env.local (or .env) like the Supabase URL and anon key. They are
+ * deliberately NOT read from the process environment, so there is no way to
+ * pass them on the command line: an approved command is saved verbatim --
+ * credentials included -- to .claude/settings.local.json and to the session
+ * transcript.
  *
  * WRITES. It uploads small throwaway objects into YOUR OWN prefix and removes
  * them again at the end, reporting anything it could not clean up. It never
@@ -45,10 +51,11 @@ function loadEnv() {
 }
 
 const env = loadEnv();
-const EMAIL = process.env.SUPABASE_TEST_EMAIL;
-const PASSWORD = process.env.SUPABASE_TEST_PASSWORD;
+// From the env file only, never process.env -- see the header.
+const EMAIL = env.SUPABASE_TEST_EMAIL;
+const PASSWORD = env.SUPABASE_TEST_PASSWORD;
 if (!EMAIL || !PASSWORD) {
-  console.error('Set SUPABASE_TEST_EMAIL and SUPABASE_TEST_PASSWORD.');
+  console.error('Add SUPABASE_TEST_EMAIL and SUPABASE_TEST_PASSWORD to .env.local.');
   process.exit(1);
 }
 
