@@ -25,8 +25,14 @@ manually by the owner in the Supabase SQL Editor.
 Migration files live in `supabase/migrations/` and are numbered (`001_…` through
 `016_…`). When a change needs schema work: write the migration file, then tell the
 owner to run it. Do not run `supabase` CLI commands, `psql`, or scripts that POST
-to the Supabase REST API — the permission rules in `.claude/settings.local.json`
-deny these, and that boundary is deliberate.
+to the Supabase REST API — the deny rules in the committed `.claude/settings.json`
+block these, and that boundary is deliberate.
+
+That includes the repo's own scripts that reach Supabase with `.env.local`
+credentials — `scripts/probe-bucket.mjs`, `scripts/cleanup-orphans.mjs`,
+`scripts/repro-upload.mjs`. The owner runs them. Their deny rules are
+**enumerated by script name**, not a catch-all: a new script that talks to
+Supabase must be added to that deny list in the same change, or nothing stops it.
 
 `src/lib/plans/config.ts` mirrors a DB `CHECK` constraint. If you change plan tiers
 in one place, the other must change in the same migration.
@@ -76,3 +82,8 @@ actually renders. `MockFrame.tsx` provides the shared chrome.
   `.env.production`, `.env.test`, plus `**/` variants. `.env.example` is
   deliberately allowed. A new variant such as `.env.staging` is NOT covered by
   anything: add it to that deny list explicitly, or it is readable and writable.
+- **Never put a credential on a command line** — not as an env-var prefix, not
+  as an argument. Every approved command is saved verbatim to
+  `.claude/settings.local.json` and to the session transcript. Scripts read
+  secrets and test logins from `.env.local` (see `loadEnv()` in
+  `scripts/probe-bucket.mjs`); the command line stays `node script.mjs`.
