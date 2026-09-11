@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Sparkles, Target, ImageOff } from 'lucide-react';
 import { renderPlainAiText } from '@/lib/ai/textFormatting';
-import { SIGNED_URL_TTL_SECONDS } from '@/lib/setups/imageUrls';
+import { SIGNED_URL_TTL_SECONDS, isOwnedPath, removeSetupImage } from '@/lib/setups/imageUrls';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -100,12 +100,15 @@ export default function SetupsClient({
   const [selected, setSelected] = useState<Setup | null>(null);
   const [aiReview, setAiReview] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
 
   const supabase = createClient();
 
   function openDetail(s: Setup) {
     setSelected(s);
     setAiReview(null);
+    setDeleteError('');
     setView('detail');
   }
 
@@ -126,9 +129,62 @@ export default function SetupsClient({
     setAiLoading(false);
   }
 
-  async function deleteSetup(id: string) {
-    await supabase.from('setups').delete().eq('id', id);
-    setSetups(prev => prev.filter(s => s.id !== id));
+  /**
+   * Image first, row second, and each step judged by what actually happened
+   * rather than by the absence of an error.
+   *
+   * The order is the point. A row deleted with its object left behind is an
+   * orphan nothing will ever find again -- the thing this change exists to
+   * stop producing -- so any storage failure aborts before the row is touched.
+   * The opposite leftover, a row whose image is already gone, stays visible
+   * (the setup is still listed, without its picture) and a retry finishes it:
+   * removeSetupImage treats an already-absent object as success.
+   *
+   * Previously both calls were fire-and-forget: the row delete's result was
+   * never read and the setup vanished from the list whether or not the DB
+   * agreed. Every failure now keeps the user on the detail view with the setup
+   * intact and a message saying what did and did not happen.
+   */
+  async function deleteSetup(setup: Setup) {
+    setDeleting(true);
+    setDeleteError('');
+
+    // A path outside this user's prefix is not theirs to remove, and RLS would
+    // refuse it anyway; skip storage and let the row go.
+    const path = setup.image_path;
+    const ownsImage = isOwnedPath(path, userId);
+    if (path && !ownsImage) {
+      console.warn('[setup-images] not removing path outside the owner prefix', { setup: setup.id, path });
+    }
+
+    if (ownsImage && !(await removeSetupImage(supabase, path))) {
+      setDeleteError('מחיקת התמונה נכשלה, ולכן הסטאפ לא נמחק. נסה שוב.');
+      setDeleting(false);
+      return;
+    }
+
+    // .select() so a delete that RLS filters to zero rows is visible as such;
+    // without it PostgREST reports success either way.
+    const { data, error } = await supabase
+      .from('setups').delete().eq('id', setup.id).select('id');
+
+    if (error || !data || data.length === 0) {
+      console.error('setups row delete failed:', error ?? 'zero rows deleted', { setup: setup.id });
+      if (ownsImage) {
+        // The image really is gone; stop rendering a URL for it.
+        const cleared = { ...setup, image_url: null };
+        setSelected(cleared);
+        setSetups(prev => prev.map(s => s.id === setup.id ? cleared : s));
+        setDeleteError('התמונה נמחקה, אבל מחיקת הסטאפ נכשלה. נסה שוב.');
+      } else {
+        setDeleteError('מחיקת הסטאפ נכשלה. נסה שוב.');
+      }
+      setDeleting(false);
+      return;
+    }
+
+    setSetups(prev => prev.filter(s => s.id !== setup.id));
+    setDeleting(false);
     setView('list');
   }
 
@@ -164,7 +220,9 @@ export default function SetupsClient({
         aiReview={aiReview}
         aiLoading={aiLoading}
         onBack={() => setView('list')}
-        onDelete={() => deleteSetup(selected.id)}
+        deleting={deleting}
+        deleteError={deleteError}
+        onDelete={() => deleteSetup(selected)}
         onAiReview={() => fetchAiReview(selected)}
         onToggleTrade={toggleTradeLink}
       />
@@ -329,13 +387,15 @@ function StatBadge({ label, value, color = 'var(--color-tg-text)' }: { label: st
 
 // ── Detail view ───────────────────────────────────────────────────────────────
 
-function DetailView({ setup, stats, linked, unlinked, aiReview, aiLoading, onBack, onDelete, onAiReview, onToggleTrade }: {
+function DetailView({ setup, stats, linked, unlinked, aiReview, aiLoading, deleting, deleteError, onBack, onDelete, onAiReview, onToggleTrade }: {
   setup: Setup;
   stats: ReturnType<typeof computeStats>;
   linked: LinkedTrade[];
   unlinked: LinkedTrade[];
   aiReview: string | null;
   aiLoading: boolean;
+  deleting: boolean;
+  deleteError: string;
   onBack: () => void;
   onDelete: () => void;
   onAiReview: () => void;
@@ -364,11 +424,18 @@ function DetailView({ setup, stats, linked, unlinked, aiReview, aiLoading, onBac
           </svg>
           כל הסטאפים
         </button>
-        <button onClick={onDelete} className="text-xs px-3 py-1.5 rounded-lg"
+        <button onClick={onDelete} disabled={deleting}
+          className="text-xs px-3 py-1.5 rounded-lg disabled:opacity-50"
           style={{ background: 'rgba(248,113,113,0.1)', color: '#f87171' }}>
-          מחק סטאפ
+          {deleting ? 'מוחק…' : 'מחק סטאפ'}
         </button>
       </div>
+
+      {deleteError && (
+        <p role="alert" className="text-xs px-3 py-2 rounded-xl" style={{ background: 'rgba(248,113,113,0.1)', color: '#f87171' }}>
+          {deleteError}
+        </p>
+      )}
 
       {/* Header */}
       <div className="rounded-2xl p-4 flex flex-col gap-3" style={{ background: SURF, border: `1px solid ${BORDER}` }}>

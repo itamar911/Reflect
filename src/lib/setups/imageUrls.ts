@@ -36,6 +36,47 @@ export function isOwnedPath(path: string | null, userId: string): path is string
 }
 
 /**
+ * Remove one setup image and report whether it is actually gone.
+ *
+ * remove() does not report refusal as an error: it returns only the objects it
+ * deleted, so an RLS refusal comes back as `data: []` with `error: null`. An
+ * empty result is therefore ambiguous -- refused, or already absent (a retry
+ * after an earlier attempt removed the object but failed to delete the row).
+ * Rather than guess, ask the bucket whether the key still exists. Same rule as
+ * deleteAccount's recheck: believe the listing, not the call.
+ *
+ * Returns false on any outcome other than "the object no longer exists".
+ * Logs the reason; the caller owns what the user is shown.
+ */
+export async function removeSetupImage(
+  supabase: SupabaseClient,
+  path: string,
+): Promise<boolean> {
+  const bucket = supabase.storage.from(SETUP_IMAGE_BUCKET);
+
+  const { data, error } = await bucket.remove([path]);
+  if (error) {
+    console.error('[setup-images] remove failed', { path, error });
+    return false;
+  }
+  if (data.length > 0) return true;
+
+  const slash = path.lastIndexOf('/');
+  const folder = path.slice(0, slash);
+  const file = path.slice(slash + 1);
+  const { data: left, error: listErr } = await bucket.list(folder, { search: file, limit: 100 });
+  if (listErr) {
+    console.error('[setup-images] remove returned nothing and the recheck failed', { path, error: listErr });
+    return false;
+  }
+  if (left.some((o) => o.name === file)) {
+    console.error('[setup-images] remove refused: object still present', { path });
+    return false;
+  }
+  return true;
+}
+
+/**
  * Replace each row's `image_url` with a freshly signed URL for its
  * `image_path`.
  *
