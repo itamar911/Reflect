@@ -33,7 +33,7 @@ export const metadata: Metadata = {
   alternates: { canonical: '/privacy' },
 };
 
-const LAST_UPDATED = '28 באוגוסט 2026';
+const LAST_UPDATED = '14 בספטמבר 2026';
 const SUPPORT_EMAIL = 'support@reflecttrading.app';
 
 export default function PrivacyPage() {
@@ -298,7 +298,8 @@ export default function PrivacyPage() {
               פעיל
             </li>
             <li>
-              <strong className="font-bold">לאחר בקשת מחיקה</strong> — הנתונים נמחקים תוך 30 יום
+              <strong className="font-bold">עם מחיקת החשבון</strong> — הנתונים נמחקים מיד, ללא
+              תקופת המתנה
             </li>
             <li>
               <strong className="font-bold">מידע חשבונאי</strong> — נשמר שבע שנים כנדרש בדיני המס
@@ -306,8 +307,56 @@ export default function PrivacyPage() {
             </li>
           </UL>
           <P>
-            <strong className="font-bold">למחיקת חשבון:</strong> יש לפנות בדוא&quot;ל לכתובת{' '}
-            <SupportEmail />. נטפל בבקשה ונאשר את ביצועה.
+            <strong className="font-bold">מחיקת החשבון:</strong>{' '}
+            תוכלו למחוק את החשבון בעצמכם, בכל עת, מתוך דף ההגדרות בשירות — באזור &quot;אזור מסוכן&quot;. המחיקה מחייבת הזנה של
+            הסיסמה שלכם ושל מילת אישור, ומתבצעת מיד עם האישור. אין צורך לפנות אלינו ואיננו נדרשים
+            לאשר אותה.
+          </P>
+          <P>
+            המחיקה מיידית ובלתי הפיכה. אין תקופת צינון, אין אפשרות לבטל אותה לאחר האישור, ואין דרך
+            לשחזר את החשבון או את הנתונים — איננו שומרים עותק שניתן להשיב.
+          </P>
+          <P>המחיקה מסירה:</P>
+          <UL>
+            <li>
+              <strong className="font-bold">הקבצים שהעליתם</strong> — כל התמונות שצירפתם, מתוך
+              שטח האחסון
+            </li>
+            <li>
+              <strong className="font-bold">החיבור לחשבון המסחר</strong> — לרבות אסימוני הגישה
+              השמורים אצלנו
+            </li>
+            <li>
+              <strong className="font-bold">נתוני החשבון בכל טבלאות המשתמש</strong> — הפרופיל,
+              תוכניות העסקה, החוקים והפרותיהם, היומן, הסטאפים, האסטרטגיות, הרצפים, הגדרות
+              ההתראות, תובנות הבינה המלאכותית והסיכומים השבועיים
+            </li>
+            <li>
+              <strong className="font-bold">רשומת המשתמש במערכת האימות</strong> — החשבון עצמו חדל
+              להתקיים ולא ניתן עוד להתחבר אליו
+            </li>
+          </UL>
+          <P>
+            בתום המחיקה המערכת בודקת את כל טבלאות המשתמש ומוודאת שלא נותרו בהן נתונים. אם נותרו,
+            המחיקה מדווחת ככושלת ולא כמושלמת.
+          </P>
+          <P>
+            <strong className="font-bold">מה אינו נמחק:</strong>
+          </P>
+          <UL>
+            <li>
+              <strong className="font-bold">מיילים שכבר נשלחו אליכם</strong> — הם מצויים בתיבת
+              הדואר שלכם וברישומי ספק שליחת הדואר, ואינם בשליטתנו
+            </li>
+            <li>
+              <strong className="font-bold">פניות ומשוב ששלחתם לנו</strong> — אלה נשלחים כהודעת
+              דואר לתיבה שלנו ואינם נשמרים בבסיס הנתונים של השירות, ולכן מחיקת החשבון אינה מגיעה
+              אליהם
+            </li>
+          </UL>
+          <P>
+            אם אינכם מצליחים להתחבר לחשבון ולכן אינכם יכולים להגיע לדף ההגדרות, פנו אלינו בדוא&quot;ל
+            לכתובת <SupportEmail /> ונבצע את המחיקה עבורכם.
           </P>
         </Section>
 
