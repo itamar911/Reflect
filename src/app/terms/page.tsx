@@ -30,7 +30,7 @@ export const metadata: Metadata = {
   alternates: { canonical: '/terms' },
 };
 
-const LAST_UPDATED = '1 בספטמבר 2026';
+const LAST_UPDATED = '14 בספטמבר 2026';
 const SUPPORT_EMAIL = 'support@reflecttrading.app';
 
 export default function TermsPage() {
@@ -295,7 +295,10 @@ export default function TermsPage() {
 
         <Section n={13} title="סיום ההתקשרות">
           <P>
-            13.1 תוכלו לסגור את חשבונכם בכל עת בפנייה לכתובת <SupportEmail />.
+            13.1 תוכלו לסגור את חשבונכם בעצמכם בכל עת, מתוך דף ההגדרות בשירות. הסגירה מחייבת הזנה
+            של סיסמת החשבון ושל מילת אישור, והיא מיידית ובלתי הפיכה — לא ניתן לשחזר את החשבון או
+            את הנתונים לאחר מכן. היקף המחיקה מפורט במדיניות הפרטיות. אם אינכם מצליחים להתחבר ולכן
+            אינכם יכולים להגיע לדף ההגדרות, פנו לכתובת <SupportEmail />.
           </P>
           <P>
             13.2 אנחנו רשאים להשעות או לסגור חשבון במקרה של הפרה מהותית של תנאים אלה, של פעילות
