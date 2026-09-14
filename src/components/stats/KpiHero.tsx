@@ -119,9 +119,10 @@ function Kpi({ label, sub, value, valueColor, visual }: {
         <span style={{ fontSize: 11, fontWeight: 600, color: MUTED }}>{label}</span>
         {/* No opacity here: the 0.75 this used to carry existed only to fake a
             step down from `label` back when --color-tg-muted was #ffffff. The
-            token is a real muted grey now, and 0.75 on top of it measures
-            4.33:1 on --color-tg-surface — under AA at this size. The size and
-            weight difference against `label` (11px/600) is the hierarchy. */}
+            token is a real muted grey now, and 0.75 on top of it composites to
+            3.99:1 on --color-tg-surface — under AA at this size. Without it
+            this measures 5.83:1. The size and weight difference against
+            `label` (11px/600) is the hierarchy. */}
         {sub && <span style={{ fontSize: 10.5, color: MUTED }}>{sub}</span>}
       </div>
     </div>

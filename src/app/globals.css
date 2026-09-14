@@ -45,8 +45,8 @@
      token is used at.
 
      Anything dimmer fails: #a0a5b0 lands at 4.47:1 on that same cell. Do not
-     stack a per-use opacity on this token — 0.75 over surface drops it to
-     4.33:1. */
+     stack a per-use opacity on this token — 0.75 over --color-tg-surface
+     composites to 3.99:1, against 5.83:1 for the token on its own. */
   --color-tg-muted: #a8adb8;
 }
 
