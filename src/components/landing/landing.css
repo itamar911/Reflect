@@ -13,7 +13,7 @@
      the page renders identically in both themes. */
   --color-tg-text: #f1f5f9;
   --color-tg-text-2: #ffffff;
-  --color-tg-muted: #ffffff;
+  --color-tg-muted: #a8adb8;
   --color-tg-disclosure: rgba(255, 255, 255, 0.72);
   --color-tg-border: #42424a;
   --color-tg-surface: #303036;
@@ -82,7 +82,11 @@
 
    Put it on any <a>/<Link> that renders as a button (its own padded, filled
    or outlined box). Do not put it on inline text links — they are supposed
-   to pick up the underline treatment. */
+   to pick up the underline treatment.
+
+   It is app-wide despite living in landing.css: the app shell's demo-banner
+   CTA (AppShell.tsx) carries it too. A button-styled anchor added anywhere
+   needs it — grep for anchors with a background or border and no marker. */
 
 /* ── Primary CTA: gradient fill + glow + hover lift ────────── */
 

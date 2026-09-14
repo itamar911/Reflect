@@ -15,8 +15,9 @@
  *   - **`text-xs`, which is 14px here, not 12.** globals.css bumps the whole
  *     `text-*` scale one step. This is the floor: anything smaller stops being
  *     "visible and legible", which is the standard these texts have to meet.
- *   - **`--color-tg-disclosure`.** Not `--color-tg-muted`: on dark that token
- *     is #ffffff, i.e. brighter than body text. See the token's own comment.
+ *   - **`--color-tg-disclosure`.** Not `--color-tg-muted`: this text has a
+ *     legal legibility floor, so it must not ride a token that call sites can
+ *     re-tune or layer opacity on. See the token's own comment.
  *
  * Measured on the landing background: 8.86:1 at 14px — past AAA (7:1) for
  * normal text, so the alpha did not need loosening when the size came down.

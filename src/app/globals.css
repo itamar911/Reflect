@@ -29,7 +29,25 @@
 
   --color-tg-text: #f1f5f9;
   --color-tg-text-2: #ffffff;
-  --color-tg-muted: #ffffff;
+
+  /* Dark-theme muted. Was #ffffff, which made every "muted" string render at
+     full white — brighter than --color-tg-text, so the semantic step down was
+     inverted rather than merely weak.
+
+     #a8adb8 is measured, not mirrored from the light theme's #5c6370 (chosen
+     against white) or its #b2b5be. Worst case across every background muted
+     text actually lands on is 4.91:1, on the journal calendar's win-day cell
+     (#224236) — a tinted, non-standard surface that is lighter than
+     --color-tg-surface-2 and is what binds the value. On the standard
+     surfaces it measures 5.16:1 (surface-2), 5.83:1 (surface) and 6.42:1
+     (bg). Primary text on surface is 11.97:1, so muted sits at ~46% of its
+     luminance: clearly subordinate, still past AA at the 9-10px sizes this
+     token is used at.
+
+     Anything dimmer fails: #a0a5b0 lands at 4.47:1 on that same cell. Do not
+     stack a per-use opacity on this token — 0.75 over surface drops it to
+     4.33:1. */
+  --color-tg-muted: #a8adb8;
 }
 
 :root {
@@ -53,11 +71,12 @@
   --shell-nav-shadow:     0 -1px 0 rgba(0,210,210,0.05), 0 -4px 32px rgba(0,0,0,0.6);
 
   /* Legal disclosures (src/components/legal/). Its own token rather than
-     --color-tg-muted, because in dark mode that token is #ffffff — brighter
-     than body text, not dimmer — and every muted-looking thing on the dark
-     surfaces is really --color-tg-muted plus a per-use opacity. Disclosure
-     text is legally required to be legible, so it cannot be tuned by eye at
-     each call site; it gets one value, set once.
+     --color-tg-muted: disclosure text is legally required to be legible, so
+     it cannot ride a token that call sites are free to re-tune or layer
+     opacity on; it gets one value, set once. (--color-tg-muted is now a real
+     muted grey rather than the #ffffff it used to be, so the two no longer
+     disagree about direction — but the reason for a separate token is
+     independence from that token's future, not its past value.)
 
      0.72 white measures ~8.4:1 on the landing and shell backgrounds — well
      past AA at 16px, and clearly subordinate to the near-white body copy. */

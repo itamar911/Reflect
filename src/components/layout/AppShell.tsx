@@ -627,7 +627,7 @@ export default function AppShell({
             </span>
             <a
               href="/signup"
-              className="text-xs font-bold px-3 py-1 rounded-full transition-opacity hover:opacity-85"
+              className="link-button text-xs font-bold px-3 py-1 rounded-full transition-opacity hover:opacity-85"
               style={{ background: ACCENT, color: '#0a0a0f' }}
             >
               התחילו עכשיו
