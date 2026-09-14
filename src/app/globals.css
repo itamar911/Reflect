@@ -58,7 +58,24 @@
 
   --text-primary:   #f1f5f9;
   --text-secondary: #ffffff;
-  --text-muted:     #ffffff;
+
+  /* Same defect --color-tg-muted had, on the other muted token: #ffffff made
+     "muted" brighter than --text-primary. Two consumers, both in the
+     accessibility panel (AccessibilityWidget.tsx) — the close button's X icon
+     and a toggle's note line — and both sit on exactly one background,
+     --color-tg-surface #303036, with no opacity stacked on top.
+
+     #a8adb8 measures 5.83:1 there, past AA for the 14px note and well past
+     the 3:1 that WCAG 1.4.11 asks of the icon; primary on that surface is
+     11.97:1, so muted lands at ~46% of its luminance.
+
+     That single background is a standard surface, not a tinted one, so
+     contrast alone does not force this exact value — dimmer values clear AA
+     here too. It matches --color-tg-muted because the light theme already
+     gives both tokens the identical #5c6370; keeping them equal in dark
+     restores a parity light already had, rather than inventing a second
+     muted grey that differs only in the dark theme. */
+  --text-muted:     #a8adb8;
 
   --shell-bg:             rgba(41, 41, 48, 0.97);
   --shell-header-bg:      rgba(41, 41, 48, 0.88);
