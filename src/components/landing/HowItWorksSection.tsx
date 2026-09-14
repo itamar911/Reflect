@@ -412,6 +412,29 @@ function RailToNext({ index }: { index: number }) {
  * three quite different illustrations still read as one family, the same way
  * DistinctionSection's PanelShell holds its two panels together.
  */
+/**
+ * Shared shell for the three stage mocks. Font sizes from here down — all 16 px
+ * sites in this file, across this shell and RulesMock / GateMock / LessonMock —
+ * are deliberately px, not rem. They are excluded from the px->rem conversion by
+ * decision, not left behind by oversight; do not "finish the job" on them later.
+ *
+ * The reason is only the first of the two the feature mocks give (see the note
+ * in feature-mocks/MockFrame.tsx): these are aria-hidden illustrations of UI,
+ * not reading copy, so they have nothing to gain from following the text-scale
+ * and they read as screenshots when they stay put.
+ *
+ * The second reason does NOT apply here, and that difference is worth stating
+ * rather than glossing: MockFrame pins a min-height and DistinctionSection's
+ * PanelShell pins PANEL_MIN_H, but this shell sets no height at all — measured,
+ * it computes min-height: auto, and the three panels size purely to content
+ * (221/175/191px at a 16px root, 284/212/250px at the widget's 150% step, with
+ * no overflow at either). So px here is not protecting anything from clipping;
+ * nothing would clip if these were rem. Keep them px for the illustration
+ * reason, but do not repeat "fixed frame" as the justification — it is not true
+ * of this section, and a future reader acting on it would be misled.
+ *
+ * The step titles and body copy above the mocks are rem, and stay rem.
+ */
 function MockPanel({
   title,
   cue,

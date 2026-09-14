@@ -12,8 +12,13 @@ export function SectionHeading({ children, sub, className = '', compact = false 
   return (
     <div className={`flex flex-col items-center text-center ${compact ? 'mb-8' : 'mb-14'} ${className}`}>
       <ScrollReveal>
-        {/* Size comes from .text-4xl (globals.css:552 — 2.625rem/3rem, ~42px at a
-            16px default); the rem scale is what follows the browser's font size. */}
+        {/* Size comes from the .text-4xl override in globals.css: 2.625rem/3rem,
+            which renders 42px at a 16px root and 63px at the widget's 150% step.
+            The rem scale is what follows the browser's font size.
+
+            Referenced by rule name rather than line number on purpose — the
+            pointer this replaces read "globals.css:552" and was already off the
+            rule (it sat at 568) before later edits moved it again. */}
         <h2 className="text-4xl font-extrabold text-white">{children}</h2>
       </ScrollReveal>
       <ScrollReveal delay={100}>

@@ -316,6 +316,23 @@ export function DistinctionSection() {
 // ── Panels ───────────────────────────────────────────────────
 
 /**
+ * Font sizes from here down are deliberately px, not rem — the same exclusion
+ * the six feature mocks carry, and for the same two reasons (see the note in
+ * feature-mocks/MockFrame.tsx). These panels are aria-hidden illustrations of
+ * UI rather than reading copy, and their text sits inside fixed geometry:
+ * PanelShell pins minHeight to PANEL_MIN_H, so growing the text with the
+ * accessibility widget's scale would grow it inside a frame sized in px.
+ *
+ * That covers all 12 px sites in this file, across PanelShell, DecisionPanel,
+ * CheckRow (rendered by DecisionPanel) and ArchivePanel. They are excluded from
+ * the px->rem conversion by decision, not left behind by oversight — do not
+ * "finish the job" on them in a later pass.
+ *
+ * The section's actual reading copy — the two paragraphs in DistinctionSection
+ * itself — is rem, and stays rem.
+ */
+
+/**
  * Shared skeleton: a header row carrying the label and a state cue, a body that
  * takes the slack, and a two-stat footer above a hairline. It is what keeps two
  * very differently-weighted bodies reading as a pair.
