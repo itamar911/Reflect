@@ -170,6 +170,41 @@ html[data-a11y-text-scale='150'] .lnav-mobile {
   display: flex !important;
 }
 
+/* ── Nav badge: hidden once the row can no longer afford it ──────
+   The badge is the widest optional item in the links group. Three states
+   at a 16px root need the room it takes (required content width, measured
+   the same way as the thresholds above):
+
+     scale 100 / underline ON   1277.9  vs the >=1210 show-threshold
+     scale 110 / underline OFF  1278.0  vs the >=1300 show-threshold
+     scale 110 / underline ON   1362.0  vs the max-w-[1360px] cap itself,
+                                        which no viewport width can satisfy
+
+   Dropping the badge returns 186.8-204.0px at this root, which clears all
+   three. scale 100 / underline OFF needs 1193.9 and keeps the badge.
+
+   CSS, not a JS matchMedia check: the server cannot know the viewport
+   before hydration, so a JS gate renders the wrong nav for a frame on
+   every reload. These attributes are on <html> before first paint
+   (AccessibilityInitScript), so the first paint is already correct.
+
+   Matched on the value 'true', never on attribute presence — the provider
+   writes every flag with String(value), so data-a11y-underline-links
+   ="false" is on the element for every visitor who has never touched the
+   widget. [data-a11y-underline-links] alone would hide the badge always.
+
+   Only the desktop copy is gated. The mobile panel keeps its own NewBadge:
+   it is what these states fall back to, so hiding it there would drop the
+   badge from the page entirely rather than move it. */
+html[data-a11y-text-scale='110'] .lnav-badge,
+html[data-a11y-text-scale='120'] .lnav-badge,
+html[data-a11y-text-scale='130'] .lnav-badge,
+html[data-a11y-text-scale='140'] .lnav-badge,
+html[data-a11y-text-scale='150'] .lnav-badge,
+html[data-a11y-underline-links='true'] .lnav-badge {
+  display: none !important;
+}
+
 /* ── Mobile nav menu: frosted glass ──────────────────────────
    Tint + blur so the page shows through instead of the old near-opaque
    panel. Deliberately NOT paired with -webkit-backdrop-filter like

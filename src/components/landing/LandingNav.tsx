@@ -103,7 +103,11 @@ export function LandingNav() {
                 {link.label}
               </a>
             ))}
-            <span className="hidden lg:inline-flex">
+            {/* lnav-badge is the hook the accessibility gating in landing.css
+                hides — see the .lnav-badge rules there. Only this desktop copy
+                carries it; the mobile panel's NewBadge below must not, since
+                the mobile panel is what shows in the states that hide this. */}
+            <span className="lnav-badge hidden lg:inline-flex">
               <NewBadge />
             </span>
           </div>
