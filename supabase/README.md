@@ -46,6 +46,34 @@ known gap; see below.
 
 ---
 
+## Triggers the migrations claim and the database does not have
+
+Drift runs in both directions. `002` creates `personal_strategies_updated_at`
+and `alert_settings_updated_at`; **neither exists in the database.** Everything
+else in `002` landed — both tables, both policies, the index, the
+`subscription_tier` column — so this was not a migration that went unrun. Two
+adjacent statements failed and the rest succeeded.
+
+Their one shared dependency is `update_updated_at()`, which is defined in
+`schema.sql` *below* the tables. If `002` was run before that part of
+`schema.sql` had been applied, both `CREATE TRIGGER`s would have failed with
+"function update_updated_at() does not exist" and nothing else in the file
+would have cared. By the time `017` ran, the function existed, which is why
+`tradovate_connections_updated_at` is there. That is inference, not proof —
+Postgres keeps no DDL history — but nothing else explains exactly those two.
+
+Consequence: `updated_at` on `personal_strategies` and `alert_settings` is
+frozen at its insert-time default and never advances. Nothing reads it today
+(every query on both tables orders by `created_at` or fetches by `user_id`), so
+it is cosmetic — but it is a column that is NOT NULL, plausible, and wrong,
+which is worse than one that is absent.
+
+**A migration file in this directory is not evidence that it ran, or that all
+of it ran.** The SQL editor will run twenty statements, fail on the
+twenty-first, and leave a file that looks applied.
+
+---
+
 ## Tables the migrations cannot create
 
 `notebook_pages`, `rule_violations` and `setups` are read and written by the

@@ -1,4 +1,4 @@
--- What is in the live database that supabase/migrations never created.
+-- Where the live database and supabase/migrations disagree, in both directions.
 --
 -- Run in the Supabase SQL editor. Read-only: nothing here changes anything.
 --
@@ -10,12 +10,25 @@
 -- in the dashboard are invisible to every grep, every review and every
 -- deploy, so the only way to find them is to ask the catalog.
 --
--- Each query below subtracts what the repo DOES create, so anything that comes
--- back is drift by definition. Keep the arrays in step with the migrations: if
--- you add a function or trigger in a migration file, add its name here too, or
--- the next run will report it as drift.
+-- Drift runs in both directions, and this file checks both:
 --
--- Run all five. Query 1 is the one needed right now; 2-5 are the sweep.
+--   Queries 1-5  things the DATABASE has that the repo never created.
+--   Queries 6-9  things the REPO declares that the database does not have.
+--
+-- The second direction is not hypothetical. 002 creates
+-- personal_strategies_updated_at and alert_settings_updated_at; both tables
+-- exist, both triggers do not. Everything else in 002 landed. A migration file
+-- sitting in this directory is not evidence that it ran, or that all of it ran
+-- — the SQL editor will happily run twenty statements, fail on the
+-- twenty-first, and leave you with a file that looks applied.
+--
+-- Queries 1-5 subtract what the repo DOES create; queries 6-9 check each thing
+-- the repo declares against the catalog. Both directions depend on the lists
+-- below being in step with the migrations — add a function, trigger, table or
+-- policy in a migration and add its name here in the same change, or the next
+-- run reports your own object as drift and the sweep starts crying wolf.
+-- (The baseline generator, when it lands, replaces both lists with something
+-- derived from the migration files so they cannot rot.)
 
 
 -- ---------------------------------------------------------------------------
@@ -23,7 +36,16 @@
 -- ---------------------------------------------------------------------------
 -- Returns the function body AND the trigger that fires it -- both are needed to
 -- drop them cleanly, since a trigger and its function are separate objects with
--- separate names. Paste the whole result back.
+-- separate names.
+--
+-- Since 022 ran this should return ZERO ROWS, and it is kept as the regression
+-- check: anything here means the plan limits are back, which can only happen by
+-- someone recreating them in the dashboard.
+--
+-- Note it matches on function name OR trigger name. When it was first run it
+-- returned nothing, because the guess at the names was wrong in both: the
+-- triggers are trg_enforce_*, the functions enforce_*. Query 2 is what found
+-- them. A name-based query returning nothing is not evidence of absence.
 
 SELECT
   t.tgname                                  AS trigger_name,
@@ -140,3 +162,156 @@ SELECT schemaname, viewname, definition
 FROM pg_views
 WHERE schemaname = 'public'
 ORDER BY viewname;
+
+
+-- ===========================================================================
+-- THE OTHER DIRECTION — what the repo declares that the database lacks
+-- ===========================================================================
+-- Each of these lists what the migrations create and LEFT JOINs the catalog.
+-- Any row that comes back is something this repo believes exists and which
+-- does not. Zero rows is the pass condition for all four.
+
+
+-- ---------------------------------------------------------------------------
+-- 6. Triggers the repo creates that are missing.
+-- ---------------------------------------------------------------------------
+-- The three trg_enforce_* triggers are deliberately absent from this list:
+-- 022 dropped them, and the repo no longer claims them.
+
+WITH expected(schema_name, table_name, trigger_name, defined_in) AS (
+  VALUES
+    ('auth',   'users',                 'on_auth_user_created',            'schema.sql'),
+    ('public', 'profiles',              'on_profile_created',              'schema.sql'),
+    ('public', 'profiles',              'profiles_updated_at',             'schema.sql'),
+    ('public', 'preset_rules',          'preset_rules_updated_at',         'schema.sql'),
+    ('public', 'personal_strategies',   'personal_strategies_updated_at',  '002'),
+    ('public', 'alert_settings',        'alert_settings_updated_at',       '002'),
+    ('public', 'tradovate_connections', 'tradovate_connections_updated_at','017')
+)
+SELECT e.defined_in, e.schema_name, e.table_name, e.trigger_name, 'MISSING' AS status
+FROM expected e
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM pg_trigger t
+  JOIN pg_class c     ON c.oid = t.tgrelid
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE NOT t.tgisinternal
+    AND n.nspname = e.schema_name
+    AND c.relname = e.table_name
+    AND t.tgname  = e.trigger_name
+)
+ORDER BY e.defined_in, e.table_name, e.trigger_name;
+
+
+-- ---------------------------------------------------------------------------
+-- 7. Functions the repo creates that are missing.
+-- ---------------------------------------------------------------------------
+-- update_updated_at() is the one to watch: every *_updated_at trigger depends
+-- on it, so if it is absent then every CREATE TRIGGER referencing it fails,
+-- which is the likeliest explanation for query 6 finding anything.
+
+WITH expected(function_name, defined_in) AS (
+  VALUES
+    ('handle_new_user',    'schema.sql'),
+    ('handle_new_profile', 'schema.sql'),
+    ('update_updated_at',  'schema.sql')
+)
+SELECT e.defined_in, e.function_name, 'MISSING' AS status
+FROM expected e
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM pg_proc p
+  JOIN pg_namespace n ON n.oid = p.pronamespace
+  WHERE n.nspname = 'public' AND p.proname = e.function_name
+)
+ORDER BY e.function_name;
+
+
+-- ---------------------------------------------------------------------------
+-- 8. Tables the repo creates that are missing.
+-- ---------------------------------------------------------------------------
+-- notebook_pages, rule_violations and setups are NOT here on purpose: no
+-- migration creates them, so their absence would not be a contradiction. They
+-- are the opposite problem, and queries 1-5 are where that shows up.
+
+WITH expected(table_name, defined_in) AS (
+  VALUES
+    ('profiles',              'schema.sql'),
+    ('preset_rules',          'schema.sql'),
+    ('custom_rules',          'schema.sql / 015'),
+    ('trade_plans',           'schema.sql'),
+    ('ai_insights',           '001'),
+    ('streaks',               '001'),
+    ('weekly_summaries',      '001'),
+    ('personal_strategies',   '002'),
+    ('alert_settings',        '002'),
+    ('tradovate_connections', '017')
+)
+SELECT e.defined_in, e.table_name, 'MISSING' AS status
+FROM expected e
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE n.nspname = 'public' AND c.relname = e.table_name AND c.relkind = 'r'
+)
+ORDER BY e.table_name;
+
+
+-- ---------------------------------------------------------------------------
+-- 9. Policies the repo creates that are missing.
+-- ---------------------------------------------------------------------------
+-- A missing policy on a table with RLS enabled means that table is readable by
+-- nobody, which tends to announce itself. A missing policy on a table whose RLS
+-- somehow got turned off means the opposite, and does not announce itself at
+-- all — so pair a finding here with query 10.
+
+WITH expected(table_name, policy_name) AS (
+  VALUES
+    ('profiles',              'Users can view own profile'),
+    ('profiles',              'Users can update own profile'),
+    ('profiles',              'Users can insert own profile'),
+    ('preset_rules',          'Users can manage own preset rules'),
+    ('custom_rules',          'Users can manage own custom rules'),
+    ('trade_plans',           'Users can manage own trade plans'),
+    ('ai_insights',           'Users can manage own insights'),
+    ('streaks',               'Users can manage own streaks'),
+    ('weekly_summaries',      'Users can manage own weekly summaries'),
+    ('alert_settings',        'Users can manage own alert settings'),
+    ('personal_strategies',   'Users can manage own strategies'),
+    ('personal_strategies',   'personal_strategies_select'),
+    ('personal_strategies',   'personal_strategies_insert'),
+    ('personal_strategies',   'personal_strategies_update'),
+    ('personal_strategies',   'personal_strategies_delete'),
+    ('tradovate_connections', 'tradovate_connections_select_own')
+)
+SELECT e.table_name, e.policy_name, 'MISSING' AS status
+FROM expected e
+WHERE NOT EXISTS (
+  SELECT 1 FROM pg_policies pp
+  WHERE pp.schemaname = 'public'
+    AND pp.tablename  = e.table_name
+    AND pp.policyname = e.policy_name
+)
+ORDER BY e.table_name, e.policy_name;
+
+
+-- ---------------------------------------------------------------------------
+-- 10. RLS off on any table in public.
+-- ---------------------------------------------------------------------------
+-- Not a repo-versus-database comparison — a flat invariant. Every table in
+-- public should have RLS on, either because a migration said so or because the
+-- ensure_rls event trigger turned it on at CREATE TABLE time. A row here means
+-- one table is being served to anyone with the anon key regardless of what
+-- policies it carries, since policies on a table with RLS off do nothing.
+--
+-- This is the single highest-value line in the file. Run it even when you are
+-- not looking for drift.
+
+SELECT n.nspname AS schema, c.relname AS table_name, 'RLS IS OFF' AS status
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'public'
+  AND c.relkind = 'r'
+  AND NOT c.relrowsecurity
+ORDER BY c.relname;
