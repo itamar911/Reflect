@@ -450,6 +450,18 @@ ORDER BY c.relkind, c.relname;
 -- scalar. get_user_tier was exactly that. The return type is reported here so
 -- a finding can be triaged, not excluded.
 --
+-- The three grantees asserted on are the ones reachable from a browser holding
+-- a publishable key: PUBLIC (which includes every role), anon, and
+-- authenticated. service_role is NOT asserted on — its key is server-side only
+-- and it bypasses RLS regardless, so an EXECUTE grant to it changes nothing
+-- about what a client can reach. Neither is the function's owner, which needs
+-- EXECUTE for CREATE TRIGGER to work.
+--
+-- Baseline: zero after 024 and 027 together. 024 alone left `authenticated` on
+-- all four functions, which would have started this assertion off failing —
+-- and an assertion that starts out failing acquires an exception list, then
+-- stops being read.
+--
 -- If a function genuinely needs to be called over PostgREST: grant it to
 -- `authenticated` explicitly, in its own migration, with a comment saying why,
 -- and add its name to the allowance below.
