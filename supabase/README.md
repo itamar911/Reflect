@@ -72,6 +72,44 @@ which is worse than one that is absent.
 of it ran.** The SQL editor will run twenty statements, fail on the
 twenty-first, and leave a file that looks applied.
 
+`026` restores the two triggers. No backfill: the real modification times are
+gone, and writing `created_at` into `updated_at` would put a guess in a column
+that is supposed to hold a fact.
+
+---
+
+## Most of these files cannot be re-run
+
+Re-running a migration here mostly does not converge — it errors. Counted
+across `schema.sql` and `migrations/`:
+
+| Statement | Total | Safe to re-run | Not |
+|---|---|---|---|
+| `CREATE TRIGGER` | 7 | 3 | **4** |
+| `CREATE POLICY` | 18 | 2 | **16** |
+
+The three safe triggers are `on_auth_user_created` and `on_profile_created`
+(both `CREATE OR REPLACE TRIGGER`) and `tradovate_connections_updated_at`
+(`DROP ... IF EXISTS` then `CREATE`). The two safe policies are in `017` and
+`018`. `004` does carry a `DROP POLICY IF EXISTS`, but for the policy it is
+replacing, not for the four it then creates — so re-running `004` still fails.
+
+`CREATE TABLE`, `CREATE INDEX` and `ADD COLUMN` are almost all written
+`IF NOT EXISTS`, so the tables are fine. It is the triggers and policies that
+are not.
+
+**Why this matters.** When a migration fails halfway, the instinct is to fix
+the problem and run the file again — and here that hits "trigger already
+exists" or "policy already exists" on the statements that *did* succeed, which
+makes it look as though the file is already applied. That is how you end up
+believing `002` ran. Recovering means reading the file and running the
+remaining statements by hand, which is exactly the situation that produces
+divergence.
+
+Not worth rewriting history for its own sake. But **anything new should be
+written to converge**: `CREATE OR REPLACE TRIGGER` (PG14+), and
+`DROP POLICY IF EXISTS` before every `CREATE POLICY`. `026` is the pattern.
+
 ---
 
 ## Tables the migrations cannot create

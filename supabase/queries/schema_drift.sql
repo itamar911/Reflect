@@ -278,7 +278,10 @@ WITH expected(table_name, policy_name) AS (
     ('streaks',               'Users can manage own streaks'),
     ('weekly_summaries',      'Users can manage own weekly summaries'),
     ('alert_settings',        'Users can manage own alert settings'),
-    ('personal_strategies',   'Users can manage own strategies'),
+    -- NOT expected: 'Users can manage own strategies'. 002 creates it and 004
+    -- drops it, replacing it with the four per-operation policies below. A
+    -- policy the migrations create and then remove must not be in this list, or
+    -- the sweep reports a false MISSING forever.
     ('personal_strategies',   'personal_strategies_select'),
     ('personal_strategies',   'personal_strategies_insert'),
     ('personal_strategies',   'personal_strategies_update'),
@@ -302,16 +305,110 @@ ORDER BY e.table_name, e.policy_name;
 -- Not a repo-versus-database comparison — a flat invariant. Every table in
 -- public should have RLS on, either because a migration said so or because the
 -- ensure_rls event trigger turned it on at CREATE TABLE time. A row here means
--- one table is being served to anyone with the anon key regardless of what
--- policies it carries, since policies on a table with RLS off do nothing.
+-- one table is served to anyone with the anon key regardless of what policies
+-- it carries, because policies on a table with RLS off do nothing at all.
 --
--- This is the single highest-value line in the file. Run it even when you are
--- not looking for drift.
+-- ── Why ensure_rls does not make this query redundant ──
+--
+-- ensure_rls fires on ddl_command_end for CREATE TABLE, CREATE TABLE AS and
+-- SELECT INTO. That leaves four ways a table ends up here anyway:
+--
+--   1. It predates the event trigger. Anything created before someone typed
+--      ensure_rls into the dashboard was never covered, and depended on a
+--      migration saying ENABLE ROW LEVEL SECURITY explicitly.
+--   2. Someone ran ALTER TABLE ... DISABLE ROW LEVEL SECURITY. ensure_rls
+--      fires on CREATE, never on ALTER, so it will not undo that — not at the
+--      time and not ever. This query is the only thing that would notice, which
+--      is the argument for running it on a schedule rather than once.
+--   3. The event trigger was absent, disabled, or erroring at the moment a
+--      table was created. It logs failures with RAISE LOG, which nobody reads.
+--   4. A restore or a copy brought tables in by a path that did not fire it.
+--
+-- So ensure_rls is a safety net for the common case, not a guarantee, and this
+-- query is what actually checks the invariant. Run it even when not looking for
+-- drift — it is the highest-value line in this file.
+--
+-- relkind covers ordinary tables ('r') and partitioned tables ('p'). A
+-- partitioned parent with RLS off is the same exposure as any other table, and
+-- filtering to 'r' alone would miss it.
 
-SELECT n.nspname AS schema, c.relname AS table_name, 'RLS IS OFF' AS status
+SELECT n.nspname AS schema, c.relname AS table_name, c.relkind, 'RLS IS OFF' AS status
 FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname = 'public'
-  AND c.relkind = 'r'
+  AND c.relkind IN ('r', 'p')
   AND NOT c.relrowsecurity
 ORDER BY c.relname;
+
+
+-- ---------------------------------------------------------------------------
+-- 11. RLS on, but the policies do not constrain anything.
+-- ---------------------------------------------------------------------------
+-- Query 10 only catches RLS being off. RLS being ON is not the same as the
+-- table being protected, and both failure modes look identical in the
+-- dashboard:
+--
+--   no policies at all   -> deny-all for non-owners. Safe, and broken: the
+--                           feature that reads the table silently returns
+--                           nothing for every user.
+--   a policy USING(true) -> every row to every role the policy names. If that
+--                           role list includes anon or public, the table is
+--                           open, and RLS being enabled says nothing about it.
+--
+-- Neither shows up anywhere else in this file.
+
+SELECT
+  c.relname AS table_name,
+  COUNT(pp.policyname) AS policy_count,
+  COUNT(*) FILTER (
+    WHERE pp.qual IN ('true', '(true)') OR pp.with_check IN ('true', '(true)')
+  ) AS unconditional_policies,
+  CASE
+    WHEN COUNT(pp.policyname) = 0 THEN 'RLS ON, NO POLICIES — denies everyone'
+    ELSE 'RLS ON, has an unconditional policy — check the roles column'
+  END AS status
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+LEFT JOIN pg_policies pp ON pp.schemaname = n.nspname AND pp.tablename = c.relname
+WHERE n.nspname = 'public'
+  AND c.relkind IN ('r', 'p')
+  AND c.relrowsecurity
+GROUP BY c.relname
+HAVING COUNT(pp.policyname) = 0
+    OR COUNT(*) FILTER (
+         WHERE pp.qual IN ('true', '(true)') OR pp.with_check IN ('true', '(true)')
+       ) > 0
+ORDER BY c.relname;
+
+
+-- ---------------------------------------------------------------------------
+-- 12. Views and materialised views — the way round RLS entirely.
+-- ---------------------------------------------------------------------------
+-- A view does not have RLS of its own. By default it runs with the privileges
+-- of the view's OWNER, so a view owned by postgres over a table with RLS
+-- returns rows the caller could not have selected directly. ensure_rls does
+-- nothing about this: CREATE VIEW is not one of its tags, and there would be
+-- nothing for it to enable if it were.
+--
+-- A materialised view is worse — it is a stored copy of the data, refreshed on
+-- demand, with no RLS anywhere in the picture.
+--
+-- There are none today (query 5 returns nothing). This exists so that the day
+-- someone adds one, it is noticed. A view over an RLS-protected table should
+-- either be declared WITH (security_invoker = true) — Postgres 15+, so the
+-- caller's own permissions and policies apply — or not exist.
+
+SELECT
+  c.relname AS name,
+  CASE c.relkind WHEN 'v' THEN 'view' WHEN 'm' THEN 'materialised view' END AS kind,
+  pg_get_userbyid(c.relowner) AS owner,
+  COALESCE(
+    (SELECT option_value FROM pg_options_to_table(c.reloptions)
+     WHERE option_name = 'security_invoker'),
+    'not set'
+  ) AS security_invoker
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'public'
+  AND c.relkind IN ('v', 'm')
+ORDER BY c.relkind, c.relname;
