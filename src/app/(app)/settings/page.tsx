@@ -1,11 +1,9 @@
 import { redirect } from 'next/navigation';
 import { createClient, getCachedUser } from '@/lib/supabase/server';
-import { getUserPlan } from '@/lib/plans/getUserPlan';
 import Card from '@/components/ui/Card';
 import AlertsPanel from '@/components/settings/AlertsPanel';
 import type { AlertSettingsData } from '@/components/settings/AlertsPanel';
 import { Plug } from 'lucide-react';
-import PricingPlans from '@/components/settings/PricingPlans';
 import DeleteAccountSection from '@/components/settings/DeleteAccountSection';
 
 export const metadata = { title: 'הגדרות — Reflect' };
@@ -15,10 +13,9 @@ export default async function SettingsPage() {
   const { data: { user } } = await getCachedUser();
   if (!user) redirect('/login');
 
-  const [profileRes, alertRes, { tier: plan }] = await Promise.all([
+  const [profileRes, alertRes] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', user.id).single(),
     supabase.from('alert_settings').select('*').eq('user_id', user.id).single(),
-    getUserPlan(supabase, user.id),
   ]);
 
   const profile = profileRes.data;
@@ -54,13 +51,8 @@ export default async function SettingsPage() {
       {/* Alerts */}
       <Card>
         <h2 className="text-sm font-semibold text-tg-text mb-4">התראות</h2>
-        <AlertsPanel plan={plan} userId={user.id} initialSettings={alertSettings} />
+        <AlertsPanel userId={user.id} initialSettings={alertSettings} />
       </Card>
-
-      {/* Pricing */}
-      <div id="pricing" className="scroll-mt-4">
-        <PricingPlans plan={plan} />
-      </div>
 
       {/* Integrations */}
       <div className="flex flex-col gap-3">
@@ -73,7 +65,7 @@ export default async function SettingsPage() {
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-sm font-bold text-tg-text">חיבור ברוקר בזמן אמת</h3>
                 <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: 'rgba(0,210,210,0.12)', color: '#00d2d2' }}>
-                  זמין בקרוב למנויי Pro
+                  זמין בקרוב
                 </span>
               </div>
               <p className="text-xs text-tg-muted mt-1.5">

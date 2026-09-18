@@ -1,5 +1,4 @@
 import { createClient, getCachedUser } from '@/lib/supabase/server';
-import { getUserPlan } from '@/lib/plans/getUserPlan';
 import StrategiesClient from '@/components/strategies/StrategiesClient';
 import type { PersonalStrategy, TradeSummary } from '@/components/strategies/StrategiesClient';
 
@@ -10,14 +9,13 @@ export default async function StrategiesPage() {
   const { data: { user } } = await getCachedUser();
   if (!user) return null;
 
-  const [strategiesRes, tradesRes, { tier: plan }] = await Promise.all([
+  const [strategiesRes, tradesRes] = await Promise.all([
     supabase.from('personal_strategies').select('*').eq('user_id', user.id).order('created_at'),
     supabase.from('trade_plans')
       .select('id, strategy, symbol, entry_price, exit_price, take_profit, rr_ratio, status, submitted_at, closed_at')
       .eq('user_id', user.id)
       .order('submitted_at', { ascending: false })
       .limit(1000),
-    getUserPlan(supabase, user.id),
   ]);
 
   const strategies = (strategiesRes.data ?? []) as PersonalStrategy[];
@@ -48,7 +46,6 @@ export default async function StrategiesPage() {
         userId={user.id}
         initialStrategies={strategies}
         allTrades={allTrades}
-        plan={plan}
       />
     </div>
   );

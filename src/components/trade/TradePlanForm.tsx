@@ -15,8 +15,7 @@ import Button from '@/components/ui/Button';
 import Select from '@/components/ui/Select';
 import type { TradePlanInput, PresetRules, RulesetValidationResult, TradeStrategy, PnlCurrency, Timeframe } from '@/lib/types';
 import type { PersonalStrategy } from '@/components/strategies/StrategiesClient';
-import { getPlanLimits, isPro, type PlanTier } from '@/lib/plans/config';
-import UpgradeModal from '@/components/plans/UpgradeModal';
+import { getPlanLimits, type PlanTier } from '@/lib/plans/config';
 import { fetchActiveRuleViolation } from '@/lib/rules/fetchActiveRuleViolation';
 import { logRuleViolations, overrideRuleViolations, type RuleViolationLogInput } from '@/lib/rules/logRuleViolation';
 
@@ -33,15 +32,9 @@ const getSavedCurrency = (): PnlCurrency | null => {
   return saved === '₪' || saved === '$' ? saved : null;
 };
 
-// Monday 00:00 UTC of the current week — matches Postgres date_trunc('week', ...).
-function getWeekStartUTC(now: Date = new Date()): Date {
-  const day = now.getUTCDay();
-  const diffToMonday = day === 0 ? 6 : day - 1;
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - diffToMonday));
-}
-
-// Non-pro plans never hard-block trade submission from the rules engine —
-// a "blocked" verdict is downgraded to a warning instead.
+// Downgrades a "blocked" verdict to a warning when hard blocking is off.
+// Nothing turns it off today — every plan has realTimeBlocking — but the policy
+// is kept so the behaviour has one place to live if that ever changes again.
 function applyRealTimeBlockingPolicy(result: RulesetValidationResult, realTimeBlocking: boolean): RulesetValidationResult {
   if (realTimeBlocking || result.status !== 'blocked') return result;
   return {
@@ -144,8 +137,6 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
   const { dialogProps } = useModalDialog({
     open: isOpen, onClose, labelledBy: titleId, initialFocusRef: symbolRef,
   });
-  const [weekTradeCount, setWeekTradeCount] = useState(0);
-  const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
   const [form, setForm] = useState<TradePlanInput>(EMPTY_FORM);
   const [formState, setFormState] = useState<FormState>('empty');
   const [validationResult, setValidationResult] = useState<RulesetValidationResult | null>(null);
@@ -238,9 +229,8 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
   const loadContext = useCallback(async () => {
     setLoading(true);
     const todayStart = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
-    const weekStart = getWeekStartUTC().toISOString();
 
-    const [rulesRes, todayRes, personalRes, weekCountRes] = await Promise.all([
+    const [rulesRes, todayRes, personalRes] = await Promise.all([
       supabase.from('preset_rules').select('*').eq('user_id', userId).single(),
       supabase
         .from('trade_plans')
@@ -248,14 +238,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
         .eq('user_id', userId)
         .gte('submitted_at', todayStart),
       supabase.from('personal_strategies').select('*').eq('user_id', userId).order('created_at'),
-      supabase
-        .from('trade_plans')
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', userId)
-        .gte('submitted_at', weekStart),
     ]);
-
-    setWeekTradeCount(weekCountRes.count ?? 0);
 
     if (personalRes.data) setPersonalStrategyRows(personalRes.data as PersonalStrategy[]);
 
@@ -561,11 +544,6 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
       return;
     }
 
-    if (!isPro(plan) && limits.maxTradesPerWeek !== null && weekTradeCount >= limits.maxTradesPerWeek) {
-      setUpgradeModalOpen(true);
-      return;
-    }
-
     setSubmitLoading(true);
     const entry = entryNum;
     const sl = slPrice;
@@ -594,11 +572,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     }).select('id').single();
 
     if (error) {
-      if (error.message.includes('PLAN_LIMIT:trades_per_week')) {
-        setUpgradeModalOpen(true);
-      } else {
-        setFormState('error');
-      }
+      setFormState('error');
     } else {
       const tradePlanId: string | null = insertedTrade?.id ?? null;
       if (tradePlanId) {
@@ -1184,12 +1158,6 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
           </div>
         )}
       </div>
-
-      <UpgradeModal
-        open={upgradeModalOpen}
-        onClose={() => setUpgradeModalOpen(false)}
-        limitType="trades_per_week"
-      />
     </>
   );
 }

@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import PresetRulesPanel from './PresetRulesPanel';
 import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
-import { Lock, ClipboardList } from 'lucide-react';
+import { ClipboardList } from 'lucide-react';
 import {
   CONDITION_LABELS,
   ACTION_LABELS,
@@ -15,8 +15,6 @@ import {
   describeCustomRule,
 } from '@/lib/validators/RulesetValidator';
 import type { PresetRules, CustomRule, ConditionType, ActionType } from '@/lib/types';
-import { getPlanLimits, isPro, type PlanTier } from '@/lib/plans/config';
-import UpgradeModal, { type UpgradeLimitType } from '@/components/plans/UpgradeModal';
 
 type Tab = 'preset' | 'custom';
 
@@ -24,7 +22,6 @@ interface RulesEditorProps {
   presetRules: PresetRules;
   customRules: CustomRule[];
   userId: string;
-  plan?: PlanTier;
 }
 
 const ACTION_VARIANTS: Record<ActionType, 'warning' | 'danger'> = {
@@ -36,7 +33,7 @@ const ACTION_VARIANTS: Record<ActionType, 'warning' | 'danger'> = {
 const CONDITION_TYPES = Object.keys(CONDITION_LABELS) as ConditionType[];
 const ACTION_TYPES = Object.keys(ACTION_LABELS) as ActionType[];
 
-export default function RulesEditor({ presetRules: initialPreset, customRules: initialCustom, userId, plan = 'free' }: RulesEditorProps) {
+export default function RulesEditor({ presetRules: initialPreset, customRules: initialCustom, userId }: RulesEditorProps) {
   const [tab, setTab] = useState<Tab>('preset');
   const [preset, setPreset] = useState<PresetRules>(initialPreset);
   const [customRules, setCustomRules] = useState<CustomRule[]>(initialCustom);
@@ -61,11 +58,6 @@ export default function RulesEditor({ presetRules: initialPreset, customRules: i
             {t === 'preset' ? 'חוקים מובנים' : (
               <>
                 חוקים אישיים{customRules.length > 0 ? ` (${customRules.length})` : ''}
-                {plan === 'free' && (
-                  <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0110 0v4" />
-                  </svg>
-                )}
               </>
             )}
           </button>
@@ -73,7 +65,7 @@ export default function RulesEditor({ presetRules: initialPreset, customRules: i
       </div>
 
       {tab === 'preset' && (
-        <PresetRulesPanel rules={preset} onSave={setPreset} plan={plan} />
+        <PresetRulesPanel rules={preset} onSave={setPreset} />
       )}
 
       {tab === 'custom' && (
@@ -83,7 +75,6 @@ export default function RulesEditor({ presetRules: initialPreset, customRules: i
           onUpdate={setCustomRules}
           showBuilder={showBuilder}
           setShowBuilder={setShowBuilder}
-          plan={plan}
         />
       )}
     </div>
@@ -91,51 +82,16 @@ export default function RulesEditor({ presetRules: initialPreset, customRules: i
 }
 
 function CustomRulesTab({
-  rules, userId, onUpdate, showBuilder, setShowBuilder, plan,
+  rules, userId, onUpdate, showBuilder, setShowBuilder,
 }: {
   rules: CustomRule[];
   userId: string;
   onUpdate: (r: CustomRule[]) => void;
   showBuilder: boolean;
   setShowBuilder: (v: boolean) => void;
-  plan: PlanTier;
 }) {
-  const maxRules = getPlanLimits(plan).maxCustomRules ?? Infinity;
-  const canAdd = rules.length < maxRules;
-
-  if (plan === 'free') {
-    return (
-      <div className="text-center py-10">
-        <div className="mb-3"><Lock aria-hidden="true" size={36} /></div>
-        <p className="text-sm font-medium text-tg-text mb-1">חוקים אישיים זמינים ב-Basic ומעלה</p>
-        <p className="text-xs text-tg-muted mb-5">עד 3 חוקים ב-Basic · ללא הגבלה ב-Pro</p>
-        <div className="flex flex-col gap-2 text-right px-2 mb-5">
-          {[
-            'הפסד יומי עבר אחוז מהתיק (%) ← חסום כניסה לעסקה נוספת',
-            'השעה עברה 21:00 (24h) ← חסום עם טיימר',
-            'הרגשתי FOMO בעסקה האחרונה ← הצג אזהרה בלבד',
-          ].map((ex) => (
-            <div key={ex} className="flex items-start gap-2 px-3 py-2 rounded-xl text-xs text-tg-muted"
-              style={{ background: 'var(--color-tg-surface-2)' }}>
-              <span>{ex}</span>
-            </div>
-          ))}
-        </div>
-        <Button variant="secondary" onClick={() => {}}>שדרג ל-Basic</Button>
-      </div>
-    );
-  }
-
   return (
     <div className="flex flex-col gap-4">
-      {!isPro(plan) && Number.isFinite(maxRules) && (
-        <div className="flex items-center justify-between px-3 py-2 rounded-xl text-xs"
-          style={{ background: 'var(--color-tg-surface-2)', color: 'var(--color-tg-text-2)' }}>
-          <span>חוקים אישיים: {rules.length} / {maxRules}</span>
-          {rules.length >= maxRules && <span style={{ color: 'var(--color-tg-warning)' }}>הגעת למגבלה · שדרג ל-Pro לחוקים נוספים</span>}
-        </div>
-      )}
-
       {rules.length === 0 && !showBuilder && (
         <div className="text-center py-10">
           <div className="mb-2"><ClipboardList aria-hidden="true" size={36} /></div>
@@ -162,19 +118,15 @@ function CustomRulesTab({
               }}
             />
           ))}
-          {canAdd && (
-            <Button variant="secondary" onClick={() => setShowBuilder(true)} className="mt-2">
-              + הוסף חוק
-            </Button>
-          )}
+          <Button variant="secondary" onClick={() => setShowBuilder(true)} className="mt-2">
+            + הוסף חוק
+          </Button>
         </div>
       )}
 
       {showBuilder && (
         <CustomRuleBuilder
           userId={userId}
-          plan={plan}
-          existingRules={rules}
           onSave={(rule) => {
             onUpdate([...rules, rule]);
             setShowBuilder(false);
@@ -248,15 +200,12 @@ function CustomRuleCard({
 }
 
 function CustomRuleBuilder({
-  userId, plan, existingRules, onSave, onCancel,
+  userId, onSave, onCancel,
 }: {
   userId: string;
-  plan: PlanTier;
-  existingRules: CustomRule[];
   onSave: (rule: CustomRule) => void;
   onCancel: () => void;
 }) {
-  const limits = getPlanLimits(plan);
   const [form, setForm] = useState({
     name: describeCustomRule({ condition_type: 'daily_loss_dollar', threshold_value: 200 }),
     nameTouched: false,
@@ -267,21 +216,9 @@ function CustomRuleBuilder({
   });
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [upgradeType, setUpgradeType] = useState<UpgradeLimitType | null>(null);
 
   const needsThreshold = conditionNeedsThreshold(form.condition_type);
-  const usedConditionTypes = new Set(existingRules.map((r) => r.condition_type));
-
   function applyCondition(condition_type: ConditionType) {
-    if (
-      !isPro(plan) &&
-      limits.maxBlockingConditions !== null &&
-      !usedConditionTypes.has(condition_type) &&
-      usedConditionTypes.size >= limits.maxBlockingConditions
-    ) {
-      setUpgradeType('blocking_conditions');
-      return;
-    }
     const threshold = needsThresholdFor(condition_type) ? form.threshold_value || '1' : '';
     setForm((f) => ({
       ...f,
@@ -333,13 +270,9 @@ function CustomRuleBuilder({
 
     if (!error && data) {
       onSave(data as CustomRule);
-    } else if (error?.message.includes('PLAN_LIMIT:custom_rules')) {
-      setUpgradeType('custom_rules');
     }
     setLoading(false);
   }
-
-  const isBlockLocked = !limits.realTimeBlocking;
 
   return (
     <div className="p-4 rounded-2xl border border-tg-primary/30 flex flex-col gap-4 animate-fade-in"
@@ -394,31 +327,24 @@ function CustomRuleBuilder({
         <p id="new-rule-action-label" className="text-sm font-medium text-tg-text-2">פעולה</p>
         <div className="grid grid-cols-1 gap-2" role="group" aria-labelledby="new-rule-action-label">
           {ACTION_TYPES.map((key) => {
-            const disabled = isBlockLocked && key !== 'warn';
             return (
               <button
                 key={key}
                 type="button"
-                onClick={() => !disabled && setForm({ ...form, action_type: key })}
+                onClick={() => setForm({ ...form, action_type: key })}
                 className="py-2 px-3 rounded-xl text-xs font-medium border transition-all duration-150 text-center flex items-center justify-center gap-1"
                 style={{
                   background: form.action_type === key ? 'var(--color-tg-primary-muted)' : 'var(--color-tg-surface-2)',
                   borderColor: form.action_type === key ? 'var(--color-tg-primary)' : 'var(--color-tg-border)',
-                  color: form.action_type === key ? 'var(--color-tg-primary)' : disabled ? 'var(--color-tg-muted)' : 'var(--color-tg-text-2)',
-                  opacity: disabled ? 0.6 : 1,
-                  cursor: disabled ? 'default' : 'pointer',
+                  color: form.action_type === key ? 'var(--color-tg-primary)' : 'var(--color-tg-text-2)',
+                  cursor: 'pointer',
                 }}
               >
                 {ACTION_LABELS[key]}
-                {disabled && <span className="text-[10px] font-bold" style={{ color: '#00d2d2' }}>Pro</span>}
               </button>
             );
           })}
         </div>
-        {isBlockLocked && (
-          <p className="text-xs text-tg-muted">חסימות זמינות ב-Pro · ב-Basic ניתן להציג אזהרה בלבד</p>
-        )}
-
         {form.action_type === 'block_timer' && (
           <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl"
             style={{ background: 'var(--color-tg-surface-2)' }}>
@@ -442,12 +368,6 @@ function CustomRuleBuilder({
         <Button variant="secondary" onClick={onCancel} className="flex-1">ביטול</Button>
         <Button onClick={handleSave} loading={loading} className="flex-1">שמור חוק</Button>
       </div>
-
-      <UpgradeModal
-        open={upgradeType !== null}
-        limitType={upgradeType ?? 'custom_rules'}
-        onClose={() => setUpgradeType(null)}
-      />
     </div>
   );
 }

@@ -2,7 +2,6 @@
 
 import { useState, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import type { PlanTier } from '@/lib/plans/config';
 
 interface AlertConfig {
   id: string;
@@ -11,7 +10,6 @@ interface AlertConfig {
   defaultEnabled: boolean;
   hasTime: boolean;
   defaultTime?: string;
-  proOnly?: boolean;
 }
 
 const ALERTS: AlertConfig[] = [
@@ -19,7 +17,7 @@ const ALERTS: AlertConfig[] = [
   { id: 'end_of_day', label: 'תזכורת סוף יום', description: 'תשלח אם יש עסקה שלא תוחקרה', defaultEnabled: true, hasTime: true, defaultTime: '21:00' },
   { id: 'discipline', label: 'התראת משמעת', description: 'תופעל כשחורגים ממגבלה שהוגדרה בחוקים', defaultEnabled: true, hasTime: false },
   { id: 'weekly_summary', label: 'סיכום שבועי AI', description: 'נשלח כל יום ראשון בבוקר עם ניתוח השבוע', defaultEnabled: true, hasTime: true, defaultTime: '09:00' },
-  { id: 'realtime_pattern', label: 'התראת דפוס בזמן אמת', description: 'מזהה דפוס כושל לפני כניסה לעסקה', defaultEnabled: false, hasTime: false, proOnly: true },
+  { id: 'realtime_pattern', label: 'התראת דפוס בזמן אמת', description: 'מזהה דפוס כושל לפני כניסה לעסקה', defaultEnabled: false, hasTime: false },
 ];
 
 export interface AlertSettingsData {
@@ -34,12 +32,11 @@ export interface AlertSettingsData {
 }
 
 interface AlertsPanelProps {
-  plan: PlanTier;
   userId: string;
   initialSettings?: AlertSettingsData | null;
 }
 
-export default function AlertsPanel({ plan, userId, initialSettings }: AlertsPanelProps) {
+export default function AlertsPanel({ userId, initialSettings }: AlertsPanelProps) {
   const [enabled, setEnabled] = useState<Record<string, boolean>>({
     pre_market: initialSettings?.pre_market_enabled ?? true,
     end_of_day: initialSettings?.end_of_day_enabled ?? true,
@@ -56,10 +53,7 @@ export default function AlertsPanel({ plan, userId, initialSettings }: AlertsPan
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState('');
 
-  const canCustomize = plan !== 'free';
-
   const save = useCallback(async (newEnabled: Record<string, boolean>, newTimes: Record<string, string>) => {
-    if (!canCustomize) return;
     setSaving(true);
     setSaveError('');
 
@@ -86,7 +80,7 @@ export default function AlertsPanel({ plan, userId, initialSettings }: AlertsPan
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     }
-  }, [canCustomize, userId]);
+  }, [userId]);
 
   function toggleAlert(id: string) {
     const newEnabled = { ...enabled, [id]: !enabled[id] };
@@ -103,36 +97,16 @@ export default function AlertsPanel({ plan, userId, initialSettings }: AlertsPan
   return (
     <div className="flex flex-col gap-0">
       {ALERTS.map((alert, i) => {
-        const isLocked = alert.proOnly && plan !== 'pro';
-        const isDisabled = !canCustomize || isLocked;
-
-        const lockCaption = isLocked
-          ? 'שדרג ל-Pro כדי להפעיל התראה זו'
-          : !canCustomize
-          ? 'שדרג לחשבון Basic ומעלה כדי להפעיל התראה זו'
-          : undefined;
-
         return (
           <div key={alert.id}
             className={`flex items-start justify-between gap-3 py-4 ${i < ALERTS.length - 1 ? 'border-b border-tg-border' : ''}`}
-            style={{ opacity: isDisabled ? 0.55 : 1 }}>
+            >
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <p className="text-sm font-medium text-tg-text">{alert.label}</p>
-                {alert.proOnly && (
-                  <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold"
-                    style={{ background: 'rgba(0,210,210,0.12)', color: '#00d2d2' }}>Pro</span>
-                )}
-                {!canCustomize && !alert.proOnly && (
-                  <span className="px-1.5 py-0.5 rounded-md text-[10px]"
-                    style={{ background: 'var(--color-tg-surface-2)', color: 'var(--color-tg-muted)' }}>Basic+</span>
-                )}
               </div>
               <p className="text-xs text-tg-text-2 mt-0.5">{alert.description}</p>
-              {lockCaption && (
-                <p className="text-[11px] mt-1" style={{ color: 'var(--color-tg-muted)' }}>{lockCaption}</p>
-              )}
-              {alert.hasTime && canCustomize && !isLocked && enabled[alert.id] && (
+              {alert.hasTime && enabled[alert.id] && (
                 <div className="flex items-center gap-2 mt-2">
                   <span className="text-xs text-tg-muted">שעת שליחה:</span>
                   <input
@@ -148,29 +122,21 @@ export default function AlertsPanel({ plan, userId, initialSettings }: AlertsPan
 
             <button
               onClick={() => toggleAlert(alert.id)}
-              disabled={isDisabled}
-              title={lockCaption}
-              aria-disabled={isDisabled}
-              className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 mt-0.5 disabled:cursor-not-allowed"
+              className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 mt-0.5"
               style={{
-                background: enabled[alert.id] && !isLocked ? 'var(--color-tg-primary)' : 'var(--color-tg-border)',
-                cursor: isDisabled ? 'not-allowed' : 'pointer',
+                background: enabled[alert.id] ? 'var(--color-tg-primary)' : 'var(--color-tg-border)',
+                cursor: 'pointer',
               }}>
               <span
                 className="inline-block h-4 w-4 transform rounded-full bg-white transition-transform shadow-sm"
-                style={{ transform: enabled[alert.id] && !isLocked ? 'translateX(-18px)' : 'translateX(-2px)' }}
+                style={{ transform: enabled[alert.id] ? 'translateX(-18px)' : 'translateX(-2px)' }}
               />
             </button>
           </div>
         );
       })}
 
-      {canCustomize && (
-        <p className="text-xs text-tg-muted mt-3 text-center">⏰ שעות לפי שעון ישראל (UTC+2)</p>
-      )}
-      {!canCustomize && (
-        <p className="text-xs text-tg-muted mt-3 text-center">התאמת שעות שליחה זמינה ב-Basic ומעלה</p>
-      )}
+      <p className="text-xs text-tg-muted mt-3 text-center">⏰ שעות לפי שעון ישראל (UTC+2)</p>
 
       {saving && <p className="text-xs text-tg-muted text-center mt-2">שומר...</p>}
       {saved && <p className="text-xs text-tg-success text-center mt-2 animate-fade-in">הגדרות נשמרו</p>}

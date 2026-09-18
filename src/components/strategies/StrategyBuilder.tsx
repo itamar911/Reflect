@@ -4,8 +4,6 @@ import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
 import { Ruler, X } from 'lucide-react';
-import { getPlanLimits, isPro, type PlanTier } from '@/lib/plans/config';
-import UpgradeModal from '@/components/plans/UpgradeModal';
 import { renderPlainAiText } from '@/lib/ai/textFormatting';
 
 export interface PersonalStrategy {
@@ -47,7 +45,6 @@ const TIMEFRAME_OPTIONS = ['1m', '5m', '15m', '30m', '1H', '4H', 'Daily', 'Weekl
 interface StrategyBuilderProps {
   userId: string;
   initialStrategies: PersonalStrategy[];
-  plan: PlanTier;
 }
 
 const EMPTY_FORM = {
@@ -65,8 +62,7 @@ const EMPTY_FORM = {
   max_daily_trades: '',
 };
 
-export default function StrategyBuilder({ initialStrategies, plan }: StrategyBuilderProps) {
-  const limits = getPlanLimits(plan);
+export default function StrategyBuilder({ initialStrategies }: StrategyBuilderProps) {
   const [strategies, setStrategies] = useState<PersonalStrategy[]>(initialStrategies);
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -75,7 +71,6 @@ export default function StrategyBuilder({ initialStrategies, plan }: StrategyBui
   const [saveError, setSaveError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [newCondition, setNewCondition] = useState('');
-  const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
   const supabase = createClient();
 
 
@@ -143,11 +138,6 @@ export default function StrategyBuilder({ initialStrategies, plan }: StrategyBui
   async function handleSave() {
     if (!form.name.trim() || !form.description.trim()) return;
 
-    if (!editId && !isPro(plan) && limits.maxStrategies !== null && strategies.length >= limits.maxStrategies) {
-      setUpgradeModalOpen(true);
-      return;
-    }
-
     setSaving(true);
     setSaveError(null);
 
@@ -199,16 +189,14 @@ export default function StrategyBuilder({ initialStrategies, plan }: StrategyBui
     if (editId) {
       const { error } = await supabase.from('personal_strategies').update(payload).eq('id', editId);
       if (error) {
-        if (error.message.includes('PLAN_LIMIT:strategies')) setUpgradeModalOpen(true);
-        else setSaveError(`${error.message} (${error.code})`);
+        setSaveError(`${error.message} (${error.code})`);
         setSaving(false);
         return;
       }
     } else {
       const { error } = await supabase.from('personal_strategies').insert(payload);
       if (error) {
-        if (error.message.includes('PLAN_LIMIT:strategies')) setUpgradeModalOpen(true);
-        else setSaveError(`${error.message} (${error.code})`);
+        setSaveError(`${error.message} (${error.code})`);
         setSaving(false);
         return;
       }
@@ -515,12 +503,6 @@ export default function StrategyBuilder({ initialStrategies, plan }: StrategyBui
           </div>
         </div>
       )}
-
-      <UpgradeModal
-        open={upgradeModalOpen}
-        onClose={() => setUpgradeModalOpen(false)}
-        limitType="strategies"
-      />
     </div>
   );
 }

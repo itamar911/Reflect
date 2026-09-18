@@ -88,7 +88,6 @@ export default async function RulesPage() {
           presetRules={presetRules}
           customRules={customRules}
           userId={user.id}
-          plan={plan}
         />
       </div>
 

@@ -2,7 +2,6 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { Bot, ArrowDown } from 'lucide-react';
-import UpgradeModal from '@/components/plans/UpgradeModal';
 import { renderPlainAiText } from '@/lib/ai/textFormatting';
 
 interface Message {
@@ -35,7 +34,6 @@ export default function TradingBot() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [scrollToBottomSignal, setScrollToBottomSignal] = useState(0);
   const [scrollToReplySignal, setScrollToReplySignal] = useState(0);
@@ -164,17 +162,6 @@ export default function TradingBot() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: newMessages }),
       });
-
-      if (res.status === 403) {
-        const data = await res.json().catch(() => null);
-        if (data?.error === 'PLAN_LIMIT') {
-          stopReveal();
-          setMessages((prev) => prev.slice(0, -1));
-          setUpgradeModalOpen(true);
-          setLoading(false);
-          return;
-        }
-      }
 
       if (!res.body) throw new Error('No response body');
 
@@ -346,12 +333,6 @@ export default function TradingBot() {
         </div>
         <p className="hidden sm:block text-[10px] text-tg-muted text-center mt-1.5">Enter לשלוח · Shift+Enter לשורה חדשה</p>
       </div>
-
-      <UpgradeModal
-        open={upgradeModalOpen}
-        onClose={() => setUpgradeModalOpen(false)}
-        limitType="ai_coach"
-      />
     </div>
   );
 }

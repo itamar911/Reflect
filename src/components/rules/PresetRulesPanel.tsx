@@ -5,18 +5,15 @@ import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
 import { COOLDOWN_MINUTE_OPTIONS } from '@/lib/validators/RulesetValidator';
 import type { PresetRules, TradeStrategy } from '@/lib/types';
-import type { PlanTier } from '@/lib/plans/config';
 
 const STRATEGIES: TradeStrategy[] = ['Breakout', 'Trend Follow', 'Reversal', 'Range', 'Custom'];
 
 interface PresetRulesPanelProps {
   rules: PresetRules;
   onSave: (rules: PresetRules) => void;
-  plan?: PlanTier;
 }
 
-export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: PresetRulesPanelProps) {
-  const readOnly = plan === 'free';
+export default function PresetRulesPanel({ rules, onSave }: PresetRulesPanelProps) {
   const [form, setForm] = useState({
     min_rr_ratio: String(rules.min_rr_ratio),
     max_daily_trades: String(rules.max_daily_trades),
@@ -74,19 +71,9 @@ export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: Prese
 
   return (
     <div className="flex flex-col gap-6">
-      {readOnly ? (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs"
-          style={{ background: 'var(--color-tg-surface-2)', color: 'var(--color-tg-text-2)' }}>
-          <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--color-tg-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0110 0v4" />
-          </svg>
-          <span>במסלול חינמי החוקים קבועים ולא ניתנים לעריכה · <span style={{ color: 'var(--color-tg-primary)' }}>שדרג ל-Basic לעריכה מלאה</span></span>
-        </div>
-      ) : (
-        <p className="text-sm text-tg-text-2">
-          חוקים אלה יאומתו אוטומטית לפני כל עסקה. שנה ערכים לפי הצורך.
-        </p>
-      )}
+      <p className="text-sm text-tg-text-2">
+        חוקים אלה ייבדקו בכל פעם שתזין כאן תוכנית עסקה. שנה ערכים לפי הצורך.
+      </p>
 
       {/* R:R Minimum */}
       <RuleRow
@@ -105,10 +92,9 @@ export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: Prese
             id="rule-min-rr"
             aria-describedby="rule-min-rr-label-desc"
             value={form.min_rr_ratio}
-            onChange={(e) => !readOnly && setForm({ ...form, min_rr_ratio: e.target.value })}
-            readOnly={readOnly}
+            onChange={(e) => setForm({ ...form, min_rr_ratio: e.target.value })}
             className="w-20 h-9 px-3 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary text-center"
-            style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)', opacity: readOnly ? 0.7 : 1 }}
+            style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)' }}
           />
         </div>
       </RuleRow>
@@ -128,10 +114,9 @@ export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: Prese
           id="rule-max-daily-trades"
           aria-describedby="rule-max-daily-trades-label-desc"
           value={form.max_daily_trades}
-          onChange={(e) => !readOnly && setForm({ ...form, max_daily_trades: e.target.value })}
-          readOnly={readOnly}
+          onChange={(e) => setForm({ ...form, max_daily_trades: e.target.value })}
           className="w-20 h-9 px-3 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary text-center"
-          style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)', opacity: readOnly ? 0.7 : 1 }}
+          style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)' }}
         />
       </RuleRow>
 
@@ -149,10 +134,9 @@ export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: Prese
           id="rule-cooldown-after-losses"
           aria-describedby="rule-cooldown-after-losses-label-desc"
           value={form.cooldown_after_losses}
-          onChange={(e) => !readOnly && setForm({ ...form, cooldown_after_losses: e.target.value })}
-          readOnly={readOnly}
+          onChange={(e) => setForm({ ...form, cooldown_after_losses: e.target.value })}
           className="w-20 h-9 px-3 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary text-center"
-          style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)', opacity: readOnly ? 0.7 : 1 }}
+          style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)' }}
         />
       </RuleRow>
 
@@ -166,10 +150,9 @@ export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: Prese
           id="rule-cooldown-minutes"
           aria-describedby="rule-cooldown-minutes-label-desc"
           value={form.cooldown_minutes}
-          onChange={(e) => !readOnly && setForm({ ...form, cooldown_minutes: e.target.value })}
-          disabled={readOnly}
+          onChange={(e) => setForm({ ...form, cooldown_minutes: e.target.value })}
           className="w-28 h-9 px-3 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary text-center"
-          style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)', opacity: readOnly ? 0.7 : 1 }}
+          style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)' }}
         >
           <option value="">ללא הגבלה</option>
           {COOLDOWN_MINUTE_OPTIONS.map((o) => (
@@ -192,10 +175,9 @@ export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: Prese
           id="rule-max-daily-loss"
           aria-describedby="rule-max-daily-loss-label-desc"
           value={form.max_daily_loss}
-          onChange={(e) => !readOnly && setForm({ ...form, max_daily_loss: e.target.value })}
-          readOnly={readOnly}
+          onChange={(e) => setForm({ ...form, max_daily_loss: e.target.value })}
           className="w-32 h-9 px-3 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary"
-          style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)', opacity: readOnly ? 0.7 : 1 }}
+          style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)' }}
         />
       </RuleRow>
 
@@ -208,14 +190,13 @@ export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: Prese
           {[1, 2, 3, 4, 5].map((n) => (
             <button
               key={n}
-              onClick={() => !readOnly && setForm({ ...form, min_emotional_state: n })}
+              onClick={() => setForm({ ...form, min_emotional_state: n })}
               className="hit-40 relative w-9 h-9 rounded-xl text-sm font-medium border transition-all duration-150"
               style={{
                 background: form.min_emotional_state === n ? 'var(--color-tg-primary)' : 'var(--color-tg-surface-2)',
                 borderColor: form.min_emotional_state === n ? 'var(--color-tg-primary)' : 'var(--color-tg-border)',
                 color: form.min_emotional_state === n ? 'white' : 'var(--color-tg-text-2)',
-                opacity: readOnly ? 0.7 : 1,
-                cursor: readOnly ? 'default' : 'pointer',
+                cursor: 'pointer',
               }}
             >
               {n}
@@ -233,14 +214,13 @@ export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: Prese
           {STRATEGIES.map((s) => (
             <button
               key={s}
-              onClick={() => !readOnly && toggleStrategy(s)}
+              onClick={() => toggleStrategy(s)}
               className="px-3 py-1.5 rounded-full text-xs font-medium border transition-all duration-150"
               style={{
                 background: form.allowed_strategies.includes(s) ? 'var(--color-tg-primary-muted)' : 'var(--color-tg-surface-2)',
                 borderColor: form.allowed_strategies.includes(s) ? 'var(--color-tg-primary)' : 'var(--color-tg-border)',
                 color: form.allowed_strategies.includes(s) ? 'var(--color-tg-primary)' : 'var(--color-tg-text-2)',
-                opacity: readOnly ? 0.7 : 1,
-                cursor: readOnly ? 'default' : 'pointer',
+                cursor: 'pointer',
               }}
             >
               {s}
@@ -250,25 +230,21 @@ export default function PresetRulesPanel({ rules, onSave, plan = 'free' }: Prese
       </RuleRow>
 
       {/* Actions */}
-      {!readOnly && (
-        <>
-          {error && (
-            <p className="text-sm text-tg-danger px-3 py-2 rounded-xl"
-              style={{ background: 'var(--color-tg-danger-muted)' }}>
-              {error}
-            </p>
-          )}
-          {saved && (
-            <p className="text-sm text-tg-success px-3 py-2 rounded-xl"
-              style={{ background: 'var(--color-tg-success-muted)' }}>
-              החוקים נשמרו ויופעלו בעסקה הבאה
-            </p>
-          )}
-          <Button onClick={handleSave} loading={loading}>
-            שמור חוקים
-          </Button>
-        </>
+      {error && (
+        <p className="text-sm text-tg-danger px-3 py-2 rounded-xl"
+          style={{ background: 'var(--color-tg-danger-muted)' }}>
+          {error}
+        </p>
       )}
+      {saved && (
+        <p className="text-sm text-tg-success px-3 py-2 rounded-xl"
+          style={{ background: 'var(--color-tg-success-muted)' }}>
+          החוקים נשמרו ויופעלו בעסקה הבאה
+        </p>
+      )}
+      <Button onClick={handleSave} loading={loading}>
+        שמור חוקים
+      </Button>
     </div>
   );
 }
