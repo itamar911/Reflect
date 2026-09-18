@@ -1,7 +1,5 @@
 -- 022 — drop the plan-limit triggers
 --
--- DO NOT RUN THIS UNTIL THE BODIES ARE PASTED IN BELOW. See "Before running".
---
 -- Reflect sells a single plan. src/lib/plans/config.ts now resolves every tier
 -- to the full limits, and the app-side checks all pass — but the app was never
 -- what enforced the caps. These three triggers were, and they were created by
@@ -38,27 +36,50 @@
 -- Reversing this is therefore a deliberate act: take the bodies from the block
 -- below, adapt the numbers, and write a new migration. That is the intent.
 --
--- ── Before running ──
+-- ── Checked before writing this ──
 --
--- The ORIGINAL BODIES block below is empty. Fill it from query C of
--- supabase/queries/function_bodies.sql before running this file, because
--- dropping the functions is the moment that text stops being recoverable.
+-- Query C confirmed all three functions do nothing but enforce: no column is
+-- stamped, no audit row is written, no side effect of any kind. Each one calls
+-- get_user_tier(NEW.user_id), returns early for 'pro', counts existing rows,
+-- and raises. That is the whole of it, so dropping them removes nothing we
+-- want to keep.
 --
--- Read those bodies first for one thing in particular: whether any of the
--- three does something BESIDES refusing the insert. If one also stamps a
--- column, writes an audit row, or validates something unrelated to plans, then
--- dropping it removes behaviour we still want and that function needs editing
--- rather than dropping. Nothing below assumes that; check before trusting it.
+-- Query D confirmed get_user_tier is called by these three functions and by
+-- nothing else — no policy, no column default, no CHECK constraint — so it
+-- dies with them and is dropped here too.
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- ORIGINAL BODIES — paste query C's output here before running.
+-- ORIGINAL BODIES
 --
---   enforce_trade_limit       (trg_enforce_trade_limit      ON public.trade_plans)
---   enforce_rules_limit       (trg_enforce_rules_limit      ON public.custom_rules)
---   enforce_strategies_limit  (trg_enforce_strategies_limit ON public.personal_strategies)
+-- Reconstructed from query C's output rather than pasted verbatim. Faithful to
+-- the logic and the constants; the exact formatting and any RAISE wording is
+-- approximate. If you want the literal text on the record, paste the raw
+-- result over this block before running — this is the last moment it exists.
 --
--- [ paste here ]
+--   get_user_tier(uid uuid) RETURNS text, SECURITY DEFINER
+--     COALESCE((SELECT subscription_tier FROM profiles WHERE id = uid), 'free')
 --
+--   enforce_rules_limit() — BEFORE INSERT ON public.custom_rules
+--     tier := get_user_tier(NEW.user_id);
+--     IF tier = 'pro' THEN RETURN NEW; END IF;
+--     SELECT COUNT(*) INTO n FROM custom_rules WHERE user_id = NEW.user_id;
+--     IF n >= 3 THEN
+--       RAISE EXCEPTION 'PLAN_LIMIT:custom_rules' USING ERRCODE = 'P0001';
+--     END IF;
+--     RETURN NEW;
+--
+--   enforce_strategies_limit() — BEFORE INSERT ON public.personal_strategies
+--     same shape, counts personal_strategies, limit 3,
+--     RAISE EXCEPTION 'PLAN_LIMIT:strategies' USING ERRCODE = 'P0001'
+--
+--   enforce_trade_limit() — BEFORE INSERT ON public.trade_plans
+--     same shape, counts trade_plans for the current week
+--     (submitted_at >= date_trunc('week', now())), limit 5,
+--     RAISE EXCEPTION 'PLAN_LIMIT:trades_per_week' USING ERRCODE = 'P0001'
+--
+-- Those three PLAN_LIMIT: strings are what the client used to match on. The
+-- branches that caught them were removed in the "Remove the UI that sold the
+-- tier split" commit, once it was clear nothing in src/ could ever throw them.
 -- ═══════════════════════════════════════════════════════════════════════════
 
 
@@ -77,20 +98,22 @@ DROP FUNCTION IF EXISTS public.enforce_trade_limit();
 DROP FUNCTION IF EXISTS public.enforce_rules_limit();
 DROP FUNCTION IF EXISTS public.enforce_strategies_limit();
 
--- get_user_tier is deliberately NOT dropped here.
+-- Last, once its only three callers are gone. Query D found no policy, no
+-- column default and no CHECK referencing it, so nothing else breaks.
 --
--- It is almost certainly what the three functions above called to decide which
--- cap to apply, which would make it dead the moment they are gone. But "almost
--- certainly" is how the last two surprises started. Query D of
--- function_bodies.sql lists every function, policy, column default and CHECK
--- that references it, plus who may EXECUTE it over PostgREST. If D comes back
--- empty on all five parts, dropping it is a one-line migration; if it does
--- not, it is load-bearing and stays. Either way that is its own decision, not
--- a side effect of this one.
---
--- rls_auto_enable is likewise untouched. If it is wired as an event trigger it
--- is infrastructure that has been silently shaping every migration we have
--- ever run, and it must be understood before anything is done to it.
+-- Dropping it also removes its EXECUTE-to-anon grant, which mattered: it is
+-- SECURITY DEFINER and reads profiles, so it answered "what tier is this user"
+-- to anyone holding a user UUID, unauthenticated, bypassing RLS. That grant
+-- was never chosen — Postgres grants EXECUTE to PUBLIC on every new function —
+-- and the same is true of every other function in this schema. 024 deals with
+-- the general case; this line only happens to fix one instance of it.
+DROP FUNCTION IF EXISTS public.get_user_tier(uuid);
+
+-- rls_auto_enable is deliberately untouched. It is wired as the event trigger
+-- `ensure_rls` on ddl_command_end and enables RLS on every table created in
+-- public — which is why the tables made by hand in the dashboard are not wide
+-- open. It is load-bearing and it is ours, not Supabase's. Do not drop it.
+-- See supabase/README.md.
 
 
 -- ── Verification ──
@@ -110,7 +133,17 @@ SELECT p.proname AS leftover_function
 FROM pg_proc p
 JOIN pg_namespace n ON n.oid = p.pronamespace
 WHERE n.nspname = 'public'
-  AND p.proname IN ('enforce_trade_limit', 'enforce_rules_limit', 'enforce_strategies_limit');
+  AND p.proname IN (
+    'enforce_trade_limit', 'enforce_rules_limit', 'enforce_strategies_limit', 'get_user_tier'
+  );
+
+-- 1b. rls_auto_enable must still be here, and `ensure_rls` must still be
+--     wired to it. If this returns no row, stop — something took it out, and
+--     the next table created in public will have no RLS.
+SELECT e.evtname, e.evtevent, e.evtenabled, p.proname
+FROM pg_event_trigger e
+JOIN pg_proc p ON p.oid = e.evtfoid
+WHERE e.evtname = 'ensure_rls';
 
 -- 2. Nothing else was taken with them. Expect the seven repo triggers:
 --    on_auth_user_created, on_profile_created, profiles_updated_at,
@@ -132,9 +165,11 @@ ORDER BY 1, 2;
 
 -- ── Still outstanding after this migration ──
 --
---   * Nine RLS policies granted TO public rather than TO authenticated —
---     handled deliberately in 023, not here.
+--   * Nine RLS policies granted TO public rather than TO authenticated — 023.
+--   * EXECUTE granted to PUBLIC and anon on every function in this schema,
+--     which is Postgres's default for new functions rather than anyone's
+--     decision — 024. This migration removes four instances of it by deleting
+--     the functions; 024 removes the cause.
 --   * notebook_pages, rule_violations and setups are read and written by the
 --     app but no migration in this directory creates them. `setups` is only
 --     ever ALTERed (019). These migrations cannot rebuild the database.
---   * get_user_tier and rls_auto_enable, per the notes above.

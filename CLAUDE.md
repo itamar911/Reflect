@@ -22,9 +22,23 @@ checks it against their rules, and an AI coach reviews their behaviour over time
 **Never run migrations, and never write to Supabase directly.** All SQL is run
 manually by the owner in the Supabase SQL Editor.
 
-Migration files live in `supabase/migrations/` and are numbered (`001_…` through
-`016_…`). When a change needs schema work: write the migration file, then tell the
-owner to run it. Do not run `supabase` CLI commands, `psql`, or scripts that POST
+**`supabase/migrations/` does not describe the live database.** Objects have been
+created by hand in the Supabase dashboard and leave no trace in the repo, so a
+grep over that directory will tell you something doesn't exist when it does.
+Read `supabase/README.md` before writing a migration, and run
+`supabase/queries/schema_drift.sql` if the answer matters.
+
+Two consequences worth knowing without reading that file:
+
+- An event trigger `ensure_rls` turns on RLS for every table created in
+  `public`. It is ours, not Supabase's, it is not in any migration, and it is
+  the only reason several tables aren't wide open. Don't drop it.
+- `notebook_pages`, `rule_violations` and `setups` are used by the app and no
+  migration creates them, so the migrations cannot rebuild the database.
+
+Migration files are numbered (`001_…` through `024_…`; `021` lands on the
+`ai-usage-accounting` branch). When a change needs schema work: write the
+migration file, then tell the owner to run it. Do not run `supabase` CLI commands, `psql`, or scripts that POST
 to the Supabase REST API — the deny rules in the committed `.claude/settings.json`
 block these, and that boundary is deliberate.
 
