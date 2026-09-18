@@ -228,6 +228,63 @@ to reason about and there are already two too many.
 - **A migration codifying the four hand-made policies**, which are now the real
   access control for their tables and appear nowhere in the repo.
 
+## Two findings from the ledger's stored statements
+
+Both from reading `supabase_migrations.schema_migrations`, 2026-09-18.
+
+### REF-72 was written that way, not clicked that way
+
+`create_setups_and_link_trades` contains:
+
+```sql
+CREATE POLICY "setup_images_select" ON storage.objects
+  FOR SELECT USING (bucket_id = 'setup-images');
+```
+
+No `TO` clause, no folder pin — sitting immediately after
+`setup_images_insert`, which has both. Same migration, adjacent statements, one
+hardened and one wide open. The bucket is created `public = true` in the same
+file.
+
+So the exposure closed by `018` and `020` did not come from someone clicking
+around in the dashboard. It went through Supabase's migration tool, was recorded
+in the ledger correctly, and shipped a hole anyway.
+
+**This is the most important caveat to everything recommended below.** Sections
+B and C of the recommendation — the CLI as the write path, the ledger check in
+CI — catch changes that are *unrecorded*. They would not have caught this one,
+because this one was recorded properly. Nothing about process discipline stops a
+bad statement from being written next to a good one by the same hand in the same
+file.
+
+What would have caught it is **query 14** (any policy granted `TO public`) and a
+reviewer noticing that two adjacent policies on the same bucket disagree about
+their own threat model. That is an argument for the assertions being the part
+that is not optional, and for them running against `storage` as well as `public`
+— which a `--schema=public` dump does not cover.
+
+### `rule_violations` has no record anywhere
+
+Only `notebook_pages` and `create_setups_and_link_trades` have ledger rows. The
+third table has neither a migration file nor a ledger entry, and it exists and
+is written to on every rule violation (`src/lib/rules/logRuleViolation.ts`).
+
+So there are three categories, not two:
+
+| | in the repo | in the ledger |
+|---|---|---|
+| the 26 migration files | yes | no |
+| `notebook_pages`, `setups` | no | yes |
+| `rule_violations` | no | no |
+
+Consequence for the backfill: two of the three tables can be written from stored
+source text, and `rule_violations` cannot. It has to be reconstructed from the
+catalog via `queries/table_ddl.sql`, and the migration should say plainly which
+of its three tables came from which source, because they are not equally
+trustworthy.
+
+---
+
 ## Migrations run and verified, 2026-09-18
 
 `022` through `027` have all been run and checked. Recorded here because none of
