@@ -227,4 +227,30 @@ to reason about and there are already two too many.
   only on pasting that output.
 - **A migration codifying the four hand-made policies**, which are now the real
   access control for their tables and appear nowhere in the repo.
-- `025`, `026` and `027` still to run. `027` before `026`.
+
+## Migrations run and verified, 2026-09-18
+
+`022` through `027` have all been run and checked. Recorded here because none of
+them left a ledger entry — which is the problem this document is about, and the
+only record that they ran is this paragraph.
+
+| | what was verified |
+|---|---|
+| `022` | plan-limit triggers and functions gone; `get_user_tier` gone; `ensure_rls` still wired |
+| `023` | no policy in `public` granted `TO public` |
+| `024` | four functions revoked; signup still works; RLS canary true |
+| `025` | canary true after `CREATE OR REPLACE`; `ensure_rls` unchanged |
+| `026` | both `updated_at` triggers present on `personal_strategies` and `alert_settings` |
+| `027` | `proacl` is `{postgres=X/postgres, service_role=X/postgres}` on all four functions |
+
+That final ACL is the intended end state, not a leftover. Query 13 asserts on
+`PUBLIC`, `anon` and `authenticated` only: `service_role` is server-side with a
+secret key and bypasses RLS regardless, and the owner needs `EXECUTE` for
+`CREATE TRIGGER` to work. So the baseline for that assertion is now a true zero.
+
+It also resolves an open question from earlier in the session. After `024`,
+`postgres` and `service_role` appeared to have vanished from these functions;
+they are both present in `proacl` now. `information_schema.routine_privileges`
+only shows rows whose grantor or grantee is a role the current user belongs to,
+so it was hiding them rather than reporting their absence. **Read `proacl` for
+questions about grants; `information_schema` cannot prove a negative.**
