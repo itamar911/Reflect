@@ -9,9 +9,9 @@
 -- custom rule, or a 4th strategy, no matter what the TypeScript says.
 --
 -- Discovered by supabase/queries/schema_drift.sql. The same sweep found
--- get_user_tier, rls_auto_enable, nine unscoped RLS policies and three tables
--- this repo cannot rebuild — those are NOT handled here. See the notes at the
--- foot of this file.
+-- get_user_tier, rls_auto_enable, a schema-wide problem with policy roles, and
+-- three tables this repo cannot rebuild — those are NOT handled here. See the
+-- notes at the foot of this file.
 --
 -- ── Why drop rather than neuter ──
 --
@@ -49,37 +49,112 @@
 -- dies with them and is dropped here too.
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- ORIGINAL BODIES
+-- ORIGINAL BODIES — verbatim, from pg_get_functiondef before the drop.
 --
--- Reconstructed from query C's output rather than pasted verbatim. Faithful to
--- the logic and the constants; the exact formatting and any RAISE wording is
--- approximate. If you want the literal text on the record, paste the raw
--- result over this block before running — this is the last moment it exists.
+--   CREATE OR REPLACE FUNCTION public.get_user_tier(uid uuid)
+--    RETURNS text
+--    LANGUAGE sql
+--    STABLE SECURITY DEFINER
+--   AS $function$
+--     SELECT COALESCE(
+--       (SELECT subscription_tier FROM profiles WHERE id = uid),
+--       'free'
+--     );
+--   $function$
 --
---   get_user_tier(uid uuid) RETURNS text, SECURITY DEFINER
---     COALESCE((SELECT subscription_tier FROM profiles WHERE id = uid), 'free')
---
---   enforce_rules_limit() — BEFORE INSERT ON public.custom_rules
+--   CREATE OR REPLACE FUNCTION public.enforce_rules_limit()
+--    RETURNS trigger
+--    LANGUAGE plpgsql
+--    SECURITY DEFINER
+--   AS $function$
+--   DECLARE
+--     tier TEXT;
+--     rule_count INT;
+--   BEGIN
 --     tier := get_user_tier(NEW.user_id);
---     IF tier = 'pro' THEN RETURN NEW; END IF;
---     SELECT COUNT(*) INTO n FROM custom_rules WHERE user_id = NEW.user_id;
---     IF n >= 3 THEN
---       RAISE EXCEPTION 'PLAN_LIMIT:custom_rules' USING ERRCODE = 'P0001';
+--     IF tier = 'pro' THEN
+--       RETURN NEW;
 --     END IF;
+--
+--     SELECT COUNT(*) INTO rule_count
+--     FROM custom_rules
+--     WHERE user_id = NEW.user_id;
+--
+--     IF rule_count >= 3 THEN
+--       RAISE EXCEPTION 'PLAN_LIMIT:custom_rules'
+--         USING ERRCODE = 'P0001';
+--     END IF;
+--
 --     RETURN NEW;
+--   END;
+--   $function$
 --
---   enforce_strategies_limit() — BEFORE INSERT ON public.personal_strategies
---     same shape, counts personal_strategies, limit 3,
---     RAISE EXCEPTION 'PLAN_LIMIT:strategies' USING ERRCODE = 'P0001'
+--   CREATE OR REPLACE FUNCTION public.enforce_strategies_limit()
+--    RETURNS trigger
+--    LANGUAGE plpgsql
+--    SECURITY DEFINER
+--   AS $function$
+--   DECLARE
+--     tier TEXT;
+--     strategy_count INT;
+--   BEGIN
+--     tier := get_user_tier(NEW.user_id);
+--     IF tier = 'pro' THEN
+--       RETURN NEW;
+--     END IF;
 --
---   enforce_trade_limit() — BEFORE INSERT ON public.trade_plans
---     same shape, counts trade_plans for the current week
---     (submitted_at >= date_trunc('week', now())), limit 5,
---     RAISE EXCEPTION 'PLAN_LIMIT:trades_per_week' USING ERRCODE = 'P0001'
+--     SELECT COUNT(*) INTO strategy_count
+--     FROM personal_strategies
+--     WHERE user_id = NEW.user_id;
+--
+--     IF strategy_count >= 3 THEN
+--       RAISE EXCEPTION 'PLAN_LIMIT:strategies'
+--         USING ERRCODE = 'P0001';
+--     END IF;
+--
+--     RETURN NEW;
+--   END;
+--   $function$
+--
+--   CREATE OR REPLACE FUNCTION public.enforce_trade_limit()
+--    RETURNS trigger
+--    LANGUAGE plpgsql
+--    SECURITY DEFINER
+--   AS $function$
+--   DECLARE
+--     tier TEXT;
+--     trade_count INT;
+--   BEGIN
+--     tier := get_user_tier(NEW.user_id);
+--     IF tier = 'pro' THEN
+--       RETURN NEW;
+--     END IF;
+--
+--     SELECT COUNT(*) INTO trade_count
+--     FROM trade_plans
+--     WHERE user_id = NEW.user_id
+--       AND created_at >= date_trunc('week', now()); -- Postgres weeks start Monday
+--
+--     IF trade_count >= 5 THEN
+--       RAISE EXCEPTION 'PLAN_LIMIT:trades_per_week'
+--         USING ERRCODE = 'P0001';
+--     END IF;
+--
+--     RETURN NEW;
+--   END;
+--   $function$
 --
 -- Those three PLAN_LIMIT: strings are what the client used to match on. The
 -- branches that caught them were removed in the "Remove the UI that sold the
 -- tier split" commit, once it was clear nothing in src/ could ever throw them.
+--
+-- Note the column: enforce_trade_limit counted created_at. The client-side cap
+-- this migration's companion commit deleted counted submitted_at, over the same
+-- Monday-start week (getWeekStartUTC in TradePlanForm.tsx). Two different
+-- columns, so the app's own pre-check and the database's enforcement could
+-- disagree for any row whose submitted_at and created_at fall either side of a
+-- week boundary. Nothing depends on this now — both are gone — but it is the
+-- reason a limit belongs in one place, and worth knowing if tiers ever return.
 -- ═══════════════════════════════════════════════════════════════════════════
 
 
@@ -165,7 +240,10 @@ ORDER BY 1, 2;
 
 -- ── Still outstanding after this migration ──
 --
---   * Nine RLS policies granted TO public rather than TO authenticated — 023.
+--   * Every RLS policy in this schema is granted TO public rather than TO
+--     authenticated — the nine hand-made ones and, as it turned out, almost
+--     all of ours too, since CREATE POLICY with no TO clause defaults to
+--     PUBLIC. 023.
 --   * EXECUTE granted to PUBLIC and anon on every function in this schema,
 --     which is Postgres's default for new functions rather than anyone's
 --     decision — 024. This migration removes four instances of it by deleting
