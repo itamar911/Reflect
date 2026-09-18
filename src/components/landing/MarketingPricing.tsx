@@ -1,121 +1,88 @@
 'use client';
 
-import { Fragment, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
-import { Check, Sparkles } from 'lucide-react';
-import { PLAN_LIMITS } from '@/lib/plans/config';
+import { Check } from 'lucide-react';
 
 /**
- * Two plans, and the only question a visitor is actually asking is "what does
- * the more expensive one give me".
+ * One plan.
  *
- * ── How this card pair answers it, and the two dead ends before it ──
+ * This section used to be a Basic/Pro pair, and most of its design effort went
+ * into answering "what does the more expensive one give me" — a delta list, a
+ * shared-foundation line, a recommended badge, two CTAs of deliberately
+ * different loudness. None of that exists any more, because the question does
+ * not. We did not have enough features to divide into tiers in a way that made
+ * sense, and every division we tried penalised the traders we most want using
+ * the product.
  *
- * The original pair repeated its first four bullets word for word in both
- * cards. ~40% of each card was duplicated, so the answer could only be found by
- * diffing two ten-item lists by eye.
+ * What is left is a single card with nothing withheld, so a check means "you
+ * get this" and there is no second meaning anywhere in the list.
  *
- * The first fix made Pro's list a pure delta under the lead line "כל מה
- * שב-Basic, ובנוסף:". That killed the duplication but replaced it with an
- * unresolved cross-reference: the sentence made Pro's entire card depend on
- * remembering the other card, and it read as an apology rather than as a
- * feature.
+ * ── Prices ──
  *
- * What is here now keeps the delta and drops the dependency:
+ * PLAN_PRICE is the only place a figure is typed. The annual list price and the
+ * number of free months are both derived from it, so the struck-through figure
+ * cannot drift from the monthly one and the saving cannot claim two free months
+ * that the arithmetic does not actually give.
  *
- *   1. Pro's prominent list is *only* what Pro adds, and it comes first, right
- *      under the price — so the upgrade proposition is the first thing read in
- *      that card, not something reached after a preamble.
- *   2. The shared foundation is still stated in Pro, but demoted to a quiet
- *      panel at the foot of the card and written as short chips rather than
- *      full sentences. The cross-reference is resolved *in place* — a reader
- *      never has to hold Basic's list in their head — while nothing is stated
- *      twice at full length.
- *   3. Both cards carry a quiet panel in that same slot, so the two are
- *      structurally identical: price, prominent list, quiet panel, CTA.
+ * ── The one claim that has to stay exact ──
  *
- * The chips are derived from BASIC_FEATURES itself (the `short` field), so the
- * foundation Pro claims to include and the list Basic actually shows cannot
- * drift apart. Likewise every limit number is read off PLAN_LIMITS rather than
- * typed, so the marketing copy cannot drift from what the app enforces.
- *
- * One icon, one meaning, per card: a check means "you get this". There is no
- * "not included" state anywhere — Basic is a legitimate starting point, not a
- * list of things withheld.
+ * The rules engine runs when a trade plan is entered in Reflect. It is not
+ * connected to any trading platform and cannot stop an order anywhere else, so
+ * nothing here may say or imply that it blocks a trade automatically. The
+ * qualifier on the first feature is the precise version of that claim and is
+ * not decorative — see Terms section 6.2, which says the same thing.
  */
 
-// Monthly price vs. per-month price on annual billing — savings are computed, not hardcoded.
-const PLAN_PRICES = {
-  basic: { monthly: 59, yearly: 55 },
-  pro: { monthly: 99, yearly: 89 },
+// The single source of truth. Monthly, and the total billed once a year.
+const PLAN_PRICE = {
+  monthly: 129,
+  yearly: 1290,
 } as const;
 
-type PlanKey = keyof typeof PLAN_PRICES;
+/** What twelve months at the monthly rate would cost — the struck-through figure. */
+const YEARLY_LIST = PLAN_PRICE.monthly * 12;
 
-function yearlySavings(plan: PlanKey) {
-  const { monthly, yearly } = PLAN_PRICES[plan];
-  return monthly * 12 - yearly * 12;
-}
+const YEARLY_SAVING = YEARLY_LIST - PLAN_PRICE.yearly;
 
 /**
- * `??` only satisfies the type — null means "unlimited" in PlanLimits, which is
- * Pro's case, never Basic's.
+ * The saving expressed the way we want to sell it — in months, not percent.
+ * Derived, so if a price moves and the discount stops being a whole number of
+ * months, the chip falls back to the shekel figure instead of quietly lying.
  */
-const BASIC_RULES = PLAN_LIMITS.basic.maxCustomRules ?? 3;
-const BASIC_CONDITIONS = PLAN_LIMITS.basic.maxBlockingConditions ?? 3;
-
-/** Condition types the product ships. Not a per-plan limit, so not in PlanLimits. */
-const TOTAL_CONDITIONS = 8;
+function savingLabel(): string {
+  const months = YEARLY_SAVING / PLAN_PRICE.monthly;
+  if (!Number.isInteger(months) || months < 1) return `חיסכון של ₪${YEARLY_SAVING}`;
+  const word = ['', 'חודש אחד', 'שני חודשים', 'שלושה חודשים'][months] ?? `${months} חודשים`;
+  return `${word} חינם`;
+}
 
 type Feature = {
   text: string;
-  /** Secondary clause. Rendered quieter and smaller, on the same line. */
+  /** Secondary clause. Rendered quieter and smaller, on its own line. */
   note?: string;
-  /**
-   * Short form, present only on capabilities both plans share. Pro reprints
-   * these as chips instead of as sentences — the single source of truth for
-   * "what the foundation is".
-   */
-  short?: string;
 };
 
-const BASIC_FEATURES: Feature[] = [
-  { text: 'יומן חודשי עם רווח והפסד אוטומטי', short: 'יומן חודשי' },
-  { text: 'גרף TradingView מובנה בתוך כל עסקה', short: 'גרף TradingView' },
-  { text: 'סטטיסטיקות ביצועים בסיסיות', short: 'סטטיסטיקות' },
-  { text: 'ניתוח מעמיק אחרי כל עסקה', short: 'ניתוח לכל עסקה' },
-  // No `short`: these two are not shared. Pro has the same capability at a
-  // different level, so it appears in Pro's prominent list as a lift.
-  { text: `עד ${BASIC_RULES} חוקי משמעת`, note: 'עם התראה לפני כניסה' },
-  { text: `עד ${BASIC_CONDITIONS} תנאי חסימה`, note: `מתוך ${TOTAL_CONDITIONS}` },
+const FEATURES: Feature[] = [
+  {
+    text: 'חוקים אישיים שעוצרים אותך לפני הכניסה',
+    // Not a softener. This is the whole claim, stated at the only scope where
+    // it is true: inside Reflect, at the moment a plan is entered.
+    note: 'עוצר אותך ברגע שאתה מזין עסקה שמפרה את הכללים שלך',
+  },
+  { text: 'ציון משמעת אחרי כל עסקה' },
+  { text: 'ביקורת AI על כל עסקה וצילום גרף' },
+  { text: 'מאמן AI שמכיר את ההיסטוריה שלך' },
+  { text: 'סטטיסטיקות, לוח חודשי ומחברת' },
 ];
-
-const PRO_ADDITIONS: Feature[] = [
-  { text: 'חסימה בזמן אמת לפני כניסה רגשית', note: 'לא רק התראה' },
-  { text: 'מאמן אישי שמכיר את דפוסי המסחר שלך' },
-  { text: 'סטטיסטיקות מלאות לפי שעה ויום' },
-  { text: 'סיכום שבועי עם תובנות מספריות' },
-  // Both limits happen to be 3, so both qualifiers rendered as the identical
-  // string "במקום 3" on consecutive lines and read as a copy-paste error. The
-  // second states the same lift as a coverage figure instead — different shape,
-  // same source, and it also says what the 8 is measured against.
-  { text: 'חוקי משמעת ללא הגבלה', note: `במקום ${BASIC_RULES}` },
-  { text: `כל ${TOTAL_CONDITIONS} תנאי החסימה`, note: `ב-Basic פתוחים ${BASIC_CONDITIONS} מתוך ${TOTAL_CONDITIONS}` },
-];
-
-/** The foundation Pro inherits, in short form. Derived — never a second list. */
-const SHARED_FOUNDATION = BASIC_FEATURES.flatMap((f) => (f.short ? [f.short] : []));
 
 export function MarketingPricing() {
   const [billing, setBilling] = useState<'monthly' | 'yearly'>('monthly');
+  const isYearly = billing === 'yearly';
 
   return (
     <div className="flex flex-col gap-10">
       <div className="flex justify-center">
-        {/* The saving used to be restated on a pill beside this toggle. It is
-            gone: each card already prints its own exact figure the moment
-            annual is selected, and the pill could only quote the better of the
-            two ("עד"), which hedged the very number it was trying to sell. */}
         <div className="pricing-toggle" role="group" aria-label="מחזור חיוב">
           {(['monthly', 'yearly'] as const).map((b) => (
             <button
@@ -130,190 +97,94 @@ export function MarketingPricing() {
         </div>
       </div>
 
-      {/* Basic first in DOM = right-most under RTL, so it is read first.
-          `items-stretch` plus `h-full` + `flex-1` inside each card is what keeps
-          the two exactly as tall as each other — no min-height constant to
-          maintain as the copy changes.
-
-          Capped at 560px once the cards stack, the same way HowItWorksSection
-          caps its three: at 960px wide — what a 1440px window becomes at 150%
-          browser zoom — a full-width card puts six short bullets on a ~900px
-          measure, leaving most of each row empty. */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-7 max-w-[560px] lg:max-w-[1120px] mx-auto w-full items-stretch">
-        {/* Both panels answer the same question, so the pair can be read across:
-            documentation first, or enforcement now. Pro used to spend this slot
-            on the shared-foundation chips instead, which left the recommended
-            plan — the one where self-identification matters most — with no
-            audience framing at all. The foundation moved to a single quiet line
-            closing Pro's list. */}
-        <PlanCard
-          name="Basic"
-          plan="basic"
-          billing={billing}
-          lead="כולל:"
-          features={BASIC_FEATURES}
-          panelLabel="למי זה מתאים"
-          panelText="לסוחר שרוצה קודם כול תיעוד מסודר וניתוח אמיתי של כל עסקה."
-        />
-        <PlanCard
-          name="Pro"
-          plan="pro"
-          billing={billing}
-          lead="מה ש-Pro מוסיף:"
-          features={PRO_ADDITIONS}
-          panelLabel="למי זה מתאים"
-          panelText="לסוחר שהידע כבר לא הבעיה, וצריך משהו שיעצור אותו ברגע ההחלטה."
-          foundation={SHARED_FOUNDATION}
-          highlighted
-        />
-      </div>
-    </div>
-  );
-}
-
-function PlanCard({
-  name,
-  plan,
-  billing,
-  lead,
-  features,
-  panelLabel,
-  panelText,
-  foundation,
-  highlighted = false,
-}: {
-  name: string;
-  plan: PlanKey;
-  billing: 'monthly' | 'yearly';
-  lead: string;
-  features: Feature[];
-  panelLabel: string;
-  panelText: string;
-  /** Pro only: the shared capabilities it inherits, as one closing line. */
-  foundation?: string[];
-  highlighted?: boolean;
-}) {
-  const price = PLAN_PRICES[plan][billing];
-
-  return (
-    <div
-      className={`pricing-card glass-card rounded-2xl flex flex-col h-full ${
-        highlighted ? 'pricing-card-pro' : 'card-hover'
-      }`}
-    >
-      {/* Header. The badge sits *in* this row at its inline end, above the same
-          hairline as the plan name — part of the card's composition rather than
-          a sticker pinned over the card's top edge, which is the same thing the
-          step numerals in HowItWorksSection were fixed out of. */}
-      <div
-        className="flex items-center gap-3 pb-4 mb-5"
-        style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}
-      >
-        <h3 className="text-2xl font-bold text-white">{name}</h3>
-        {highlighted && (
-          <span className="pricing-badge ms-auto shrink-0">
-            <Sparkles size={13} strokeWidth={2.5} aria-hidden />
-            המומלץ
-          </span>
-        )}
-      </div>
-
-      <div className="mb-7">
-        <div className="flex items-baseline gap-2">
-          {/* Isolated LTR so the shekel sign stays on the digits' left, the same
-              way DistinctionSection isolates its figures. The row around it
-              stays RTL, so the price sits on the card's start edge and "/חודש"
-              follows it leftward. */}
-          <span dir="ltr" className="pricing-price">
-            <span className="pricing-currency">₪</span>
-            <span className="pricing-amount">{price}</span>
-          </span>
-          <span className="pricing-per">/חודש</span>
-        </div>
-        {billing === 'yearly' && (
-          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 mt-3">
-            <span className="text-sm" style={{ color: 'rgba(255,255,255,0.55)' }}>
-              לחיוב שנתי
-            </span>
-            <span className="pricing-save-chip">{`חיסכון של ₪${yearlySavings(plan)} בשנה`}</span>
+      {/* Capped at 560px — the same width the pair used once it stacked. A
+          single card allowed to run the full 1120px would put five short
+          bullets on a ~1000px measure, which is most of each row left empty. */}
+      <div className="max-w-[560px] mx-auto w-full">
+        <div className="pricing-card pricing-card-pro glass-card rounded-2xl flex flex-col">
+          {/* The card carries no plan name: there is nothing to tell it apart
+              from, and "Pro" on the only plan is a tier label for a tier that
+              no longer exists. The eyebrow states the choice instead. */}
+          <div
+            className="pb-4 mb-5"
+            style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}
+          >
+            <p className="text-sm font-bold" style={{ color: 'rgba(0,210,210,0.95)' }}>
+              מסלול אחד, הכול כלול
+            </p>
           </div>
-        )}
-      </div>
 
-      {/* The prominent list takes the card's slack, so whatever height the two
-          cards do not share lands as breathing room above the quiet panel
-          rather than as a gap in the middle of the copy. */}
-      <div className="flex-1 flex flex-col">
-        <p
-          className="text-sm font-bold mb-4"
-          style={{ color: highlighted ? 'rgba(0,210,210,0.95)' : 'rgba(255,255,255,0.5)' }}
-        >
-          {lead}
-        </p>
-        <ul className="flex flex-col gap-3.5">
-          {features.map((f) => (
-            <li key={f.text} className="flex items-start gap-2.5">
-              <span className="pricing-check" aria-hidden>
-                <Check aria-hidden="true" size={12} strokeWidth={3.25} />
+          <div className="mb-7">
+            <div className="flex items-baseline gap-2">
+              {/* Isolated LTR so the shekel sign stays on the digits' left, the
+                  same way DistinctionSection isolates its figures. The row
+                  around it stays RTL. */}
+              <span dir="ltr" className="pricing-price">
+                <span className="pricing-currency">₪</span>
+                <span className="pricing-amount">
+                  {isYearly ? PLAN_PRICE.yearly.toLocaleString('en-US') : PLAN_PRICE.monthly}
+                </span>
               </span>
-              <span className="text-base leading-snug" style={{ color: 'rgba(255,255,255,0.9)' }}>
-                {f.text}
-                {/* The qualifier is its own line, not a "· note" appended to the
-                    sentence. Inline, it wrapped at 150% and stranded the middot
-                    at the start of the next line, where it read as a bullet. */}
-                {f.note && <span className="pricing-note">{f.note}</span>}
-              </span>
-            </li>
-          ))}
-        </ul>
+              <span className="pricing-per">{isYearly ? '/שנה' : '/חודש'}</span>
+            </div>
 
-        {/* The foundation, as one quiet line closing the list rather than a
-            cluster of pills in the panel. `mt-auto` pins it to the foot of the
-            list block, so the card's slack opens above it instead of between it
-            and the rows it belongs to. */}
-        {foundation && (
-          <p className="pricing-foundation mt-auto">
-            <span className="pricing-foundation-label">כולל גם את כל מה שב-Basic:</span>{' '}
-            {/* Each name is nowrap and the separators are not, so a line can
-                only break *between* capabilities. Joined as one string, "ניתוח
-                לכל עסקה" split across two lines and left "עסקה" stranded. */}
-            {foundation.map((item, i) => (
-              <Fragment key={item}>
-                {i > 0 && ' · '}
-                <span className="pricing-foundation-item">{item}</span>
-              </Fragment>
+            {isYearly && (
+              <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 mt-3">
+                {/* The list price is struck, not merely stated, so the discount
+                    is visible without a percentage being quoted anywhere. */}
+                <span dir="ltr" className="pricing-list-price">
+                  {`₪${YEARLY_LIST.toLocaleString('en-US')}`}
+                </span>
+                <span className="pricing-save-chip">{savingLabel()}</span>
+              </div>
+            )}
+          </div>
+
+          <ul className="flex flex-col gap-3.5">
+            {FEATURES.map((f) => (
+              <li key={f.text} className="flex items-start gap-2.5">
+                <span className="pricing-check" aria-hidden>
+                  <Check aria-hidden="true" size={12} strokeWidth={3.25} />
+                </span>
+                <span className="text-base leading-snug" style={{ color: 'rgba(255,255,255,0.9)' }}>
+                  {f.text}
+                  {/* Its own line, not a "· note" appended to the sentence.
+                      Inline, it wrapped at 150% zoom and stranded the middot at
+                      the start of the next line, where it read as a bullet. */}
+                  {f.note && <span className="pricing-note">{f.note}</span>}
+                </span>
+              </li>
             ))}
-          </p>
-        )}
-      </div>
+          </ul>
 
-      {/* Both cards carry the same panel here, answering the same question, so
-          the pair can be read across rather than each card being a different
-          kind of thing. */}
-      <div className="pricing-panel mt-7">
-        <p className="pricing-panel-label">{panelLabel}</p>
-        <p className="pricing-panel-text">{panelText}</p>
-      </div>
+          <div className="pricing-panel mt-7">
+            <p className="pricing-panel-label">למי זה מתאים</p>
+            <p className="pricing-panel-text">
+              לסוחר שהידע כבר לא הבעיה, וצריך תיעוד אמיתי של כל עסקה — ומשהו שיעצור אותו ברגע ההחלטה.
+            </p>
+          </div>
 
-      {/* The recommended plan keeps the page's filled gradient CTA; the other
-          takes an outlined one. Two identically-loud buttons made the pair a
-          coin toss — an outline still reads as a legitimate choice, which a
-          greyed-out button would not. `cta-shine` is a hover-only sweep, not a
-          loop: nothing animates at rest at the decision moment. */}
-      <div className="mt-6 flex flex-col items-center gap-2.5">
-        <Link
-          href="/signup"
-          className={`link-button w-full py-3.5 rounded-xl text-base font-bold text-center ${
-            highlighted ? 'landing-cta cta-shine text-black' : 'pricing-cta-ghost'
-          }`}
-        >
-          התחל ניסיון חינם 5 ימים
-        </Link>
-        {/* Only what is actually true today. Stripe is not integrated, so there
-            is no billing behaviour to promise beyond this. */}
-        <span className="text-sm" style={{ color: 'rgba(255,255,255,0.5)' }}>
-          בלי כרטיס אשראי
-        </span>
+          {/* One plan, so one CTA, and it takes the page's filled gradient.
+              `cta-shine` is a hover-only sweep, not a loop: nothing animates at
+              rest at the decision moment. */}
+          <div className="mt-6 flex flex-col items-center gap-2">
+            <Link
+              href="/signup"
+              className="link-button landing-cta cta-shine w-full py-3.5 rounded-xl text-base font-bold text-center text-black"
+            >
+              התחל חמישה ימי ניסיון
+            </Link>
+            {/* Both lines describe what the product actually does. The refund
+                is not new — it has been in the Terms all along and has simply
+                never been said out loud where anyone deciding could see it. */}
+            <span className="text-sm" style={{ color: 'rgba(255,255,255,0.5)' }}>
+              חמישה ימי ניסיון, בלי כרטיס אשראי
+            </span>
+            <span className="text-sm" style={{ color: 'rgba(255,255,255,0.5)' }}>
+              החזר מלא תוך 14 יום
+            </span>
+          </div>
+        </div>
       </div>
     </div>
   );

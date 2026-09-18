@@ -25,7 +25,7 @@ export function PricingSection() {
           <ScrollReveal>
             <div className="pricing-title-wrap flex items-center justify-center gap-4 md:gap-6">
               <span className="pricing-title-line" aria-hidden />
-              <h2 className="pricing-title">המסלולים שלנו</h2>
+              <h2 className="pricing-title">המסלול שלנו</h2>
               <span className="pricing-title-line" aria-hidden />
             </div>
           </ScrollReveal>
@@ -36,7 +36,8 @@ export function PricingSection() {
               className="text-lg max-w-2xl mx-auto mt-6 leading-relaxed"
               style={{ color: 'rgba(255,255,255,0.62)' }}
             >
-              שני המסלולים מתחילים ב-5 ימי ניסיון חינם. בחר את מה שמתאים לך — ואפשר לשדרג בכל רגע.
+              מסלול אחד, בלי מדרגות ובלי תכונות שנעולות מאחורי שדרוג. חמישה ימי ניסיון בלי כרטיס
+              אשראי, והחזר מלא תוך 14 יום.
             </p>
           </ScrollReveal>
         </div>

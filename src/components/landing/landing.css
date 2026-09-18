@@ -355,10 +355,12 @@ html[data-a11y-contrast='inverted'] .lnav-mobile-panel {
 }
 
 .pricing-title {
-  /* The floor is what keeps "המסלולים שלנו" on one line at 376px — the rules
-     plus the words need ~340px of the 344px available, and a wrapped two-line
-     wordmark left the flanking rules stranded against its middle. In rem, so
-     the accessibility text scale still grows it (and is allowed to wrap it). */
+  /* The floor is what keeps "המסלול שלנו" on one line at 376px — the rules plus
+     the words need ~340px of the 344px available, and a wrapped two-line
+     wordmark left the flanking rules stranded against its middle. Sized for the
+     longer plural this heading used to carry, so the shorter singular has room
+     to spare. In rem, so the accessibility text scale still grows it (and is
+     allowed to wrap it). */
   font-size: clamp(2.125rem, 5.4vw, 3.5rem);
   font-weight: 900;
   line-height: 1.12;
@@ -549,22 +551,6 @@ html[data-a11y-reduce-motion='true'] .pricing-title {
     0 0 66px rgba(0, 210, 210, 0.26);
 }
 
-/* ── Pricing: the recommended badge ────────────────────────── */
-
-.pricing-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  padding: 0.3rem 0.75rem;
-  border-radius: 999px;
-  font-size: 0.8125rem;
-  font-weight: 800;
-  white-space: nowrap;
-  color: #04191c;
-  background: linear-gradient(120deg, #00d2d2 0%, #67e8f9 100%);
-  box-shadow: 0 2px 14px rgba(0, 210, 210, 0.45);
-}
-
 /* ── Pricing: price typography ─────────────────────────────────
    The figure is the largest thing in the card, so it carries the most weight:
    heavy, tightly tracked, tabular. The currency is stepped down and lifted onto
@@ -594,11 +580,23 @@ html[data-a11y-reduce-motion='true'] .pricing-title {
   letter-spacing: -0.035em;
 }
 
-/* Pro's figure is the one the section is arguing for, so it gets the accent
-   glow. Kept as a shadow on white text rather than a gradient fill: gradient
-   text on a numeral costs contrast exactly where legibility matters most. */
+/* The figure is what the section is arguing for, so it gets the accent glow.
+   Kept as a shadow on white text rather than a gradient fill: gradient text on
+   a numeral costs contrast exactly where legibility matters most. */
 .pricing-card-pro .pricing-price {
   text-shadow: 0 0 26px rgba(0, 210, 210, 0.45);
+}
+
+/* The annual list price, struck through beside the discounted figure. Quiet and
+   small: it is there to be crossed out, not read. Tabular so its digits line up
+   with the price above it rather than drifting under them. */
+.pricing-list-price {
+  font-size: 1rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  color: rgba(255, 255, 255, 0.4);
 }
 
 .pricing-per {
@@ -665,63 +663,15 @@ html[data-a11y-reduce-motion='true'] .pricing-title {
   color: rgba(255, 255, 255, 0.62);
 }
 
-/* Pro's inherited foundation, as one line under a hairline at the foot of its
-   list. It was a cluster of pills inside the panel, which both crowded the
-   panel and took the slot Pro needed for its own audience line. As running text
-   it says exactly the same thing far more quietly. */
-.pricing-foundation {
-  padding-top: 0.875rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
-  font-size: 0.8125rem;
-  line-height: 1.65;
-  color: rgba(255, 255, 255, 0.55);
-}
+/* The lift this card used to take at >=1024px is gone with the second card.
+   It existed to stand one card out of a row of two; on a single centred card
+   there is nothing to stand out of, and it would read as exactly the
+   unexplained 12px gap the stacked layout was careful to avoid. */
 
-.pricing-foundation-label {
-  font-weight: 700;
-  color: rgba(255, 255, 255, 0.68);
-}
-
-.pricing-foundation-item {
-  white-space: nowrap;
-}
-
-/* The lift only exists once the cards are side by side and there is a row to
-   stand out of. Stacked, it would just be an unexplained 12px gap. */
-@media (min-width: 1024px) {
-  .pricing-card-pro {
-    transform: translateY(-12px);
-  }
-
-  .pricing-card-pro:hover {
-    transform: translateY(-18px);
-  }
-}
-
-/* Basic's CTA. An outline rather than the filled gradient, so the two buttons
-   are not equally loud at the moment of choosing — but still an inviting
-   button in the accent colour, not a disabled-looking grey one. */
-.pricing-cta-ghost {
-  color: #00d2d2;
-  background: rgba(0, 210, 210, 0.06);
-  border: 1px solid rgba(0, 210, 210, 0.5);
-  transition: transform 0.2s ease, background-color 0.2s ease, border-color 0.2s ease;
-}
-
-.pricing-cta-ghost:hover {
-  transform: translateY(-2px);
-  background: rgba(0, 210, 210, 0.13);
-  border-color: rgba(0, 210, 210, 0.85);
-}
-
-.pricing-cta-ghost:active {
-  transform: translateY(0) scale(0.97);
-}
-
-/* The annual saving, inside a card, once annual is selected. This is now the
-   *only* place the figure appears — the "עד ₪120" pill that used to sit beside
-   the toggle restated it less precisely and hedged it across two plans whose
-   discounts differ (Basic 7%, Pro 10%). */
+/* The annual saving, once annual is selected. Sold in months rather than
+   percent, and paired with the struck-through list price beside it, so the
+   discount is shown rather than asserted — there is no percentage figure
+   anywhere in this section for a reader to have to take on trust. */
 .pricing-save-chip {
   display: inline-flex;
   align-items: center;
