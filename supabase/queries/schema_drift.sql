@@ -10,10 +10,17 @@
 -- in the dashboard are invisible to every grep, every review and every
 -- deploy, so the only way to find them is to ask the catalog.
 --
--- Drift runs in both directions, and this file checks both:
+-- Drift runs in both directions, and this file checks both — then checks two
+-- things that are not comparisons at all:
 --
---   Queries 1-5  things the DATABASE has that the repo never created.
---   Queries 6-9  things the REPO declares that the database does not have.
+--   Queries 1-5    things the DATABASE has that the repo never created.
+--   Queries 6-9    things the REPO declares that the database does not have.
+--   Queries 10-12  RLS invariants: off, on-but-toothless, and bypassed by views.
+--   Queries 13-14  standing assertions — the EXECUTE and TO-public defaults.
+--
+-- 10-14 are the ones that catch the object written next month rather than the
+-- objects written before today, because they check a rule instead of a list.
+-- They are also the ones to wire into CI first: all five must return zero rows.
 --
 -- The second direction is not hypothetical. 002 creates
 -- personal_strategies_updated_at and alert_settings_updated_at; both tables
@@ -412,3 +419,82 @@ JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname = 'public'
   AND c.relkind IN ('v', 'm')
 ORDER BY c.relkind, c.relname;
+
+
+-- ===========================================================================
+-- STANDING ASSERTIONS — invariants, not comparisons
+-- ===========================================================================
+-- Queries 1-9 ask whether the repo and the database agree. These two ask
+-- whether a rule holds, and they are the ones that catch the object written
+-- next month rather than the objects written before today.
+--
+-- Both must return ZERO ROWS. They are written to be the CI assertions: fail
+-- the job on any row, print the rows.
+
+
+-- ---------------------------------------------------------------------------
+-- 13. Any function in public executable by PUBLIC, anon or authenticated.
+-- ---------------------------------------------------------------------------
+-- Postgres grants EXECUTE to PUBLIC on every function at CREATE time, and
+-- Supabase grants USAGE on schema public to anon, so a new function is
+-- callable at /rest/v1/rpc/<name> unless someone revokes it. 024 revoked the
+-- four that existed; nothing stops the fifth, because the default cannot be
+-- changed reliably on managed Supabase (ALTER DEFAULT PRIVILEGES only works
+-- per creating role, for roles you are a member of). This query is the
+-- substitute for that guarantee.
+--
+-- A function RETURNING trigger or event_trigger cannot be invoked as an
+-- ordinary call, so those are not exploitable today — but that is a property
+-- of what they happen to return, not a rule anyone is enforcing, and it stops
+-- being true the moment someone writes a SECURITY DEFINER function returning a
+-- scalar. get_user_tier was exactly that. The return type is reported here so
+-- a finding can be triaged, not excluded.
+--
+-- If a function genuinely needs to be called over PostgREST: grant it to
+-- `authenticated` explicitly, in its own migration, with a comment saying why,
+-- and add its name to the allowance below.
+
+SELECT
+  p.proname       AS function_name,
+  pg_get_function_identity_arguments(p.oid) AS args,
+  rp.grantee,
+  p.prosecdef     AS security_definer,
+  pg_get_function_result(p.oid) AS returns,
+  CASE
+    WHEN pg_get_function_result(p.oid) IN ('trigger', 'event_trigger')
+      THEN 'not callable over PostgREST — grant is still wrong'
+    ELSE 'CALLABLE OVER HTTP'
+  END AS severity
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+JOIN information_schema.routine_privileges rp
+  ON rp.routine_schema = n.nspname
+ AND rp.routine_name   = p.proname
+WHERE n.nspname = 'public'
+  AND rp.grantee IN ('PUBLIC', 'anon', 'authenticated')
+  AND rp.privilege_type = 'EXECUTE'
+  -- Deliberately granted, with the migration that did it:
+  AND p.proname NOT IN (
+    -- (none yet)
+    ''
+  )
+ORDER BY severity DESC, p.proname;
+
+
+-- ---------------------------------------------------------------------------
+-- 14. Any policy in public granted TO public.
+-- ---------------------------------------------------------------------------
+-- CREATE POLICY with no TO clause means PUBLIC, which includes anon. The
+-- expression is usually still the real barrier — auth.uid() is NULL for an
+-- anonymous caller, so an owner check yields no rows — but that leaves the
+-- expression as the only barrier, and 018 is the precedent for an expression
+-- being the hole.
+--
+-- 023 fixed every policy that existed. This catches the next one written
+-- without a TO clause, which is the one that will not be noticed otherwise.
+
+SELECT schemaname, tablename, policyname, cmd, roles, qual, with_check
+FROM pg_policies
+WHERE schemaname = 'public'
+  AND 'public' = ANY (roles)
+ORDER BY tablename, policyname;

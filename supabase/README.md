@@ -158,6 +158,24 @@ grants `USAGE` on schema `public` to `anon`, so by default **every function
 here is callable unauthenticated** at `/rest/v1/rpc/<name>`. For a
 `SECURITY DEFINER` function that means it runs as its owner and bypasses RLS.
 
-`024` revokes the existing grants and changes the default for future functions.
-If you add a function that genuinely needs to be called over PostgREST, grant
-it explicitly to `authenticated`, in its own migration, and say why.
+`024` revokes the grants on the four functions that exist. It does **not**
+change the default for future ones, and cannot: `ALTER DEFAULT PRIVILEGES`
+only works per creating role and only for roles you are a member of, and the
+SQL editor's `postgres` is not a member of `supabase_admin`. The first attempt
+named it, failed, and — because the editor wraps the file in a transaction —
+rolled back the revokes with it.
+
+So the next function created here will carry an EXECUTE grant nobody asked
+for, and the guarantee is a standing assertion rather than a migration: query
+13 of `queries/schema_drift.sql` fails on any function in `public` granted
+EXECUTE to `PUBLIC`, `anon` or `authenticated`.
+
+The four that exist all return `trigger` or `event_trigger`, which cannot be
+invoked as ordinary calls, so none is reachable over HTTP. That is a property
+of what they happen to return, not a rule being enforced — `get_user_tier`
+returned `text`, which is exactly why it was reachable. Don't read "not
+exploitable today" as "the grant is fine".
+
+If you add a function that genuinely needs calling over PostgREST: grant it to
+`authenticated` explicitly, in its own migration, say why, and add its name to
+query 13's allowance list in the same change.
