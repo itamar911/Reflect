@@ -295,7 +295,20 @@ WITH expected(table_name, policy_name) AS (
     ('personal_strategies',   'personal_strategies_delete'),
     ('tradovate_connections', 'tradovate_connections_select_own')
 )
-SELECT e.table_name, e.policy_name, 'MISSING' AS status
+SELECT
+  e.table_name,
+  e.policy_name AS expected_but_missing,
+  -- What IS on that table, so a finding comes with its own diagnosis. A
+  -- missing policy next to an empty list means the table is closed; next to a
+  -- differently-named policy it means someone replaced ours, which is what
+  -- happened to all four of the "Users can manage own ..." policies.
+  COALESCE(
+    (SELECT string_agg(pp2.policyname || ' [' || pp2.cmd || ']', ', ' ORDER BY pp2.policyname)
+     FROM pg_policies pp2
+     WHERE pp2.schemaname = 'public' AND pp2.tablename = e.table_name),
+    '(no policies at all — table is closed to everyone)'
+  ) AS actually_on_this_table,
+  'MISSING' AS status
 FROM expected e
 WHERE NOT EXISTS (
   SELECT 1 FROM pg_policies pp
