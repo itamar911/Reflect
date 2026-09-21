@@ -137,6 +137,14 @@ export function clearAllCachedTokens(): void {
 export async function saveConnection(params: {
   userId: string;
   accessToken: string;
+  /**
+   * The refresh token to store, when there is one.
+   *
+   * OMITTING THIS CLEARS THE STORED VALUE. It is not a partial update: this
+   * column is written on every save, so leaving the argument out writes NULL.
+   * Any caller that is updating an existing connection — a renewal, say —
+   * must pass the current value through, or it destroys it.
+   */
   refreshToken?: string;
   /** Epoch milliseconds. */
   expiresAt: number;
@@ -156,9 +164,10 @@ export async function saveConnection(params: {
     {
       user_id: userId,
       access_token_encrypted: encryptToken(accessToken, 'access', userId),
-      // Null unless Tradovate ever starts issuing refresh tokens. Written
-      // explicitly so reconnecting clears a stale value rather than leaving one
-      // behind from a previous connection.
+      // Always written, never left untouched: reconnecting must clear a stale
+      // value rather than leave one behind from a previous connection. The cost
+      // of that choice is that a caller which forgets to pass refreshToken
+      // silently erases it — see the warning on the parameter.
       refresh_token_encrypted: refreshToken ? encryptToken(refreshToken, 'refresh', userId) : null,
       expires_at: new Date(expiresAt).toISOString(),
       tradovate_user_id: tradovateUserId,
@@ -316,6 +325,16 @@ async function loadOrRenew(
     // records which environment actually minted the token, and a renewal must
     // not be able to relabel it.
     environment: data.environment,
+    // Carried forward for the same reason, and it is not optional: every
+    // saveConnection writes refresh_token_encrypted, so omitting this argument
+    // writes NULL rather than leaving the stored value alone. A renewal would
+    // then silently destroy a refresh token the exchange had issued. Decrypted
+    // and re-encrypted rather than copied as ciphertext because the AAD binds
+    // each value to its user and column, and saveConnection owns that binding;
+    // the fresh IV on re-encryption is expected, not a problem.
+    refreshToken: data.refresh_token_encrypted
+      ? decryptToken(data.refresh_token_encrypted, 'refresh', userId)
+      : undefined,
     admin,
   });
 

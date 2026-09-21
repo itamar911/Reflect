@@ -164,6 +164,12 @@ export async function GET(request: NextRequest) {
             expiresAt: renewedExpiry,
             tradovateUserId: me.userId,
             environment: config.config.environment,
+            // Carried forward explicitly. saveConnection always writes this
+            // column — omitting it does not leave the stored value alone, it
+            // writes NULL — so a renewal that dropped it would destroy a
+            // refresh token the exchange had just issued. Which is exactly the
+            // thing Q8 exists to find out about.
+            refreshToken: token.refreshToken,
           });
           logPhase2('renewed token stored', 'yes');
         }
