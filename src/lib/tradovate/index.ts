@@ -72,6 +72,28 @@ export {
 } from './connections';
 export type { ConnectionStatus, ConnectionSummary } from './connections';
 
+export {
+  isAllowlistConfigured,
+  isUserAllowed,
+  parseAllowlist,
+  TRADOVATE_ALLOWLIST_ENV_VAR,
+} from './allowlist';
+
+export {
+  AUTHORIZE_URLS,
+  LIVE_API_URL,
+  TOKEN_URLS,
+  TOKEN_URLS_ALTERNATIVE,
+  TOKEN_URL_SOURCE,
+  TRADING_API_URLS,
+  detectEnvironment,
+} from './hosts';
+export type { TradovateEnvironment } from './hosts';
+
+// PHASE 2 DIAGNOSTICS — remove these two exports with ./phase2-diagnostics.ts.
+export { describeJsonShape, formatShape, logPhase2, probeRenewal } from './phase2-diagnostics';
+export type { JsonShape, RenewalProbe } from './phase2-diagnostics';
+
 export { redactSecrets, redactUrl } from './redact';
 
 export { isPenaltyResponse } from './types';

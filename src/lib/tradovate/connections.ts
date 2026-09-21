@@ -60,6 +60,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 
 import { renewAccessToken } from './auth';
 import { TradovateNotConnectedError, TradovateOAuthError } from './errors';
+import type { TradovateEnvironment } from './hosts';
 import { decryptToken, encryptToken } from './token-crypto';
 import type { TradovateOAuthConfig } from './oauth-config';
 import type { UserTokenSnapshot } from './types';
@@ -89,6 +90,7 @@ interface ConnectionRow {
   refresh_token_encrypted: string | null;
   expires_at: string;
   tradovate_user_id: number | null;
+  environment: TradovateEnvironment;
   status: ConnectionStatus;
 }
 
@@ -97,6 +99,7 @@ export interface ConnectionSummary {
   status: ConnectionStatus;
   tradovateUserId: number | null;
   expiresAt: string;
+  environment: TradovateEnvironment;
 }
 
 function remember(userId: string, snapshot: UserTokenSnapshot): UserTokenSnapshot {
@@ -138,9 +141,15 @@ export async function saveConnection(params: {
   /** Epoch milliseconds. */
   expiresAt: number;
   tradovateUserId: number | null;
+  /**
+   * Which Tradovate environment minted this token. Required, with no default:
+   * a demo token and a live token are indistinguishable once stored, and
+   * guessing would mean reading simulated fills as though they were real ones.
+   */
+  environment: TradovateEnvironment;
   admin?: SupabaseClient;
 }): Promise<void> {
-  const { userId, accessToken, refreshToken, expiresAt, tradovateUserId } = params;
+  const { userId, accessToken, refreshToken, expiresAt, tradovateUserId, environment } = params;
   const admin = params.admin ?? createAdminClient();
 
   const { error } = await admin.from('tradovate_connections').upsert(
@@ -153,6 +162,7 @@ export async function saveConnection(params: {
       refresh_token_encrypted: refreshToken ? encryptToken(refreshToken, 'refresh', userId) : null,
       expires_at: new Date(expiresAt).toISOString(),
       tradovate_user_id: tradovateUserId,
+      environment,
       status: 'active',
       updated_at: new Date().toISOString(),
     },
@@ -173,7 +183,7 @@ export async function getConnectionSummary(
 ): Promise<ConnectionSummary | null> {
   const { data, error } = await admin
     .from('tradovate_connections')
-    .select('status, tradovate_user_id, expires_at')
+    .select('status, tradovate_user_id, expires_at, environment')
     .eq('user_id', userId)
     .maybeSingle();
 
@@ -184,6 +194,7 @@ export async function getConnectionSummary(
     status: data.status as ConnectionStatus,
     tradovateUserId: data.tradovate_user_id,
     expiresAt: data.expires_at,
+    environment: data.environment as TradovateEnvironment,
   };
 }
 
@@ -239,7 +250,7 @@ async function loadOrRenew(
   const { data, error } = await admin
     .from('tradovate_connections')
     .select(
-      'user_id, access_token_encrypted, refresh_token_encrypted, expires_at, tradovate_user_id, status'
+      'user_id, access_token_encrypted, refresh_token_encrypted, expires_at, tradovate_user_id, environment, status'
     )
     .eq('user_id', userId)
     .maybeSingle<ConnectionRow>();
@@ -301,6 +312,10 @@ async function loadOrRenew(
     accessToken: renewed.accessToken,
     expiresAt,
     tradovateUserId,
+    // Carried from the stored row, not from the caller's config: the row
+    // records which environment actually minted the token, and a renewal must
+    // not be able to relabel it.
+    environment: data.environment,
     admin,
   });
 

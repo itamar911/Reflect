@@ -5,6 +5,7 @@ import AlertsPanel from '@/components/settings/AlertsPanel';
 import type { AlertSettingsData } from '@/components/settings/AlertsPanel';
 import { Plug } from 'lucide-react';
 import DeleteAccountSection from '@/components/settings/DeleteAccountSection';
+import { isUserAllowed } from '@/lib/tradovate/allowlist';
 
 export const metadata = { title: 'הגדרות — Reflect' };
 
@@ -20,6 +21,12 @@ export default async function SettingsPage() {
 
   const profile = profileRes.data;
   const alertSettings = alertRes.data as AlertSettingsData | null;
+
+  // Tradovate is closed to everyone but an allowlist until the production OAuth
+  // test has passed. This only decides whether the button is live — the real
+  // gate is in /api/tradovate/connect and /api/tradovate/callback, which check
+  // the same list independently. A hidden button is still a URL.
+  const canConnectTradovate = isUserAllowed(user.id);
 
   return (
     <div className="px-4 py-5 flex flex-col gap-5 md:max-w-none">
@@ -58,26 +65,38 @@ export default async function SettingsPage() {
       <div className="flex flex-col gap-3">
         <h2 className="text-base font-bold text-tg-text">אינטגרציות</h2>
 
-        <Card className="opacity-75">
+        <Card className={canConnectTradovate ? undefined : 'opacity-75'}>
           <div className="flex items-start gap-3">
             <Plug aria-hidden="true" size={20} style={{ color: '#00d2d2' }} className="shrink-0 mt-0.5" />
             <div className="flex-1">
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-sm font-bold text-tg-text">חיבור ברוקר בזמן אמת</h3>
                 <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: 'rgba(0,210,210,0.12)', color: '#00d2d2' }}>
-                  זמין בקרוב
+                  {canConnectTradovate ? 'בדיקה מוקדמת' : 'זמין בקרוב'}
                 </span>
               </div>
               <p className="text-xs text-tg-muted mt-1.5">
                 העסקאות, הפוזיציות והביצועים שלך יסונכרנו באופן אוטומטי ישירות מהברוקר לאפליקציה.
               </p>
-              <button
-                disabled
-                className="mt-3 w-full py-2.5 rounded-xl text-sm font-semibold cursor-not-allowed"
-                style={{ background: 'var(--color-tg-surface-2)', color: 'var(--color-tg-muted)' }}
-              >
-                חבר ברוקר
-              </button>
+              {canConnectTradovate ? (
+                // A plain link, not a fetch: the flow ends on Tradovate's own
+                // consent screen, so it has to be a top-level navigation.
+                <a
+                  href="/api/tradovate/connect"
+                  className="mt-3 w-full py-2.5 rounded-xl text-sm font-semibold block text-center"
+                  style={{ background: '#00d2d2', color: 'var(--color-tg-bg)' }}
+                >
+                  חבר ברוקר
+                </a>
+              ) : (
+                <button
+                  disabled
+                  className="mt-3 w-full py-2.5 rounded-xl text-sm font-semibold cursor-not-allowed"
+                  style={{ background: 'var(--color-tg-surface-2)', color: 'var(--color-tg-muted)' }}
+                >
+                  חבר ברוקר
+                </button>
+              )}
             </div>
           </div>
         </Card>

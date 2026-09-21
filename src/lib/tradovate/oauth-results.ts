@@ -33,6 +33,14 @@ export const TradovateResult = {
   RateLimited: 'rate_limited',
   /** OAuth environment variables are missing or malformed on the server. */
   NotConfigured: 'not_configured',
+  /**
+   * The connection is not open to this user yet.
+   *
+   * Deliberately says nothing about why. The allowlist gate produces this for
+   * "you are not on the list" and for "no list is configured" alike, so probing
+   * the route reveals neither who is on it nor whether one exists.
+   */
+  NotAvailable: 'not_available',
 } as const;
 
 export type TradovateResultCode = (typeof TradovateResult)[keyof typeof TradovateResult];

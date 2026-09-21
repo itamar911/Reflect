@@ -25,6 +25,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
 import { createClient } from '@/lib/supabase/server';
+import { isAllowlistConfigured, isUserAllowed } from '@/lib/tradovate/allowlist';
 import { describeConfigError } from '@/lib/tradovate/config';
 import { saveConnection } from '@/lib/tradovate/connections';
 import {
@@ -39,6 +40,8 @@ import {
   type TradovateResultCode,
 } from '@/lib/tradovate/oauth-results';
 import { STATE_COOKIE_NAME, stateCookieOptions, verifyState } from '@/lib/tradovate/oauth-state';
+// PHASE 2 DIAGNOSTICS — remove with lib/tradovate/phase2-diagnostics.ts.
+import { formatShape, logPhase2, probeRenewal } from '@/lib/tradovate/phase2-diagnostics';
 import { redactSecrets } from '@/lib/tradovate/redact';
 
 export const runtime = 'nodejs';
@@ -65,6 +68,21 @@ export async function GET(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   if (!user) return NextResponse.redirect(new URL('/login', request.url));
+
+  // The allowlist gate, checked independently of /connect. A callback can be
+  // replayed or hand-crafted, so the route that actually writes tokens does not
+  // get to assume the route that starts the flow was ever involved. Placed
+  // before the error branch and before state so that a blocked user cannot
+  // learn anything about the flow's internals.
+  if (!isUserAllowed(user.id)) {
+    if (!isAllowlistConfigured()) {
+      console.warn(
+        '[tradovate] callback refused: TRADOVATE_OAUTH_ALLOWED_USER_IDS is unset or empty, ' +
+          'so no user can connect. This is the fail-closed default.'
+      );
+    }
+    return finish(TradovateResult.NotAvailable);
+  }
 
   // Step 2 — Tradovate said no before we spend anything. The user declining is
   // an outcome, not a failure: no error page, no console noise.
@@ -106,7 +124,59 @@ export async function GET(request: NextRequest) {
       refreshToken: token.refreshToken,
       expiresAt: token.expiresAt,
       tradovateUserId: me.userId,
+      environment: config.config.environment,
     });
+
+    // ========================================================================
+    // PHASE 2 DIAGNOSTICS — DELETE THIS BLOCK WHEN THE PRODUCTION TEST PASSES
+    //
+    // Answers Q3, Q4 and Q8 from the migration plan; see
+    // lib/tradovate/phase2-diagnostics.ts for what each one is and for the
+    // rules about what may be logged. Only reachable by an allowlisted user,
+    // because the gate above already returned for everyone else.
+    //
+    // Field NAMES and TYPES only, plus expires_in as a number and an HTTP
+    // status. No token, no secret, no code, no header, no field value. Every
+    // line goes through redactSecrets() inside logPhase2().
+    // ========================================================================
+    logPhase2('exchange environment', config.config.environment);
+    logPhase2('exchange response fields', formatShape(token.diagnostics ?? {}));
+    logPhase2('exchange expires_in (seconds)', String(token.expiresIn));
+
+    try {
+      const probe = await probeRenewal(config.config.apiUrl, token.accessToken);
+      logPhase2('renewal HTTP status', String(probe.status));
+      logPhase2('renewal response fields', formatShape(probe.shape));
+      logPhase2('renewal apiHosts present', String(probe.hasApiHosts));
+      logPhase2('renewal looked like a rate-limit penalty', String(probe.penalty));
+      logPhase2('renewal returned usable credentials', String(Boolean(probe.renewed)));
+
+      // Persist what renewal returned. The docs say renewal "returns a fresh
+      // accessToken" but never say the presented token survives, so discarding
+      // the result could leave a dead token in the row. Storing it is the safe
+      // reading, and it keeps the connection usable after the probe.
+      if (probe.renewed) {
+        const renewedExpiry = Date.parse(probe.renewed.expirationTime);
+        if (!Number.isNaN(renewedExpiry)) {
+          await saveConnection({
+            userId: user.id,
+            accessToken: probe.renewed.accessToken,
+            expiresAt: renewedExpiry,
+            tradovateUserId: me.userId,
+            environment: config.config.environment,
+          });
+          logPhase2('renewed token stored', 'yes');
+        }
+      }
+    } catch (probeError) {
+      // A failed probe must never fail the connection — the token is already
+      // stored and usable. Message only, redacted, never the error object.
+      logPhase2(
+        'renewal probe threw',
+        redactSecrets(probeError instanceof Error ? probeError.message : 'unknown error', [code])
+      );
+    }
+    // ===================== END PHASE 2 DIAGNOSTICS ==========================
 
     return finish(TradovateResult.Connected);
   } catch (error) {

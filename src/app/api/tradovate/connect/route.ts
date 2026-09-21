@@ -18,6 +18,7 @@
 import { NextResponse } from 'next/server';
 
 import { createClient } from '@/lib/supabase/server';
+import { isAllowlistConfigured, isUserAllowed } from '@/lib/tradovate/allowlist';
 import { describeConfigError } from '@/lib/tradovate/config';
 import { buildAuthorizeUrl } from '@/lib/tradovate/oauth';
 import { loadOAuthConfig } from '@/lib/tradovate/oauth-config';
@@ -44,6 +45,21 @@ export async function GET(request: Request) {
     // A browser navigation, so send them to sign in rather than answering with
     // JSON they would never see.
     return NextResponse.redirect(new URL('/login', request.url));
+  }
+
+  // The allowlist gate. Checked before configuration so that a server which is
+  // not yet configured and a user who is not yet allowed produce the same
+  // outcome for everyone outside the list. See lib/tradovate/allowlist.ts —
+  // this fails closed, and it is the real gate; the hidden settings button is
+  // only cosmetic.
+  if (!isUserAllowed(user.id)) {
+    if (!isAllowlistConfigured()) {
+      console.warn(
+        '[tradovate] connect refused: TRADOVATE_OAUTH_ALLOWED_USER_IDS is unset or empty, ' +
+          'so no user can connect. This is the fail-closed default.'
+      );
+    }
+    return NextResponse.redirect(resultUrl(request, TradovateResult.NotAvailable));
   }
 
   const result = loadOAuthConfig();

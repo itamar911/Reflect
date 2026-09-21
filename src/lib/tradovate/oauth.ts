@@ -17,6 +17,8 @@
 
 import { tradovateGet } from './client';
 import { TradovateOAuthError, TradovatePenaltyError, TradovateRequestError } from './errors';
+// PHASE 2 DIAGNOSTICS — remove with ./phase2-diagnostics.ts.
+import { describeJsonShape, type JsonShape } from './phase2-diagnostics';
 import { redactSecrets } from './redact';
 import {
   isPenaltyResponse,
@@ -54,6 +56,13 @@ export interface ExchangedToken {
   expiresAt: number;
   /** Present only if Tradovate ever starts issuing one. */
   refreshToken?: string;
+  /** Seconds, as returned. A lifetime, not a credential. */
+  expiresIn: number;
+  /**
+   * PHASE 2 DIAGNOSTICS — remove with ./phase2-diagnostics.ts.
+   * Top-level field names and JSON types of the token response. No values.
+   */
+  diagnostics?: JsonShape;
 }
 
 /**
@@ -152,6 +161,9 @@ export async function exchangeCodeForToken(
     accessToken: body.access_token,
     expiresAt: Date.now() + body.expires_in * 1000,
     refreshToken: body.refresh_token,
+    expiresIn: body.expires_in,
+    // PHASE 2 DIAGNOSTICS — remove this line with ./phase2-diagnostics.ts.
+    diagnostics: describeJsonShape(parsed),
   };
 }
 
@@ -160,6 +172,24 @@ export async function exchangeCodeForToken(
  *
  * Called once per connection so `tradovate_user_id` can be stored without the
  * token — that id is what the UI shows to say which account is linked.
+ *
+ * ALWAYS AGAINST THE LIVE HOST, whatever environment the connection targets:
+ *
+ *   "Environments: Live"
+ *   "This endpoint operates against Live. On Demo it returns an error
+ *    indicating the request must be sent to the Live server."
+ *   — https://docs.ninjatrader.com/api/rest-api-endpoints/authentication/me
+ *
+ * This previously used config.apiUrl, which meant every Demo connection failed
+ * identification. config.liveApiUrl resolves to the Live host on Demo and to
+ * the same host as apiUrl on Live.
+ *
+ * Rate limit is 10 requests per hour, counting failed requests only, so a run
+ * of failed connects burns the budget while successful ones do not. One call
+ * per connection, no retry.
+ *
+ * Only `userId` is stored. The response also carries `email`, `fullName` and
+ * `organizationName`; none of it is read, kept, or logged.
  */
 export async function fetchTradovateUser(
   config: TradovateOAuthConfig,
@@ -167,7 +197,7 @@ export async function fetchTradovateUser(
   signal?: AbortSignal
 ): Promise<TradovateMeResponse> {
   const me = await tradovateGet<TradovateMeResponse>('/auth/me', undefined, {
-    apiUrl: config.apiUrl,
+    apiUrl: config.liveApiUrl,
     accessToken,
     signal,
   });

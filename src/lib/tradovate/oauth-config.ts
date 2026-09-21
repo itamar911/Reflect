@@ -11,21 +11,30 @@
  * account and needs none of them. Requiring both sets would force an
  * OAuth-only deployment to invent a password it never uses.
  *
- * Endpoint URLs are derived rather than configured, with escape hatches:
+ * Endpoint URLs are LOOKED UP per environment, not derived, with escape
+ * hatches. See ./hosts.ts for the documented values and the citation for each.
  *
- *   authorize  https://trader.tradovate.com/oauth
- *   token      <origin of TRADOVATE_API_URL>/auth/oauthtoken
+ * This used to derive the token URL as `<origin of TRADOVATE_API_URL>/auth/
+ * oauthtoken`. That happens to be right for Live and is wrong for Demo, which
+ * exchanges against a different domain than it trades on — the derivation
+ * produced https://demo.tradovateapi.com/auth/oauthtoken, a URL that appears in
+ * neither official page. The dynamic-hosts documentation names this exact
+ * mistake ("Assumes the Demo and Live hosts share a domain, or derives one host
+ * from the other") as a thing that breaks clients, so the environment is now
+ * identified explicitly and the hosts read from a table.
  *
- * The token URL matches Tradovate's own guide, which pairs
- * https://live.tradovateapi.com/auth/oauthtoken with the live REST host — note
- * it has no /v1 segment, unlike every other endpoint. Deriving it from
- * TRADOVATE_API_URL keeps live and demo from drifting apart. Tradovate's example
- * repository uses a third pair of hosts for its own dev environment
- * (trader-d.tradovate.com / live-api-d.tradovate.com), which is what
- * TRADOVATE_OAUTH_AUTHORIZE_URL and TRADOVATE_OAUTH_TOKEN_URL are for.
+ * TRADOVATE_OAUTH_AUTHORIZE_URL and TRADOVATE_OAUTH_TOKEN_URL remain as
+ * overrides for a Tradovate environment this table does not know about.
  */
 
 import { type ConfigFailure } from './config';
+import {
+  AUTHORIZE_URLS,
+  LIVE_API_URL,
+  TOKEN_URLS,
+  detectEnvironment,
+  type TradovateEnvironment,
+} from './hosts';
 import { isEncryptionKeyValid } from './token-crypto';
 
 /** Variables the OAuth flow requires. */
@@ -56,15 +65,27 @@ export interface TradovateOAuthConfig {
   authorizeUrl: string;
   /** Where the authorization code is exchanged for a token. */
   tokenUrl: string;
-  /** REST base including /v1 — used for /auth/me and /auth/renewaccesstoken. */
+  /**
+   * Trading REST base including /v1, for this connection's environment. Used
+   * for /auth/renewaccesstoken. NOT for /auth/me — see liveApiUrl.
+   */
   apiUrl: string;
+  /**
+   * REST base for the Live-only endpoints, chiefly GET /v1/auth/me. Equal to
+   * apiUrl when the environment is live; the Live host regardless when it is
+   * demo. See the citation on LIVE_API_URL in ./hosts.ts.
+   */
+  liveApiUrl: string;
+  /**
+   * Which Tradovate environment this configuration targets. Recorded on every
+   * saved connection so a demo token is never mistaken for a live one.
+   */
+  environment: TradovateEnvironment;
 }
 
 export type OAuthConfigResult =
   | { ok: true; config: TradovateOAuthConfig }
   | ConfigFailure<TradovateOAuthEnvVar>;
-
-const DEFAULT_AUTHORIZE_URL = 'https://trader.tradovate.com/oauth';
 
 function assertServerOnly(): void {
   if (typeof window !== 'undefined') {
@@ -105,6 +126,22 @@ export function loadOAuthConfig(env: NodeJS.ProcessEnv = process.env): OAuthConf
   const apiUrl = rawApiUrl ? parseUrl(rawApiUrl) : null;
   if (rawApiUrl && !apiUrl) {
     invalid.push({ name: 'TRADOVATE_API_URL', reason: `not a valid URL: ${JSON.stringify(rawApiUrl)}` });
+  }
+
+  // The environment decides the authorize and token hosts, and is recorded on
+  // the stored connection. An unrecognised host is a configuration error rather
+  // than a default: guessing wrong means minting a token against one server and
+  // filing it as though it belonged to the other. Dedicated-infrastructure
+  // hosts land here, which is Q4 in the plan — a pure-OAuth client has no
+  // documented way to discover them before the first renewal.
+  const environment = apiUrl ? detectEnvironment(apiUrl.toString()) : null;
+  if (apiUrl && !environment) {
+    invalid.push({
+      name: 'TRADOVATE_API_URL',
+      reason:
+        `host ${JSON.stringify(apiUrl.hostname)} is not a known Tradovate environment — ` +
+        'expected demo.tradovateapi.com or live.tradovateapi.com',
+    });
   }
 
   // The redirect URI is compared byte for byte by Tradovate at both the
@@ -149,9 +186,11 @@ export function loadOAuthConfig(env: NodeJS.ProcessEnv = process.env): OAuthConf
       // Not trimmed: a secret is opaque and may legitimately end in whitespace.
       clientSecret: env.TRADOVATE_OAUTH_CLIENT_SECRET!,
       redirectUri: rawRedirect!,
-      authorizeUrl: env.TRADOVATE_OAUTH_AUTHORIZE_URL?.trim() || DEFAULT_AUTHORIZE_URL,
-      tokenUrl: env.TRADOVATE_OAUTH_TOKEN_URL?.trim() || `${apiUrl!.origin}/auth/oauthtoken`,
+      authorizeUrl: env.TRADOVATE_OAUTH_AUTHORIZE_URL?.trim() || AUTHORIZE_URLS[environment!],
+      tokenUrl: env.TRADOVATE_OAUTH_TOKEN_URL?.trim() || TOKEN_URLS[environment!],
       apiUrl: rawApiUrl!.replace(/\/+$/, ''),
+      liveApiUrl: environment === 'live' ? rawApiUrl!.replace(/\/+$/, '') : LIVE_API_URL,
+      environment: environment!,
     },
   };
 }
