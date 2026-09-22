@@ -78,11 +78,17 @@ export const EMAIL_COLORS = {
    *
    * NOTE: html.light does not override this one, and #f59e0b measures 2.15:1
    * on white — below the 3:1 floor even for large text. It is the one value in
-   * this palette that does not pass on a light surface, so `alerts.ts` no
-   * longer uses it: a sub-threshold R:R now reads in `textSecondary` rather
-   * than amber. Kept here because `api/send-email` still references it.
-   * Fixing it properly means adding a light-mode warning token to globals.css,
-   * which is a change to the app's design system rather than to email.
+   * this palette that does not pass on a light surface, so neither `alerts.ts`
+   * nor `api/send-email` uses it for text: a sub-threshold R:R reads in
+   * `textSecondary` rather than amber in both.
+   *
+   * Kept here because `api/send-feedback` still maps the `feature` type to it.
+   * That one is unresolved: the colour is the type encoding across bug/feature/
+   * question, so flattening it to `textSecondary` would merge two of the three
+   * into the same heading colour. Fixing it properly means either adding a
+   * light-mode warning token to globals.css — a change to the app's design
+   * system rather than to email — or dropping colour from the heading and
+   * letting the callout accent bar carry the type alone.
    */
   warning: '#f59e0b',
 } as const;

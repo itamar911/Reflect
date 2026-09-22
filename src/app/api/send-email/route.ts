@@ -65,7 +65,7 @@ function buildPreMarketEmail(name: string): EmailContent {
         paragraph(`שלום ${escapeHtml(name)},`, { color: EMAIL_COLORS.muted }) +
         paragraph('לפני שמתחיל יום המסחר — 3 שאלות לבדיקה עצמית:', { bottom: 12 }) +
         cardRows(questions) +
-        callout(paragraph(tip, { color: EMAIL_COLORS.primary, size: 14, bottom: 0 })),
+        callout(paragraph(tip, { color: EMAIL_COLORS.textSecondary, size: 14, bottom: 0 })),
     }),
     text: renderPlainText({
       title,
@@ -88,7 +88,7 @@ function buildDailySummaryEmail(
 ): EmailContent {
   const title = 'סיכום יומי';
   const cells = [
-    { value: String(stats.trades), label: 'עסקאות', color: EMAIL_COLORS.primary },
+    { value: String(stats.trades), label: 'עסקאות', color: EMAIL_COLORS.text },
     {
       value: `${stats.winRate}%`,
       label: 'הצלחה',
@@ -97,7 +97,7 @@ function buildDailySummaryEmail(
     {
       value: String(stats.avgRR),
       label: 'R:R ממוצע',
-      color: stats.avgRR >= 2 ? EMAIL_COLORS.success : EMAIL_COLORS.warning,
+      color: stats.avgRR >= 2 ? EMAIL_COLORS.success : EMAIL_COLORS.textSecondary,
     },
   ];
 
@@ -139,7 +139,7 @@ function buildWeeklySummaryEmail(
   const tipHeading = 'טיפ לשבוע הבא';
 
   const cells = [
-    { value: String(stats.trades), label: 'עסקאות השבוע', color: EMAIL_COLORS.primary },
+    { value: String(stats.trades), label: 'עסקאות השבוע', color: EMAIL_COLORS.text },
     {
       value: `${stats.winRate}%`,
       label: 'אחוז הצלחה',
@@ -148,7 +148,7 @@ function buildWeeklySummaryEmail(
     {
       value: String(stats.avgRR),
       label: 'R:R ממוצע',
-      color: stats.avgRR >= 2 ? EMAIL_COLORS.success : EMAIL_COLORS.warning,
+      color: stats.avgRR >= 2 ? EMAIL_COLORS.success : EMAIL_COLORS.textSecondary,
     },
     { value: plFormatted, label: 'P&amp;L השבוע', color: plColor },
   ];
@@ -164,7 +164,7 @@ function buildWeeklySummaryEmail(
         }) +
         statGrid(cells, 2) +
         callout(
-          paragraph(tipHeading, { color: EMAIL_COLORS.primary, size: 14, bold: true, bottom: 8 }) +
+          paragraph(tipHeading, { color: EMAIL_COLORS.textSecondary, size: 14, bold: true, bottom: 8 }) +
             paragraph(tip, { bottom: 0 })
         ),
     }),

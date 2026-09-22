@@ -60,8 +60,17 @@ const UNSUBSCRIBE: EmailLink = {
 /**
  * The daily read on the numbers.
  *
- * The seven conditions are unchanged from the original — only the returned copy
+ * The seven conditions — and the fallback that follows them, for eight return
+ * paths in total — are unchanged from the original; only the returned copy
  * moved from encouragement to statement of fact.
+ *
+ * Every line here reports what the figures are, or names the figure worth
+ * looking at, and then stops. None of them tells the reader what to do: section
+ * 2.2 of the terms disclaims investment advice, and an instruction about how to
+ * trade contradicts it however mild the wording. "Check whether your trades
+ * followed your rules" is an instruction; "the discipline score shows how many
+ * did" is a description of the reader's own record. Do not reintroduce an
+ * imperative here, however encouraging it sounds.
  */
 function readout(trades: number, winRate: number, totalPL: number): string {
   if (trades === 0)
@@ -73,11 +82,11 @@ function readout(trades: number, winRate: number, totalPL: number): string {
   if (totalPL > 0)
     return 'יום חיובי למרות אחוז הצלחה מתחת ל-50%. התוצאה נשענת על יחס ה-R:R.';
   if (totalPL < 0 && winRate >= 50)
-    return 'הפסד למרות אחוז הצלחה מעל 50%. ההפסדים גדולים מהרווחים — יחס ה-R:R דורש בדיקה.';
+    return 'הפסד למרות אחוז הצלחה מעל 50%. ההפסד הממוצע גדול מהרווח הממוצע.';
   if (totalPL < 0 && trades <= 2)
     return 'הפסד ב-' + trades + ' עסקאות. מדגם קטן מכדי להסיק ממנו דפוס.';
   if (totalPL < 0)
-    return 'יום הפסד. בדוק כמה מהעסקאות עמדו בחוקים שהגדרת.';
+    return 'יום הפסד. ציון המשמעת ביומן מראה כמה מהעסקאות עמדו בחוקים שהגדרת.';
   return 'המאזן היומי אפס.';
 }
 
