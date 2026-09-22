@@ -55,7 +55,9 @@ function buildPreMarketEmail(name: string): EmailContent {
     'האם אני במצב רגשי מתאים למסחר?',
     'מה גבולות הסיכון שלי היום?',
   ];
-  const tip = 'תזכורת: לעולם לא להסתכן ביותר מ-1-2% מההון בעסקה אחת';
+  // See the note in `@/lib/email/alerts` — a prescribed risk rule is advice.
+  // Wording from 36cfbe9 on main.
+  const rule = 'גבולות הסיכון שלך הם אלה שהגדרת בכללים — Reflect בודק כל תוכנית מולם.';
 
   return {
     html: renderEmail({
@@ -65,7 +67,7 @@ function buildPreMarketEmail(name: string): EmailContent {
         paragraph(`שלום ${escapeHtml(name)},`, { color: EMAIL_COLORS.muted }) +
         paragraph('לפני שמתחיל יום המסחר — 3 שאלות לבדיקה עצמית:', { bottom: 12 }) +
         cardRows(questions) +
-        callout(paragraph(tip, { color: EMAIL_COLORS.textSecondary, size: 14, bottom: 0 })),
+        callout(paragraph(rule, { color: EMAIL_COLORS.textSecondary, size: 14, bottom: 0 })),
     }),
     text: renderPlainText({
       title,
@@ -76,7 +78,7 @@ function buildPreMarketEmail(name: string): EmailContent {
         'לפני שמתחיל יום המסחר — 3 שאלות לבדיקה עצמית:',
         ...questions.map((q, i) => `${i + 1}. ${q}`),
         '',
-        tip,
+        rule,
       ],
     }),
   };
@@ -131,12 +133,16 @@ function buildWeeklySummaryEmail(
 ): EmailContent {
   const plColor = stats.totalPL >= 0 ? EMAIL_COLORS.success : EMAIL_COLORS.danger;
   const plFormatted = (stats.totalPL >= 0 ? '+$' : '-$') + Math.abs(stats.totalPL).toFixed(2);
-  const tip =
-    stats.winRate < 40 ? 'אחוז הצלחה נמוך — בדוק את תנאי הכניסה שלך ואת ה-R:R' :
-    stats.avgRR < 1.5  ? 'שפר את יחס ה-R:R — חפש סטאפים עם לפחות 1:2' :
-                         'כל הכבוד — המשך לפי התוכנית!';
+  // Reports what the week's figures show; never what to do about them. "Improve
+  // your R:R — look for setups of at least 1:2" is an instruction about how to
+  // trade, which section 2.2 of the terms disclaims. Wording from 36cfbe9 on
+  // main; see the note on readout() in `@/lib/email/alerts`.
+  const observation =
+    stats.winRate < 40 ? 'אחוז ההצלחה השבוע היה מתחת ל-40%. התחקירים ביומן מפרטים מה קרה בכל עסקה.' :
+    stats.avgRR < 1.5  ? 'יחס הסיכון-סיכוי הממוצע השבוע היה מתחת ל-1.5.' :
+                         'הנתונים של השבוע נרשמו במלואם ביומן.';
   const title = 'סיכום שבועי — Reflect';
-  const tipHeading = 'טיפ לשבוע הבא';
+  const observationHeading = 'מה היומן מראה';
 
   const cells = [
     { value: String(stats.trades), label: 'עסקאות השבוע', color: EMAIL_COLORS.text },
@@ -158,28 +164,28 @@ function buildWeeklySummaryEmail(
       title,
       footerText: FOOTER_TEXT,
       bodyHtml:
-        paragraph(`שלום ${escapeHtml(name)}, הנה השפעת Reflect על הארנק שלך השבוע:`, {
+        paragraph(`שלום ${escapeHtml(name)}, הנה מה שהיומן שלך מראה על השבוע:`, {
           color: EMAIL_COLORS.muted,
           bottom: 20,
         }) +
         statGrid(cells, 2) +
         callout(
-          paragraph(tipHeading, { color: EMAIL_COLORS.textSecondary, size: 14, bold: true, bottom: 8 }) +
-            paragraph(tip, { bottom: 0 })
+          paragraph(observationHeading, { color: EMAIL_COLORS.textSecondary, size: 14, bold: true, bottom: 8 }) +
+            paragraph(observation, { bottom: 0 })
         ),
     }),
     text: renderPlainText({
       title,
       footerText: FOOTER_TEXT,
       lines: [
-        `שלום ${name}, הנה השפעת Reflect על הארנק שלך השבוע:`,
+        `שלום ${name}, הנה מה שהיומן שלך מראה על השבוע:`,
         '',
         `עסקאות השבוע: ${stats.trades}`,
         `אחוז הצלחה: ${stats.winRate}%`,
         `R:R ממוצע: ${stats.avgRR}`,
         `P&L השבוע: ${plFormatted}`,
         '',
-        `${tipHeading}: ${tip}`,
+        `${observationHeading}: ${observation}`,
       ],
     }),
   };

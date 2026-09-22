@@ -167,7 +167,10 @@ export function preMarketEmail(name: string): AlertEmail {
     'בדוק את המצב הרגשי שלך לפני הכניסה הראשונה.',
     'קבע את גבולות הסיכון להיום.',
   ];
-  const rule = 'סיכון מרבי לעסקה: 1–2% מההון.';
+  // Not "risk no more than 1-2%" — that prescribes a risk rule, which is the
+  // advice section 2.2 disclaims. This says what the product does against the
+  // limits the reader set for themselves. Wording from 36cfbe9 on main.
+  const rule = 'גבולות הסיכון שלך הם אלה שהגדרת בכללים — Reflect בודק כל תוכנית מולם.';
 
   const html = renderEmail({
     title,
@@ -198,12 +201,16 @@ export function preMarketEmail(name: string): AlertEmail {
 
 export function weeklySummaryEmail(name: string, stats: AlertStats): AlertEmail {
   const plFormatted = formatPL(stats.totalPL);
+  // Describes the week's figures and stops. "The entry conditions are the link
+  // to examine" and "too small relative to the risk" are judgments about what
+  // the reader should do; these report what the numbers were and point at the
+  // journal. Wording from 36cfbe9 on main — see the note on readout() above.
   const note =
-    stats.winRate < 40 ? 'אחוז הצלחה מתחת ל-40%. תנאי הכניסה הם החוליה לבדיקה.' :
-    stats.avgRR < 1.5  ? 'יחס R:R ממוצע מתחת ל-1.5. הרווח הממוצע קטן מדי ביחס לסיכון.' :
-                         'המספרים תואמים לתוכנית. אין חריגה שדורשת התייחסות.';
+    stats.winRate < 40 ? 'אחוז ההצלחה השבוע היה מתחת ל-40%. התחקירים ביומן מפרטים מה קרה בכל עסקה.' :
+    stats.avgRR < 1.5  ? 'יחס הסיכון-סיכוי הממוצע השבוע היה מתחת ל-1.5.' :
+                         'הנתונים של השבוע נרשמו במלואם ביומן.';
   const title = 'סיכום שבועי';
-  const noteHeading = 'מה דורש תשומת לב';
+  const noteHeading = 'מה היומן מראה';
 
   const secondary = [
     { value: String(stats.trades), label: 'עסקאות השבוע', color: EMAIL_COLORS.text },
