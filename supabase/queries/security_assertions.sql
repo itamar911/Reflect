@@ -38,9 +38,17 @@
 -- fire on its own and there is no list to keep in step with the migrations.
 -- Every rule below is meant to hold for this application forever.
 --
--- Schemas: public and storage. storage holds objects and buckets and is as much
--- a part of the attack surface as public — the hole that started this was in
--- storage.objects.
+-- Schemas: public and storage for the rules about things we write — policies,
+-- grants, RLS. storage holds objects and buckets and is as much a part of the
+-- attack surface as public; the hole that started this was in storage.objects,
+-- and a policy or grant there is ours to get wrong.
+--
+-- Rules 2 and 5 are the exception and are scoped to public ALONE. Supabase owns
+-- the rest of the storage schema: on the first production run rule 2 returned
+-- storage.buckets, migrations, s3_multipart_uploads and vector_indexes, and rule
+-- 5 returned about twenty storage.* functions and not one of ours. None of it is
+-- under our control and none of it will ever be actionable, and a rule that
+-- cannot be acted on trains you to skip the whole report.
 --
 --
 -- RELATIONSHIP TO THE CRON
@@ -68,6 +76,20 @@
 -- the name. A list of where the weaknesses are is a map; a list of exactly how
 -- each one is shaped is an exploitation guide. Widen a SELECT locally while you
 -- are triaging if you need the detail — just do not mail the result.
+--
+--
+-- WHAT IS MAILED AND WHAT IS ONLY HERE
+-- ------------------------------------
+--
+-- Query 6c is an INVENTORY. It answers "which tables can a client role reach at
+-- the table level", which is about forty rows and is the normal, correct state —
+-- the browser talks to Postgres as `authenticated` and RLS is what scopes it. It
+-- lives here and is never mailed; forty rows arriving daily is how a report stops
+-- being read.
+--
+-- 6a and 6b are the alarms carved out of it. 6a is the override case: a
+-- table-level grant on a table that ALSO carries column-level grants, which is a
+-- blanket GRANT quietly widening a careful column grant. 6b is a never-list.
 
 
 -- ===========================================================================
@@ -102,6 +124,13 @@ ORDER BY 1, 2;
 -- not. It is listed as a weakness rather than a win because the next person to
 -- notice the table is broken will fix it by adding a permissive policy in a
 -- hurry.
+--
+-- It caught one on the first run: public."my database - trading", an empty table
+-- with id and created_at, created by accident in the dashboard and referenced
+-- nowhere in src/. Dropped 1 Oct.
+--
+-- PUBLIC ONLY. storage.buckets, storage.migrations, s3_multipart_uploads and
+-- vector_indexes are all RLS-on-no-policy and all Supabase's to manage.
 -- ===========================================================================
 SELECT
   n.nspname                      AS schema_name,
@@ -109,7 +138,7 @@ SELECT
   'rls.no_policies'              AS rule_broken
 FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
-WHERE n.nspname IN ('public', 'storage')
+WHERE n.nspname = 'public'
   AND c.relkind IN ('r', 'p')
   AND c.relrowsecurity
   AND NOT EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid)
@@ -191,6 +220,10 @@ ORDER BY 1, 2;
 --
 -- This is what 024 and 027 were cleaning up; this query is what stops it coming
 -- back on the next function somebody creates in the dashboard.
+--
+-- PUBLIC ONLY. The first production run returned about twenty storage.* functions
+-- and none of ours: Supabase ships them EXECUTE TO PUBLIC, they are not ours to
+-- revoke, and leaving them in means our own next mistake arrives on page two.
 -- ===========================================================================
 SELECT DISTINCT
   n.nspname                      AS schema_name,
@@ -199,38 +232,120 @@ SELECT DISTINCT
 FROM pg_proc p
 JOIN pg_namespace n ON n.oid = p.pronamespace
 CROSS JOIN LATERAL aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a
-WHERE n.nspname IN ('public', 'storage')
+WHERE n.nspname = 'public'
   AND a.grantee = 0                    -- OID 0 is PUBLIC
   AND a.privilege_type = 'EXECUTE'
 ORDER BY 1, 2;
 
 
 -- ===========================================================================
--- 6. A table-level grant of any privilege to anon or authenticated.
+-- 6a. A table-level grant on a table that ALSO has column-level grants.
 --
--- EXPECTED: SEE THE NOTE — this one is not zero rows today.
+-- EXPECTED: zero rows. MAILED.
 --
--- This is the check that catches a blanket `GRANT ALL ON t TO authenticated`
--- quietly overriding a careful column-level grant: a table-level grant covers
--- every column, including ones deliberately left out of a column grant, and it
--- is invisible next to the column grant in any listing that only reads
--- attribute ACLs.
+-- This is the override case, carved out of the inventory in 6c because it is
+-- the part that is actually an alarm.
 --
--- The COALESCE matters here for the same reason as in query 5: a relacl of NULL
--- means untouched, and Supabase's default privileges grant ALL on new public
--- tables to anon and authenticated.
+-- Column-level grants are how a table says "only these columns are
+-- client-readable". A table-level grant covers EVERY column, including the ones
+-- deliberately left out, so a blanket `GRANT ALL ON t TO authenticated` silently
+-- widens a careful column grant to everything — and the two sit in different
+-- catalogs (pg_class.relacl and pg_attribute.attacl), so neither is visible in a
+-- listing of the other. Somebody reviewing the column grants sees exactly what
+-- they expect while the table grant makes them irrelevant.
 --
--- WHY IT WILL RETURN MANY ROWS: that default is also how the application works
--- at all. The browser talks to Postgres as `authenticated` and needs table
--- privileges on trade_plans, profiles, setups and the rest; RLS is what scopes
--- them to the user's own rows. So this query currently reports most of public.
+-- The presence of column grants is what makes a table-level grant suspicious:
+-- it means someone went to the trouble of naming columns, and something later
+-- made that pointless.
 --
--- Read it as an inventory, not an alarm: the question it answers is "which
--- tables are reachable by a client role at the table level", and the row to
--- look for is a table you believed was column-granted or server-only.
--- tradovate_connections is the one table that should NEVER appear here (017
--- revokes from both roles and grants named columns instead); if it does, a
--- blanket grant has overridden that and the token columns are readable.
+-- The COALESCE matters for the same reason as in query 5: a relacl of NULL means
+-- untouched, and Supabase's default privileges grant ALL on new public tables to
+-- anon and authenticated.
+-- ===========================================================================
+WITH table_granted AS (
+  SELECT DISTINCT c.oid, n.nspname, c.relname, r.rolname
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  CROSS JOIN LATERAL aclexplode(COALESCE(c.relacl, acldefault('r', c.relowner))) a
+  JOIN pg_roles r ON r.oid = a.grantee
+  WHERE n.nspname IN ('public', 'storage')
+    AND c.relkind IN ('r', 'p', 'v', 'm')
+    AND r.rolname IN ('anon', 'authenticated')
+),
+column_granted AS (
+  SELECT DISTINCT att.attrelid AS oid
+  FROM pg_attribute att
+  CROSS JOIN LATERAL aclexplode(att.attacl) a
+  JOIN pg_roles r ON r.oid = a.grantee
+  WHERE att.attnum > 0
+    AND NOT att.attisdropped
+    AND att.attacl IS NOT NULL
+    AND r.rolname IN ('anon', 'authenticated')
+)
+SELECT DISTINCT
+  tg.nspname                                      AS schema_name,
+  tg.relname                                      AS object_name,
+  'grant.table_overrides_column_' || tg.rolname   AS rule_broken
+FROM table_granted tg
+WHERE EXISTS (SELECT 1 FROM column_granted cg WHERE cg.oid = tg.oid)
+ORDER BY 1, 2, 3;
+
+
+-- ===========================================================================
+-- 6b. A table-level grant on a table that must never have one.
+--
+-- EXPECTED: zero rows. MAILED.
+--
+-- A never-list, and the one place in this file that names an object. That is a
+-- deliberate exception to the invariants-only rule: it can only ever produce a
+-- false NEGATIVE for a table nobody added to it, never a false positive, and it
+-- never fires because something new exists. Adding a server-only table means
+-- adding a line here in the same change.
+--
+-- tradovate_connections holds OAuth access and refresh tokens as ciphertext. 017
+-- revokes from anon and authenticated and grants named non-secret columns
+-- instead; 030 adds three more named columns and withholds api_hosts. A
+-- table-level grant on it makes every one of those decisions void and the token
+-- columns client-readable.
+--
+-- 6a would normally catch this too, since the table carries column grants. 6b
+-- exists for the case 6a cannot see: someone who REVOKEs the column grants and
+-- GRANTs the table in one go leaves no column grant behind, and 6a goes quiet
+-- at exactly the moment the table became fully readable.
+-- ===========================================================================
+SELECT DISTINCT
+  n.nspname                          AS schema_name,
+  c.relname                          AS object_name,
+  'grant.table_on_never_list'        AS rule_broken
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+CROSS JOIN LATERAL aclexplode(COALESCE(c.relacl, acldefault('r', c.relowner))) a
+JOIN pg_roles r ON r.oid = a.grantee
+WHERE n.nspname = 'public'
+  AND c.relname IN ('tradovate_connections')      -- the never-list
+  AND r.rolname IN ('anon', 'authenticated')
+ORDER BY 1, 2;
+
+
+-- ===========================================================================
+-- 6c. INVENTORY: every table-level grant to a client role.
+--
+-- EXPECTED: about forty rows, and that is the correct state. NOT MAILED.
+--
+-- This is not an alarm and the cron never sends it. The browser talks to
+-- Postgres as `authenticated` and needs table privileges on trade_plans,
+-- profiles, setups and the rest; RLS is what scopes them to the user's own rows.
+-- Supabase's default privileges grant ALL on new public tables to both client
+-- roles, so most of public appears here by design.
+--
+-- It stays in this file because the question it answers — "which tables can a
+-- client role reach at the table level" — is worth asking by hand when you are
+-- adding a table or wondering why something is visible. Mailed daily it would be
+-- forty lines of noise wrapped around the handful of lines that matter, and the
+-- whole report would stop being read.
+--
+-- Scan it for a table you believed was column-granted or server-only. 6a and 6b
+-- are the two cases of that worth waking up for.
 --
 -- Privileges are deliberately not listed — see the header.
 -- ===========================================================================
@@ -258,8 +373,14 @@ ORDER BY 1, 2, 3;
 --
 -- This reads pg_attribute.attacl, which holds ONLY column-level grants. A
 -- secret column on a table carrying a table-level grant has a NULL attacl and
--- will not appear here — query 6 is what covers that case. The two are
+-- will not appear here — queries 6a and 6b are what cover that case. They are
 -- complements and neither replaces the other.
+--
+-- ONE EXCLUSION, by exact name: token_type. 030 grants it to authenticated on
+-- purpose and it holds "bearer" — the token TYPE, not a token. It is excluded by
+-- full column name rather than by weakening the pattern, so `token`,
+-- `access_token` and `refresh_token` all still fire, and so does a column called
+-- token_type_secret. One name, matched whole.
 -- ===========================================================================
 SELECT DISTINCT
   n.nspname                                      AS schema_name,
@@ -276,6 +397,7 @@ WHERE n.nspname IN ('public', 'storage')
   AND att.attacl IS NOT NULL
   AND r.rolname IN ('anon', 'authenticated')
   AND att.attname ~* '(token|secret|key|password)'
+  AND att.attname <> 'token_type'
 ORDER BY 1, 2, 3;
 
 
@@ -333,13 +455,15 @@ ORDER BY 2, 3;
 -- ===========================================================================
 -- ALL OF THE ABOVE, AS ONE RESULT SET
 --
--- EXPECTED: only the query-6 inventory rows and the two query-9 rows.
+-- EXPECTED: the two query-9 rows, and nothing else.
 --
 -- Same rules, same output columns, unioned — this is the shape the cron route
 -- reports, and running it is the fastest way to see whether anything new has
--- appeared since the last look. Query 6 is included; it is the noisy one, so
--- filter it out with `WHERE rule_broken NOT LIKE 'grant.table_to_%'` when you
--- want only the rules whose healthy answer is zero rows.
+-- appeared since the last look.
+--
+-- 6c, the inventory, is NOT in here. This block is the mailable set: every rule
+-- in it has zero rows as its healthy answer, so any row at all is worth reading.
+-- Run 6c on its own when you want the inventory.
 -- ===========================================================================
 WITH findings AS (
   SELECT n.nspname, c.relname, 'rls.disabled' AS rule_broken
@@ -349,7 +473,7 @@ WITH findings AS (
   UNION ALL
   SELECT n.nspname, c.relname, 'rls.no_policies'
   FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-  WHERE n.nspname IN ('public','storage') AND c.relkind IN ('r','p') AND c.relrowsecurity
+  WHERE n.nspname = 'public' AND c.relkind IN ('r','p') AND c.relrowsecurity
     AND NOT EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid)
 
   UNION ALL
@@ -375,14 +499,32 @@ WITH findings AS (
   SELECT DISTINCT n.nspname, p.oid::regprocedure::text, 'function.execute_to_public'
   FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
   CROSS JOIN LATERAL aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a
-  WHERE n.nspname IN ('public','storage') AND a.grantee = 0 AND a.privilege_type = 'EXECUTE'
+  WHERE n.nspname = 'public' AND a.grantee = 0 AND a.privilege_type = 'EXECUTE'
 
+  -- 6a: table-level grant on a table that also carries column-level grants.
   UNION ALL
-  SELECT DISTINCT n.nspname, c.relname, 'grant.table_to_' || r.rolname
+  SELECT DISTINCT n.nspname, c.relname, 'grant.table_overrides_column_' || r.rolname
   FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
   CROSS JOIN LATERAL aclexplode(COALESCE(c.relacl, acldefault('r', c.relowner))) a
   JOIN pg_roles r ON r.oid = a.grantee
   WHERE n.nspname IN ('public','storage') AND c.relkind IN ('r','p','v','m')
+    AND r.rolname IN ('anon','authenticated')
+    AND EXISTS (
+      SELECT 1 FROM pg_attribute att
+      CROSS JOIN LATERAL aclexplode(att.attacl) ca
+      JOIN pg_roles cr ON cr.oid = ca.grantee
+      WHERE att.attrelid = c.oid AND att.attnum > 0 AND NOT att.attisdropped
+        AND att.attacl IS NOT NULL
+        AND cr.rolname IN ('anon','authenticated')
+    )
+
+  -- 6b: the never-list.
+  UNION ALL
+  SELECT DISTINCT n.nspname, c.relname, 'grant.table_on_never_list'
+  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+  CROSS JOIN LATERAL aclexplode(COALESCE(c.relacl, acldefault('r', c.relowner))) a
+  JOIN pg_roles r ON r.oid = a.grantee
+  WHERE n.nspname = 'public' AND c.relname IN ('tradovate_connections')
     AND r.rolname IN ('anon','authenticated')
 
   UNION ALL
@@ -395,6 +537,7 @@ WITH findings AS (
   WHERE n.nspname IN ('public','storage') AND att.attnum > 0 AND NOT att.attisdropped
     AND att.attacl IS NOT NULL AND r.rolname IN ('anon','authenticated')
     AND att.attname ~* '(token|secret|key|password)'
+    AND att.attname <> 'token_type'
 
   UNION ALL
   SELECT 'storage', b.id, 'bucket.public' FROM storage.buckets b WHERE b.public IS TRUE

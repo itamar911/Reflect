@@ -48,7 +48,23 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-/** Every rule this module can report, and what each one means. */
+/**
+ * Every rule this module can report, and what each one means.
+ *
+ * Scope notes that the catalog function is expected to honour, from the first
+ * production run:
+ *
+ * - `rls.no_policies` and `function.execute_to_public` are PUBLIC SCHEMA ONLY.
+ *   Across storage they return Supabase's own internals — buckets, migrations,
+ *   s3_multipart_uploads, vector_indexes, and about twenty storage.* functions —
+ *   none of which is ours to change. The other rules still cover storage,
+ *   because a policy or grant there is ours to get wrong and is where the
+ *   original hole was.
+ * - `grant.secret_column_to_*` excludes the exact column name `token_type`.
+ *   030 grants it deliberately and it holds "bearer", the token TYPE. Excluded
+ *   by whole name rather than by weakening the pattern, so `token`,
+ *   `access_token` and `refresh_token` all still fire.
+ */
 export const SECURITY_RULES = {
   'rls.disabled': 'טבלה ללא RLS',
   'rls.no_policies': 'RLS פעיל אך אין אף מדיניות',
@@ -57,16 +73,46 @@ export const SECURITY_RULES = {
   'policy.using_true': 'מדיניות שתנאי ה-USING שלה הוא true',
   'policy.with_check_true': 'מדיניות שתנאי ה-WITH CHECK שלה הוא true',
   'function.execute_to_public': 'פונקציה עם EXECUTE ל-PUBLIC',
-  'grant.table_to_anon': 'הרשאה ברמת טבלה ל-anon',
-  'grant.table_to_authenticated': 'הרשאה ברמת טבלה ל-authenticated',
+  'grant.table_overrides_column_anon': 'הרשאה ברמת טבלה עוקפת הרשאות עמודה (anon)',
+  'grant.table_overrides_column_authenticated':
+    'הרשאה ברמת טבלה עוקפת הרשאות עמודה (authenticated)',
+  'grant.table_on_never_list': 'הרשאה ברמת טבלה על טבלה שאסור שתהיה לה',
   'grant.secret_column_to_anon': 'הרשאה על עמודת סוד ל-anon',
   'grant.secret_column_to_authenticated': 'הרשאה על עמודת סוד ל-authenticated',
   'bucket.public': 'דלי אחסון ציבורי',
   'bucket.no_size_limit': 'דלי אחסון ללא מגבלת גודל',
   'bucket.no_mime_allowlist': 'דלי אחסון ללא הגבלת סוגי קבצים',
+
+  // Inventory. Never mailed — see INVENTORY_RULES below.
+  'grant.table_to_anon': 'מצאי: הרשאה ברמת טבלה ל-anon',
+  'grant.table_to_authenticated': 'מצאי: הרשאה ברמת טבלה ל-authenticated',
 } as const;
 
 export type SecurityRule = keyof typeof SECURITY_RULES;
+
+/**
+ * Rules that are an inventory of the normal state, not an alarm.
+ *
+ * `grant.table_to_*` answers "which tables can a client role reach at the table
+ * level", which is about forty rows and is correct: the browser talks to
+ * Postgres as `authenticated` and RLS is what scopes it. Worth asking by hand,
+ * worthless as a daily email — forty lines of noise around the few that matter
+ * is how a report stops being read.
+ *
+ * The alarms carved out of it are `grant.table_overrides_column_*` (a blanket
+ * grant quietly widening a careful column grant) and `grant.table_on_never_list`.
+ *
+ * Filtered here rather than only in SQL so that a catalog function which returns
+ * the inventory rows anyway still cannot put them in the mail.
+ */
+export const INVENTORY_RULES: ReadonlySet<string> = new Set([
+  'grant.table_to_anon',
+  'grant.table_to_authenticated',
+]);
+
+export function isInventoryRule(rule: string): boolean {
+  return INVENTORY_RULES.has(rule);
+}
 
 /** One violation: which object, which rule. Nothing else, ever. */
 export interface SecurityFinding {

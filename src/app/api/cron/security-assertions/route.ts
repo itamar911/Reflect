@@ -20,6 +20,12 @@
  * every finding. Nothing at all on a clean run — daily mail gets filtered, and a
  * filtered security report is worse than none.
  *
+ * The `grant.table_to_*` inventory is excluded from the mail and returned under
+ * its own key in the JSON. It is about forty rows describing the normal state of
+ * the database, and mailing it daily would bury the handful of rows that mean
+ * something. The alarms carved out of it — a table-level grant overriding a
+ * column grant, and the never-list — are mailed.
+ *
  * A run in which some checks could not execute is NOT a clean run. It mails,
  * and the notice sits above the findings, because an empty list from a check
  * that never ran reads exactly like a clean bill of health.
@@ -37,7 +43,7 @@
 import { NextResponse } from 'next/server';
 
 import { securityAssertionsEmail } from '@/lib/email/securityAssertions';
-import { checkBuckets, checkCatalog, groupByRule } from '@/lib/security/assertions';
+import { checkBuckets, checkCatalog, groupByRule, isInventoryRule } from '@/lib/security/assertions';
 import type { SecurityFinding } from '@/lib/security/assertions';
 import { createAdminClient } from '@/lib/supabase/admin';
 
@@ -86,7 +92,14 @@ export async function GET(request: Request) {
 
   const [buckets, catalog] = await Promise.all([checkBuckets(admin), checkCatalog(admin)]);
 
-  const findings: SecurityFinding[] = [...catalog.findings, ...buckets.findings];
+  const all: SecurityFinding[] = [...catalog.findings, ...buckets.findings];
+
+  // The inventory rules describe the normal state of the database — about forty
+  // tables a client role can reach, which is how the app works. They are split
+  // off here rather than filtered in the email builder so that nothing
+  // downstream has to remember: `findings` is the mailable set, full stop.
+  const findings = all.filter((f) => !isInventoryRule(f.rule));
+  const inventory = all.filter((f) => isInventoryRule(f.rule));
 
   const unavailable: Array<{ group: string; reason: string }> = [];
   if (!catalog.ran) {
@@ -97,12 +110,16 @@ export async function GET(request: Request) {
   }
 
   const groups = groupByRule(findings);
+  const inventoryGroups = groupByRule(inventory);
+
+  // Inventory deliberately does not count: a clean day is one with no alarms,
+  // and forty inventory rows is what a clean day looks like.
   const clean = findings.length === 0 && unavailable.length === 0;
 
   // Rule ids and object names only — the same material the email carries.
   console.info(
     `[security-assertions] findings=${findings.length} rules=${groups.length} ` +
-      `unavailable=${unavailable.length}` +
+      `inventory=${inventory.length} unavailable=${unavailable.length}` +
       (groups.length > 0 ? ` rules_fired=${groups.map((g) => g.rule).join(',')}` : '')
   );
 
@@ -142,5 +159,9 @@ export async function GET(request: Request) {
     unavailable,
     findingCount: findings.length,
     findings: groups,
+    // Returned for checking by hand, never mailed. Kept under its own key so a
+    // reader of the JSON cannot mistake the two for one list.
+    inventoryCount: inventory.length,
+    inventory: inventoryGroups,
   });
 }
