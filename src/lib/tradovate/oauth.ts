@@ -17,8 +17,6 @@
 
 import { tradovateGet } from './client';
 import { TradovateOAuthError, TradovatePenaltyError, TradovateRequestError } from './errors';
-// PHASE 2 DIAGNOSTICS — remove with ./phase2-diagnostics.ts.
-import { describeJsonShape, type JsonShape } from './phase2-diagnostics';
 import { redactSecrets } from './redact';
 import {
   isPenaltyResponse,
@@ -52,17 +50,36 @@ export function buildAuthorizeUrl(config: TradovateOAuthConfig, state: string): 
 
 export interface ExchangedToken {
   accessToken: string;
-  /** Epoch milliseconds, computed from `expires_in` at the moment of exchange. */
+  /**
+   * Epoch milliseconds, computed from `expires_in` at the moment of exchange.
+   *
+   * Arithmetic on our own clock, because the exchange states no absolute time —
+   * only a number of seconds. Renewal does state one (`expirationTime`), and
+   * ./connections.ts stores that verbatim rather than recomputing from it.
+   */
   expiresAt: number;
-  /** Present only if Tradovate ever starts issuing one. */
+  /**
+   * The refresh token.
+   *
+   * Observed in production: the exchange DOES issue one, together with
+   * `refresh_token_expires_in`, despite the OAuth guide never mentioning
+   * either. Still optional, because nothing documents it as guaranteed and a
+   * response without one must not be rejected.
+   */
   refreshToken?: string;
   /** Seconds, as returned. A lifetime, not a credential. */
   expiresIn: number;
   /**
-   * PHASE 2 DIAGNOSTICS — remove with ./phase2-diagnostics.ts.
-   * Top-level field names and JSON types of the token response. No values.
+   * Epoch milliseconds, from `refresh_token_expires_in`.
+   *
+   * This is the value that decides how long a user may be away before they
+   * have to re-authorize, so it is product-visible rather than bookkeeping.
+   * Absent when the response carried no usable number; unlike `expires_in`
+   * that is not fatal, because nothing schedules work off it.
    */
-  diagnostics?: JsonShape;
+  refreshExpiresAt?: number;
+  /** `token_type`, as returned. Expected "Bearer"; kept so a change is visible. */
+  tokenType?: string;
 }
 
 /**
@@ -157,13 +174,25 @@ export async function exchangeCodeForToken(
     );
   }
 
+  // Seconds, like expires_in, and turned into an instant here for the same
+  // reason: the column is a timestamptz, and the clock reading that makes the
+  // number mean anything is this one. Deliberately not validated the way
+  // expires_in is — a missing or nonsensical refresh lifetime costs us a stored
+  // date, not a token we cannot schedule renewal for, so it is dropped rather
+  // than made fatal.
+  const refreshLifetime = body.refresh_token_expires_in;
+  const refreshExpiresAt =
+    typeof refreshLifetime === 'number' && Number.isFinite(refreshLifetime) && refreshLifetime > 0
+      ? Date.now() + refreshLifetime * 1000
+      : undefined;
+
   return {
     accessToken: body.access_token,
     expiresAt: Date.now() + body.expires_in * 1000,
     refreshToken: body.refresh_token,
     expiresIn: body.expires_in,
-    // PHASE 2 DIAGNOSTICS — remove this line with ./phase2-diagnostics.ts.
-    diagnostics: describeJsonShape(parsed),
+    refreshExpiresAt,
+    tokenType: body.token_type,
   };
 }
 

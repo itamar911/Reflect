@@ -32,13 +32,15 @@
 --      https://docs.ninjatrader.com/api/oauth
 --      https://docs.ninjatrader.com/api/dynamic-api-hosts
 --
--- 2. refresh_expires_at — 017's comment states Tradovate issues no refresh
---    token. The REST reference contradicts it: OAuthTokenResponse lists both
+-- 2. refresh_expires_at — 017's comment stated Tradovate issues no refresh
+--    token. The REST reference contradicted it: OAuthTokenResponse lists both
 --    refresh_token and refresh_token_expires_in, and the request body accepts
---    a refresh_token. 017 already provides refresh_token_encrypted but has
+--    a refresh_token. 017 already provides refresh_token_encrypted but had
 --    nowhere to record its expiry.
 --      https://docs.ninjatrader.com/api/rest-api-endpoints/authentication/o-auth-token
---    Whether one is actually issued is Q8, unresolved until the Phase 2 test.
+--    SETTLED (Phase 2, production round trip): the reference is right and 017
+--    was wrong. Both fields are issued, and 017's comment has been corrected.
+--    The application now writes this column on every exchange.
 --
 -- 3. token_type — the OAuthTokenResponse field. Expected to be "Bearer";
 --    stored so a change becomes visible instead of being silently ignored.

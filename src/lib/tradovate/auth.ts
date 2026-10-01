@@ -212,6 +212,10 @@ export async function renewAccessToken(
     );
   }
 
+  // This body also carries mdAccessToken, a market-data token, even though Market
+  // Data is Denied in our registration. It is deliberately ignored — never read
+  // off this response, never stored, never logged; callers take accessToken and
+  // expirationTime and nothing else.
   const response = parsed as AccessTokenResponse;
   if (response.errorText) throw new TradovateAuthError(response.errorText);
   if (!response.accessToken || !response.expirationTime) {

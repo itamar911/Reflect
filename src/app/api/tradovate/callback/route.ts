@@ -40,8 +40,6 @@ import {
   type TradovateResultCode,
 } from '@/lib/tradovate/oauth-results';
 import { STATE_COOKIE_NAME, stateCookieOptions, verifyState } from '@/lib/tradovate/oauth-state';
-// PHASE 2 DIAGNOSTICS — remove with lib/tradovate/phase2-diagnostics.ts.
-import { formatShape, logPhase2, probeRenewal } from '@/lib/tradovate/phase2-diagnostics';
 import { redactSecrets } from '@/lib/tradovate/redact';
 
 export const runtime = 'nodejs';
@@ -125,64 +123,12 @@ export async function GET(request: NextRequest) {
       expiresAt: token.expiresAt,
       tradovateUserId: me.userId,
       environment: config.config.environment,
+      // The exchange is the only place these two are stated. api_hosts is not set
+      // here on purpose: the token exchange returns no apiHosts, so it is written
+      // by the first renewal and carried forward from there.
+      refreshExpiresAt: token.refreshExpiresAt,
+      tokenType: token.tokenType,
     });
-
-    // ========================================================================
-    // PHASE 2 DIAGNOSTICS — DELETE THIS BLOCK WHEN THE PRODUCTION TEST PASSES
-    //
-    // Answers Q3, Q4 and Q8 from the migration plan; see
-    // lib/tradovate/phase2-diagnostics.ts for what each one is and for the
-    // rules about what may be logged. Only reachable by an allowlisted user,
-    // because the gate above already returned for everyone else.
-    //
-    // Field NAMES and TYPES only, plus expires_in as a number and an HTTP
-    // status. No token, no secret, no code, no header, no field value. Every
-    // line goes through redactSecrets() inside logPhase2().
-    // ========================================================================
-    logPhase2('exchange environment', config.config.environment);
-    logPhase2('exchange response fields', formatShape(token.diagnostics ?? {}));
-    logPhase2('exchange expires_in (seconds)', String(token.expiresIn));
-
-    try {
-      const probe = await probeRenewal(config.config.apiUrl, token.accessToken);
-      logPhase2('renewal HTTP status', String(probe.status));
-      logPhase2('renewal response fields', formatShape(probe.shape));
-      logPhase2('renewal apiHosts present', String(probe.hasApiHosts));
-      logPhase2('renewal looked like a rate-limit penalty', String(probe.penalty));
-      logPhase2('renewal returned usable credentials', String(Boolean(probe.renewed)));
-
-      // Persist what renewal returned. The docs say renewal "returns a fresh
-      // accessToken" but never say the presented token survives, so discarding
-      // the result could leave a dead token in the row. Storing it is the safe
-      // reading, and it keeps the connection usable after the probe.
-      if (probe.renewed) {
-        const renewedExpiry = Date.parse(probe.renewed.expirationTime);
-        if (!Number.isNaN(renewedExpiry)) {
-          await saveConnection({
-            userId: user.id,
-            accessToken: probe.renewed.accessToken,
-            expiresAt: renewedExpiry,
-            tradovateUserId: me.userId,
-            environment: config.config.environment,
-            // Carried forward explicitly. saveConnection always writes this
-            // column — omitting it does not leave the stored value alone, it
-            // writes NULL — so a renewal that dropped it would destroy a
-            // refresh token the exchange had just issued. Which is exactly the
-            // thing Q8 exists to find out about.
-            refreshToken: token.refreshToken,
-          });
-          logPhase2('renewed token stored', 'yes');
-        }
-      }
-    } catch (probeError) {
-      // A failed probe must never fail the connection — the token is already
-      // stored and usable. Message only, redacted, never the error object.
-      logPhase2(
-        'renewal probe threw',
-        redactSecrets(probeError instanceof Error ? probeError.message : 'unknown error', [code])
-      );
-    }
-    // ===================== END PHASE 2 DIAGNOSTICS ==========================
 
     return finish(TradovateResult.Connected);
   } catch (error) {

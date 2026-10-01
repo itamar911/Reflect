@@ -31,12 +31,20 @@
  *
  * What is different, and it matters:
  *
- * - **There is no fallback to full authentication.** ./session.ts can always
- *   re-authenticate with Reflect's own username and password. Here we hold only
- *   an OAuth access token — Tradovate's /auth/oauthtoken issues no refresh token
- *   — so if renewal fails there is nothing to recover with. The connection is
- *   marked 'expired' and the user must reconnect. Failing loudly is the point:
- *   silently retrying would only burn rate limit.
+ * - **There is no automatic fallback when renewal fails.** ./session.ts can
+ *   always re-authenticate with Reflect's own username and password. Here the
+ *   only credential this module uses is the access token itself, so a failed
+ *   renewal leaves nothing to recover with in-process: the connection is marked
+ *   'expired' and the user must reconnect. Failing loudly is the point; silently
+ *   retrying would only burn rate limit.
+ *
+ *   The exchange DOES issue a refresh token — observed in production, against
+ *   both migration 017's comment and this module's original one. It is stored,
+ *   and `refresh_expires_at` records how long it lasts, but nothing here redeems
+ *   it: sessions are extended in place with GET /auth/renewaccesstoken using the
+ *   access token, which is the call that does not open a second session. The
+ *   refresh token is what a returning user re-authorizes against, and wiring
+ *   that up is separate work from this cache.
  *
  * - **The two-concurrent-sessions cap belongs to the USER, not to us.** A trader
  *   with our connection open plus their own Tradovate desktop or web session is
@@ -63,9 +71,17 @@ import { TradovateNotConnectedError, TradovateOAuthError } from './errors';
 import type { TradovateEnvironment } from './hosts';
 import { decryptToken, encryptToken } from './token-crypto';
 import type { TradovateOAuthConfig } from './oauth-config';
-import type { UserTokenSnapshot } from './types';
+import type { TradovateApiHosts, UserTokenSnapshot } from './types';
 
-/** Renew once the token is within this window of expiring. Mirrors ./session.ts. */
+/**
+ * Renew once the token is within this window of expiring. Mirrors ./session.ts.
+ *
+ * Sized against an observed 80-minute access-token lifetime (`expires_in` 4800),
+ * not the ~26 hours NinjaTrader support stated in writing — trust the number the
+ * server sent. 15 minutes out of 80 leaves a comfortable margin, and at 5,000
+ * requests per hour per Tradovate user the resulting cadence costs nothing worth
+ * counting.
+ */
 const RENEW_MARGIN_MS = 15 * 60_000;
 
 /** Never hand out a token this close to expiry; it would die in flight. */
@@ -92,6 +108,13 @@ interface ConnectionRow {
   tradovate_user_id: number | null;
   environment: TradovateEnvironment;
   status: ConnectionStatus;
+  // Read only so that a renewal can carry them forward. saveConnection writes
+  // every one of these columns on every save, so a renewal that did not
+  // re-supply them would null values the exchange had recorded — the same hazard
+  // the refreshToken parameter is documented for.
+  refresh_expires_at: string | null;
+  token_type: string | null;
+  api_hosts: TradovateApiHosts | null;
 }
 
 /** Non-secret view of a connection, safe to return from a route. */
@@ -146,9 +169,37 @@ export async function saveConnection(params: {
    * must pass the current value through, or it destroys it.
    */
   refreshToken?: string;
-  /** Epoch milliseconds. */
-  expiresAt: number;
+  /**
+   * Authoritative expiry: epoch milliseconds, OR the server's own ISO string.
+   *
+   * Pass the string whenever the server stated one. GET /auth/renewaccesstoken
+   * returns `expirationTime`, and that IS the expiry — storing it verbatim beats
+   * parsing it to epoch milliseconds and formatting it back, which is our clock's
+   * arithmetic applied to a value we were simply told. The OAuth exchange states
+   * no such instant (only `expires_in`, in seconds), so that path has no choice
+   * but to pass a computed number.
+   */
+  expiresAt: number | string;
   tradovateUserId: number | null;
+  /**
+   * `refresh_token_expires_in` from the exchange, as epoch milliseconds.
+   *
+   * Product-relevant rather than metadata: this is how long a user can be away
+   * before they must re-authorize. CLEARED IF OMITTED, exactly like refreshToken
+   * — a renewal has to pass the stored value through.
+   */
+  refreshExpiresAt?: number;
+  /** `token_type` from the exchange. CLEARED IF OMITTED. */
+  tokenType?: string;
+  /**
+   * `apiHosts`, from the most recent renewal.
+   *
+   * The token exchange returns none, so renewal is the only source and this is
+   * written from there. Not a secret, but migration 030 deliberately withholds it
+   * from the client column grant, so nothing may hand it to the browser.
+   * CLEARED IF OMITTED.
+   */
+  apiHosts?: TradovateApiHosts;
   /**
    * Which Tradovate environment minted this token. Required, with no default:
    * a demo token and a live token are indistinguishable once stored, and
@@ -158,7 +209,16 @@ export async function saveConnection(params: {
   admin?: SupabaseClient;
 }): Promise<void> {
   const { userId, accessToken, refreshToken, expiresAt, tradovateUserId, environment } = params;
+  const { refreshExpiresAt, tokenType, apiHosts } = params;
   const admin = params.admin ?? createAdminClient();
+
+  // The in-memory cache needs milliseconds whichever form arrived, and an
+  // unparsable expiry has to be refused before it is written: a row whose
+  // expires_at cannot be read is a connection that can never be renewed.
+  const expiresAtMs = typeof expiresAt === 'number' ? expiresAt : Date.parse(expiresAt);
+  if (!Number.isFinite(expiresAtMs)) {
+    throw new Error('Refusing to store a Tradovate connection with an unparsable expiry.');
+  }
 
   const { error } = await admin.from('tradovate_connections').upsert(
     {
@@ -169,9 +229,18 @@ export async function saveConnection(params: {
       // of that choice is that a caller which forgets to pass refreshToken
       // silently erases it — see the warning on the parameter.
       refresh_token_encrypted: refreshToken ? encryptToken(refreshToken, 'refresh', userId) : null,
-      expires_at: new Date(expiresAt).toISOString(),
+      // A string here is the server's own expirationTime, stored as it was sent.
+      // Only a number — the exchange path, which is given seconds and nothing
+      // else — goes through our clock.
+      expires_at: typeof expiresAt === 'string' ? expiresAt : new Date(expiresAt).toISOString(),
       tradovate_user_id: tradovateUserId,
       environment,
+      // Always written, under the same rule as refresh_token_encrypted above and
+      // with the same cost: a caller that forgets one of these erases it.
+      refresh_expires_at:
+        refreshExpiresAt === undefined ? null : new Date(refreshExpiresAt).toISOString(),
+      token_type: tokenType ?? null,
+      api_hosts: apiHosts ?? null,
       status: 'active',
       updated_at: new Date().toISOString(),
     },
@@ -182,7 +251,7 @@ export async function saveConnection(params: {
   // cannot leak a token. The row we just built is not logged either.
   if (error) throw new Error(`Failed to store the Tradovate connection: ${error.message}`);
 
-  remember(userId, { accessToken, expiresAt, tradovateUserId });
+  remember(userId, { accessToken, expiresAt: expiresAtMs, tradovateUserId });
 }
 
 /** Read a connection without touching tokens. For status checks and routes. */
@@ -229,8 +298,8 @@ async function markStatus(
  *
  * Throws TradovateNotConnectedError when there is nothing usable: no row, a
  * disconnected or expired connection, or a renewal that failed. That is the
- * signal to prompt the user to reconnect — there is no silent recovery, because
- * OAuth hands us no refresh token to recover with.
+ * signal to prompt the user to reconnect. There is no silent recovery: a refresh
+ * token may be stored, but nothing here redeems one — see the header.
  */
 export async function getUserAccessToken(
   userId: string,
@@ -259,7 +328,8 @@ async function loadOrRenew(
   const { data, error } = await admin
     .from('tradovate_connections')
     .select(
-      'user_id, access_token_encrypted, refresh_token_encrypted, expires_at, tradovate_user_id, environment, status'
+      'user_id, access_token_encrypted, refresh_token_encrypted, expires_at, ' +
+        'tradovate_user_id, environment, status, refresh_expires_at, token_type, api_hosts'
     )
     .eq('user_id', userId)
     .maybeSingle<ConnectionRow>();
@@ -285,8 +355,9 @@ async function loadOrRenew(
     return remember(userId, { accessToken, expiresAt: storedExpiry, tradovateUserId });
   }
 
-  // Renewal has to present a live token, so one that has already lapsed cannot
-  // be recovered here — and with no refresh token, not anywhere else either.
+  // Renewal has to present a live token, so one that has already lapsed cannot be
+  // recovered here — and no other path in this module redeems the refresh token,
+  // so not anywhere else either. The user reconnects.
   if (!Number.isFinite(storedExpiry) || storedExpiry - Date.now() <= MIN_REMAINING_MS) {
     cache.delete(userId);
     await markStatus(userId, 'expired', admin);
@@ -316,10 +387,19 @@ async function loadOrRenew(
     );
   }
 
+  // The stored refresh-token expiry, carried forward: renewal never restates it.
+  // A value we cannot parse is dropped rather than written back as garbage.
+  const storedRefreshExpiry = data.refresh_expires_at
+    ? Date.parse(data.refresh_expires_at)
+    : Number.NaN;
+
   await saveConnection({
     userId,
     accessToken: renewed.accessToken,
-    expiresAt,
+    // The ISO string the server sent, not the epoch milliseconds parsed out of it
+    // above. `expiresAt` exists for the validation and for the snapshot this
+    // function returns; the column gets Tradovate's own words.
+    expiresAt: renewed.expirationTime,
     tradovateUserId,
     // Carried from the stored row, not from the caller's config: the row
     // records which environment actually minted the token, and a renewal must
@@ -335,6 +415,13 @@ async function loadOrRenew(
     refreshToken: data.refresh_token_encrypted
       ? decryptToken(data.refresh_token_encrypted, 'refresh', userId)
       : undefined,
+    refreshExpiresAt: Number.isFinite(storedRefreshExpiry) ? storedRefreshExpiry : undefined,
+    // Also carried from the row: the renewal response has no token_type.
+    tokenType: data.token_type ?? undefined,
+    // This one DOES come back on renewal, and renewal is the only place it ever
+    // comes back — the token exchange returns no apiHosts at all. Falls back to
+    // the stored value so a response that omits it does not erase what we know.
+    apiHosts: renewed.apiHosts ?? data.api_hosts ?? undefined,
     admin,
   });
 

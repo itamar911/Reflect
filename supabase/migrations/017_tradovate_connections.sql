@@ -22,11 +22,17 @@ CREATE TABLE IF NOT EXISTS tradovate_connections (
   -- AES-256-GCM ciphertext, format "v1.<iv>.<tag>.<ciphertext>" (base64url).
   access_token_encrypted TEXT NOT NULL,
 
-  -- Nullable on purpose. Tradovate's /auth/oauthtoken returns access_token and
-  -- expires_in but NO refresh_token; sessions are extended in place through
-  -- /auth/renewaccesstoken using the access token itself. The column exists so
-  -- that if Tradovate ever starts issuing refresh tokens we can store one
-  -- without a migration, and it is written whenever the field is present.
+  -- CORRECTION (Phase 2, production OAuth round trip): this comment used to say
+  -- /auth/oauthtoken returns NO refresh_token. That is wrong. The exchange does
+  -- issue one, together with refresh_token_expires_in, which 030 adds a column
+  -- for as refresh_expires_at. The OAuth guide mentions neither field; only the
+  -- REST reference lists them, and the live response settled it.
+  --
+  -- Still nullable: nothing documents a refresh token as guaranteed, and the
+  -- renewal path does not use one — sessions are extended in place through
+  -- /auth/renewaccesstoken with the access token itself, which is the call that
+  -- does not open a second session. The refresh token is what a returning user
+  -- re-authorizes against. Written whenever the field is present.
   refresh_token_encrypted TEXT,
 
   -- Authoritative expiry of the stored access token. Never derive this from a
@@ -38,8 +44,9 @@ CREATE TABLE IF NOT EXISTS tradovate_connections (
   tradovate_user_id BIGINT,
 
   --   active  — token present and believed usable
-  --   expired — renewal failed or the token lapsed; the user must reconnect,
-  --             because OAuth gives us no refresh token to recover with
+  --   expired — renewal failed or the token lapsed; the user must reconnect.
+  --             A refresh token may be stored (see above), but nothing redeems
+  --             it yet, so there is no in-process recovery from this state
   --   revoked — the user disconnected; the row is normally deleted, so this
   --             state exists for the window between revoking upstream and the
   --             delete landing, and for audit if the delete is ever deferred

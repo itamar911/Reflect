@@ -103,7 +103,8 @@ export class TradovateOAuthError extends TradovateError {
 
 /**
  * A user has no usable Tradovate connection: never connected, disconnected, or
- * the token lapsed and OAuth gives us no refresh token to recover with.
+ * the token lapsed with nothing in ./connections.ts able to recover it (a
+ * refresh token may be stored, but nothing redeems one).
  *
  * Distinct from TradovateAuthError because the remedy is different — this one is
  * fixed by the user reconnecting, not by correcting server configuration.

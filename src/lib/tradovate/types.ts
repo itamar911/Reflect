@@ -35,17 +35,32 @@ export interface AccessTokenRequestBody {
 }
 
 /**
+ * The `apiHosts` map: which hosts to use for this user's subsequent calls.
+ *
+ * Bare hostnames, no scheme — the caller prefixes https:// or wss://. Left as
+ * an open record on purpose: the dynamic-API-hosts page says to ignore
+ * unrecognised fields and that more hosts may be added, so narrowing this to
+ * the keys seen once would make a future addition a type error instead of data.
+ *   https://docs.ninjatrader.com/api/dynamic-api-hosts
+ */
+export type TradovateApiHosts = Record<string, unknown>;
+
+/**
  * Successful response from /auth/accesstokenrequest.
  *
- * /auth/renewaccesstoken returns the same shape minus `mdAccessToken` — renewal
- * does not reissue the market-data token.
+ * /auth/renewaccesstoken returns the same shape. It was documented here as
+ * returning it minus `mdAccessToken`; a production renewal showed otherwise —
+ * renewal DOES carry mdAccessToken, and it also carries `apiHosts`. Neither
+ * changes what we store: see the field comments below.
  */
 export interface AccessTokenResponse {
   accessToken: string;
   /**
-   * Market Data API token. We do NOT use it: the Market Data WebSocket requires
-   * CME sub-vendor registration, which Reflect does not have. It is typed here
-   * only because the endpoint returns it.
+   * Market Data API token. We do NOT use it, and must not: Market Data is
+   * Denied in our OAuth registration, and the Market Data WebSocket needs CME
+   * sub-vendor registration Reflect does not have. It is typed here only
+   * because the endpoint returns it — including on renewal, despite the denial.
+   * Never stored, never sent anywhere, never logged.
    */
   mdAccessToken?: string;
   /** ISO datetime. The authoritative expiry — never hardcode a token lifetime. */
@@ -63,6 +78,12 @@ export interface AccessTokenResponse {
   showKIDs?: boolean;
   /** Present when authentication failed; the HTTP status is still 200. */
   errorText?: string;
+  /**
+   * Dynamic API hosts for this user, returned by authentication and renewal.
+   * Answers Q4: a pure-OAuth client learns them from the renewal response,
+   * since the token exchange returns none.
+   */
+  apiHosts?: TradovateApiHosts;
   hibpHint?: 'EmailAndPasswordCompromised' | 'PasswordCompromised';
 }
 
@@ -106,22 +127,26 @@ export interface TokenSnapshot {
 /**
  * Response from POST /auth/oauthtoken.
  *
- * Note what is NOT here: `refresh_token`. Tradovate's OAuth token endpoint
- * issues an access token and nothing else — sessions are extended in place with
- * GET /auth/renewaccesstoken, using the access token itself as the credential.
- * The field is typed as optional only so that we store one if Tradovate ever
- * starts returning it; do not write code that assumes it will be there.
+ * `refresh_token` IS issued, together with `refresh_token_expires_in` —
+ * observed on a production exchange. This comment, and migration 017's, used
+ * to assert the opposite (the OAuth guide mentions neither field; only the REST
+ * reference lists them). Sessions are still extended in place with GET
+ * /auth/renewaccesstoken using the access token itself, so the refresh token is
+ * not on the renewal path; it is what a returning user re-authorizes against.
+ * Both fields stay optional: nothing documents them as guaranteed.
  *
  * `expires_in` is seconds, unlike the ISO `expirationTime` on the password-grant
- * response — the two auth paths report expiry in different units.
+ * response — the two auth paths report expiry in different units. Observed value
+ * is 4800 (80 minutes), not the ~26 hours NinjaTrader support stated in writing.
  */
 export interface OAuthTokenResponse {
   access_token?: string;
-  /** Seconds until the access token expires. */
+  /** Seconds until the access token expires. Observed: 4800. */
   expires_in?: number;
   token_type?: string;
-  /** Not currently issued by Tradovate. See above. */
   refresh_token?: string;
+  /** Seconds until the refresh token expires. */
+  refresh_token_expires_in?: number;
   /** OAuth 2.0 error code, e.g. 'access_denied', 'invalid_grant'. */
   error?: string;
   error_description?: string;

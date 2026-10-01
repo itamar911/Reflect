@@ -108,9 +108,11 @@ export const TOKEN_URLS_ALTERNATIVE: Record<TradovateEnvironment, string> =
  *   "Treat all hosts as authoritative, including live, mdLive, and replay.
  *    Those are currently the same for every organization…"
  *
- * and a pure-OAuth client has no documented way to learn apiHosts at connect
- * time — OAuthTokenResponse has no such field. That gap is Q4 in the plan; the
- * Phase 2 diagnostics report whether the exchange returns one after all.
+ * and a pure-OAuth client has no way to learn apiHosts at connect time — the
+ * token exchange returns no such field, confirmed on a production round trip
+ * (Q4). GET /auth/renewaccesstoken DOES return one, so the hosts become known
+ * at the first renewal rather than at connect; ./connections.ts stores them in
+ * tradovate_connections.api_hosts from there. Nothing reads that column yet.
  */
 export const LIVE_API_URL = 'https://live.tradovateapi.com/v1';
 
