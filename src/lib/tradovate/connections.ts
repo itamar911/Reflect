@@ -254,26 +254,85 @@ export async function saveConnection(params: {
   remember(userId, { accessToken, expiresAt: expiresAtMs, tradovateUserId });
 }
 
-/** Read a connection without touching tokens. For status checks and routes. */
+/** The non-secret columns a summary needs. Never a token column. */
+const SUMMARY_COLUMNS = 'status, tradovate_user_id, expires_at, environment';
+
+/**
+ * The outcome of trying to read a connection.
+ *
+ * Three cases, deliberately not two. "I asked and there is no connection" and
+ * "I could not ask" are different facts, and collapsing them is how a UI ends up
+ * telling a connected user they are not connected. Any caller that renders state
+ * to a person wants this; a caller that just needs the row can use
+ * getConnectionSummary() and let a failure throw.
+ */
+export type ConnectionRead =
+  | { outcome: 'row'; summary: ConnectionSummary }
+  | { outcome: 'none' }
+  | { outcome: 'error'; code?: string; message: string };
+
+function toSummary(row: Record<string, unknown>): ConnectionSummary {
+  return {
+    status: row.status as ConnectionStatus,
+    tradovateUserId: (row.tradovate_user_id as number | null) ?? null,
+    expiresAt: row.expires_at as string,
+    environment: row.environment as TradovateEnvironment,
+  };
+}
+
+/**
+ * Read a connection, reporting failure as a value rather than an exception.
+ *
+ * Covers the client itself failing to build — createAdminClient() throws when
+ * the service-role key is missing, and that is a read failure like any other,
+ * not a crash the caller should have to anticipate separately.
+ */
+export async function readConnectionSummary(
+  userId: string,
+  adminClient?: SupabaseClient
+): Promise<ConnectionRead> {
+  let admin: SupabaseClient;
+  try {
+    admin = adminClient ?? createAdminClient();
+  } catch (error) {
+    return {
+      outcome: 'error',
+      code: 'admin_client_unavailable',
+      message: error instanceof Error ? error.message : 'unknown error',
+    };
+  }
+
+  const { data, error } = await admin
+    .from('tradovate_connections')
+    .select(SUMMARY_COLUMNS)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  // A PostgREST error carries the failing statement and its own code, not the
+  // row values, so none of this can carry a token — the select names four
+  // non-secret columns and the token columns are not among them.
+  if (error) return { outcome: 'error', code: error.code, message: error.message };
+  if (!data) return { outcome: 'none' };
+
+  return { outcome: 'row', summary: toSummary(data as Record<string, unknown>) };
+}
+
+/**
+ * Read a connection without touching tokens. Throws if the read fails.
+ *
+ * Kept for callers that are already inside a try/catch and treat an unreadable
+ * connection as fatal — disconnectUser() is the one in the repo. Anything
+ * rendering state to a user should call readConnectionSummary() instead.
+ */
 export async function getConnectionSummary(
   userId: string,
   admin: SupabaseClient = createAdminClient()
 ): Promise<ConnectionSummary | null> {
-  const { data, error } = await admin
-    .from('tradovate_connections')
-    .select('status, tradovate_user_id, expires_at, environment')
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  if (error) throw new Error(`Failed to read the Tradovate connection: ${error.message}`);
-  if (!data) return null;
-
-  return {
-    status: data.status as ConnectionStatus,
-    tradovateUserId: data.tradovate_user_id,
-    expiresAt: data.expires_at,
-    environment: data.environment as TradovateEnvironment,
-  };
+  const read = await readConnectionSummary(userId, admin);
+  if (read.outcome === 'error') {
+    throw new Error(`Failed to read the Tradovate connection: ${read.message}`);
+  }
+  return read.outcome === 'row' ? read.summary : null;
 }
 
 /**

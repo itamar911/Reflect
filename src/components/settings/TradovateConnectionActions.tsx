@@ -92,12 +92,21 @@ export interface TradovateConnectionActionsProps {
   hasConnection: boolean;
   /** Whether that row still holds a usable token. */
   isActive: boolean;
+  /**
+   * Whether the server could not read the connection at all.
+   *
+   * Distinct from `hasConnection: false`, and the distinction is the point: not
+   * knowing is not the same as knowing there is nothing, and rendering them the
+   * same way is how a connected user gets told they are not connected.
+   */
+  readFailed: boolean;
 }
 
 export default function TradovateConnectionActions({
   canConnect,
   hasConnection,
   isActive,
+  readFailed,
 }: TradovateConnectionActionsProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -113,6 +122,36 @@ export default function TradovateConnectionActions({
       >
         חבר ברוקר
       </button>
+    );
+  }
+
+  if (readFailed) {
+    return (
+      <div className="mt-3 flex flex-col gap-3">
+        {/* role="alert": this is the page being wrong about something the user
+            can see, not a passive status. */}
+        <p
+          role="alert"
+          className="text-xs font-semibold leading-relaxed"
+          style={{ color: 'var(--color-tg-warning)' }}
+        >
+          לא הצלחנו לקרוא את מצב החיבור כרגע, כך שייתכן שקיים חיבור פעיל שאינו מוצג כאן.
+          רענן את הדף כדי לנסות שוב.
+        </p>
+
+        {/* Connect stays available — it is an upsert, so it is safe whatever the
+            true state turns out to be. Disconnect does not: offering to delete a
+            connection we have no evidence exists is not a choice we can put in
+            front of someone honestly. */}
+        <a
+          href="/api/tradovate/connect"
+          className={`w-full py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 ${FOCUS_RING}`}
+          style={{ background: '#00d2d2', color: 'var(--color-tg-bg)' }}
+        >
+          <Plug aria-hidden="true" size={16} />
+          חבר ברוקר
+        </a>
+      </div>
     );
   }
 

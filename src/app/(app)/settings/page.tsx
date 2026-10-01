@@ -7,7 +7,12 @@ import { Plug } from 'lucide-react';
 import DeleteAccountSection from '@/components/settings/DeleteAccountSection';
 import TradovateConnectionActions from '@/components/settings/TradovateConnectionActions';
 import { isUserAllowed } from '@/lib/tradovate/allowlist';
-import { getConnectionSummary, type ConnectionStatus } from '@/lib/tradovate/connections';
+import { readConnectionSummary, type ConnectionStatus } from '@/lib/tradovate/connections';
+// CONNECTION-READ DIAGNOSTICS — remove with lib/tradovate/connection-read-diagnostics.ts.
+import {
+  logConnectionRead,
+  reportConnectionRead,
+} from '@/lib/tradovate/connection-read-diagnostics';
 
 export const metadata = { title: 'הגדרות — Reflect' };
 
@@ -31,21 +36,42 @@ export default async function SettingsPage() {
   const canConnectTradovate = isUserAllowed(user.id);
 
   // Only read for an allowlisted user — nobody else can have a connection, and
-  // this call uses the service-role client. Failures are swallowed on purpose:
-  // the connection card is one section of a page whose other five do not depend
-  // on it, and a Supabase hiccup here must not take the whole of Settings down.
-  // The cost of swallowing is that the card falls back to "not connected", which
-  // offers Connect rather than Disconnect; both routes re-check the real state.
+  // this call uses the service-role client.
+  //
+  // A failure here must not take down a page whose other five sections do not
+  // depend on it, but it must not be mistaken for an answer either. This used to
+  // catch the throw into the same `null` that means "no connection", so an
+  // unreadable connection and an absent one rendered identically and the log
+  // line was the only difference. Now the three outcomes stay apart all the way
+  // to the card: a read that failed says so, to the user and in the logs.
   let tradovateStatus: ConnectionStatus | null = null;
+  let tradovateReadFailed = false;
+
   if (canConnectTradovate) {
-    try {
-      tradovateStatus = (await getConnectionSummary(user.id))?.status ?? null;
-    } catch (error) {
+    const read = await readConnectionSummary(user.id);
+
+    if (read.outcome === 'error') {
+      tradovateReadFailed = true;
       console.error(
         '[settings] could not read the Tradovate connection:',
-        error instanceof Error ? error.message : 'unknown error'
+        `code=${read.code ?? 'none'}`,
+        JSON.stringify(read.message)
       );
+    } else if (read.outcome === 'row') {
+      tradovateStatus = read.summary.status;
     }
+
+    // ========================================================================
+    // CONNECTION-READ DIAGNOSTICS — DELETE THIS BLOCK WITH
+    // lib/tradovate/connection-read-diagnostics.ts
+    //
+    // Answers why this read finds nothing for a row that exists. Costs one
+    // extra, unfiltered SELECT of user_id per Settings render, for an
+    // allowlisted user only. Ids and result shape only — no token column is
+    // read by anything in that module.
+    // ========================================================================
+    logConnectionRead('settings', await reportConnectionRead(user.id));
+    // ==================== END CONNECTION-READ DIAGNOSTICS ===================
   }
 
   return (
@@ -94,9 +120,11 @@ export default async function SettingsPage() {
                 <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: 'rgba(0,210,210,0.12)', color: '#00d2d2' }}>
                   {!canConnectTradovate
                     ? 'זמין בקרוב'
-                    : tradovateStatus === 'active'
-                      ? 'מחובר'
-                      : 'בדיקה מוקדמת'}
+                    : tradovateReadFailed
+                      ? 'מצב לא ידוע'
+                      : tradovateStatus === 'active'
+                        ? 'מחובר'
+                        : 'בדיקה מוקדמת'}
                 </span>
               </div>
               <p className="text-xs text-tg-muted mt-1.5">
@@ -106,6 +134,7 @@ export default async function SettingsPage() {
                 canConnect={canConnectTradovate}
                 hasConnection={tradovateStatus !== null}
                 isActive={tradovateStatus === 'active'}
+                readFailed={tradovateReadFailed}
               />
             </div>
           </div>
