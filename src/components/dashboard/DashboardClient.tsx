@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect, useCallback, useId, useSyncExternalStore } from 'react';
-import { Sparkles, TrendingUp, TrendingDown, RefreshCw, CheckCircle, AlertCircle, AlertTriangle, Heart, Target, ChevronRight, ChevronLeft, Quote, Clock } from 'lucide-react';
+import { Sparkles, TrendingUp, TrendingDown, RefreshCw, CheckCircle, AlertCircle, AlertTriangle, Heart, Target, ChevronRight, ChevronLeft, Quote, Clock, Plug } from 'lucide-react';
 import { formatPnlIls, formatPnlPoints } from '@/lib/utils';
 import { createClient } from '@/lib/supabase/client';
 import { DASH_TRADE_SELECT, mapDashTrade } from '@/lib/dashboard/trades';
@@ -1243,11 +1243,23 @@ export default function DashboardClient({
   displayName,
   userId,
   plan,
+  canConnectBroker,
 }: {
   trades: DashTrade[];
   displayName: string;
   userId: string;
   plan: PlanTier;
+  /**
+   * Whether this user may start the Tradovate connect flow.
+   *
+   * Decided on the server with isUserAllowed() and passed down, because
+   * lib/tradovate/allowlist.ts reads process.env and is server-only. Re-deriving
+   * it here would mean a second, divergent copy of the gate; this is the same
+   * one Settings uses. It governs copy only — /api/tradovate/connect checks the
+   * list itself, so a stale `false` costs a link and a stale `true` costs a
+   * redirect, never access.
+   */
+  canConnectBroker: boolean;
 }) {
   const limits = getPlanLimits(plan);
   const [trades,   setTrades]   = useState<DashTrade[]>(initialTrades);
@@ -1950,11 +1962,39 @@ export default function DashboardClient({
         )}
       </Card>
 
-      {/* ── Coming soon banner ───────────────────────────────────────────── */}
+      {/* ── Broker connection banner ─────────────────────────────────────────
+          Was an unconditional "coming soon" line, which stopped being true for
+          an allowlisted user once Settings started offering the real flow. Same
+          gate as Settings, same wording for everyone still waiting. */}
       <div className="flex items-center justify-center gap-2 text-sm py-4"
         style={{ borderTop: `1px solid ${BORDER}`, color: TEXT2 }}>
-        <Clock aria-hidden="true" size={14} />
-        <span>בקרוב - חיבור ברוקר בזמן אמת</span>
+        {canConnectBroker ? (
+          // A plain link: the flow ends on Tradovate's consent screen, so it has
+          // to be a top-level navigation rather than a fetch.
+          // Styled as the dashboard's existing accent action (see the "צור
+          // סיכום" button above) rather than as a new kind of link.
+          <a
+            href="/api/tradovate/connect"
+            className="inline-flex items-center gap-2 transition-all active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tg-primary"
+            style={{
+              background: 'rgba(0,210,210,0.12)',
+              color: ACCENT,
+              border: '1px solid rgba(0,210,210,0.3)',
+              borderRadius: 6,
+              padding: '6px 16px',
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+          >
+            <Plug aria-hidden="true" size={14} />
+            חבר ברוקר בזמן אמת
+          </a>
+        ) : (
+          <>
+            <Clock aria-hidden="true" size={14} />
+            <span>בקרוב - חיבור ברוקר בזמן אמת</span>
+          </>
+        )}
       </div>
 
       {/* ── Trade detail panel ────────────────────────────────────────────── */}

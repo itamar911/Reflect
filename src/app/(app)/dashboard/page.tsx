@@ -3,6 +3,7 @@ import { getUserPlan } from '@/lib/plans/getUserPlan';
 import DashboardClient from '@/components/dashboard/DashboardClient';
 import { DASH_TRADE_SELECT, mapDashTrade } from '@/lib/dashboard/trades';
 import type { DashTrade } from '@/lib/dashboard/trades';
+import { isUserAllowed } from '@/lib/tradovate/allowlist';
 
 export const metadata = { title: 'דשבורד — Reflect' };
 
@@ -25,5 +26,18 @@ export default async function DashboardPage() {
 
   const trades: DashTrade[] = (tradesRes.data ?? []).map(mapDashTrade);
 
-  return <DashboardClient trades={trades} displayName={displayName} userId={user.id} plan={plan} />;
+  // The same gate Settings uses, evaluated here because allowlist.ts is
+  // server-only. Cosmetic either way: /api/tradovate/connect checks the list
+  // itself, so this only decides whether the banner is a link or a placeholder.
+  const canConnectBroker = isUserAllowed(user.id);
+
+  return (
+    <DashboardClient
+      trades={trades}
+      displayName={displayName}
+      userId={user.id}
+      plan={plan}
+      canConnectBroker={canConnectBroker}
+    />
+  );
 }

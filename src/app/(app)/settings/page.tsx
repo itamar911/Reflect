@@ -5,7 +5,9 @@ import AlertsPanel from '@/components/settings/AlertsPanel';
 import type { AlertSettingsData } from '@/components/settings/AlertsPanel';
 import { Plug } from 'lucide-react';
 import DeleteAccountSection from '@/components/settings/DeleteAccountSection';
+import TradovateConnectionActions from '@/components/settings/TradovateConnectionActions';
 import { isUserAllowed } from '@/lib/tradovate/allowlist';
+import { getConnectionSummary, type ConnectionStatus } from '@/lib/tradovate/connections';
 
 export const metadata = { title: 'הגדרות — Reflect' };
 
@@ -27,6 +29,24 @@ export default async function SettingsPage() {
   // gate is in /api/tradovate/connect and /api/tradovate/callback, which check
   // the same list independently. A hidden button is still a URL.
   const canConnectTradovate = isUserAllowed(user.id);
+
+  // Only read for an allowlisted user — nobody else can have a connection, and
+  // this call uses the service-role client. Failures are swallowed on purpose:
+  // the connection card is one section of a page whose other five do not depend
+  // on it, and a Supabase hiccup here must not take the whole of Settings down.
+  // The cost of swallowing is that the card falls back to "not connected", which
+  // offers Connect rather than Disconnect; both routes re-check the real state.
+  let tradovateStatus: ConnectionStatus | null = null;
+  if (canConnectTradovate) {
+    try {
+      tradovateStatus = (await getConnectionSummary(user.id))?.status ?? null;
+    } catch (error) {
+      console.error(
+        '[settings] could not read the Tradovate connection:',
+        error instanceof Error ? error.message : 'unknown error'
+      );
+    }
+  }
 
   return (
     <div className="px-4 py-5 flex flex-col gap-5 md:max-w-none">
@@ -72,31 +92,21 @@ export default async function SettingsPage() {
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-sm font-bold text-tg-text">חיבור ברוקר בזמן אמת</h3>
                 <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: 'rgba(0,210,210,0.12)', color: '#00d2d2' }}>
-                  {canConnectTradovate ? 'בדיקה מוקדמת' : 'זמין בקרוב'}
+                  {!canConnectTradovate
+                    ? 'זמין בקרוב'
+                    : tradovateStatus === 'active'
+                      ? 'מחובר'
+                      : 'בדיקה מוקדמת'}
                 </span>
               </div>
               <p className="text-xs text-tg-muted mt-1.5">
                 העסקאות, הפוזיציות והביצועים שלך יסונכרנו באופן אוטומטי ישירות מהברוקר לאפליקציה.
               </p>
-              {canConnectTradovate ? (
-                // A plain link, not a fetch: the flow ends on Tradovate's own
-                // consent screen, so it has to be a top-level navigation.
-                <a
-                  href="/api/tradovate/connect"
-                  className="mt-3 w-full py-2.5 rounded-xl text-sm font-semibold block text-center"
-                  style={{ background: '#00d2d2', color: 'var(--color-tg-bg)' }}
-                >
-                  חבר ברוקר
-                </a>
-              ) : (
-                <button
-                  disabled
-                  className="mt-3 w-full py-2.5 rounded-xl text-sm font-semibold cursor-not-allowed"
-                  style={{ background: 'var(--color-tg-surface-2)', color: 'var(--color-tg-muted)' }}
-                >
-                  חבר ברוקר
-                </button>
-              )}
+              <TradovateConnectionActions
+                canConnect={canConnectTradovate}
+                hasConnection={tradovateStatus !== null}
+                isActive={tradovateStatus === 'active'}
+              />
             </div>
           </div>
         </Card>
