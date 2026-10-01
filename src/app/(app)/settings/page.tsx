@@ -3,16 +3,10 @@ import { createClient, getCachedUser } from '@/lib/supabase/server';
 import Card from '@/components/ui/Card';
 import AlertsPanel from '@/components/settings/AlertsPanel';
 import type { AlertSettingsData } from '@/components/settings/AlertsPanel';
-import { Plug } from 'lucide-react';
 import DeleteAccountSection from '@/components/settings/DeleteAccountSection';
-import TradovateConnectionActions from '@/components/settings/TradovateConnectionActions';
+import TradovateConnectionCard from '@/components/settings/TradovateConnectionCard';
 import { isUserAllowed } from '@/lib/tradovate/allowlist';
 import { readConnectionSummary, type ConnectionStatus } from '@/lib/tradovate/connections';
-// CONNECTION-READ DIAGNOSTICS — remove with lib/tradovate/connection-read-diagnostics.ts.
-import {
-  logConnectionRead,
-  reportConnectionRead,
-} from '@/lib/tradovate/connection-read-diagnostics';
 
 export const metadata = { title: 'הגדרות — Reflect' };
 
@@ -60,18 +54,6 @@ export default async function SettingsPage() {
     } else if (read.outcome === 'row') {
       tradovateStatus = read.summary.status;
     }
-
-    // ========================================================================
-    // CONNECTION-READ DIAGNOSTICS — DELETE THIS BLOCK WITH
-    // lib/tradovate/connection-read-diagnostics.ts
-    //
-    // Answers why this read finds nothing for a row that exists. Costs one
-    // extra, unfiltered SELECT of user_id per Settings render, for an
-    // allowlisted user only. Ids and result shape only — no token column is
-    // read by anything in that module.
-    // ========================================================================
-    logConnectionRead('settings', await reportConnectionRead(user.id));
-    // ==================== END CONNECTION-READ DIAGNOSTICS ===================
   }
 
   return (
@@ -111,33 +93,18 @@ export default async function SettingsPage() {
       <div className="flex flex-col gap-3">
         <h2 className="text-base font-bold text-tg-text">אינטגרציות</h2>
 
+        {/* Only the shell is server-rendered. The badge used to live here, next
+            to the heading, while the actions under it were client state — so a
+            disconnect updated the body and left the badge reading "מחובר" until
+            the next refresh. Everything that a client action can change now sits
+            inside one component and derives from one flag. */}
         <Card className={canConnectTradovate ? undefined : 'opacity-75'}>
-          <div className="flex items-start gap-3">
-            <Plug aria-hidden="true" size={20} style={{ color: '#00d2d2' }} className="shrink-0 mt-0.5" />
-            <div className="flex-1">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="text-sm font-bold text-tg-text">חיבור לחשבון הברוקר</h3>
-                <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: 'rgba(0,210,210,0.12)', color: '#00d2d2' }}>
-                  {!canConnectTradovate
-                    ? 'זמין בקרוב'
-                    : tradovateReadFailed
-                      ? 'מצב לא ידוע'
-                      : tradovateStatus === 'active'
-                        ? 'מחובר'
-                        : 'בדיקה מוקדמת'}
-                </span>
-              </div>
-              <p className="text-xs text-tg-muted mt-1.5">
-                כשתפתח תוכנית עסקה, Reflect ימשוך מהברוקר את נתוני העסקאות שלך באותו רגע. אין סנכרון אוטומטי ברקע.
-              </p>
-              <TradovateConnectionActions
-                canConnect={canConnectTradovate}
-                hasConnection={tradovateStatus !== null}
-                isActive={tradovateStatus === 'active'}
-                readFailed={tradovateReadFailed}
-              />
-            </div>
-          </div>
+          <TradovateConnectionCard
+            canConnect={canConnectTradovate}
+            hasConnection={tradovateStatus !== null}
+            isActive={tradovateStatus === 'active'}
+            readFailed={tradovateReadFailed}
+          />
         </Card>
       </div>
 
