@@ -189,15 +189,14 @@ export async function checkBuckets(admin: SupabaseClient): Promise<CheckGroupRes
  *
  * These need pg_class, pg_policy, pg_proc and aclexplode, and PostgREST exposes
  * only the `public` schema — there is no path from the service-role key to
- * pg_catalog over HTTP. The gap closes with one SECURITY DEFINER function in
- * `public` named {@link CATALOG_RPC}, returning a row per finding as
- * (schema_name text, object_name text, rule_broken text) — the exact shape the
- * final query in supabase/queries/security_assertions.sql already produces.
- * Creating it is DDL and was deliberately out of scope for the task that wrote
- * this file.
+ * pg_catalog over HTTP. {@link CATALOG_RPC} is the function that bridges it:
+ * public.security_assertions(), created by migration 031, SECURITY DEFINER with
+ * a pinned search_path, EXECUTE granted to service_role alone. It returns a row
+ * per finding as (schema_name, object_name, rule_broken).
  *
- * Until it exists this returns ran: false. It does NOT return an empty findings
- * list and call that clean, which is the whole point — see the header.
+ * While 031 is unapplied the RPC call fails and this returns ran: false. It does
+ * NOT return an empty findings list and call that clean, which is the whole
+ * point — see the header.
  */
 export async function checkCatalog(admin: SupabaseClient): Promise<CheckGroupResult> {
   const { data, error } = await admin.rpc(CATALOG_RPC);

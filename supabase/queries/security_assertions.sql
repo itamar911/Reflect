@@ -59,13 +59,17 @@
 -- when you want to look right now, and it is what makes the logic reviewable
 -- without reading TypeScript.
 --
--- The route can run queries 8 and 9 today, through the Storage API. It CANNOT
--- run 1-7: PostgREST exposes only the `public` schema, so there is no way for
--- the service-role key to reach pg_catalog over HTTP. Closing that gap needs a
--- SECURITY DEFINER function in `public` that returns (rule text, object text)
--- and is callable by the service role — creating it is DDL and deliberately out
--- of scope here. Until it exists the route reports the catalog checks as
--- UNAVAILABLE rather than as clean, and this file is the only way to run 1-7.
+-- The route runs queries 8 and 9 through the Storage API, and 1-7 through
+-- public.security_assertions(), created by migration 031. PostgREST exposes only
+-- the `public` schema, so without that function there is no path from the
+-- service-role key to pg_catalog over HTTP at all.
+--
+-- UNTIL 031 IS APPLIED the route reports the catalog checks as UNAVAILABLE
+-- rather than as clean, and this file is the only way to run 1-7.
+--
+-- 031 carries the same rules as 1-7 below, minus the 6c inventory. Change a rule
+-- here and change it there in the same edit, or the daily mail and the hand-run
+-- stop agreeing — which is worse than either being wrong alone.
 --
 --
 -- WHAT THE RESULTS MAY AND MAY NOT BE PASTED INTO
