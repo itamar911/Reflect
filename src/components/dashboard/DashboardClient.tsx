@@ -1965,7 +1965,12 @@ export default function DashboardClient({
       {/* ── Broker connection banner ─────────────────────────────────────────
           Was an unconditional "coming soon" line, which stopped being true for
           an allowlisted user once Settings started offering the real flow. Same
-          gate as Settings, same wording for everyone still waiting. */}
+          gate as Settings.
+
+          Neither branch says "בזמן אמת" any more. What REF-90 actually settled
+          on is an on-demand pull when the user opens a trade plan — not a real-
+          time feed and not a background sync — so both the waiting copy and the
+          live link describe a pull. */}
       <div className="flex items-center justify-center gap-2 text-sm py-4"
         style={{ borderTop: `1px solid ${BORDER}`, color: TEXT2 }}>
         {canConnectBroker ? (
@@ -1987,12 +1992,12 @@ export default function DashboardClient({
             }}
           >
             <Plug aria-hidden="true" size={14} />
-            חבר ברוקר בזמן אמת
+            חבר את חשבון הברוקר
           </a>
         ) : (
           <>
             <Clock aria-hidden="true" size={14} />
-            <span>בקרוב - חיבור ברוקר בזמן אמת</span>
+            <span>בקרוב - משיכת עסקאות מחשבון הברוקר</span>
           </>
         )}
       </div>

@@ -29,11 +29,12 @@
  * before the click, because that is when it can still change what they do, and
  * after it, because that is when they would otherwise assume they were finished.
  *
- * The note deliberately does NOT name a screen or menu path inside Tradovate.
- * No path is documented in the API reference at api.tradovate.com; the OAuth
- * material refers to "your authorized-apps settings" without saying where they
- * are. Naming a guessed path would send people hunting for a menu that may not
- * exist under that name, which is worse than describing it generically.
+ * The note now names a path, hedged — see RevokeNote below for why it is worded
+ * the way it is. It is still not documented anywhere: api.tradovate.com
+ * publishes no endpoint list at all, and the OAuth material only refers to
+ * "your authorized-apps settings" without saying where those are. The path in
+ * the copy is a hand-verified observation, not a citation, and it is presented
+ * as one.
  */
 
 import { Plug, Unplug } from 'lucide-react';
@@ -44,13 +45,33 @@ import Button from '@/components/ui/Button';
 /**
  * The one thing the disconnect action cannot do, stated in full.
  *
- * Rendered verbatim both before and after disconnecting, from this single
- * constant, so the two can never drift into saying different things.
+ * Rendered both before and after disconnecting, from this single component, so
+ * the two can never drift into saying different things.
+ *
+ * The path is hedged on purpose. It was verified by hand in Tradovate, but as
+ * the account that OWNS the registered app, where the section read "No
+ * authorized apps found" — so how it looks to an ordinary user who only
+ * authorized Reflect has not been seen. The copy therefore tells them what to
+ * look for first and offers the path as where it was found, not as a promise,
+ * and says outright that the name or location may differ for them.
+ *
+ * The path itself is wrapped in dir="ltr": it is three English labels inside an
+ * RTL sentence, and without it the bidi algorithm reorders the separators and
+ * the user is told to follow a path that reads backwards.
  */
-const REVOKE_NOTE =
-  'ניתוק מ-Reflect מוחק את ההרשאה השמורה אצלנו ומפסיק את הסנכרון. ' +
-  'כדי להסיר את ההרשאה גם מצד Tradovate, יש להיכנס להגדרות החשבון שלך ' +
-  'ב-Tradovate ולהסיר את Reflect מרשימת האפליקציות המורשות.';
+function RevokeNote() {
+  return (
+    <p className="text-xs text-tg-text-2 leading-relaxed">
+      ניתוק מ-Reflect מוחק את ההרשאה השמורה אצלנו ומפסיק את משיכת הנתונים. כדי להסיר את
+      ההרשאה גם מצד Tradovate, יש להיכנס להגדרות החשבון שלך ב-Tradovate ולאתר את רשימת
+      האפליקציות שאישרת בגישת OAuth — אצלנו היא הופיעה תחת{' '}
+      <span dir="ltr" className="inline-block font-medium text-tg-text">
+        Settings &rsaquo; App Permissions &rsaquo; Authorized Apps
+      </span>{' '}
+      — ולהסיר משם את Reflect. ייתכן שהשם או המיקום המדויק יהיו שונים בחשבון שלך.
+    </p>
+  );
+}
 
 /**
  * The app's focus convention, copied from AccessibilityWidget: a turquoise ring
@@ -148,7 +169,7 @@ export default function TradovateConnectionActions({
             <p className="text-xs font-semibold text-tg-text">
               החיבור נותק וההרשאה השמורה נמחקה.
             </p>
-            <p className="text-xs text-tg-text-2 leading-relaxed">{REVOKE_NOTE}</p>
+            <RevokeNote />
           </>
         )}
       </div>
@@ -176,7 +197,7 @@ export default function TradovateConnectionActions({
 
       {showDisconnect && (
         <>
-          <p className="text-xs text-tg-text-2 leading-relaxed">{REVOKE_NOTE}</p>
+          <RevokeNote />
           <Button
             variant="secondary"
             size="md"

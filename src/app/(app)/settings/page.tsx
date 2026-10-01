@@ -90,7 +90,7 @@ export default async function SettingsPage() {
             <Plug aria-hidden="true" size={20} style={{ color: '#00d2d2' }} className="shrink-0 mt-0.5" />
             <div className="flex-1">
               <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="text-sm font-bold text-tg-text">חיבור ברוקר בזמן אמת</h3>
+                <h3 className="text-sm font-bold text-tg-text">חיבור לחשבון הברוקר</h3>
                 <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: 'rgba(0,210,210,0.12)', color: '#00d2d2' }}>
                   {!canConnectTradovate
                     ? 'זמין בקרוב'
@@ -100,7 +100,7 @@ export default async function SettingsPage() {
                 </span>
               </div>
               <p className="text-xs text-tg-muted mt-1.5">
-                העסקאות, הפוזיציות והביצועים שלך יסונכרנו באופן אוטומטי ישירות מהברוקר לאפליקציה.
+                כשתפתח תוכנית עסקה, Reflect ימשוך מהברוקר את נתוני העסקאות שלך באותו רגע. אין סנכרון אוטומטי ברקע.
               </p>
               <TradovateConnectionActions
                 canConnect={canConnectTradovate}
