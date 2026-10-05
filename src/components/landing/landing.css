@@ -48,6 +48,52 @@
   contain-intrinsic-size: auto 700px;
 }
 
+/* ── ScrollReveal: fail-open entrance ──────────────────────────
+   ScrollReveal.tsx renders this class on the server and swaps it for its
+   JS-driven transition on hydration.
+
+   The hidden state is deliberately expressed as the opening frame of an
+   animation that always completes, rather than as a flat `opacity: 0` that
+   only JS can lift. If the client bundle never runs — a parse error in a
+   framework chunk, a blocked or truncated asset, a browser we do not support —
+   the page still resolves to readable content instead of leaving every
+   revealed block invisible under the nav.
+
+   The delay only has to outlast hydration. It does so by roughly an order of
+   magnitude on a healthy load, where the class is gone long before the delay
+   elapses, so this animation is never seen there. */
+
+@keyframes scroll-reveal-fail-open {
+  from { opacity: 0; transform: translateY(2rem); }
+  to   { opacity: 1; transform: none; }
+}
+
+.landing .scroll-reveal {
+  animation: scroll-reveal-fail-open 850ms cubic-bezier(0.16, 1, 0.3, 1) 1800ms both;
+}
+
+/* A `.cv-auto` section is not rendered at all until it nears the viewport, and
+   an animation inside skipped content does not tick. Its clock therefore starts
+   when the reader scrolls down — necessarily long after hydration, since all
+   six opted-in sections sit well below the fold — so the delay has nothing left
+   to outlast and only buys a blank section while the reader waits on it. */
+.landing .cv-auto .scroll-reveal {
+  animation-delay: 0ms;
+}
+
+/* The blanket reduced-motion rule at the foot of this file collapses
+   animation-duration but not animation-delay, which would still hold this
+   content blank for 1.8s. Without JS there is nothing else to lift it.
+
+   There is no matching `html[data-a11y-reduce-motion]` rule because that
+   attribute is only ever set by the accessibility widget's own JS — in any
+   run where it exists, hydration has already replaced this class. */
+@media (prefers-reduced-motion: reduce) {
+  .landing .scroll-reveal {
+    animation-delay: 0ms;
+  }
+}
+
 /* ── Gradient text ─────────────────────────────────────────── */
 
 .text-gradient-cyan {

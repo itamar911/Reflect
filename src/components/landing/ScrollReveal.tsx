@@ -1,7 +1,28 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { usePrefersReducedMotion } from '@/lib/hooks';
+import { useHydrated, usePrefersReducedMotion } from '@/lib/hooks';
+
+/**
+ * Must stay in step with the `animation-delay` on `.scroll-reveal`
+ * (landing.css), which is what actually reveals the content when JS is absent.
+ */
+const FAIL_OPEN_DELAY_MS = 1800;
+
+/**
+ * Whether the CSS fallback had already started revealing by the time the client
+ * took over.
+ *
+ * Latched on first read rather than sampled per element: hydration is a single
+ * page-wide event, so the answer belongs to the page load, and a value that
+ * drifted between reads would make this unusable during render.
+ */
+let failOpenStarted: boolean | null = null;
+
+function hasFailOpenStarted(): boolean {
+  failOpenStarted ??= performance.now() >= FAIL_OPEN_DELAY_MS;
+  return failOpenStarted;
+}
 
 interface ScrollRevealProps {
   children: React.ReactNode;
@@ -12,13 +33,25 @@ interface ScrollRevealProps {
 export function ScrollReveal({ children, className = '', delay = 0 }: ScrollRevealProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [intersected, setIntersected] = useState(false);
+  /**
+   * False on the server and through hydration, so the markup carries the CSS
+   * fail-open class until the client bundle has demonstrably run. A bundle that
+   * never parses never flips this, and the animation finishes the job.
+   */
+  const hydrated = useHydrated();
   const reducedMotion = usePrefersReducedMotion();
-  // Reduced motion skips the reveal animation entirely
-  const visible = reducedMotion || intersected;
+  /**
+   * Reduced motion skips the reveal animation entirely.
+   *
+   * The last clause covers a hydration so late that the fallback is already
+   * painting the element in: taking JS control at that point would snap it back
+   * to opacity 0 and transition it a second time, so adopt the revealed state.
+   */
+  const visible = reducedMotion || intersected || (hydrated && hasFailOpenStarted());
 
   useEffect(() => {
     const el = ref.current;
-    if (!el || reducedMotion) return;
+    if (!el || !hydrated || reducedMotion) return;
 
     /**
      * The bottom margin extends the observation box *past* the viewport, so a
@@ -47,7 +80,16 @@ export function ScrollReveal({ children, className = '', delay = 0 }: ScrollReve
 
     observer.observe(el);
     return () => observer.disconnect();
-  }, [reducedMotion]);
+  }, [hydrated, reducedMotion]);
+
+  // Pre-hydration markup: hidden, but on a timer that CSS alone will finish.
+  if (!hydrated) {
+    return (
+      <div ref={ref} className={`scroll-reveal ${className}`}>
+        {children}
+      </div>
+    );
+  }
 
   return (
     <div
