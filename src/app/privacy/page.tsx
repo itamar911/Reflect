@@ -33,7 +33,7 @@ export const metadata: Metadata = {
   alternates: { canonical: '/privacy' },
 };
 
-const LAST_UPDATED = '14 בספטמבר 2026';
+const LAST_UPDATED = '7 באוקטובר 2026';
 const SUPPORT_EMAIL = 'support@reflecttrading.app';
 
 export default function PrivacyPage() {
@@ -267,6 +267,14 @@ export default function PrivacyPage() {
                 <tr>
                   <td>פלטפורמות מסחר מחוברות</td>
                   <td>סנכרון עסקאות</td>
+                </tr>
+                <tr>
+                  <td>TradingView</td>
+                  <td>
+                    הצגת גרף מחירים בטופס העסקה — נטען רק לאחר לחיצה על
+                    &quot;הצג גרף&quot;. מקבל את כתובת ה-IP, פרטי הדפדפן, הסימבול
+                    ורמות המחיר שהוזנו, ועשוי להציב עוגיות משלו.
+                  </td>
                 </tr>
               </tbody>
             </table>
