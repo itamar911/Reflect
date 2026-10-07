@@ -19,9 +19,6 @@ const TIMEFRAME_MAP: Record<string, string> = {
 interface Props {
   symbol: string;
   timeframe: string;
-  entryPrice: number | null;
-  stopLoss: number | null;
-  takeProfit: number | null;
 }
 
 const TV_SCRIPT_SRC = 'https://s3.tradingview.com/tv.js';
@@ -78,68 +75,35 @@ function normalizeSymbol(raw: string): string {
 
 let _counter = 0;
 
-interface Levels {
-  entryPrice: number | null;
-  stopLoss: number | null;
-  takeProfit: number | null;
-}
-
-// Entry/SL/TP horizontal lines. Colors restate the app's own primary/danger/
-// success tokens (globals.css) — the widget lives in a cross-origin iframe and
-// can't read our CSS custom properties, so the hex values have to live here too.
-const LEVEL_LINES: { key: keyof Levels; color: string; text: string }[] = [
-  { key: 'entryPrice', color: '#00d2d2', text: 'Entry' },
-  { key: 'stopLoss', color: '#ef4444', text: 'SL' },
-  { key: 'takeProfit', color: '#22c55e', text: 'TP' },
-];
-
-function drawLevels(widget: TvWidget, levels: Levels) {
-  widget.onChartReady(() => {
-    const chart = widget.chart();
-    const now = Math.floor(Date.now() / 1000);
-    for (const { key, color, text } of LEVEL_LINES) {
-      const price = levels[key];
-      if (price == null) continue;
-      try {
-        chart.createShape({ time: now, price }, {
-          shape: 'horizontal_line',
-          lock: true,
-          disableSelection: true,
-          disableSave: true,
-          disableUndo: true,
-          text,
-          overrides: {
-            linecolor: color,
-            linewidth: 1,
-            linestyle: 2,
-            showLabel: true,
-            textcolor: color,
-            fontsize: 10,
-            horzLabelsAlign: 'left',
-          },
-        });
-      } catch { /* ignore */ }
-    }
-  });
-}
+// Entry/SL/TP were drawn here as horizontal lines via
+// widget.onChartReady() → chart().createShape(). That API belongs to
+// TradingView's licensed Charting Library, not to the free tv.js embed widget
+// this file loads — both products expose the same `TradingView.widget`
+// constructor, so the code typechecked and built, then threw
+// "onChartReady is not a function" on every single load. The lines were never
+// drawn once. Removed rather than fixed: the embed renders inside a
+// cross-origin iframe, so there is no way to draw on it from here at all.
+// (This was already diagnosed and removed once in 5118a76, then reintroduced
+// in aef5f36 — don't add it back without the paid Charting Library.)
 
 /**
  * Mounts a TradingView Advanced Chart widget into `containerRef` while `active`
  * is true, autosized to fill it, and tears it down on cleanup or when any input
  * changes. Used twice (inline card + fullscreen view) so both stay in sync.
+ *
+ * Only the symbol and the timeframe reach the widget, so only those two can
+ * force a rebuild — editing a price no longer tears down and re-creates the
+ * iframe (REF-94).
  */
 function useTvWidget(opts: {
   containerRef: RefObject<HTMLDivElement | null>;
   active: boolean;
   symbol: string;
   timeframe: string;
-  entryPrice: number | null;
-  stopLoss: number | null;
-  takeProfit: number | null;
   initDelay: number;
   touchAction: string;
 }) {
-  const { containerRef, active, symbol, timeframe, entryPrice, stopLoss, takeProfit, initDelay, touchAction } = opts;
+  const { containerRef, active, symbol, timeframe, initDelay, touchAction } = opts;
   const widgetRef = useRef<TvWidget | null>(null);
   const idRef = useRef<string | null>(null);
 
@@ -194,7 +158,6 @@ function useTvWidget(opts: {
       // drags to the sheet) can silently fail there and trap page scroll.
       const iframe = containerRef.current.querySelector('iframe');
       if (iframe) iframe.style.touchAction = touchAction;
-      drawLevels(widget, { entryPrice, stopLoss, takeProfit });
     }
 
     // Lets any container CSS transition (bottom-sheet slide-up, fullscreen
@@ -211,10 +174,10 @@ function useTvWidget(opts: {
       try { widgetRef.current?.remove(); } catch { /* ignore */ }
       widgetRef.current = null;
     };
-  }, [active, symbol, timeframe, entryPrice, stopLoss, takeProfit, containerRef, initDelay, touchAction]);
+  }, [active, symbol, timeframe, containerRef, initDelay, touchAction]);
 }
 
-export default function TradingViewChart({ symbol, timeframe, entryPrice, stopLoss, takeProfit }: Props) {
+export default function TradingViewChart({ symbol, timeframe }: Props) {
   const tvContainerRef = useRef<HTMLDivElement>(null);
   const fsContainerRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
@@ -222,7 +185,7 @@ export default function TradingViewChart({ symbol, timeframe, entryPrice, stopLo
   useTvWidget({
     containerRef: tvContainerRef,
     active: true,
-    symbol, timeframe, entryPrice, stopLoss, takeProfit,
+    symbol, timeframe,
     initDelay: 100,
     touchAction: 'pan-y',
   });
@@ -230,7 +193,7 @@ export default function TradingViewChart({ symbol, timeframe, entryPrice, stopLo
   useTvWidget({
     containerRef: fsContainerRef,
     active: expanded,
-    symbol, timeframe, entryPrice, stopLoss, takeProfit,
+    symbol, timeframe,
     initDelay: 0,
     // No page scroll to compete with here (body is locked while expanded),
     // so the fullscreen chart gets full native pan/zoom.

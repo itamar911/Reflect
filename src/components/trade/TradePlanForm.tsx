@@ -182,9 +182,6 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
   const [fetchedStrategyTradeCount, setFetchedStrategyTradeCount] = useState(0);
   const [chartSymbol, setChartSymbol] = useState('');
   const [chartTimeframe, setChartTimeframe] = useState('');
-  const [chartEntry, setChartEntry] = useState<number | null>(null);
-  const [chartSL, setChartSL] = useState<number | null>(null);
-  const [chartTP, setChartTP] = useState<number | null>(null);
 
   // Stable client identity so it can appear in hook deps without refiring
   // them every render (in demo mode createClient returns a fresh Proxy).
@@ -311,16 +308,17 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     if (isOpen) loadContext();
   }, [isOpen, loadContext]);
 
+  // Debounced so the chart doesn't chase every keystroke. Symbol and timeframe
+  // only: the price fields used to feed this too, but nothing downstream reads
+  // them any more now that the level lines are gone, so editing a price leaves
+  // the widget alone.
   useEffect(() => {
     const t = setTimeout(() => {
       setChartSymbol(form.symbol.trim());
       setChartTimeframe(form.timeframe);
-      setChartEntry(hasEntry ? entryNum : null);
-      setChartSL(slPrice);
-      setChartTP(tpPrice);
     }, 800);
     return () => clearTimeout(t);
-  }, [form.symbol, form.timeframe, hasEntry, entryNum, slPrice, tpPrice]);
+  }, [form.symbol, form.timeframe]);
 
   const rr = hasEntry && slPrice !== null && tpPrice !== null
     ? calcRR(entryNum, slPrice, tpPrice)
@@ -1115,9 +1113,6 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                     <TradingViewChart
                       symbol={chartSymbol}
                       timeframe={chartTimeframe}
-                      entryPrice={chartEntry}
-                      stopLoss={chartSL}
-                      takeProfit={chartTP}
                     />
                   ) : (
                     // Same frame as the chart it stands in for — aspect ratio,
@@ -1149,7 +1144,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                         </p>
                       )}
                       <p className="text-[10px] text-center max-w-[34ch] leading-snug" style={{ color: 'var(--color-tg-muted)' }}>
-                        הגרף מסופק על ידי TradingView. בלחיצה, הסימבול ורמות המחיר שהזנת מועברים אליהם.
+                        הגרף מסופק על ידי TradingView. בלחיצה, הסימבול שהזנת מועבר אליהם.
                       </p>
                     </div>
                   )}
