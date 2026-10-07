@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useId, useMemo, useRef, useSyncExternalStore } from 'react';
-import { Check, AlertTriangle, X } from 'lucide-react';
+import { Check, AlertTriangle, X, LineChart, EyeOff } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { validateTradePlan, DEFAULT_PRESET_RULES } from '@/lib/validators/RulesetValidator';
 import { useModalDialog } from '@/lib/a11y/useModalDialog';
@@ -31,6 +31,12 @@ const getSavedCurrency = (): PnlCurrency | null => {
   const saved = localStorage.getItem('trade-plan-pnl-currency');
   return saved === '₪' || saved === '$' ? saved : null;
 };
+
+// The app's focus convention (see TradovateConnectionCard / AccessibilityWidget):
+// a turquoise ring on keyboard focus only. A ring, not an outline, because the
+// shared Button sets `focus:outline-none` in its base classes and a
+// `focus-visible:outline-*` would be arguing with it.
+const CHART_TOGGLE_FOCUS_RING = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tg-primary';
 
 // Downgrades a "blocked" verdict to a warning when hard blocking is off.
 // Nothing turns it off today — every plan has realTimeBlocking — but the policy
@@ -129,13 +135,31 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
   const limits = getPlanLimits(plan);
   const titleId = useId();
   const symbolRef = useRef<HTMLInputElement>(null);
+
+  // The chart is opt-in (REF-70): until the trader asks for it, TradingViewChart
+  // isn't rendered at all, so neither its dynamic() chunk nor
+  // s3.tradingview.com/tv.js is fetched and no symbol leaves the page.
+  const [chartVisible, setChartVisible] = useState(false);
+  const chartRegionId = useId();
+
+  // Closing the sheet puts the chart back behind the button, so the next open
+  // starts opted out again. It needs its own reset: the sheet keeps the rest of
+  // its state across a plain close (only a successful submit clears the form),
+  // and it stays mounted while closed — `if (!isOpen) return null` below renders
+  // nothing but unmounts nothing. Every close path goes through the `onClose`
+  // prop, so wrapping it here covers Escape, the backdrop and the X button.
+  const handleClose = useCallback(() => {
+    setChartVisible(false);
+    onClose();
+  }, [onClose]);
+
   // Task-shaped dialog: focus the symbol field, the first thing you fill in,
   // rather than the close button. The sheet has no trigger element to hand
   // back to — it opens from the sidebar CTA, from EmptyStateButton, or from a
   // bare `open-trade-form` event — so useModalDialog captures whatever had
   // focus at open time and restores that.
   const { dialogProps } = useModalDialog({
-    open: isOpen, onClose, labelledBy: titleId, initialFocusRef: symbolRef,
+    open: isOpen, onClose: handleClose, labelledBy: titleId, initialFocusRef: symbolRef,
   });
   const [form, setForm] = useState<TradePlanInput>(EMPTY_FORM);
   const [formState, setFormState] = useState<FormState>('empty');
@@ -602,7 +626,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
         setStrategyConditionsChecked({});
         setFormState('empty');
         onSuccess();
-        onClose();
+        handleClose();
       }, 1800);
     }
     setSubmitLoading(false);
@@ -635,7 +659,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
       {/* Backdrop */}
       <div
         className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
-        onClick={onClose}
+        onClick={handleClose}
       />
 
       {/* Bottom Sheet */}
@@ -651,7 +675,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-tg-border">
           <h2 id={titleId} className="text-base font-semibold text-tg-text">תוכנית עסקה</h2>
-          <button onClick={onClose} aria-label="סגור" className="text-tg-muted hover:text-tg-text transition-colors p-1">
+          <button onClick={handleClose} aria-label="סגור" className="text-tg-muted hover:text-tg-text transition-colors p-1">
             <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
             </svg>
@@ -1086,13 +1110,70 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
 
               {/* Chart (mobile: second/below; desktop: left) */}
               <div className="order-2 md:order-1 md:flex-1">
-                <TradingViewChart
-                  symbol={chartSymbol}
-                  timeframe={chartTimeframe}
-                  entryPrice={chartEntry}
-                  stopLoss={chartSL}
-                  takeProfit={chartTP}
-                />
+                <div id={chartRegionId}>
+                  {chartVisible ? (
+                    <TradingViewChart
+                      symbol={chartSymbol}
+                      timeframe={chartTimeframe}
+                      entryPrice={chartEntry}
+                      stopLoss={chartSL}
+                      takeProfit={chartTP}
+                    />
+                  ) : (
+                    // Same frame as the chart it stands in for — aspect ratio,
+                    // radius, border and surface are restated from
+                    // TradingViewChart's own outer box (which is why the two have
+                    // to stay in sync) so that revealing the chart drops it into
+                    // an already-reserved space instead of reflowing the column.
+                    <div
+                      className="flex flex-col items-center justify-center gap-2 w-full px-4 rounded-2xl aspect-[4/3] md:aspect-[16/9]"
+                      style={{ border: '1px solid var(--color-tg-border)', background: 'var(--color-tg-surface-2)' }}
+                    >
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setChartVisible(true)}
+                        disabled={!chartSymbol}
+                        aria-expanded={false}
+                        aria-controls={chartRegionId}
+                        aria-describedby={chartSymbol ? undefined : `${chartRegionId}-hint`}
+                        className={CHART_TOGGLE_FOCUS_RING}
+                      >
+                        <LineChart size={14} aria-hidden />
+                        הצג גרף
+                      </Button>
+                      {!chartSymbol && (
+                        <p id={`${chartRegionId}-hint`} className="text-[10px] text-center" style={{ color: 'var(--color-tg-muted)' }}>
+                          הזן סימבול כדי להציג גרף
+                        </p>
+                      )}
+                      <p className="text-[10px] text-center max-w-[34ch] leading-snug" style={{ color: 'var(--color-tg-muted)' }}>
+                        הגרף מסופק על ידי TradingView. בלחיצה, הסימבול ורמות המחיר שהזנת מועברים אליהם.
+                      </p>
+                    </div>
+                  )}
+                </div>
+                {/* Outside the region it controls, under the chart's own
+                    indicative-data disclaimer. tv.js stays loaded and cached for
+                    the rest of the page's life — hiding only takes the widget
+                    off screen, it doesn't undo the opt-in. */}
+                {chartVisible && (
+                  <div className="flex justify-center mt-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setChartVisible(false)}
+                      aria-expanded
+                      aria-controls={chartRegionId}
+                      className={CHART_TOGGLE_FOCUS_RING}
+                    >
+                      <EyeOff size={14} aria-hidden />
+                      הסתר גרף
+                    </Button>
+                  </div>
+                )}
               </div>
 
             </div>
