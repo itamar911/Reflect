@@ -40,13 +40,6 @@ import {
   type TradovateResultCode,
 } from '@/lib/tradovate/oauth-results';
 import { STATE_COOKIE_NAME, stateCookieOptions, verifyState } from '@/lib/tradovate/oauth-state';
-// REF-92 MEASUREMENT — remove with lib/tradovate/ref92-measurement.ts.
-import {
-  describeJsonShape,
-  formatApiHosts,
-  formatShape,
-  logRef92,
-} from '@/lib/tradovate/ref92-measurement';
 import { redactSecrets } from '@/lib/tradovate/redact';
 
 export const runtime = 'nodejs';
@@ -130,57 +123,18 @@ export async function GET(request: NextRequest) {
       expiresAt: token.expiresAt,
       tradovateUserId: me.userId,
       environment: config.config.environment,
-      // The exchange is the only place these two are stated. api_hosts is not set
-      // here on purpose: the token exchange returns no apiHosts, so it is written
-      // by the first renewal and carried forward from there.
+      // The exchange is the only place these two are stated.
       refreshExpiresAt: token.refreshExpiresAt,
       tokenType: token.tokenType,
+      // This user's API hosts, which the exchange returns — measured in
+      // production on 8 Oct 2026, against both documents' disagreement about
+      // whether it does. Stored here so the connection knows its hosts from
+      // the moment it is made; renewal re-reads and replaces them, as the
+      // dynamic-hosts page instructs. Undefined when the response carried
+      // none, which stores NULL and leaves lib/tradovate/api-hosts.ts to
+      // fall back to the documented shared hosts.
+      apiHosts: token.apiHosts,
     });
-
-    // ======================================================================
-    // REF-92 MEASUREMENT — DELETE THIS BLOCK WHEN THE ANSWER IS RECORDED
-    //
-    // One connect, to learn whether POST /auth/oauthtoken carries apiHosts
-    // and, if it does, what its values look like. The header of
-    // lib/tradovate/ref92-measurement.ts says why the question is still open
-    // after Phase 2, what may be logged, and how to remove all of this.
-    // Only reachable by an allowlisted user — the gate above returned for
-    // everyone else before a code was ever spent.
-    //
-    // Field NAMES and JSON types from both bodies. VALUES from one object
-    // only, apiHosts on the exchange, and from nothing else ever: no token,
-    // no authorization code, no header, and nothing whatsoever from
-    // /auth/me beyond its key names, because that body carries the user's
-    // email address. If the /auth/me line ever shows an apiHosts field, that
-    // is a finding for the next pass to read properly — it is deliberately
-    // not printed here. Every line goes out through redactSecrets().
-    //
-    // After saveConnection on purpose, so a measurement cannot cost a
-    // connection: the token is stored and the user is connected before any
-    // of it runs.
-    // ======================================================================
-    try {
-      logRef92('exchange environment', config.config.environment);
-      logRef92('exchange response fields', formatShape(token.measurement?.shape ?? {}));
-
-      const exchangeHosts = token.measurement?.apiHosts;
-      logRef92('exchange apiHosts present', String(Boolean(exchangeHosts)));
-      if (exchangeHosts) logRef92('exchange apiHosts', formatApiHosts(exchangeHosts));
-
-      logRef92('auth/me response fields', formatShape(describeJsonShape(me)));
-    } catch (measurementError) {
-      // A measurement must never fail a connection that already succeeded.
-      // Message only, redacted, never the error object: a thrown error's
-      // `cause` can carry the request it was made with.
-      logRef92(
-        'measurement threw',
-        redactSecrets(
-          measurementError instanceof Error ? measurementError.message : 'unknown error',
-          [code]
-        )
-      );
-    }
-    // ===================== END REF-92 MEASUREMENT =========================
 
     return finish(TradovateResult.Connected);
   } catch (error) {

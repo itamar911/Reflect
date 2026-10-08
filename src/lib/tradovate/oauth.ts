@@ -15,14 +15,14 @@
  * Nothing in this module logs.
  */
 
+import { readApiHosts } from './api-hosts';
 import { tradovateGet } from './client';
 import { TradovateOAuthError, TradovatePenaltyError, TradovateRequestError } from './errors';
-// REF-92 MEASUREMENT — remove with ./ref92-measurement.ts.
-import { describeJsonShape, pickApiHosts, type JsonShape } from './ref92-measurement';
 import { redactSecrets } from './redact';
 import {
   isPenaltyResponse,
   type OAuthTokenResponse,
+  type TradovateApiHosts,
   type TradovateMeResponse,
 } from './types';
 import type { TradovateOAuthConfig } from './oauth-config';
@@ -83,16 +83,15 @@ export interface ExchangedToken {
   /** `token_type`, as returned. Expected "Bearer"; kept so a change is visible. */
   tokenType?: string;
   /**
-   * REF-92 MEASUREMENT — remove with ./ref92-measurement.ts.
+   * This user's API hosts, as the exchange returned them.
    *
-   * What the raw body looked like, taken from `parsed` before the cast to
-   * OAuthTokenResponse below — which is the whole point, because that cast is
-   * precisely why the shipped code cannot answer the question. `shape` is
-   * field names and JSON types, never a value; `apiHosts` is the one object
-   * whose values may be logged, lifted out by pickApiHosts() so that nothing
-   * downstream is ever handed the body itself.
+   * The reason there is no "renew once at connect just to learn the hosts"
+   * step: they arrive with the token. Absent when the response carried none,
+   * which the dynamic-hosts page says happens on an error response and on a
+   * multi-factor step — ./api-hosts.ts falls back to the documented shared
+   * hosts for those, and for every row written before this field existed.
    */
-  measurement?: { shape: JsonShape; apiHosts?: Record<string, unknown> };
+  apiHosts?: TradovateApiHosts;
 }
 
 /**
@@ -206,8 +205,10 @@ export async function exchangeCodeForToken(
     expiresIn: body.expires_in,
     refreshExpiresAt,
     tokenType: body.token_type,
-    // REF-92 MEASUREMENT — remove this line with ./ref92-measurement.ts.
-    measurement: { shape: describeJsonShape(parsed), apiHosts: pickApiHosts(parsed) },
+    // From `parsed`, not `body`: readApiHosts() checks that the field really
+    // is an object instead of trusting the cast above, and the cast is the
+    // reason this field went unnoticed until it was measured.
+    apiHosts: readApiHosts(parsed),
   };
 }
 

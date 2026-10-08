@@ -108,20 +108,35 @@ export const TOKEN_URLS_ALTERNATIVE: Record<TradovateEnvironment, string> =
  *   "Treat all hosts as authoritative, including live, mdLive, and replay.
  *    Those are currently the same for every organization…"
  *
- * and a pure-OAuth client has no way to learn apiHosts at connect time — the
- * token exchange returns no such field, confirmed on a production round trip
- * (Q4). GET /auth/renewaccesstoken DOES return one, so the hosts become known
- * at the first renewal rather than at connect; ./connections.ts stores them in
- * tradovate_connections.api_hosts from there. Nothing reads that column yet.
+ * Not resolved from apiHosts even though a connection now has them. The
+ * endpoint is called once, mid-exchange, to learn which Tradovate user the
+ * new token belongs to, and `live` is the host documented as uniform across
+ * organizations — so routing it dynamically would add a failure mode to the
+ * connect path to buy nothing. Revisit if `live` ever stops being uniform;
+ * ./api-hosts.ts already has what it would need.
  */
 export const LIVE_API_URL = 'https://live.tradovateapi.com/v1';
 
 /**
- * Trading REST bases, for reference and for the check script's report.
+ * Trading REST bases for the shared NinjaTrader environment.
  *
  *   live.tradovateapi.com   Live trading
  *   demo.tradovateapi.com   Demo (simulation) environment
  *   — https://docs.ninjatrader.com/api/authentication, "Servers"
+ *
+ * THE FALLBACK, NOT THE MECHANISM. A connection's real trading host comes
+ * from its own apiHosts via resolveTradingApiUrl() in ./api-hosts.ts; these
+ * two values are what that function answers with when a row has none, which
+ * the dynamic-hosts page requires us to keep:
+ *
+ *   "apiHosts is optional, and it's omitted when the response carries an
+ *    error and when the response asks for a multi-factor authentication
+ *    step. Keep your existing host resolution as a fallback for those
+ *    cases"
+ *
+ * For a user on dedicated infrastructure the demo value here is wrong, and
+ * only the stored host is right. Do not reach for this map to build a
+ * request URL.
  */
 export const TRADING_API_URLS: Record<TradovateEnvironment, string> = {
   live: 'https://live.tradovateapi.com/v1',
@@ -136,10 +151,20 @@ export const TRADING_API_URLS: Record<TradovateEnvironment, string> = {
  * environment wrong means minting a token against one server and storing it
  * as if it belonged to the other.
  *
- * Returns null for anything unrecognised — notably the dedicated-infrastructure
- * hosts the dynamic-hosts page describes, which a pure-OAuth client cannot
- * discover at connect time. The caller reports that as a configuration problem
- * naming TRADOVATE_API_URL rather than assuming a default.
+ * Classifies OUR configured TRADOVATE_API_URL, never a user's host. It is not
+ * how a connection learns its environment: loadOAuthConfig() derives the
+ * deployment's environment from this, the callback records that on the row,
+ * and everything afterwards reads the row. Nothing infers an environment
+ * from a hostname after a connection exists.
+ *
+ * Returns null for anything unrecognised, including the
+ * dedicated-infrastructure hosts the dynamic-hosts page describes. The caller
+ * reports that as a configuration problem naming TRADOVATE_API_URL rather
+ * than assuming a default — which also means a deployment cannot be pointed
+ * at a dedicated host. That is the right constraint for now: the variable
+ * says which environment we connect users to, and per-user hosts come from
+ * ./api-hosts.ts. An explicit TRADOVATE_ENVIRONMENT would say it more
+ * directly than a hostname does.
  */
 export function detectEnvironment(apiUrl: string): TradovateEnvironment | null {
   let host: string;

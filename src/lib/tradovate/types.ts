@@ -37,10 +37,17 @@ export interface AccessTokenRequestBody {
 /**
  * The `apiHosts` map: which hosts to use for this user's subsequent calls.
  *
- * Bare hostnames, no scheme — the caller prefixes https:// or wss://. Left as
- * an open record on purpose: the dynamic-API-hosts page says to ignore
+ * Bare hostnames, no scheme — the caller prefixes https:// or wss://. Read it
+ * through ./api-hosts.ts, which owns the validation and the fallback; this
+ * type is only the shape it arrives in.
+ *
+ * Left as an open record on purpose: the dynamic-API-hosts page says to ignore
  * unrecognised fields and that more hosts may be added, so narrowing this to
  * the keys seen once would make a future addition a type error instead of data.
+ * That is not hypothetical — the production response measured on 8 Oct 2026
+ * carried riskMonitorLive, riskMonitorDemo and userContext, none of which
+ * appear in that page's field table, alongside the seven it does list:
+ * live, demo, mdLive, mdDemo, replay, reportingLive, reportingDemo.
  *   https://docs.ninjatrader.com/api/dynamic-api-hosts
  */
 export type TradovateApiHosts = Record<string, unknown>;
@@ -79,9 +86,11 @@ export interface AccessTokenResponse {
   /** Present when authentication failed; the HTTP status is still 200. */
   errorText?: string;
   /**
-   * Dynamic API hosts for this user, returned by authentication and renewal.
-   * Answers Q4: a pure-OAuth client learns them from the renewal response,
-   * since the token exchange returns none.
+   * Dynamic API hosts for this user. Returned by renewal, which is where
+   * ./connections.ts had been picking them up since 1 Oct. Not the only
+   * source: the OAuth token exchange returns them too, measured 8 Oct 2026,
+   * so a connection knows its hosts from the moment it is made. See
+   * OAuthTokenResponse below and ./api-hosts.ts.
    */
   apiHosts?: TradovateApiHosts;
   hibpHint?: 'EmailAndPasswordCompromised' | 'PasswordCompromised';
@@ -147,6 +156,30 @@ export interface OAuthTokenResponse {
   refresh_token?: string;
   /** Seconds until the refresh token expires. */
   refresh_token_expires_in?: number;
+  /**
+   * Dynamic API hosts for this user.
+   *
+   * MEASURED IN PRODUCTION, 8 Oct 2026: the exchange returns a complete
+   * apiHosts object. api.tradovate.com documents the field here and is
+   * right; https://docs.ninjatrader.com/api/dynamic-api-hosts omits
+   * /auth/oauthtoken from its list of carriers and is wrong, at least for a
+   * pure-OAuth client. Read it with readApiHosts() from ./api-hosts.ts
+   * rather than off this field: the body is typed by a plain cast, so this
+   * declaration is a claim about the server and not a guarantee about the
+   * value in hand.
+   */
+  apiHosts?: TradovateApiHosts;
+  /**
+   * An OpenID Connect ID token.
+   *
+   * Neither documentation set mentions that the exchange issues one; it
+   * does. We have no use for it — a connection's identity comes from GET
+   * /auth/me — so it is typed for the same reason mdAccessToken is, because
+   * the endpoint returns it and a field nobody has written down is a field
+   * someone later mistakes for a discovery. Never stored, never read, never
+   * logged; ./redact.ts lists it among the secret-bearing keys.
+   */
+  id_token?: string;
   /** OAuth 2.0 error code, e.g. 'access_denied', 'invalid_grant'. */
   error?: string;
   error_description?: string;

@@ -66,13 +66,11 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { createAdminClient } from '@/lib/supabase/admin';
 
+import { readApiHosts, resolveTradingApiUrl } from './api-hosts';
 import { renewAccessToken } from './auth';
 import { TradovateNotConnectedError, TradovateOAuthError } from './errors';
 import type { TradovateEnvironment } from './hosts';
-// REF-92 MEASUREMENT — remove with ./ref92-measurement.ts.
-import { formatApiHosts, logRef92, pickApiHosts } from './ref92-measurement';
 import { decryptToken, encryptToken } from './token-crypto';
-import type { TradovateOAuthConfig } from './oauth-config';
 import type { TradovateApiHosts, UserTokenSnapshot } from './types';
 
 /**
@@ -194,12 +192,17 @@ export async function saveConnection(params: {
   /** `token_type` from the exchange. CLEARED IF OMITTED. */
   tokenType?: string;
   /**
-   * `apiHosts`, from the most recent renewal.
+   * `apiHosts` — this user's own API hosts, from the most recent
+   * authentication or renewal.
    *
-   * The token exchange returns none, so renewal is the only source and this is
-   * written from there. Not a secret, but migration 030 deliberately withholds it
-   * from the client column grant, so nothing may hand it to the browser.
-   * CLEARED IF OMITTED.
+   * Both paths supply it: the exchange returns it (measured 8 Oct 2026) and
+   * so does renewal, which is what the dynamic-hosts page means by resolving
+   * the hosts again on every authentication and replacing what was stored.
+   * Not a secret, but migration 030 deliberately withholds it from the
+   * client column grant, so nothing may hand it to the browser.
+   * CLEARED IF OMITTED — a caller that forgets it erases what we know, and
+   * the renewal path below carries the stored value forward for exactly
+   * that reason.
    */
   apiHosts?: TradovateApiHosts;
   /**
@@ -364,7 +367,6 @@ async function markStatus(
  */
 export async function getUserAccessToken(
   userId: string,
-  config: Pick<TradovateOAuthConfig, 'apiUrl'>,
   options: { admin?: SupabaseClient } = {}
 ): Promise<UserTokenSnapshot> {
   const cached = cache.get(userId);
@@ -376,14 +378,13 @@ export async function getUserAccessToken(
   if (existing) return existing;
 
   const admin = options.admin ?? createAdminClient();
-  const work = loadOrRenew(userId, config, admin).finally(() => inFlight.delete(userId));
+  const work = loadOrRenew(userId, admin).finally(() => inFlight.delete(userId));
   inFlight.set(userId, work);
   return work;
 }
 
 async function loadOrRenew(
   userId: string,
-  config: Pick<TradovateOAuthConfig, 'apiUrl'>,
   admin: SupabaseClient
 ): Promise<UserTokenSnapshot> {
   const { data, error } = await admin
@@ -425,9 +426,32 @@ async function loadOrRenew(
     throw new TradovateNotConnectedError(userId, 'expired');
   }
 
+  // The host this user's own connection resolves to, not the deployment's
+  // TRADOVATE_API_URL. Hosts are a property of the user — a dedicated-
+  // infrastructure organization reaches the API somewhere else entirely —
+  // and sending the renewal to the shared host would 307 for exactly the
+  // users the stored column exists to serve, which the catch below would
+  // then record as a dead connection. Falls back to the documented shared
+  // host when the row has no apiHosts, which every row written before the
+  // exchange started supplying them does.
+  const resolved = resolveTradingApiUrl({
+    environment: data.environment,
+    apiHosts: data.api_hosts,
+  });
+  if (resolved.rejected) {
+    // A hostname, not a secret. Worth a line because it means the stored
+    // value is not the bare hostname the contract promises, and the
+    // fallback is now quietly standing in for a host we were given.
+    console.warn(
+      '[tradovate] stored api_hosts.' +
+        `${data.environment} is not a usable bare hostname (${resolved.rejected}); ` +
+        `using ${resolved.url} instead`
+    );
+  }
+
   let renewed;
   try {
-    renewed = await renewAccessToken({ apiUrl: config.apiUrl }, accessToken);
+    renewed = await renewAccessToken({ apiUrl: resolved.url }, accessToken);
   } catch {
     // The cause is deliberately not chained: a renewal failure can carry the
     // response body, and that body can carry a token. There is no
@@ -479,53 +503,16 @@ async function loadOrRenew(
     refreshExpiresAt: Number.isFinite(storedRefreshExpiry) ? storedRefreshExpiry : undefined,
     // Also carried from the row: the renewal response has no token_type.
     tokenType: data.token_type ?? undefined,
-    // This one DOES come back on renewal, and renewal is the only place it ever
-    // comes back — the token exchange returns no apiHosts at all. Falls back to
-    // the stored value so a response that omits it does not erase what we know.
-    apiHosts: renewed.apiHosts ?? data.api_hosts ?? undefined,
+    // Re-read and replaced on every renewal, as the dynamic-hosts page
+    // instructs: "A user's organization can move to dedicated infrastructure
+    // between sessions, which changes the hosts they get back." Through
+    // readApiHosts() rather than off renewed.apiHosts, because the renewal
+    // body is typed by a cast. Falls back to the stored value so a response
+    // that omits it — an error or a multi-factor step, per the same page —
+    // does not erase what we already know.
+    apiHosts: readApiHosts(renewed) ?? data.api_hosts ?? undefined,
     admin,
   });
-
-  // ========================================================================
-  // REF-92 MEASUREMENT — DELETE THIS BLOCK WHEN THE ANSWER IS RECORDED
-  //
-  // The renewal half of the question the callback's fence asks of the
-  // exchange; ./ref92-measurement.ts has the whole story and the removal
-  // recipe. NO EXTRA REQUEST: this reads the response loadOrRenew has
-  // already received, at the one point where the object is in hand.
-  //
-  // Here because the exchange may well carry no apiHosts at all — that is
-  // what 1 Oct observed. Without this line a negative result there would
-  // tell us nothing about the shape of a host value, and learning it would
-  // cost another deploy. Measuring one half of a question is the mistake
-  // Phase 2 made.
-  //
-  // Values, because the hostnames are the question: whether one carries a
-  // scheme, a port or a path decides how the URL builder is written. This
-  // and the exchange's apiHosts are the only objects whose values are ever
-  // logged. pickApiHosts() reads the field off the raw body and admits only
-  // an object, so a renewal that answered something else cannot reach
-  // formatApiHosts() — and the body itself, which carries accessToken and
-  // mdAccessToken, never does.
-  //
-  // Unlike the callback's fence this one is not on the connect path: it
-  // fires when a renewal actually happens, so at most once per token
-  // lifetime per connected user. After saveConnection, and wrapped, for the
-  // same reason as there — a measurement must not cost a connection.
-  // ========================================================================
-  try {
-    const renewalHosts = pickApiHosts(renewed);
-    logRef92('renewal apiHosts present', String(Boolean(renewalHosts)));
-    if (renewalHosts) logRef92('renewal apiHosts', formatApiHosts(renewalHosts));
-  } catch (measurementError) {
-    // Message only, never the error object: a thrown error's `cause` can
-    // carry the request it was made with, and that request bore a token.
-    logRef92(
-      'renewal measurement threw',
-      measurementError instanceof Error ? measurementError.message : 'unknown error'
-    );
-  }
-  // ======================= END REF-92 MEASUREMENT ==========================
 
   return { accessToken: renewed.accessToken, expiresAt, tradovateUserId };
 }

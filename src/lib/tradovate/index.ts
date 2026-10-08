@@ -79,6 +79,9 @@ export {
   TRADOVATE_ALLOWLIST_ENV_VAR,
 } from './allowlist';
 
+export { readApiHosts, readHostname, resolveTradingApiUrl } from './api-hosts';
+export type { ResolvedApiUrl } from './api-hosts';
+
 export {
   AUTHORIZE_URLS,
   LIVE_API_URL,
