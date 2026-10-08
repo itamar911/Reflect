@@ -163,6 +163,10 @@ export default function CloseTrade({
       moved_sl: movedSl,
       exited_early: exitedEarly,
       fomo_entry: fomoEntry,
+      // NOT IN THIS PASS: revenge_trade is captured here and read by the stats
+      // and dashboard panels, but no rule condition consumes it. The other three
+      // flags each have a *_last_trade condition in ConditionType; this one has
+      // none, so a user cannot write a rule about it.
       revenge_trade: revengeTrade,
       post_trade_notes: notesValue,
     }).eq('id', tradeId);

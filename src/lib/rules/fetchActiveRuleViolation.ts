@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/client';
+import { loadTradeRuleContext } from './tradeRuleContext';
 import {
   checkActiveViolation,
   checkCustomRules,
@@ -27,96 +28,60 @@ export interface RuleViolationResult {
  */
 export async function fetchActiveRuleViolation(userId: string, realTimeBlocking: boolean = true): Promise<RuleViolationResult | null> {
   const supabase = createClient();
-  const todayStart = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
 
-  const [rulesRes, customRulesRes, todayCountRes, todayClosedRes, recentRes] = await Promise.all([
+  // Trade history comes from ./tradeRuleContext.ts, which the trade form
+  // calls too. It used to be worked out here and, differently, there — see
+  // that module's header for what the two definitions disagreed about.
+  const [rulesRes, customRulesRes, history] = await Promise.all([
     supabase.from('preset_rules').select('*').eq('user_id', userId).single(),
     supabase.from('custom_rules').select('*').eq('user_id', userId).eq('is_active', true).order('created_at'),
-    // Trades TAKEN today (for the daily trade-count condition) — by submitted_at.
-    supabase.from('trade_plans').select('id').eq('user_id', userId).gte('submitted_at', todayStart),
-    // Trades CLOSED today (for the daily realized-loss condition) — by closed_at,
-    // using the stored dollar pnl (actual_pnl override, falling back to pnl_amount).
-    supabase
-      .from('trade_plans')
-      .select('pnl_amount, actual_pnl')
-      .eq('user_id', userId)
-      .eq('status', 'closed')
-      .gte('closed_at', todayStart),
-    // Most recent closed trades — used for the loss streak AND the
-    // fomo/exited-early/moved-sl "last trade" conditions (the first row).
-    supabase
-      .from('trade_plans')
-      .select('pnl_amount, actual_pnl, closed_at, fomo_entry, exited_early, moved_sl')
-      .eq('user_id', userId)
-      .eq('status', 'closed')
-      .order('closed_at', { ascending: false })
-      .limit(10),
+    loadTradeRuleContext(userId, supabase),
   ]);
 
   const presetRules: PresetRules =
     (rulesRes.data as PresetRules) ?? { ...DEFAULT_PRESET_RULES, id: '', user_id: userId, created_at: '', updated_at: '' };
   const customRules: CustomRule[] = (customRulesRes.data as CustomRule[]) ?? [];
 
-  const todayTradeCount = todayCountRes.data?.length ?? 0;
-
-  let todayLossAmount = 0;
-  if (todayClosedRes.data) {
-    for (const t of todayClosedRes.data) {
-      const pnl = t.actual_pnl ?? t.pnl_amount;
-      if (typeof pnl === 'number' && pnl < 0) {
-        todayLossAmount += Math.abs(pnl);
-      }
-    }
-  }
-
-  const recent = recentRes.data ?? [];
-  const lastTrade = recent[0];
-
-  let lossStreak = 0;
-  let minutesSinceLastClose: number | null = null;
-  for (const t of recent) {
-    const pnl = t.actual_pnl ?? t.pnl_amount;
-    if (typeof pnl === 'number' && pnl < 0) {
-      if (minutesSinceLastClose === null && t.closed_at) {
-        minutesSinceLastClose = (Date.now() - new Date(t.closed_at).getTime()) / 60000;
-      }
-      lossStreak++;
-    } else {
-      break;
-    }
-  }
-
-  // No portfolio-size field exists on profiles yet, so daily_loss_percent
-  // rules can't be evaluated — they're skipped (never match) rather than erroring.
+  // NOT IN THIS PASS: daily_loss_percent is offered in the rules UI and can
+  // never fire. profiles has no portfolio-size field, so this stays null and
+  // evaluateCustomRuleCondition() skips the condition rather than erroring —
+  // one of the eight creatable conditions is inert.
   const todayLossPercent: number | null = null;
 
   const customViolation = checkCustomRules(customRules, {
-    todayLossAmount,
+    todayLossAmount: history.todayLossAmount,
     todayLossPercent,
-    todayTradeCount,
-    lossStreak,
+    todayTradeCount: history.todayTradeCount,
+    lossStreak: history.lossStreak,
     currentHour: new Date().getHours(),
-    lastTradeFomo: !!lastTrade?.fomo_entry,
-    lastTradeExitedEarly: !!lastTrade?.exited_early,
-    lastTradeMovedSl: !!lastTrade?.moved_sl,
+    lastTradeFomo: history.lastTradeFomo,
+    lastTradeExitedEarly: history.lastTradeExitedEarly,
+    lastTradeMovedSl: history.lastTradeMovedSl,
   });
 
   if (customViolation) {
+    // NOT IN THIS PASS: the 'warn' fallback is unreachable. Every plan tier
+    // resolves to realTimeBlocking: true (lib/plans/config.ts), so the
+    // downgrade never happens here or in applyRealTimeBlockingPolicy().
     const actionType = realTimeBlocking ? customViolation.rule.action_type : 'warn';
     return {
       ruleName: customViolation.rule.name,
       description: customViolation.description,
       actionType,
+      // NOT IN THIS PASS: for a custom rule this number is only printed, never
+      // enforced — nothing compares it against elapsed time, so a custom
+      // block_timer behaves exactly like block_day with a duration on the label.
+      // Only preset_rules.cooldown_after_losses actually uses minutesSinceLastClose.
       cooldownMinutes: actionType === 'warn' ? null : customViolation.rule.cooldown_minutes,
       customRule: customViolation.rule,
     };
   }
 
   const presetViolation = checkActiveViolation(presetRules, {
-    todayTradeCount,
-    recentLossCount: lossStreak,
-    todayLossAmount,
-    minutesSinceLastClose,
+    todayTradeCount: history.todayTradeCount,
+    recentLossCount: history.lossStreak,
+    todayLossAmount: history.todayLossAmount,
+    minutesSinceLastClose: history.minutesSinceLastClose,
   });
 
   if (presetViolation) {

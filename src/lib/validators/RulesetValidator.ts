@@ -205,6 +205,15 @@ export function checkActiveViolation(
 
 // ── Structured custom rules ──────────────────────────────────────────────────
 
+// NOT IN THIS PASS, two gaps between what this map offers and what the engine
+// delivers. RulesEditor builds its dropdown from Object.keys() of this map, so
+// every entry here is creatable by a user:
+//
+//   - daily_loss_percent can never fire. profiles carries no portfolio size,
+//     so lib/rules/fetchActiveRuleViolation.ts passes todayLossPercent: null
+//     and evaluateCustomRuleCondition() skips it.
+//   - revenge_trade has no condition at all, although CloseTrade.tsx records
+//     it alongside the three *_last_trade flags that do.
 export const CONDITION_LABELS: Record<ConditionType, string> = {
   daily_loss_dollar: 'הפסד יומי עבר סכום קבוע ($)',
   daily_loss_percent: 'הפסד יומי עבר אחוז מהתיק (%)',
@@ -216,6 +225,11 @@ export const CONDITION_LABELS: Record<ConditionType, string> = {
   moved_sl_last_trade: 'הזזתי Stop Loss בעסקה האחרונה',
 };
 
+// NOT IN THIS PASS: block_timer is a label with no timer when it comes from a
+// custom rule. Its cooldown_minutes is printed in RuleBlockedModal and never
+// compared against elapsed time, so the block lasts exactly as long as the
+// condition stays true — the same behaviour as block_day. Only the preset
+// cooldown_after_losses check below actually measures minutesSinceLastClose.
 export const ACTION_LABELS: Record<ActionType, string> = {
   block_day: 'חסום כניסה לעסקה חדשה ליום שלם',
   block_timer: 'חסום עם טיימר',

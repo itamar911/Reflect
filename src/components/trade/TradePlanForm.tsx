@@ -18,6 +18,7 @@ import type { PersonalStrategy } from '@/components/strategies/StrategiesClient'
 import { getPlanLimits, type PlanTier } from '@/lib/plans/config';
 import { fetchActiveRuleViolation } from '@/lib/rules/fetchActiveRuleViolation';
 import { logRuleViolations, overrideRuleViolations, type RuleViolationLogInput } from '@/lib/rules/logRuleViolation';
+import { loadTradeRuleContext } from '@/lib/rules/tradeRuleContext';
 
 // Saved TP/SL input unit preference, read during render via
 // useSyncExternalStore (null on the server / until a valid value is saved).
@@ -41,6 +42,10 @@ const CHART_TOGGLE_FOCUS_RING = 'focus-visible:outline-none focus-visible:ring-2
 // Downgrades a "blocked" verdict to a warning when hard blocking is off.
 // Nothing turns it off today — every plan has realTimeBlocking — but the policy
 // is kept so the behaviour has one place to live if that ever changes again.
+//
+// NOT IN THIS PASS: that makes the whole downgrade branch below unreachable.
+// lib/plans/config.ts maps free, basic and pro to the same FULL_LIMITS with
+// realTimeBlocking: true, and nothing anywhere sets it false.
 function applyRealTimeBlockingPolicy(result: RulesetValidationResult, realTimeBlocking: boolean): RulesetValidationResult {
   if (realTimeBlocking || result.status !== 'blocked') return result;
   return {
@@ -249,54 +254,25 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
 
   const loadContext = useCallback(async () => {
     setLoading(true);
-    const todayStart = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
 
-    const [rulesRes, todayRes, personalRes] = await Promise.all([
+    // Trade history through loadTradeRuleContext, the same function the
+    // open-the-form gate uses. This used to be worked out here with its own
+    // arithmetic — price distance instead of money, and "the stop was hit"
+    // instead of "money was lost" — which meant the gate and this form could
+    // disagree about the same two preset rules for the same user at the same
+    // moment. See lib/rules/tradeRuleContext.ts.
+    const [rulesRes, personalRes, history] = await Promise.all([
       supabase.from('preset_rules').select('*').eq('user_id', userId).single(),
-      supabase
-        .from('trade_plans')
-        .select('id, status, entry_price, exit_price, stop_loss')
-        .eq('user_id', userId)
-        .gte('submitted_at', todayStart),
       supabase.from('personal_strategies').select('*').eq('user_id', userId).order('created_at'),
+      loadTradeRuleContext(userId, supabase),
     ]);
 
     if (personalRes.data) setPersonalStrategyRows(personalRes.data as PersonalStrategy[]);
-
     if (rulesRes.data) setPresetRules(rulesRes.data as PresetRules);
-    if (todayRes.data) {
-      setTodayCount(todayRes.data.length);
 
-      // Approximate daily loss: sum of (entry - exit) for closed losing trades
-      let lossSum = 0;
-      for (const t of todayRes.data) {
-        if (t.status === 'closed' && t.exit_price && t.entry_price && t.exit_price < t.entry_price) {
-          lossSum += Math.abs(t.entry_price - t.exit_price);
-        }
-      }
-      setTodayLossAmount(lossSum);
-    }
-
-    // Count recent consecutive losses
-    const recentRes = await supabase
-      .from('trade_plans')
-      .select('status, exit_price, stop_loss')
-      .eq('user_id', userId)
-      .eq('status', 'closed')
-      .order('closed_at', { ascending: false })
-      .limit(10);
-
-    if (recentRes.data) {
-      let losses = 0;
-      for (const t of recentRes.data) {
-        if (t.exit_price && t.stop_loss && t.exit_price <= t.stop_loss) {
-          losses++;
-        } else {
-          break;
-        }
-      }
-      setLossCount(losses);
-    }
+    setTodayCount(history.todayTradeCount);
+    setTodayLossAmount(history.todayLossAmount);
+    setLossCount(history.lossStreak);
 
     setLoading(false);
   }, [supabase, userId]);
