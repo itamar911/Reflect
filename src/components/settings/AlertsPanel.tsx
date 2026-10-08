@@ -168,7 +168,7 @@ export default function AlertsPanel({ userId, initialSettings }: AlertsPanelProp
         );
       })}
 
-      <p className="text-xs text-tg-muted mt-3 text-center">⏰ שעות לפי שעון ישראל (UTC+2)</p>
+      <p className="text-xs text-tg-muted mt-3 text-center">שעות לפי שעון ישראל (UTC+2)</p>
 
       {saving && <p className="text-xs text-tg-muted text-center mt-2">שומר...</p>}
       {saved && <p className="text-xs text-tg-success text-center mt-2 animate-fade-in">הגדרות נשמרו</p>}
