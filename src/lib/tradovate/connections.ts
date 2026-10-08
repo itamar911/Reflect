@@ -69,6 +69,8 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { renewAccessToken } from './auth';
 import { TradovateNotConnectedError, TradovateOAuthError } from './errors';
 import type { TradovateEnvironment } from './hosts';
+// REF-92 MEASUREMENT — remove with ./ref92-measurement.ts.
+import { formatApiHosts, logRef92, pickApiHosts } from './ref92-measurement';
 import { decryptToken, encryptToken } from './token-crypto';
 import type { TradovateOAuthConfig } from './oauth-config';
 import type { TradovateApiHosts, UserTokenSnapshot } from './types';
@@ -483,6 +485,47 @@ async function loadOrRenew(
     apiHosts: renewed.apiHosts ?? data.api_hosts ?? undefined,
     admin,
   });
+
+  // ========================================================================
+  // REF-92 MEASUREMENT — DELETE THIS BLOCK WHEN THE ANSWER IS RECORDED
+  //
+  // The renewal half of the question the callback's fence asks of the
+  // exchange; ./ref92-measurement.ts has the whole story and the removal
+  // recipe. NO EXTRA REQUEST: this reads the response loadOrRenew has
+  // already received, at the one point where the object is in hand.
+  //
+  // Here because the exchange may well carry no apiHosts at all — that is
+  // what 1 Oct observed. Without this line a negative result there would
+  // tell us nothing about the shape of a host value, and learning it would
+  // cost another deploy. Measuring one half of a question is the mistake
+  // Phase 2 made.
+  //
+  // Values, because the hostnames are the question: whether one carries a
+  // scheme, a port or a path decides how the URL builder is written. This
+  // and the exchange's apiHosts are the only objects whose values are ever
+  // logged. pickApiHosts() reads the field off the raw body and admits only
+  // an object, so a renewal that answered something else cannot reach
+  // formatApiHosts() — and the body itself, which carries accessToken and
+  // mdAccessToken, never does.
+  //
+  // Unlike the callback's fence this one is not on the connect path: it
+  // fires when a renewal actually happens, so at most once per token
+  // lifetime per connected user. After saveConnection, and wrapped, for the
+  // same reason as there — a measurement must not cost a connection.
+  // ========================================================================
+  try {
+    const renewalHosts = pickApiHosts(renewed);
+    logRef92('renewal apiHosts present', String(Boolean(renewalHosts)));
+    if (renewalHosts) logRef92('renewal apiHosts', formatApiHosts(renewalHosts));
+  } catch (measurementError) {
+    // Message only, never the error object: a thrown error's `cause` can
+    // carry the request it was made with, and that request bore a token.
+    logRef92(
+      'renewal measurement threw',
+      measurementError instanceof Error ? measurementError.message : 'unknown error'
+    );
+  }
+  // ======================= END REF-92 MEASUREMENT ==========================
 
   return { accessToken: renewed.accessToken, expiresAt, tradovateUserId };
 }

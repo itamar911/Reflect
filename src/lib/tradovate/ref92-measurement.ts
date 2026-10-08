@@ -5,10 +5,19 @@
  *
  * SERVER ONLY — see ./config.ts.
  *
- * One production connect, to settle one question: does POST /auth/oauthtoken
- * return an `apiHosts` object, and if it does, what do its values actually look
- * like? Option 4 of REF-92 — read the hosts from the exchange, fall back to a
- * renewal — is designed on the answer, so the answer is measured first.
+ * One production connect, to settle two halves of one question: does POST
+ * /auth/oauthtoken return an `apiHosts` object, and — wherever it arrives —
+ * what do its values actually look like? Option 4 of REF-92, read the hosts
+ * from the exchange and fall back to a renewal, is designed on the answer, so
+ * the answer is measured first.
+ *
+ * Both halves, because they can fail independently. If the exchange carries no
+ * apiHosts — which is what 1 Oct observed — then measuring only the exchange
+ * would answer "is it there" with a no and leave the shape of a host value
+ * entirely unknown, costing a second deploy to learn. So the renewal response
+ * is read too, at the point where ./connections.ts already holds it and
+ * without any extra request. Measuring one half of a question is the mistake
+ * Phase 2 made.
  *
  *
  * WHY THIS IS NOT ALREADY KNOWN
@@ -63,22 +72,26 @@
  *     only is not a style choice there — that body carries the user's email
  *     address, full name and organization.
  *
- * Values, from one object and one object only:
+ * Values, from one kind of object only:
  *
- *   - `apiHosts`, in full, keys and values. Hostnames are not credentials and
- *     seeing them is the entire point. {@link formatApiHosts} is the only
- *     function here that prints a value, it is only ever handed that object,
- *     and it prints a value only when it is a string — an unexpected nested
- *     object is reported by type, because this is not the place to find out
- *     what else a response might be carrying.
+ *   - `apiHosts`, in full, keys and values — off the exchange response in the
+ *     callback, and off the renewal response in ./connections.ts. Hostnames
+ *     are not credentials and seeing them is the entire point.
+ *     {@link formatApiHosts} is the only function here that prints a value,
+ *     both callers reach it only through {@link pickApiHosts}, and it prints a
+ *     value only when it is a string — an unexpected nested object is reported
+ *     by type, because this is not the place to find out what else a response
+ *     might be carrying.
  *
  * Never logged, by construction rather than by care: any token, the
  * authorization code, any secret, any header, any other field value.
  * {@link describeJsonShape} cannot leak one because it never copies one — it
  * reads `typeof` and discards the value in the same expression. {@link
- * pickApiHosts} is what keeps a token out of the one value-printing path: what
- * the exchange hands back to the caller is the shape plus the apiHosts object,
- * never the body they came from. Every line still goes out through
+ * pickApiHosts} is what keeps a token out of the one value-printing path, at
+ * both sites: the exchange hands its caller a shape plus the apiHosts object
+ * and never the body they came from, and the renewal body — which carries
+ * accessToken and mdAccessToken — is read only through pickApiHosts(), which
+ * returns hostnames or nothing. Every line still goes out through
  * redactSecrets(), because a defence resting on my reading of a call graph is
  * not a defence.
  *
@@ -92,11 +105,13 @@
  *   2. Delete the REF-92 MEASUREMENT block in
  *      src/app/api/tradovate/callback/route.ts — one fenced block plus its
  *      import.
- *   3. Delete the `measurement` field from ExchangedToken in ./oauth.ts, the
+ *   3. Delete the REF-92 MEASUREMENT block at the end of loadOrRenew() in
+ *      ./connections.ts — one fenced block plus its import.
+ *   4. Delete the `measurement` field from ExchangedToken in ./oauth.ts, the
  *      import there, and the one line in exchangeCodeForToken() that fills it.
- *   4. Nothing in ./index.ts: both consumers import this module directly, so
- *      the barrel never learned about it.
- *   5. `npx tsc --noEmit` will find anything missed.
+ *   5. Nothing in ./index.ts: all three consumers import this module
+ *      directly, so the barrel never learned about it.
+ *   6. `npx tsc --noEmit` will find anything missed.
  */
 
 import { redactSecrets } from './redact';
