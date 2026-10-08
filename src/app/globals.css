@@ -246,6 +246,32 @@ body {
   }
 }
 
+/* ── Rule-event colours ──────────────────────────────────
+   Scoped to components/rules/RuleEventsCard.tsx, NOT app-wide tokens.
+
+   Turquoise marks a rule that worked (blocked, warned); orange marks the
+   one worth a second look (overridden). Red is reserved for money lost and
+   is not used for a rule event.
+
+   These exist instead of --color-tg-primary / --color-tg-warning because
+   neither of those has a light-theme override, and against the light
+   surface (#f4f6f8) they measure about 1.7:1 and 2.0:1 — failing AA for
+   text and failing the 3:1 non-text threshold too. The darker light-theme
+   values below measure about 5.8:1 and 4.6:1 on the same surface. The
+   app-wide tokens are left alone on purpose: their light-theme failure is
+   a bigger problem than this card and is tracked separately.
+
+   Nothing here carries meaning on its own. Every event says what happened
+   in words, in --color-tg-text; these only decide an icon and a rail. */
+.rule-event-colours {
+  --rule-event-ok:        #00d2d2;
+  --rule-event-attention: #f59e0b;
+}
+html.light .rule-event-colours {
+  --rule-event-ok:        #0b6b6b;
+  --rule-event-attention: #b45309;
+}
+
 /* ── Sidebar toggle handle ────────────────────────────────
    Half-pill tab attached to the sidebar's edge (RTL: rounded on the left,
    flat against the panel). The outer button (.sidebar-handle-btn, inline

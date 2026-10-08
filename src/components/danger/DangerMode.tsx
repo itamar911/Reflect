@@ -3,6 +3,13 @@
 import { useState } from 'react';
 import { Siren } from 'lucide-react';
 
+/**
+ * NOT IN THIS PASS: nothing renders this component. A repo-wide search finds no
+ * caller, so `consecutiveLosses` and the rest are never supplied by anything —
+ * which is also why it escaped the loss-definition work in
+ * lib/rules/tradeRuleContext.ts. Left as it is, recorded so the next reader
+ * knows the omission was noticed rather than missed.
+ */
 interface DangerModeProps {
   consecutiveLosses: number;
   emotionalState: number;

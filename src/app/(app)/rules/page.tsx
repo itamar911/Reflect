@@ -2,24 +2,45 @@ import { redirect } from 'next/navigation';
 import { createClient, getCachedUser } from '@/lib/supabase/server';
 import { getUserPlan } from '@/lib/plans/getUserPlan';
 import RulesEditor from '@/components/rules/RulesEditor';
+import RuleEventsCard, { type RuleEvent } from '@/components/rules/RuleEventsCard';
 import type { PresetRules, CustomRule } from '@/lib/types';
 import { Zap, FileText, Shield } from 'lucide-react';
 
 export const metadata = { title: 'חוקי מסחר — Reflect' };
+
+/** How many rule events the card shows. A short list, not a log. */
+const RULE_EVENT_LIMIT = 20;
 
 export default async function RulesPage() {
   const supabase = await createClient();
   const { data: { user } } = await getCachedUser();
   if (!user) redirect('/login');
 
-  const [{ tier: plan }, presetRes, customRes] = await Promise.all([
+  // RULE_EVENT_LIMIT + 1 is fetched so the card can say whether older events
+  // exist without a second count query.
+  const [{ tier: plan }, presetRes, customRes, eventsRes] = await Promise.all([
     getUserPlan(supabase, user.id),
     supabase.from('preset_rules').select('*').eq('user_id', user.id).single(),
     supabase.from('custom_rules').select('*').eq('user_id', user.id).order('created_at'),
+    // No filter on trade_plan_id. The only other reader of this table
+    // (app/(app)/trades/page.tsx) requires one so it can mark a trade row,
+    // which silently excluded every gate block — a block happens instead of
+    // a trade, so it has no trade to point at. That filter is right for its
+    // own purpose; this is simply a different question.
+    supabase
+      .from('rule_violations')
+      .select('id, created_at, outcome, rule_source, rule_name, rule_key')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(RULE_EVENT_LIMIT + 1),
   ]);
 
   const presetRules = presetRes.data as PresetRules | null;
   const customRules = (customRes.data ?? []) as CustomRule[];
+
+  const allEvents = (eventsRes.data ?? []) as RuleEvent[];
+  const ruleEvents = allEvents.slice(0, RULE_EVENT_LIMIT);
+  const moreEvents = allEvents.length > RULE_EVENT_LIMIT;
 
   if (!presetRules) {
     return (
@@ -90,6 +111,9 @@ export default async function RulesPage() {
           userId={user.id}
         />
       </div>
+
+      {/* ── What the rules actually did ─────────────────────────────── */}
+      <RuleEventsCard events={ruleEvents} truncated={moreEvents} />
 
     </div>
   );
