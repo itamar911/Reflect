@@ -37,7 +37,11 @@ export { requestAccessToken, renewAccessToken, snapshotFromResponse } from './au
 export { getAccessToken, peekToken, clearToken, timeUntilExpiry } from './session';
 
 export { tradovateRequest, tradovateGet } from './client';
-export type { RequestOptions } from './client';
+export type {
+  AppSessionRequestOptions,
+  RequestOptions,
+  UserTokenRequestOptions,
+} from './client';
 
 export {
   TradovateError,
