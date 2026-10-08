@@ -17,6 +17,8 @@
 
 import { tradovateGet } from './client';
 import { TradovateOAuthError, TradovatePenaltyError, TradovateRequestError } from './errors';
+// REF-92 MEASUREMENT — remove with ./ref92-measurement.ts.
+import { describeJsonShape, pickApiHosts, type JsonShape } from './ref92-measurement';
 import { redactSecrets } from './redact';
 import {
   isPenaltyResponse,
@@ -80,6 +82,17 @@ export interface ExchangedToken {
   refreshExpiresAt?: number;
   /** `token_type`, as returned. Expected "Bearer"; kept so a change is visible. */
   tokenType?: string;
+  /**
+   * REF-92 MEASUREMENT — remove with ./ref92-measurement.ts.
+   *
+   * What the raw body looked like, taken from `parsed` before the cast to
+   * OAuthTokenResponse below — which is the whole point, because that cast is
+   * precisely why the shipped code cannot answer the question. `shape` is
+   * field names and JSON types, never a value; `apiHosts` is the one object
+   * whose values may be logged, lifted out by pickApiHosts() so that nothing
+   * downstream is ever handed the body itself.
+   */
+  measurement?: { shape: JsonShape; apiHosts?: Record<string, unknown> };
 }
 
 /**
@@ -193,6 +206,8 @@ export async function exchangeCodeForToken(
     expiresIn: body.expires_in,
     refreshExpiresAt,
     tokenType: body.token_type,
+    // REF-92 MEASUREMENT — remove this line with ./ref92-measurement.ts.
+    measurement: { shape: describeJsonShape(parsed), apiHosts: pickApiHosts(parsed) },
   };
 }
 
