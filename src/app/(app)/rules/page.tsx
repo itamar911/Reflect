@@ -29,7 +29,7 @@ export default async function RulesPage() {
     // own purpose; this is simply a different question.
     supabase
       .from('rule_violations')
-      .select('id, created_at, outcome, rule_source, rule_name, rule_key')
+      .select('id, created_at, outcome, rule_source, rule_name, rule_key, custom_rule_id')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
       .limit(RULE_EVENT_LIMIT + 1),
