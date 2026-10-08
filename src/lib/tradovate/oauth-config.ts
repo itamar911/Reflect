@@ -66,8 +66,18 @@ export interface TradovateOAuthConfig {
   /** Where the authorization code is exchanged for a token. */
   tokenUrl: string;
   /**
-   * Trading REST base including /v1, for this connection's environment. Used
-   * for /auth/renewaccesstoken. NOT for /auth/me — see liveApiUrl.
+   * The configured trading REST base including /v1, for the environment this
+   * deployment connects users to.
+   *
+   * NO LONGER READ. It used to be the base for /auth/renewaccesstoken, but a
+   * renewal now goes to the host the connection itself resolves to — hosts are
+   * a property of the user, not of this deployment. See resolveTradingApiUrl()
+   * in ./api-hosts.ts. It is also not the base for /auth/me; that is liveApiUrl.
+   *
+   * Kept because TRADOVATE_API_URL is still what declares the environment and
+   * what liveApiUrl is derived from. An explicit TRADOVATE_ENVIRONMENT would
+   * say that directly instead of leaving it to be read off a hostname, and
+   * would retire both this field and detectEnvironment().
    */
   apiUrl: string;
   /**
