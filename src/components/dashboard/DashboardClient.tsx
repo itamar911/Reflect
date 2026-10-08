@@ -1238,6 +1238,31 @@ function StatPill({ label, value, color, delta }: { label: string; value: React.
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
+/**
+ * Whether a rejected fetch was our own cancellation rather than a failure.
+ *
+ * A withdrawn request must not write a load-failure message over state a newer
+ * request has already filled in, or the dashboard ends up telling someone the
+ * weekly summary failed to load while the summary sits on screen beside the
+ * message.
+ *
+ * That ordering is not reachable from the code as it stands — one mount makes
+ * one GET, measured — so this is a guard rather than a fix for an observed
+ * symptom. It is worth having because the shape is easy to reintroduce: a
+ * second caller, or a dependency that makes this effect re-run, is all it
+ * takes, and the failure mode is a message the user cannot explain and we
+ * cannot see.
+ *
+ * `signal.aborted` is checked as well as the error name because a request
+ * torn down by the browser — navigating away mid-flight is the common case —
+ * rejects with a plain TypeError rather than an AbortError, and the signal is
+ * the only thing that still says it was withdrawn on purpose.
+ */
+function isWithdrawn(err: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) return true;
+  return err instanceof DOMException && err.name === 'AbortError';
+}
+
 export default function DashboardClient({
   trades: initialTrades,
   displayName,
@@ -1336,12 +1361,20 @@ export default function DashboardClient({
     };
   }, [userId, fetchTrades]);
 
-  // Fetch a given week's summary (or the latest completed week if omitted).
-  const loadWeek = useCallback(async (weekStart?: string) => {
+  /**
+   * Fetch a given week's summary (or the latest completed week if omitted).
+   *
+   * `signal` is optional, and the caller that passes one is saying it may
+   * stop caring about the answer. When it does, nothing here writes state:
+   * see isWithdrawn() above for why a cancelled request must not surface as
+   * a load failure. Callers without a signal — the week arrows and the
+   * manual refresh — are unchanged, because their failures are real.
+   */
+  const loadWeek = useCallback(async (weekStart?: string, signal?: AbortSignal) => {
     setWeeklyLoading(true);
     try {
       const url = weekStart ? `/api/weekly-summary?week_start=${weekStart}` : '/api/weekly-summary';
-      const res = await fetch(url);
+      const res = await fetch(url, { signal });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data) {
         console.error('[weekly-summary] GET failed', res.status, data);
@@ -1357,24 +1390,33 @@ export default function DashboardClient({
       setLatestWeekStart(data.latest_week_start ?? null);
       return data;
     } catch (err) {
+      // Withdrawn, not failed: say nothing and touch no state. The caller is
+      // either gone or has already started a newer request.
+      if (isWithdrawn(err, signal)) return null;
       console.error('[weekly-summary] GET request failed', err);
       setWeeklyError('שגיאה בטעינת הסיכום השבועי.');
       return null;
     } finally {
-      setWeeklyLoading(false);
+      // Not unconditional: clearing the spinner for a request we withdrew
+      // would clear it for whichever request replaced it.
+      if (!signal?.aborted) setWeeklyLoading(false);
     }
   }, []);
 
   // Load this week's AI summary; on Sundays, generate one if it doesn't exist yet.
   useEffect(() => {
     if (!limits.weeklySummary) return;
+    // One controller for both requests this effect can make, aborted on
+    // cleanup so a re-run or an unmount withdraws them instead of letting
+    // them land on a component that has moved on.
+    const controller = new AbortController();
     let cancelled = false;
     (async () => {
-      const data = await loadWeek();
+      const data = await loadWeek(undefined, controller.signal);
       if (cancelled || !data || data.summary || new Date().getDay() !== 0) return;
       setWeeklyLoading(true);
       try {
-        const genRes = await fetch('/api/weekly-summary', { method: 'POST' });
+        const genRes = await fetch('/api/weekly-summary', { method: 'POST', signal: controller.signal });
         const genData = await genRes.json().catch(() => null);
         if (!genRes.ok || !genData?.summary) {
           console.error('[weekly-summary] auto-generate failed', genRes.status, genData);
@@ -1386,13 +1428,14 @@ export default function DashboardClient({
           setWeeklySummary(genData.summary);
         }
       } catch (err) {
+        if (isWithdrawn(err, controller.signal)) return;
         console.error('[weekly-summary] auto-generate request failed', err);
         if (!cancelled) setWeeklyError('שגיאה ביצירת הסיכום השבועי.');
       } finally {
         if (!cancelled) setWeeklyLoading(false);
       }
     })();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; controller.abort(); };
   }, [loadWeek, limits.weeklySummary]);
 
   async function refreshWeeklySummary() {
