@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, type CSSProperties, type ReactNode } from 'react';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { TrendingUp, Rocket, ArrowLeftRight, RefreshCw, Building2, Activity, Ruler, X } from 'lucide-react';
 import { renderPlainAiText } from '@/lib/ai/textFormatting';
@@ -173,6 +174,13 @@ export default function StrategiesClient({
   initialStrategies: PersonalStrategy[];
   allTrades: TradeSummary[];
 }) {
+  // The page header above this component is server-rendered and counts both
+  // strategies and trades (src/app/(app)/strategies/page.tsx). Mutating only
+  // local state left that count stale — delete a strategy and the heading
+  // still claimed the old number until a full page load. Cosmetic, unlike
+  // REF-91's own bug, but the same shape: a server-rendered value and a
+  // client mutation with nothing pushing one to the other.
+  const router = useRouter();
   const [strategies,  setStrategies]  = useState<PersonalStrategy[]>(initialStrategies);
   const [showForm,    setShowForm]    = useState(false);
   const [editId,      setEditId]      = useState<string | null>(null);
@@ -285,6 +293,8 @@ export default function StrategiesClient({
     const { data: fresh } = await supabase.from('personal_strategies').select('*').eq('user_id', userId).order('created_at');
     setStrategies((fresh ?? []) as PersonalStrategy[]);
     setSaving(false); setShowForm(false); setEditId(null);
+    // Creating one changes the heading's count as surely as deleting one does.
+    router.refresh();
   }
 
   async function handleDelete(id: string) {
@@ -292,6 +302,7 @@ export default function StrategiesClient({
     await supabase.from('personal_strategies').delete().eq('id', id);
     setStrategies(prev => prev.filter(s => s.id !== id));
     setDeletingId(null);
+    router.refresh();
   }
 
   async function fetchAiReview(s: PersonalStrategy) {

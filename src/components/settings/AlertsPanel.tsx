@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 
 interface AlertConfig {
@@ -52,8 +53,33 @@ export default function AlertsPanel({ userId, initialSettings }: AlertsPanelProp
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState('');
+  const router = useRouter();
 
-  const save = useCallback(async (newEnabled: Record<string, boolean>, newTimes: Record<string, string>) => {
+  /**
+   * Persist the whole settings row.
+   *
+   * `refreshShell` is not an optimisation, it is the fix for REF-91. One of
+   * these toggles is read on the server: src/app/(app)/layout.tsx selects
+   * alert_settings.discipline_enabled and passes it to AppShell as
+   * disciplineAlertsEnabled, which decides whether opening the trade form
+   * checks for rule violations. Writing the column without telling the server
+   * to re-read it left the shell acting on the value it was rendered with:
+   * discipline alerts switched off, the toggle showing off, and rule blocking
+   * still firing until the next full page load. The toggle told the truth
+   * about itself and only the behaviour disagreed, so the user had no way to
+   * see it.
+   *
+   * True for every toggle rather than only for `discipline`: any flag here
+   * could become one the layout reads, and a refresh that was not needed
+   * costs one re-render of server components while a missing one is this bug
+   * again. False for a time change, which nothing server-rendered depends on
+   * and which fires on each component of the time input.
+   */
+  const save = useCallback(async (
+    newEnabled: Record<string, boolean>,
+    newTimes: Record<string, string>,
+    refreshShell: boolean,
+  ) => {
     setSaving(true);
     setSaveError('');
 
@@ -79,19 +105,25 @@ export default function AlertsPanel({ userId, initialSettings }: AlertsPanelProp
     } else {
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
+      // Re-runs this route's server components, so the (app) layout re-reads
+      // discipline_enabled and AppShell is handed the new value. The same
+      // convention JournalClient and SetupsClient follow after a write.
+      // Client state is preserved across a refresh, so the toggles do not
+      // flicker back to their initial props.
+      if (refreshShell) router.refresh();
     }
-  }, [userId]);
+  }, [router, userId]);
 
   function toggleAlert(id: string) {
     const newEnabled = { ...enabled, [id]: !enabled[id] };
     setEnabled(newEnabled);
-    save(newEnabled, times);
+    save(newEnabled, times, true);
   }
 
   function updateTime(id: string, value: string) {
     const newTimes = { ...times, [id]: value };
     setTimes(newTimes);
-    save(enabled, newTimes);
+    save(enabled, newTimes, false);
   }
 
   return (
