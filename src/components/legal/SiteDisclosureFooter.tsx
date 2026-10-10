@@ -29,17 +29,24 @@ export function SiteDisclosureFooter({ className = '' }: { className?: string })
       {/* Reading order is navigation first, fine print last — the same order
           the landing footer uses, so the two read alike. */}
       <div className="max-w-[900px] mx-auto flex flex-col gap-6">
+        {/* Hovering to --color-tg-text-2, not --color-tg-primary: html.light
+            does not override the accent token, so a hovered link here measured
+            1.88:1 over the white page (REF-96) — and a hovered link is still
+            text under WCAG 1.4.3, which axe does not check because it never
+            evaluates hover. Resting stays --color-tg-muted; these are fine
+            print and are meant to read as subordinate. 6.05:1 → 9.77:1 light,
+            6.42:1 → 14.44:1 dark. */}
         <div className="flex flex-wrap gap-x-6 gap-y-2">
-          <Link href="/risk-disclosure" className="text-sm text-tg-muted hover:text-tg-primary transition-colors">
+          <Link href="/risk-disclosure" className="text-sm text-tg-muted hover:text-tg-text-2 transition-colors">
             גילוי סיכון
           </Link>
-          <Link href="/terms" className="text-sm text-tg-muted hover:text-tg-primary transition-colors">
+          <Link href="/terms" className="text-sm text-tg-muted hover:text-tg-text-2 transition-colors">
             תנאי שימוש
           </Link>
-          <Link href="/privacy" className="text-sm text-tg-muted hover:text-tg-primary transition-colors">
+          <Link href="/privacy" className="text-sm text-tg-muted hover:text-tg-text-2 transition-colors">
             מדיניות פרטיות
           </Link>
-          <Link href="/accessibility" className="text-sm text-tg-muted hover:text-tg-primary transition-colors">
+          <Link href="/accessibility" className="text-sm text-tg-muted hover:text-tg-text-2 transition-colors">
             הצהרת נגישות
           </Link>
         </div>
