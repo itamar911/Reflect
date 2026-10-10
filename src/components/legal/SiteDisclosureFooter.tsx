@@ -39,6 +39,9 @@ export function SiteDisclosureFooter({ className = '' }: { className?: string })
           <Link href="/privacy" className="text-sm text-tg-muted hover:text-tg-primary transition-colors">
             מדיניות פרטיות
           </Link>
+          <Link href="/accessibility" className="text-sm text-tg-muted hover:text-tg-primary transition-colors">
+            הצהרת נגישות
+          </Link>
         </div>
 
         <FooterDisclosures />

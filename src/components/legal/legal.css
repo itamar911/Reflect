@@ -1,4 +1,4 @@
-/* Long-form legal pages (/privacy, and /terms when it gets real content).
+/* Long-form legal pages (/privacy, /terms, /accessibility).
    Colocated and imported by the page that uses it, the same way stats.css and
    journal.css are. */
 
@@ -80,4 +80,21 @@
   direction: ltr;
   unicode-bidi: isolate;
   display: inline-block;
+}
+
+/* The same isolation without the inline-block, for a multi-word Latin run in a
+   table cell — "macOS Ventura", "iOS 26.6.1 (iPhone 15)" on /accessibility.
+
+   An inline-block is a shrink-to-fit box: once the cell is narrow enough that
+   the run wraps inside it, the lines align to the box's own start edge, which
+   is the LEFT one here, while the Hebrew column header above still sits at the
+   right. The column visibly stops lining up. Without the inline-block the run
+   is ordinary inline content and keeps the cell's own start alignment.
+
+   It does not make the table any narrower — an inline-block wraps internally
+   too, so both forms measure the same — and the bidi isolate is resolved per
+   line, so a run that wraps still orders correctly on each of them. */
+.legal-ltr-phrase {
+  direction: ltr;
+  unicode-bidi: isolate;
 }

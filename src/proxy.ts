@@ -99,10 +99,14 @@ export async function proxy(request: NextRequest) {
 
   const isApiRoute = pathname.startsWith('/api/');
 
+  // A new public page is not public until it is listed here: anything the
+  // matcher lets through and this misses falls to the auth gate below and
+  // redirects to /login for every logged-out visitor.
   const isMarketingRoute =
     pathname.startsWith('/terms') ||
     pathname.startsWith('/privacy') ||
-    pathname.startsWith('/risk-disclosure');
+    pathname.startsWith('/risk-disclosure') ||
+    pathname.startsWith('/accessibility');
 
   const isPublicRoute = pathname === '/' || isAuthRoute || isApiRoute || isMarketingRoute;
 

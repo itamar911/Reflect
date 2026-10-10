@@ -38,6 +38,9 @@ export function LandingFooter() {
           <Link href="/risk-disclosure" className="inline-block py-2 -my-2 text-sm text-tg-muted hover:text-tg-primary transition-colors">
             גילוי סיכון
           </Link>
+          <Link href="/accessibility" className="inline-block py-2 -my-2 text-sm text-tg-muted hover:text-tg-primary transition-colors">
+            הצהרת נגישות
+          </Link>
         </div>
 
         {/* The product disclaimer stays — it says what Reflect is, which the
