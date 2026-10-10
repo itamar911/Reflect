@@ -112,7 +112,11 @@ function PlatformTile({ platform }: { platform: Platform }) {
       >
         <Image
           src={platform.logoSrc}
-          alt={platform.name}
+          // Empty, not the platform name: the caption directly below is that
+          // same name, so naming the logo too made the link read its name
+          // twice (axe: image-redundant-alt). The logo carries no information
+          // the caption does not.
+          alt=""
           width={platform.logoWidth}
           height={platform.logoHeight}
           // The source is many times the rendered width, so `sizes` is what
@@ -132,7 +136,8 @@ function PlatformTile({ platform }: { platform: Platform }) {
   );
 
   // The tile and the name are one link, so the accessible name comes from the
-  // logo's alt plus the caption rather than from a wrapper with no text.
+  // caption rather than from a wrapper with no text. The logo is alt="" — see
+  // the note on the Image above.
   //
   // rel="sponsored" because href is a vendor tracking URL, not a plain link to
   // the platform: the destination is monetised, and `sponsored` is the token

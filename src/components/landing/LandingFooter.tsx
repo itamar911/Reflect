@@ -20,7 +20,9 @@ export function LandingFooter() {
           השוק בוחן את האסטרטגיה שלך. Reflect בוחן אותך.
         </p>
 
-        <nav className="flex flex-wrap justify-center gap-x-6 gap-y-2">
+        {/* Named for the same reason the header's nav is — two unlabelled nav
+            landmarks on one page cannot be told apart in a landmark list. */}
+        <nav aria-label="ניווט בתחתית העמוד" className="flex flex-wrap justify-center gap-x-6 gap-y-2">
           {FOOTER_LINKS.map((link) => (
             <a key={link.label} href={link.href} className="inline-block py-2 -my-2 text-sm text-tg-muted hover:text-tg-primary transition-colors">
               {link.label}

@@ -24,14 +24,42 @@ function hasFailOpenStarted(): boolean {
   return failOpenStarted;
 }
 
+/**
+ * The elements this can render as. A div is right almost everywhere; `li` is
+ * there because this component is a wrapper, and a wrapper between `<ol>` and
+ * `<li>` is not a styling detail — it empties the list. `<ol><div><li>` gives
+ * a list with no items and items with no list, which axe reports as two
+ * serious 1.3.1 failures and a screen reader reads as neither.
+ *
+ * Add to the union rather than reaching for a div and a nested child: the next
+ * list wrapped in this should render as what its parent expects, not
+ * reintroduce the same defect somewhere else.
+ */
+type ScrollRevealTag = 'div' | 'li';
+
 interface ScrollRevealProps {
   children: React.ReactNode;
   className?: string;
   delay?: number;
+  /** The element to render. Inside a `<ul>`/`<ol>`, pass `"li"`. */
+  as?: ScrollRevealTag;
 }
 
-export function ScrollReveal({ children, className = '', delay = 0 }: ScrollRevealProps) {
-  const ref = useRef<HTMLDivElement>(null);
+export function ScrollReveal({
+  children,
+  className = '',
+  delay = 0,
+  as: Tag = 'div',
+}: ScrollRevealProps) {
+  /* Typed to the base element and attached through a callback: a plain
+     RefObject<HTMLDivElement> would not satisfy an `li`'s ref, while a
+     callback that accepts the base type satisfies both (parameter types are
+     contravariant). Only IntersectionObserver reads it, and that takes an
+     Element. */
+  const ref = useRef<HTMLElement | null>(null);
+  const setRef = (node: HTMLElement | null) => {
+    ref.current = node;
+  };
   const [intersected, setIntersected] = useState(false);
   /**
    * False on the server and through hydration, so the markup carries the CSS
@@ -85,15 +113,15 @@ export function ScrollReveal({ children, className = '', delay = 0 }: ScrollReve
   // Pre-hydration markup: hidden, but on a timer that CSS alone will finish.
   if (!hydrated) {
     return (
-      <div ref={ref} className={`scroll-reveal ${className}`}>
+      <Tag ref={setRef} className={`scroll-reveal ${className}`}>
         {children}
-      </div>
+      </Tag>
     );
   }
 
   return (
-    <div
-      ref={ref}
+    <Tag
+      ref={setRef}
       className={`transition-all duration-[850ms] ${visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'} ${className}`}
       style={{
         transitionDelay: visible ? `${delay}ms` : '0ms',
@@ -101,6 +129,6 @@ export function ScrollReveal({ children, className = '', delay = 0 }: ScrollReve
       }}
     >
       {children}
-    </div>
+    </Tag>
   );
 }

@@ -140,30 +140,39 @@ export function LoopSection() {
                 const onStart = SIDE_PATTERN[i] === 1;
                 const rotate = i % 2 === 0 ? '-1.1deg' : '1.1deg';
                 const isLast = i === LOOP_STEPS.length - 1;
+                /* as="li", rather than a <li> nested inside it: a wrapper
+                   between the <ol> and its items leaves the list with no items
+                   and the items with no list. min-h-[60px] rather than an
+                   inline style because ScrollReveal owns the style attribute
+                   (the transition delay) — the value is the 60px set here
+                   before. */
                 return (
-                  <ScrollReveal key={step.text} delay={i * 70}>
-                    <li className={`relative flex ${onStart ? 'justify-start' : 'justify-end'}`} style={{ minHeight: 60 }}>
-                      <span
-                        className="loop-node-dot absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-3.5 h-3.5 rounded-full z-10"
-                        style={{ background: tone.dot, boxShadow: `0 0 12px ${tone.dot}` }}
-                        aria-hidden
-                      />
-                      <div
-                        className="loop-glass-card w-full max-w-[460px] rounded-2xl px-5 py-3"
-                        style={{
-                          borderColor: tone.border,
-                          boxShadow: `inset 0 0 24px ${tone.glow}, 0 10px 28px rgba(0,0,0,0.35)`,
-                          transform: `rotate(${rotate})`,
-                        }}
-                      >
-                        {/* rem so the widget's text scale and the browser font
-                            preference reach this copy; 1rem is the 16px used before */}
-                        <p className="text-white/95" style={{ fontSize: '1rem', lineHeight: 1.55 }}>
-                          {step.text}
-                        </p>
-                        {isLast && <LoopRestartPill className="mt-2" />}
-                      </div>
-                    </li>
+                  <ScrollReveal
+                    key={step.text}
+                    as="li"
+                    delay={i * 70}
+                    className={`relative flex min-h-[60px] ${onStart ? 'justify-start' : 'justify-end'}`}
+                  >
+                    <span
+                      className="loop-node-dot absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-3.5 h-3.5 rounded-full z-10"
+                      style={{ background: tone.dot, boxShadow: `0 0 12px ${tone.dot}` }}
+                      aria-hidden
+                    />
+                    <div
+                      className="loop-glass-card w-full max-w-[460px] rounded-2xl px-5 py-3"
+                      style={{
+                        borderColor: tone.border,
+                        boxShadow: `inset 0 0 24px ${tone.glow}, 0 10px 28px rgba(0,0,0,0.35)`,
+                        transform: `rotate(${rotate})`,
+                      }}
+                    >
+                      {/* rem so the widget's text scale and the browser font
+                          preference reach this copy; 1rem is the 16px used before */}
+                      <p className="text-white/95" style={{ fontSize: '1rem', lineHeight: 1.55 }}>
+                        {step.text}
+                      </p>
+                      {isLast && <LoopRestartPill className="mt-2" />}
+                    </div>
                   </ScrollReveal>
                 );
               })}
@@ -181,24 +190,22 @@ export function LoopSection() {
               {LOOP_STEPS.map((step, i) => {
                 const tone = TONE_STYLES[step.tone];
                 return (
-                  <ScrollReveal key={step.text} delay={i * 60}>
-                    <li className="relative">
-                      <span
-                        className="loop-node-dot-rail absolute top-5 start-[-26px] w-3.5 h-3.5 rounded-full z-10"
-                        style={{ background: tone.dot, boxShadow: `0 0 12px ${tone.dot}` }}
-                        aria-hidden
-                      />
-                      <div
-                        className="loop-glass-card rounded-2xl px-4 py-3.5"
-                        style={{ borderColor: tone.border, boxShadow: `inset 0 0 20px ${tone.glow}` }}
-                      >
-                        {/* 0.9375rem = the 15px used before — see the note on the
-                            desktop copy above */}
-                        <p className="text-white/95" style={{ fontSize: '0.9375rem', lineHeight: 1.55 }}>
-                          {step.text}
-                        </p>
-                      </div>
-                    </li>
+                  <ScrollReveal key={step.text} as="li" delay={i * 60} className="relative">
+                    <span
+                      className="loop-node-dot-rail absolute top-5 start-[-26px] w-3.5 h-3.5 rounded-full z-10"
+                      style={{ background: tone.dot, boxShadow: `0 0 12px ${tone.dot}` }}
+                      aria-hidden
+                    />
+                    <div
+                      className="loop-glass-card rounded-2xl px-4 py-3.5"
+                      style={{ borderColor: tone.border, boxShadow: `inset 0 0 20px ${tone.glow}` }}
+                    >
+                      {/* 0.9375rem = the 15px used before — see the note on the
+                          desktop copy above */}
+                      <p className="text-white/95" style={{ fontSize: '0.9375rem', lineHeight: 1.55 }}>
+                        {step.text}
+                      </p>
+                    </div>
                   </ScrollReveal>
                 );
               })}

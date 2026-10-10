@@ -83,6 +83,11 @@ export function LandingNav() {
 
         <nav
           ref={navRef}
+          // Labelled because the landing page has two nav landmarks — this one
+          // and the footer's. Without a name they are indistinguishable in a
+          // screen reader's landmark list, which is what axe reports as
+          // landmark-unique.
+          aria-label="ניווט ראשי"
           // gap-x-8 is a floor CSS respects even under justify-between: it's
           // the minimum space between logo/links/CTA, topped up with whatever
           // extra room justify-between finds — not a margin that flex is free
