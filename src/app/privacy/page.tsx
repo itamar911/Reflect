@@ -452,16 +452,29 @@ export default function PrivacyPage() {
           </P>
         </Section>
 
+        {/* Not --color-tg-primary, and no accent on hover: html.light does not
+            override that token, so #00d2d2 stays over a #ffffff page and lands
+            near 1.7:1 (REF-96). These links are body text that hovers one step
+            brighter — 18.1:1 / 8.9:1 in light, 14.9:1 / 16.1:1 in dark — and
+            underlined, so they are not marked by colour alone either. Same
+            treatment as /accessibility; don't restore the accent here before
+            the token is fixed. */}
         <div className="flex flex-wrap gap-x-6 gap-y-2 pt-2">
-          <Link href="/" className="text-tg-primary font-semibold">
+          <Link
+            href="/"
+            className="text-tg-text hover:text-tg-text-2 font-semibold underline underline-offset-2 transition-colors"
+          >
             חזרה לעמוד הבית
           </Link>
-          <Link href="/terms" className="text-tg-muted hover:text-tg-primary transition-colors">
+          <Link
+            href="/terms"
+            className="text-tg-text hover:text-tg-text-2 underline underline-offset-2 transition-colors"
+          >
             תנאי שימוש
           </Link>
           <Link
             href="/risk-disclosure"
-            className="text-tg-muted hover:text-tg-primary transition-colors"
+            className="text-tg-text hover:text-tg-text-2 underline underline-offset-2 transition-colors"
           >
             גילוי סיכון
           </Link>
@@ -527,13 +540,17 @@ function UL({ children }: { children: ReactNode }) {
 }
 
 /* Isolated because the address is bounded by neutrals (@ and .) — inside an
-   RTL line those take the paragraph's direction and drag the address apart. */
+   RTL line those take the paragraph's direction and drag the address apart.
+
+   The colour is a utility rather than an inline style: an inline `color`
+   outranks every class, so the hover beside it never applied. It hovers to
+   --color-tg-text-2 rather than the accent, for the reason in the comment on
+   the link row above. */
 function SupportEmail() {
   return (
     <a
       href={`mailto:${SUPPORT_EMAIL}`}
-      className="legal-ltr underline underline-offset-2 transition-colors hover:text-tg-primary"
-      style={{ color: 'inherit' }}
+      className="legal-ltr underline underline-offset-2 transition-colors text-inherit hover:text-tg-text-2"
     >
       {SUPPORT_EMAIL}
     </a>

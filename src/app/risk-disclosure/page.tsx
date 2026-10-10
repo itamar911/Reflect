@@ -75,14 +75,27 @@ export default function RiskDisclosurePage() {
         <NinjaTraderAttribution variant="page" />
       </section>
 
+      {/* Not --color-tg-primary, and no accent on hover — see the matching
+          note on /privacy's link row. html.light does not override that token,
+          so the accent lands near 1.9:1 over a white page (REF-96). Don't
+          restore it here before the token is fixed. */}
       <div className="flex flex-wrap gap-x-6 gap-y-2 pt-2">
-        <Link href="/" className="text-tg-primary font-semibold">
+        <Link
+          href="/"
+          className="text-tg-text hover:text-tg-text-2 font-semibold underline underline-offset-2 transition-colors"
+        >
           חזרה לעמוד הבית
         </Link>
-        <Link href="/terms" className="text-tg-muted hover:text-tg-primary transition-colors">
+        <Link
+          href="/terms"
+          className="text-tg-text hover:text-tg-text-2 underline underline-offset-2 transition-colors"
+        >
           תנאי שימוש
         </Link>
-        <Link href="/privacy" className="text-tg-muted hover:text-tg-primary transition-colors">
+        <Link
+          href="/privacy"
+          className="text-tg-text hover:text-tg-text-2 underline underline-offset-2 transition-colors"
+        >
           מדיניות פרטיות
         </Link>
       </div>
