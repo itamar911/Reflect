@@ -28,10 +28,17 @@ export default async function StatsPage() {
   const { data: { user } } = await getCachedUser();
   if (!user) redirect('/login');
 
+  // Every figure on this page is a statistic about trades the user took, and
+  // several of them (avgRR, the symbol and strategy tables, the
+  // confidence/emotion buckets, the headline trade count) are computed over
+  // every row rather than only the closed ones. A 'not_entered' plan is not a
+  // trade (REF-82 §5.2), so it is excluded here once instead of at each of
+  // them.
   const { data: raw } = await supabase
     .from('trade_plans')
     .select('*')
     .eq('user_id', user.id)
+    .neq('status', 'not_entered')
     .order('submitted_at', { ascending: true });
 
   const trades  = (raw ?? []) as TradePlan[];

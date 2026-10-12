@@ -9,6 +9,15 @@ export default async function TradesPage() {
   const { data: { user } } = await getCachedUser();
   if (!user) return null;
 
+  // THE ONE PAGE THAT KEEPS 'not_entered' ROWS. Every other reader excludes
+  // them at the query (REF-82 §5.2) because they are not trades; this page's
+  // job is to show the user what they recorded, and deciding not to enter a
+  // plan is something they recorded. JournalClient renders them under "הכל"
+  // only, with their own label, and leaves them out of its own total.
+  //
+  // The two counts below need no filter: both are exact matches, so a
+  // 'not_entered' plan is in neither "פתוחות" nor "סגורות", which is correct —
+  // it is neither.
   const [{ data: trades }, { data: violations }] = await Promise.all([
     supabase
       .from('trade_plans')

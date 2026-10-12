@@ -9,6 +9,7 @@ import EmotionalStateSlider from '@/components/trade/EmotionalStateSlider';
 import { createClient } from '@/lib/supabase/client';
 import { formatPnlIls, formatPnlPoints, calcRR } from '@/lib/utils';
 import { tradeMoneyPnl, hasMoneyPnl, isWinningTrade } from '@/lib/pnl';
+import { isTradeTaken, NOT_ENTERED, NOT_ENTERED_LABEL, tradeStatusLabel } from '@/lib/trades/status';
 import type { PnlCurrency } from '@/lib/types';
 import { useHydrated } from '@/lib/hooks';
 import { useModalDialog } from '@/lib/a11y/useModalDialog';
@@ -108,6 +109,12 @@ function rowAccessibleName(t: Trade): string {
   const title = t.symbol ?? t.strategy;
   const dir   = inferDirection(t) === 'long' ? 'לונג' : 'שורט';
 
+  // A plan never entered has no outcome to read out, so the name stops at what
+  // it is and when it was planned — and says so in the same words as the chip,
+  // rather than letting the "פתוחה" branch below describe it as still live.
+  if (t.status === NOT_ENTERED) {
+    return `${title}, ${dir}, ${NOT_ENTERED_LABEL}, ${fmtDate(t.submitted_at)}`;
+  }
   if (t.status !== 'closed') return `${title}, ${dir}, פתוחה, ${fmtDate(t.submitted_at)}`;
 
   const win  = isWinningTrade(t);
@@ -133,7 +140,6 @@ function MobileTradeCard({ t, onView, onEdit, onDelete, onClose, onDebrief, hasD
 }) {
   const pnl = calcPnl(t);
   const dir = inferDirection(t);
-  const isWin = isWinningTrade(t);
   const isClosed = t.status === 'closed';
 
   const menuItems: KebabItem[] = [
@@ -176,7 +182,7 @@ function MobileTradeCard({ t, onView, onEdit, onDelete, onClose, onDebrief, hasD
             </Chip>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
-            {isClosed ? <StatusBadge win={isWin} /> : <Chip bg="rgba(0,210,210,0.1)" color={GOLD}>פתוח</Chip>}
+            <RowStatusChip t={t} />
             <KebabMenu items={menuItems} />
           </div>
         </div>
@@ -207,6 +213,11 @@ function MobileTradeCard({ t, onView, onEdit, onDelete, onClose, onDebrief, hasD
                 {fmtPnl(pnl)}
               </span>
             )
+          ) : t.status === NOT_ENTERED ? (
+            // No P&L, and never will be — an em dash, like the desktop row's
+            // P&L cell, rather than "פתוח", which would contradict the chip
+            // immediately above it.
+            <span style={{ fontSize: 13, color: MUTED, fontWeight: 600 }}>—</span>
           ) : (
             <span style={{ fontSize: 13, color: GOLD, fontWeight: 600 }}>פתוח</span>
           )}
@@ -253,6 +264,11 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
   const supabase = createClient();
 
   // ── Stats ──────────────────────────────────────────────────────────────────
+  // This page is the only one that loads 'not_entered' rows (see trades/page.tsx),
+  // so it is the only one that has to subtract them from its own figures. Every
+  // stat below except "סה״כ עסקאות" is derived from `closed` and excludes them
+  // already; that one counted every row it was given.
+  const taken = useMemo(() => trades.filter(isTradeTaken), [trades]);
   const closed = useMemo(() =>
     trades.filter(t => t.status === 'closed' && t.exit_price != null), [trades]);
   const pnls        = useMemo(() => closed.map(t => calcPnl(t)!), [closed]);
@@ -275,6 +291,10 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
   // ── Filtered + sorted ─────────────────────────────────────────────────────
   const filtered = useMemo(() => {
     let r = trades;
+    // No filter is added for 'not_entered' (REF-82 §5.2): it appears under
+    // "הכל" and nowhere else. This needs no code — the comparison is an exact
+    // match, so "פתוחות" and "סגורות" exclude it on their own. Keep it that
+    // way; `filterStatus` is its own literal union for exactly this reason.
     if (filterStatus !== 'all') r = r.filter(t => t.status === filterStatus);
     if (search.trim()) {
       const q = search.trim().toLowerCase();
@@ -370,7 +390,7 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
 
       {/* Summary strip — one slim card, internal dividers */}
       <div className="jr-summary">
-        <SummaryStat label="סה״כ עסקאות" value={String(trades.length)} />
+        <SummaryStat label="סה״כ עסקאות" value={String(taken.length)} />
         <SummaryStat label="אחוז הצלחה" value={`${winRate}%`}
           color={winRate >= 50 ? GREEN : RED} />
         <SummaryStat label="רווח/הפסד כולל"
@@ -523,7 +543,6 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
               ) : pageTrades.map(t => {
                 const pnl      = calcPnl(t);
                 const dir      = inferDirection(t);
-                const isWin    = isWinningTrade(t);
                 const isClosed = t.status === 'closed';
                 const isChecked = selected.has(t.id);
 
@@ -575,10 +594,7 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
 
                     {/* Status */}
                     <TD>
-                      {isClosed
-                        ? <StatusBadge win={isWin} />
-                        : <Chip bg="rgba(0,210,210,0.1)" color={GOLD}>פתוח</Chip>
-                      }
+                      <RowStatusChip t={t} />
                     </TD>
 
                     {/* Asset — and the row's keyboard control.
@@ -993,6 +1009,21 @@ function StatusBadge({ win }: { win: boolean | null }) {
   </Chip>;
 }
 
+/**
+ * The status chip for one row, all three statuses in one place.
+ *
+ * 'not_entered' is grey — the same neutral pair StatusBadge already uses for a
+ * trade closed without an exit price. Deliberately not turquoise, which on this
+ * page means "still open and still live", and deliberately not red: §7 of the
+ * build brief reserves red for money lost, and a plan the user decided to stay
+ * out of lost them nothing. The word carries the meaning either way.
+ */
+function RowStatusChip({ t }: { t: Trade }) {
+  if (t.status === NOT_ENTERED) return <Chip bg={SURF2} color={MUTED}>{NOT_ENTERED_LABEL}</Chip>;
+  if (t.status === 'closed') return <StatusBadge win={isWinningTrade(t)} />;
+  return <Chip bg="rgba(0,210,210,0.1)" color={GOLD}>פתוח</Chip>;
+}
+
 function AssetDot({ symbol }: { symbol: string | null }) {
   const s = (symbol ?? '?').slice(0, 2).toUpperCase();
   return (
@@ -1126,7 +1157,9 @@ function TradeDetailModal({ trade, onClose, debriefResult, onDebrief }: {
     ['יחס R:R', trade.rr_ratio],
     ['מצב רגשי', `${trade.emotional_state}/5`],
     ['סיבת כניסה', trade.trade_reason],
-    ['סטטוס', trade.status === 'open' ? 'פתוח' : 'סגור'],
+    // Three statuses, one label function — the ternary this replaces read
+    // 'not_entered' as "סגור", which is the one thing it is not.
+    ['סטטוס', tradeStatusLabel(trade.status)],
     ['מחיר יציאה', trade.exit_price != null ? trade.exit_price.toFixed(2) : '—'],
     ['סיבת יציאה', trade.exit_reason ?? '—'],
     ['הערות', trade.post_trade_notes ?? '—'],

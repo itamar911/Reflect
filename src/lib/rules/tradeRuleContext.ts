@@ -48,7 +48,8 @@ interface ClosedTradeRow {
 
 /** Everything the preset and custom rule checks need from trade history. */
 export interface TradeRuleContext {
-  /** Trades TAKEN today, counted by submitted_at. No close required. */
+  /** Trades TAKEN today, counted by submitted_at. No close required — but a
+   *  plan the user marked 'not_entered' is not a trade taken, and is excluded. */
   todayTradeCount: number;
   /**
    * Money lost today, as a positive number, from trades CLOSED today.
@@ -72,6 +73,22 @@ export interface TradeRuleContext {
 
 /** Fields every query here needs for tradeMoneyPnl() to be usable. */
 const MONEY_FIELDS = 'status, exit_price, pnl_amount, actual_pnl';
+
+/**
+ * Midnight this morning, local time, as an ISO timestamp.
+ *
+ * Exported because the trade form has to ask "which plans are still open from
+ * BEFORE today" (REF-82 §5.2) and that question has to use the same seam as
+ * "how many trades today", or a plan submitted at 00:30 could be counted
+ * against today's limit and simultaneously be offered as yesterday's leftover.
+ * One definition, the same reason the rest of this module exists.
+ *
+ * Local, not UTC: a trading day belongs to the trader's clock, and this runs in
+ * their browser. Vercel's UTC would file an 01:00 Tel Aviv plan under yesterday.
+ */
+export function startOfTodayIso(): string {
+  return new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
+}
 
 /** Money lost today, positive, summed over closed rows. */
 function sumLosses(rows: readonly ClosedTradeRow[]): number {
@@ -124,12 +141,23 @@ export async function loadTradeRuleContext(
   userId: string,
   client: SupabaseClient = createClient()
 ): Promise<TradeRuleContext> {
-  const todayStart = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
+  const todayStart = startOfTodayIso();
 
   const [takenRes, closedTodayRes, recentRes] = await Promise.all([
     // Taken today — by submitted_at, so a plan counts the moment it is logged
     // whether or not it has been closed.
-    client.from('trade_plans').select('id').eq('user_id', userId).gte('submitted_at', todayStart),
+    //
+    // Except a plan the user has told us they never entered. Without the neq a
+    // 'not_entered' row would be counted against max_daily_trades and
+    // daily_trades_count: the user declares they stayed out, and the app spends
+    // one of their day's trades on it. The other two queries below already
+    // exclude it by asking for status = 'closed'; this one asked for every row.
+    client
+      .from('trade_plans')
+      .select('id')
+      .eq('user_id', userId)
+      .neq('status', 'not_entered')
+      .gte('submitted_at', todayStart),
     // Closed today — by closed_at, because the loss is realised on the close,
     // not on the entry. A trade opened yesterday and closed today counts today.
     client

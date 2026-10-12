@@ -12,10 +12,17 @@ export default async function CoachPage() {
   const { data: { user } } = await getCachedUser();
   if (!user) return null;
 
+  // These rows become the prompt for /api/ai-coach and /api/ai-patterns, both
+  // of which average over every row (avgRR, average emotional state, the
+  // discipline score) and read runs of consecutive trades. A plan the user
+  // never entered would be described to the coach as a trade (REF-82 §5.2) —
+  // and it would break the revenge-trade detection, which looks at the gap
+  // between one trade and the next.
   const { data: trades } = await supabase
     .from('trade_plans')
     .select('*')
     .eq('user_id', user.id)
+    .neq('status', 'not_entered')
     .order('submitted_at', { ascending: false })
     .limit(100);
 

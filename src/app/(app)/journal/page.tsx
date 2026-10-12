@@ -10,10 +10,15 @@ export default async function JournalPage() {
   const { data: { user } } = await getCachedUser();
   if (!user) return null;
 
+  // 'not_entered' plans are left out of this page entirely (REF-82 §5.2). The
+  // monthly calendar is a P&L-and-count grid with no per-trade row — there is
+  // nowhere to say "never entered", and counting one would put a trade on a day
+  // the user did not trade. They are visible on All Trades, which has rows.
   const { data: trades } = await supabase
     .from('trade_plans')
     .select('*')
     .eq('user_id', user.id)
+    .neq('status', 'not_entered')
     .order('submitted_at', { ascending: false })
     .limit(1000);
 

@@ -11,9 +11,14 @@ export default async function StrategiesPage() {
 
   const [strategiesRes, tradesRes] = await Promise.all([
     supabase.from('personal_strategies').select('*').eq('user_id', user.id).order('created_at'),
+    // Per-strategy performance, plus the "N עסקאות בסה״כ" line below. Both
+    // count trades, and a plan the user never entered is not one (REF-82 §5.2)
+    // — excluded here so StrategiesClient's own counts and its per-trade
+    // רווח/הפסד/פתוח labels never have to represent a third state.
     supabase.from('trade_plans')
       .select('id, strategy, symbol, entry_price, exit_price, take_profit, rr_ratio, status, submitted_at, closed_at')
       .eq('user_id', user.id)
+      .neq('status', 'not_entered')
       .order('submitted_at', { ascending: false })
       .limit(1000),
   ]);

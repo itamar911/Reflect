@@ -64,10 +64,14 @@ async function dispatchAlert(
     ? todayStart.toISOString()
     : sevenDaysAgo.toISOString();
 
+  // stats.trades and avgRR below are computed over every row, so without this
+  // an alert email would report a plan the user never entered back to them as a
+  // trade they made (REF-82 §5.2).
   const { data: trades } = await supabase
     .from('trade_plans')
     .select('status, entry_price, exit_price, rr_ratio, emotional_state')
     .eq('user_id', userId)
+    .neq('status', 'not_entered')
     .gte('submitted_at', rangeStart);
 
   const allTrades = trades ?? [];

@@ -1330,10 +1330,15 @@ export default function DashboardClient({
   // Re-fetch trades from Supabase (used by the real-time subscription below)
   const fetchTrades = useCallback(async () => {
     const supabase = createClient();
+    // Must match app/(app)/dashboard/page.tsx: the realtime subscription below
+    // fires on any trade_plans change, so without the same neq a plan marked
+    // 'not_entered' in the trade form would be absent on load and present a
+    // second later, when this replaces the server's rows with its own.
     const { data } = await supabase
       .from('trade_plans')
       .select(DASH_TRADE_SELECT)
       .eq('user_id', userId)
+      .neq('status', 'not_entered')
       .order('submitted_at', { ascending: false })
       .limit(500);
 

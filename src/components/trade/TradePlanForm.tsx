@@ -1,14 +1,18 @@
 'use client';
 
 import { useState, useEffect, useCallback, useId, useMemo, useRef, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
 import { Check, AlertTriangle, X, LineChart, EyeOff } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { validateTradePlan, DEFAULT_PRESET_RULES } from '@/lib/validators/RulesetValidator';
 import { useModalDialog } from '@/lib/a11y/useModalDialog';
+import { useHydrated } from '@/lib/hooks';
 import { calcRR } from '@/lib/utils';
 import ValidationResultBanner from './ValidationResultBanner';
 import EmotionalStateSlider from './EmotionalStateSlider';
 import ConfidenceLevelSlider from './ConfidenceLevelSlider';
+import OpenPlanPrompt, { type OpenPlanFromPreviousDay } from './OpenPlanPrompt';
+import CloseTrade from '@/components/journal/CloseTrade';
 import dynamic from 'next/dynamic';
 const TradingViewChart = dynamic(() => import('./TradingViewChart'), { ssr: false });
 import Button from '@/components/ui/Button';
@@ -18,7 +22,9 @@ import type { PersonalStrategy } from '@/components/strategies/StrategiesClient'
 import { getPlanLimits, type PlanTier } from '@/lib/plans/config';
 import { fetchActiveRuleViolation } from '@/lib/rules/fetchActiveRuleViolation';
 import { logRuleViolations, overrideRuleViolations, type RuleViolationLogInput } from '@/lib/rules/logRuleViolation';
-import { loadTradeRuleContext } from '@/lib/rules/tradeRuleContext';
+import { loadTradeRuleContext, startOfTodayIso } from '@/lib/rules/tradeRuleContext';
+import { tradeDirection } from '@/lib/pnl';
+import { NOT_ENTERED } from '@/lib/trades/status';
 
 // Saved TP/SL input unit preference, read during render via
 // useSyncExternalStore (null on the server / until a valid value is saved).
@@ -125,6 +131,64 @@ const REQUIRED_FIELD_LABELS: Record<RequiredFieldKey, string> = {
   trade_reason: 'סיבת הכניסה',
 };
 
+// ── Plans left open from a previous day (REF-82 §5.2) ────────────────────────
+//
+// Everything OpenPlanPrompt shows, plus everything CloseTrade needs, so
+// "סגרתי אותה" can open the journal's close dialog without a second fetch.
+
+const OPEN_PLAN_SELECT =
+  'id, symbol, strategy, direction, submitted_at, entry_price, stop_loss, take_profit, '
+  + 'rr_ratio, emotional_state, trade_reason, units, quantity, point_value, pnl_currency';
+
+interface OpenPlanRow {
+  id: string;
+  symbol: string | null;
+  strategy: string;
+  direction: 'long' | 'short' | null;
+  submitted_at: string;
+  entry_price: number | string;
+  stop_loss: number | string;
+  take_profit: number | string;
+  rr_ratio: number | string;
+  emotional_state: number | string;
+  trade_reason: string;
+  units: number | string | null;
+  quantity: number | string | null;
+  point_value: number | string | null;
+  pnl_currency: string | null;
+}
+
+function mapOpenPlan(r: OpenPlanRow): OpenPlanFromPreviousDay {
+  return {
+    id: r.id,
+    symbol: r.symbol ?? null,
+    strategy: r.strategy,
+    // Via tradeDirection(), not r.direction — rows written before the direction
+    // column existed have it null, and that helper is the one place that knows
+    // the take_profit-vs-entry fallback. status/exit_price are passed only
+    // because its parameter type asks for them; it reads neither.
+    direction: tradeDirection({
+      status: 'open',
+      entry_price: r.entry_price,
+      exit_price: null,
+      take_profit: r.take_profit,
+      direction: r.direction,
+    }),
+    submitted_at: r.submitted_at,
+    entry_price: Number(r.entry_price),
+    stop_loss: Number(r.stop_loss),
+    take_profit: Number(r.take_profit),
+    rr_ratio: Number(r.rr_ratio),
+    emotional_state: Number(r.emotional_state),
+    trade_reason: r.trade_reason,
+    // units ?? quantity — the same precedence the journal passes to CloseTrade,
+    // because `units` is the newer column and older rows only have `quantity`.
+    units: r.units != null ? Number(r.units) : r.quantity != null ? Number(r.quantity) : null,
+    point_value: r.point_value != null ? Number(r.point_value) : null,
+    pnl_currency: r.pnl_currency ?? null,
+  };
+}
+
 interface TradePlanFormProps {
   userId: string;
   plan: PlanTier;
@@ -165,14 +229,43 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
   const [chartVisible, setChartVisible] = useState(false);
   const chartRegionId = useId();
 
+  // ── Plans left open from a previous day (REF-82 §5.2) ──────────────────────
+  //
+  // Declared above handleClose because, like chartVisible, some of it is reset
+  // on the way out.
+  const openPlansHeadingId = useId();
+  const [openPlans, setOpenPlans] = useState<OpenPlanFromPreviousDay[]>([]);
+  /**
+   * The plans "אחר כך" has hidden, for THIS opening of the sheet only.
+   *
+   * Component state and deliberately not localStorage: a dismissal that
+   * survived a reload would let the question be answered by silence, which is
+   * the failure this card exists to prevent ("without this, 'how many trades
+   * today' breaks within a week"). Cleared in handleClose below, so the next
+   * open asks again.
+   */
+  const [dismissedPlanIds, setDismissedPlanIds] = useState<Set<string>>(new Set());
+  /** The plan whose 'not_entered' write is in flight. */
+  const [markingPlanId, setMarkingPlanId] = useState<string | null>(null);
+  const [openPlanError, setOpenPlanError] = useState('');
+  /** The plan whose close dialog is open, if any. */
+  const [closingPlanId, setClosingPlanId] = useState<string | null>(null);
+
   // Closing the sheet puts the chart back behind the button, so the next open
   // starts opted out again. It needs its own reset: the sheet keeps the rest of
   // its state across a plain close (only a successful submit clears the form),
   // and it stays mounted while closed — `if (!isOpen) return null` below renders
   // nothing but unmounts nothing. Every close path goes through the `onClose`
   // prop, so wrapping it here covers Escape, the backdrop and the X button.
+  //
+  // The open-plan prompt resets here for the same reason and on the same path:
+  // "אחר כך" lasts one opening, and a half-finished close or a stale error
+  // message must not be waiting when the sheet comes back.
   const handleClose = useCallback(() => {
     setChartVisible(false);
+    setDismissedPlanIds(new Set());
+    setClosingPlanId(null);
+    setOpenPlanError('');
     onClose();
   }, [onClose]);
 
@@ -279,10 +372,28 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     // instead of "money was lost" — which meant the gate and this form could
     // disagree about the same two preset rules for the same user at the same
     // moment. See lib/rules/tradeRuleContext.ts.
-    const [rulesRes, personalRes, history] = await Promise.all([
+    const [rulesRes, personalRes, history, openPlansRes] = await Promise.all([
       supabase.from('preset_rules').select('*').eq('user_id', userId).single(),
       supabase.from('personal_strategies').select('*').eq('user_id', userId).order('created_at'),
       loadTradeRuleContext(userId, supabase),
+      // Plans still open from BEFORE today (REF-82 §5.2).
+      //
+      // The day boundary is startOfTodayIso() from tradeRuleContext — the same
+      // seam loadTradeRuleContext uses for "trades taken today", and
+      // deliberately not a second calculation. With two, a plan submitted just
+      // after local midnight could be counted against today's limit AND
+      // offered here as yesterday's leftover, and the user would be asked what
+      // happened to a plan they are still in.
+      //
+      // Oldest first: the plan that has been waiting longest is the one most
+      // likely to have gone unreported, so it leads.
+      supabase
+        .from('trade_plans')
+        .select(OPEN_PLAN_SELECT)
+        .eq('user_id', userId)
+        .eq('status', 'open')
+        .lt('submitted_at', startOfTodayIso())
+        .order('submitted_at', { ascending: true }),
     ]);
 
     if (personalRes.data) setPersonalStrategyRows(personalRes.data as PersonalStrategy[]);
@@ -291,6 +402,11 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     setTodayCount(history.todayTradeCount);
     setTodayLossAmount(history.todayLossAmount);
     setLossCount(history.lossStreak);
+
+    // `?? []` rather than the `if (data)` guard the two above use: an empty
+    // list is the honest state when the query failed, and showing nothing is
+    // better than leaving a card on screen that may already be answered.
+    setOpenPlans(((openPlansRes.data ?? []) as unknown as OpenPlanRow[]).map(mapOpenPlan));
 
     setLoading(false);
   }, [supabase, userId]);
@@ -301,6 +417,103 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     // eslint-disable-next-line react-hooks/set-state-in-effect -- marks the in-flight state of the fetch started here
     if (isOpen) loadContext();
   }, [isOpen, loadContext]);
+
+  // ── The open-plan prompt's behaviour ───────────────────────────────────────
+
+  const visibleOpenPlans = useMemo(
+    () => openPlans.filter((p) => !dismissedPlanIds.has(p.id)),
+    [openPlans, dismissedPlanIds],
+  );
+
+  const closingPlan = useMemo(
+    () => openPlans.find((p) => p.id === closingPlanId) ?? null,
+    [openPlans, closingPlanId],
+  );
+  const closePlanTitleId = useId();
+  const closePlanExitPriceRef = useRef<HTMLInputElement>(null);
+
+  // The first button of each card, so focus can be placed on a SURVIVING card
+  // after one leaves. This matters more here than it does in the journal: the
+  // control that had focus is inside a card that no longer exists, and
+  // useModalDialog's fallback for a vanished restore target is #main-content —
+  // which sits outside this sheet, so letting it fire would drop the user out
+  // of the dialog they are still working in.
+  const planButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  // undefined — nothing pending. A string — focus that card. null — focus the
+  // symbol field, which is where someone who came to write a plan wants to be.
+  const focusAfterPlanActionRef = useRef<string | null | undefined>(undefined);
+
+  const registerPlanButton = useCallback((planId: string, el: HTMLButtonElement | null) => {
+    planButtonRefs.current[planId] = el;
+  }, []);
+
+  /** The card that should take focus once `planId`'s card is gone. */
+  function focusTargetAfterRemoving(planId: string): string | null {
+    const i = visibleOpenPlans.findIndex((p) => p.id === planId);
+    return visibleOpenPlans[i + 1]?.id ?? visibleOpenPlans[i - 1]?.id ?? null;
+  }
+
+  // Keyed on the rendered list so it runs in the same commit that removes the
+  // card — the same ordering the journal relies on after a row delete.
+  useEffect(() => {
+    const target = focusAfterPlanActionRef.current;
+    if (target === undefined) return;
+    focusAfterPlanActionRef.current = undefined;
+    if (target !== null) planButtonRefs.current[target]?.focus();
+    else symbolRef.current?.focus();
+  }, [visibleOpenPlans]);
+
+  function dismissPlan(plan: OpenPlanFromPreviousDay) {
+    setOpenPlanError('');
+    focusAfterPlanActionRef.current = focusTargetAfterRemoving(plan.id);
+    setDismissedPlanIds((prev) => new Set(prev).add(plan.id));
+  }
+
+  async function markPlanNotEntered(plan: OpenPlanFromPreviousDay) {
+    setMarkingPlanId(plan.id);
+    setOpenPlanError('');
+
+    // status and nothing else. No closed_at, no exit price, no P&L — there was
+    // no trade, and writing a closing timestamp would make one up. Note that
+    // the status CHECK from migration 032 has to be applied for this to
+    // succeed; until it is, Postgres rejects the value and the user sees the
+    // error below.
+    const { error } = await supabase
+      .from('trade_plans')
+      .update({ status: NOT_ENTERED })
+      // Guards against the plan having been closed in another tab since this
+      // card was drawn: then the update matches nothing and the close stands,
+      // rather than this overwriting a real exit price and its P&L.
+      .eq('id', plan.id)
+      .eq('status', 'open');
+
+    setMarkingPlanId(null);
+
+    if (error) {
+      setOpenPlanError('לא הצלחנו לשמור את התשובה. אפשר לנסות שוב.');
+      return;
+    }
+
+    focusAfterPlanActionRef.current = focusTargetAfterRemoving(plan.id);
+    setOpenPlans((prev) => prev.filter((p) => p.id !== plan.id));
+
+    // No reload of the rule context. This plan was submitted before today, so
+    // it was never in todayTradeCount, and lossStreak/todayLossAmount read only
+    // closed rows — marking it 'not_entered' changes none of the three.
+  }
+
+  function handlePlanClosed(planId: string) {
+    setClosingPlanId(null);
+    focusAfterPlanActionRef.current = focusTargetAfterRemoving(planId);
+    setOpenPlans((prev) => prev.filter((p) => p.id !== planId));
+
+    // A reload, unlike the 'not_entered' path: CloseTrade wrote closed_at = now,
+    // so this plan has just joined TODAY's closed set. todayLossAmount and
+    // lossStreak both change, and they are what the gate on submit is about to
+    // judge the new plan against — stale numbers here mean a max_daily_loss or
+    // cooldown_after_losses rule silently fails to fire.
+    loadContext();
+  }
 
   // Debounced so the chart doesn't chase every keystroke. Symbol and timeframe
   // only: the price fields used to feed this too, but nothing downstream reads
@@ -348,13 +561,17 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
 
   useEffect(() => {
     if (!selectedStrategy || selectedStrategy.max_daily_trades == null) return;
-    const todayStart = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
+    const todayStart = startOfTodayIso();
     let cancelled = false;
     supabase
       .from('trade_plans')
       .select('id', { count: 'exact', head: true })
       .eq('user_id', userId)
       .eq('strategy', selectedStrategy.name)
+      // The strategy's own daily limit, and the same exclusion
+      // loadTradeRuleContext makes for the preset one: a plan the user never
+      // entered must not eat into the allowance.
+      .neq('status', 'not_entered')
       .gte('submitted_at', todayStart)
       .then(({ count }) => {
         if (!cancelled) setFetchedStrategyTradeCount(count ?? 0);
@@ -728,6 +945,22 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                 שגיאת שרת — נסה שוב
               </div>
             )}
+
+            {/* Plans left open from a previous day (REF-82 §5.2).
+                Above the fields, inside the same scrolling column, and not
+                blocking them: everything below stays usable and submittable
+                whether or not the question is answered. Renders nothing when
+                there is nothing to ask about. */}
+            <OpenPlanPrompt
+              plans={visibleOpenPlans}
+              headingId={openPlansHeadingId}
+              onReportClosed={(plan) => { setOpenPlanError(''); setClosingPlanId(plan.id); }}
+              onMarkNotEntered={markPlanNotEntered}
+              onDismiss={dismissPlan}
+              busyPlanId={markingPlanId}
+              error={openPlanError}
+              registerFirstButton={registerPlanButton}
+            />
 
             {/* Step 1 — Asset, direction & strategy */}
             <FormSection step={1} label="נכס ואסטרטגיה" active={activeStep === 1} done={activeStep > 1}>
@@ -1250,7 +1483,117 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
           </div>
         )}
       </div>
+
+      {/* "סגרתי אותה" — the journal's own close dialog, for the plan on the
+          card. Not a second closing form: a close needs an exit price to
+          produce a real P&L, and CloseTrade is the one component that knows how
+          to take one and what to write (REF-82 §5.2).
+
+          Mounted here as a sibling of the sheet rather than inside it, so it
+          is not inside the sheet's own scroll container, and only when there is
+          a plan to close — useModalDialog has to run on mount to push onto the
+          dialog stack, and it is that stack that gives this dialog Escape and
+          the focus trap while the sheet keeps both when it closes. */}
+      {closingPlan && (
+        <ClosePlanDialog
+          titleId={closePlanTitleId}
+          title={`סגירת העסקה — ${closingPlan.symbol ?? closingPlan.strategy}`}
+          exitPriceRef={closePlanExitPriceRef}
+          // Dismissing reloads rather than just closing. CloseTrade writes the
+          // close to the database BEFORE it shows its AI debrief, and only
+          // calls onClosed once the user dismisses that — so Escape or × at
+          // that point leaves a card on screen for a plan that is already
+          // closed. Refetching is what makes the list say what the database
+          // says, in the one case where this component cannot know.
+          onCancel={() => { setClosingPlanId(null); loadContext(); }}
+        >
+          <CloseTrade
+            tradeId={closingPlan.id}
+            entryPrice={closingPlan.entry_price}
+            stopLoss={closingPlan.stop_loss}
+            takeProfit={closingPlan.take_profit}
+            rrRatio={closingPlan.rr_ratio}
+            emotionalState={closingPlan.emotional_state}
+            strategy={closingPlan.strategy}
+            tradeReason={closingPlan.trade_reason}
+            direction={closingPlan.direction}
+            units={closingPlan.units}
+            pointValue={closingPlan.point_value}
+            pnlCurrency={closingPlan.pnl_currency}
+            exitPriceRef={closePlanExitPriceRef}
+            onClosed={() => handlePlanClosed(closingPlan.id)}
+          />
+        </ClosePlanDialog>
+      )}
     </>
+  );
+}
+
+/**
+ * Dialog chrome for the close-the-old-plan flow.
+ *
+ * A separate component, not an `if` around a hook: useModalDialog registers on
+ * the shared dialog stack when it mounts and unregisters when it unmounts, and
+ * that is what hands Escape and the focus trap to this dialog while it is up
+ * and back to the trade sheet underneath when it goes.
+ *
+ * Portalled to <body> because the sheet sets `md:-translate-x-1/2` — a
+ * transform, which would make a `position: fixed` child position itself against
+ * the sheet's box instead of the viewport. Same reason the journal's Modal is
+ * portalled; z-index one step above the sheet's z-50.
+ *
+ * Focus lands on the exit-price field, the first thing to fill in, exactly as
+ * it does when this dialog is opened from the journal. On close, useModalDialog
+ * restores focus to the card button that opened it — or, once that card is
+ * gone, the parent's own hand-off takes over.
+ */
+function ClosePlanDialog({ titleId, title, exitPriceRef, onCancel, children }: {
+  titleId: string;
+  /** Visible heading, and via titleId the dialog's accessible name. */
+  title: string;
+  exitPriceRef: React.RefObject<HTMLInputElement | null>;
+  onCancel: () => void;
+  children: React.ReactNode;
+}) {
+  const mounted = useHydrated();
+  const { dialogProps } = useModalDialog({
+    open: mounted, onClose: onCancel, labelledBy: titleId, initialFocusRef: exitPriceRef,
+  });
+
+  if (!mounted) return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[60] flex items-start sm:items-center justify-center overflow-y-auto p-4"
+      style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
+      onClick={onCancel}
+    >
+      <div
+        {...dialogProps}
+        dir="rtl"
+        className="w-full max-w-lg mx-auto max-h-[90dvh] overflow-y-auto rounded-2xl p-5 flex flex-col gap-3 my-auto"
+        style={{
+          background: 'var(--color-tg-surface)',
+          border: '1px solid var(--color-tg-border)',
+          boxShadow: '0 24px 64px rgba(0,0,0,0.8)',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <p id={titleId} className="text-base font-semibold text-tg-text">{title}</p>
+          <button
+            type="button"
+            onClick={onCancel}
+            aria-label="סגור"
+            className="text-tg-muted hover:text-tg-text transition-colors p-1 shrink-0"
+          >
+            <X aria-hidden="true" size={18} />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>,
+    document.body
   );
 }
 

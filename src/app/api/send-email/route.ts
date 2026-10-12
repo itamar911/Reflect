@@ -207,8 +207,12 @@ export async function POST(request: Request) {
 
   // Get trade stats
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  // Same reason as the cron alerts: the trade count and avgRR below are over
+  // every row, and a plan the user never entered is not a trade (REF-82 §5.2).
   const { data: trades } = await supabase.from('trade_plans')
-    .select('*').eq('user_id', user.id).gte('submitted_at', sevenDaysAgo);
+    .select('*').eq('user_id', user.id)
+    .neq('status', 'not_entered')
+    .gte('submitted_at', sevenDaysAgo);
 
   const allTrades = trades ?? [];
   const closed = allTrades.filter(t => t.status === 'closed');

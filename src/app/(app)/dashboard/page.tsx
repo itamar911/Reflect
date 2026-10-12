@@ -14,9 +14,14 @@ export default async function DashboardPage() {
 
   const [profileRes, tradesRes, { tier: plan }] = await Promise.all([
     supabase.from('profiles').select('display_name').eq('id', user.id).single(),
+    // 'not_entered' is excluded here and in DashboardClient's own refetch,
+    // which has to stay in step with this query: a plan the user never entered
+    // is not a trade (REF-82 §5.2), and the dashboard also reads a non-empty
+    // trade list as "this user is past the welcome state".
     supabase.from('trade_plans')
       .select(DASH_TRADE_SELECT)
       .eq('user_id', user.id)
+      .neq('status', 'not_entered')
       .order('submitted_at', { ascending: false })
       .limit(500),
     getUserPlan(supabase, user.id),

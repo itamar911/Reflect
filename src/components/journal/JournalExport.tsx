@@ -1,5 +1,7 @@
 'use client';
 
+import { tradeStatusLabel } from '@/lib/trades/status';
+
 interface ExportTrade {
   submitted_at: string;
   strategy: string;
@@ -30,7 +32,10 @@ export default function JournalExport({ trades }: { trades: ExportTrade[] }) {
         t.emotional_state ?? '',
         `"${(t.trade_reason ?? '').replace(/"/g, '""')}"`,
         `"${(t.debrief_answer ?? '').replace(/"/g, '""')}"`,
-        t.status === 'open' ? 'פתוח' : 'סגור',
+        // Via the shared label — this ternary exported a 'not_entered' plan as
+        // "סגור", which is the one thing it is not (REF-82 §5.2). Reached from
+        // All Trades, the one page that loads such rows.
+        tradeStatusLabel(t.status),
       ];
     });
 

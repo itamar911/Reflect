@@ -16,10 +16,14 @@ export default async function SetupsPage() {
       .select('*')
       .eq('user_id', user.id)
       .order('updated_at', { ascending: false }),
+    // Win rate and P&L per setup. A plan the user never entered is not a trade
+    // (REF-82 §5.2) and would dilute a setup's trade count without ever
+    // contributing an outcome.
     supabase
       .from('trade_plans')
       .select('id, strategy, symbol, entry_price, exit_price, status, setup_id, submitted_at, rr_ratio')
       .eq('user_id', user.id)
+      .neq('status', 'not_entered')
       .order('submitted_at', { ascending: false }),
   ]);
 

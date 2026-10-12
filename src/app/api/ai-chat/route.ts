@@ -276,7 +276,11 @@ export async function POST(request: Request) {
 
   // Load user context
   const [tradesRes, presetRes, customRes] = await Promise.all([
-    supabase.from('trade_plans').select('*').eq('user_id', user.id).order('submitted_at', { ascending: false }).limit(100),
+    // buildUserContext averages over every row and builds the coach's
+    // discipline score, strategy mix and recent-trades list from them, so a
+    // plan the user never entered would be described to the coach as a trade
+    // (REF-82 §5.2).
+    supabase.from('trade_plans').select('*').eq('user_id', user.id).neq('status', 'not_entered').order('submitted_at', { ascending: false }).limit(100),
     supabase.from('preset_rules').select('*').eq('user_id', user.id).single(),
     supabase.from('custom_rules').select('*').eq('user_id', user.id).eq('is_active', true),
   ]);
