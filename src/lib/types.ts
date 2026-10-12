@@ -20,7 +20,16 @@ export type ConditionType =
 export type ActionType = 'block_day' | 'block_timer' | 'warn';
 export type ValidationStatus = 'valid' | 'warning' | 'blocked';
 export type EmotionalPattern = 'FOMO' | 'REVENGE' | 'FEAR' | 'OVERCONFIDENCE' | 'NONE';
-export type TradeStatus = 'open' | 'closed';
+// 'not_entered' is a plan the user confirmed they never took — asked about in
+// the next form when a plan is still open from a previous day (REF-82 §5.2).
+// It is not 'closed': there is no exit price and no P&L. Allowed by the status
+// CHECK from migration 032.
+//
+// Readers that filter on status have to decide about it explicitly; a
+// 'not_entered' plan is not a trade taken. lib/rules/tradeRuleContext.ts
+// counts today's trades with no status filter and so would currently count
+// one — that is step 2's work, not this change's.
+export type TradeStatus = 'open' | 'closed' | 'not_entered';
 export type TraderIdentity = 'Disciplined Sniper' | 'Emotional Trader' | 'Risk Taker' | 'Aggressive Scalper' | 'Developing Trader';
 export type StreakType = 'discipline' | 'no_revenge' | 'stop_loss' | 'full_discipline';
 export type Timeframe = '1m' | '5m' | '15m' | '30m' | '1H' | '4H' | 'Daily' | 'Weekly';
@@ -107,7 +116,55 @@ export interface TradePlan {
   risk_type: RiskType | null;
   actual_pnl: number | null;
   strategy_conditions_checked: { condition: string; checked: boolean }[] | null;
+
+  // ── Added by migration 032, which is not applied yet ──────────────────────
+  //
+  // OPTIONAL ON PURPOSE, and not because the columns are nullable — 032
+  // declares both NOT NULL with a DEFAULT, so once it has run every row
+  // carries a value. They are optional because the migration is run by hand
+  // and production has to keep working in the window before that happens:
+  // until then `select *` returns rows without these keys, and a required
+  // `boolean` here would have TypeScript promise a value that is `undefined`
+  // at runtime. Optional makes callers handle the absence, which is the true
+  // state of the data.
+  //
+  // Tighten both to required once 032 is applied and the window is closed.
+  // Nothing reads or writes them yet.
+
+  /** A trade that reached the journal with no plan behind it (REF-82 §5.4).
+   *  Marked, and still counted toward the rules. Written by REF-90, which is
+   *  not built — so this is false on every row today. */
+  unplanned?: boolean;
+
+  /** What the rule check had to judge this plan against when it was saved
+   *  (REF-82 §6), so a plan saved while broker data was missing can later be
+   *  shown as "saved without verification" rather than read as verified.
+   *  REF-82 only ever writes 'reflect_only'; the broker values come from
+   *  REF-90. */
+  rule_context_source?: RuleContextSource;
 }
+
+/**
+ * Where the rule check's view of the user's day came from.
+ *
+ * A four-value enum rather than the single "saved without verification"
+ * boolean the brief proposes, because REF-82 §6 distinguishes two failure
+ * kinds that need different things from the user — an expired connection they
+ * fix in one click, and a Tradovate outage nobody can fix — and a boolean
+ * cannot carry that difference. Decided on REF-82 (12.10).
+ *
+ * Mirrors trade_plans_rule_context_source_check in migration 032; the two must
+ * change together.
+ */
+export type RuleContextSource =
+  /** No broker data consulted. The default, and all REF-82 writes. */
+  | 'reflect_only'
+  /** Broker data was fetched and judged against. */
+  | 'broker_verified'
+  /** The connection had lapsed; the user must reconnect. */
+  | 'broker_expired'
+  /** The fetch failed upstream. */
+  | 'broker_unavailable';
 
 export type PnlCurrency = '₪' | '$';
 

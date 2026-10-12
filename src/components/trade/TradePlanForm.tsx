@@ -141,6 +141,24 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
   const titleId = useId();
   const symbolRef = useRef<HTMLInputElement>(null);
 
+  // Ids for the field labels and help text (REF-82, §9 of the build brief).
+  // Generated rather than hardcoded for the same reason PriceInput generates
+  // its own: the sheet is one component but there is no guarantee it is only
+  // ever mounted once, and a duplicated id silently breaks the association
+  // it exists to make.
+  //
+  // The two chip groups and the direction pair are labelled with a <span> +
+  // role="group" rather than <fieldset>/<legend>, because a legend cannot be
+  // laid out inside the flex column these sit in without fighting its
+  // default rendering — and the accessible result is the same.
+  const symbolId = useId();
+  const directionLabelId = useId();
+  const strategyLabelId = useId();
+  const personalStrategyLabelId = useId();
+  const reasonId = useId();
+  const sizingNoteId = useId();
+  const sizingErrorId = useId();
+
   // The chart is opt-in (REF-70): until the trader asks for it, TradingViewChart
   // isn't rendered at all, so neither its dynamic() chunk nor
   // s3.tradingview.com/tv.js is fetched and no symbol leaves the page.
@@ -713,60 +731,76 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
 
             {/* Step 1 — Asset, direction & strategy */}
             <FormSection step={1} label="נכס ואסטרטגיה" active={activeStep === 1} done={activeStep > 1}>
-              <div ref={(el) => { fieldRefs.current.symbol = el; }} style={fieldHighlightStyle('symbol')}>
+              <div ref={(el) => { fieldRefs.current.symbol = el; }} style={fieldHighlightStyle('symbol')} className="flex flex-col gap-1">
+                <label htmlFor={symbolId} className="text-xs font-medium text-tg-muted">סימול</label>
                 <input
+                  id={symbolId}
                   ref={symbolRef}
                   type="text"
-                  placeholder="סימול נייר (SPY, EURUSD, AAPL...)"
+                  placeholder="SPY, EURUSD, AAPL..."
                   value={form.symbol}
                   onChange={(e) => { setForm({ ...form, symbol: e.target.value.toUpperCase() }); setValidationResult(null); }}
                   className="w-full h-10 px-3 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none focus:border-tg-primary transition-colors"
                   style={{ background: 'var(--color-tg-surface-2)' }}
                 />
               </div>
-              <div ref={(el) => { fieldRefs.current.direction = el; }} style={fieldHighlightStyle('direction')} className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => { setForm({ ...form, direction: 'long' }); setValidationResult(null); }}
-                  className="h-11 rounded-xl text-sm font-bold border-2 transition-all flex items-center justify-center gap-1.5"
-                  style={{
-                    background: form.direction === 'long' ? 'var(--color-tg-success-muted)' : 'var(--color-tg-surface-2)',
-                    borderColor: form.direction === 'long' ? 'var(--color-tg-success)' : 'var(--color-tg-border)',
-                    color: form.direction === 'long' ? 'var(--color-tg-success)' : 'var(--color-tg-muted)',
-                  }}
-                >
-                  Long ▲
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setForm({ ...form, direction: 'short' }); setValidationResult(null); }}
-                  className="h-11 rounded-xl text-sm font-bold border-2 transition-all flex items-center justify-center gap-1.5"
-                  style={{
-                    background: form.direction === 'short' ? 'var(--color-tg-danger-muted)' : 'var(--color-tg-surface-2)',
-                    borderColor: form.direction === 'short' ? 'var(--color-tg-danger)' : 'var(--color-tg-border)',
-                    color: form.direction === 'short' ? 'var(--color-tg-danger)' : 'var(--color-tg-muted)',
-                  }}
-                >
-                  Short ▼
-                </button>
+              <div ref={(el) => { fieldRefs.current.direction = el; }} style={fieldHighlightStyle('direction')} className="flex flex-col gap-1">
+                <span id={directionLabelId} className="text-xs font-medium text-tg-muted">כיוון עסקה</span>
+                {/* aria-pressed, because until now the chosen direction was
+                    distinguishable only by background and border colour —
+                    nothing announced it, and nothing conveyed it without
+                    colour. */}
+                <div role="group" aria-labelledby={directionLabelId} className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    aria-pressed={form.direction === 'long'}
+                    onClick={() => { setForm({ ...form, direction: 'long' }); setValidationResult(null); }}
+                    className="h-11 rounded-xl text-sm font-bold border-2 transition-all flex items-center justify-center gap-1.5"
+                    style={{
+                      background: form.direction === 'long' ? 'var(--color-tg-success-muted)' : 'var(--color-tg-surface-2)',
+                      borderColor: form.direction === 'long' ? 'var(--color-tg-success)' : 'var(--color-tg-border)',
+                      color: form.direction === 'long' ? 'var(--color-tg-success)' : 'var(--color-tg-muted)',
+                    }}
+                  >
+                    Long ▲
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={form.direction === 'short'}
+                    onClick={() => { setForm({ ...form, direction: 'short' }); setValidationResult(null); }}
+                    className="h-11 rounded-xl text-sm font-bold border-2 transition-all flex items-center justify-center gap-1.5"
+                    style={{
+                      background: form.direction === 'short' ? 'var(--color-tg-danger-muted)' : 'var(--color-tg-surface-2)',
+                      borderColor: form.direction === 'short' ? 'var(--color-tg-danger)' : 'var(--color-tg-border)',
+                      color: form.direction === 'short' ? 'var(--color-tg-danger)' : 'var(--color-tg-muted)',
+                    }}
+                  >
+                    Short ▼
+                  </button>
+                </div>
               </div>
-              <div ref={(el) => { fieldRefs.current.strategy = el; }} style={fieldHighlightStyle('strategy')} className="flex flex-wrap gap-2">
-                {STRATEGIES.map((s) => (
-                  <StrategyChip
-                    key={s}
-                    label={s}
-                    selected={form.strategy === s}
-                    onClick={() => { setForm({ ...form, strategy: s }); setValidationResult(null); }}
-                  />
-                ))}
+              <div ref={(el) => { fieldRefs.current.strategy = el; }} style={fieldHighlightStyle('strategy')} className="flex flex-col gap-1">
+                <span id={strategyLabelId} className="text-xs font-medium text-tg-muted">אסטרטגיה</span>
+                <div role="group" aria-labelledby={strategyLabelId} className="flex flex-wrap gap-2">
+                  {STRATEGIES.map((s) => (
+                    <StrategyChip
+                      key={s}
+                      label={s}
+                      selected={form.strategy === s}
+                      onClick={() => { setForm({ ...form, strategy: s }); setValidationResult(null); }}
+                    />
+                  ))}
+                </div>
               </div>
               <div className="flex items-center gap-2 mt-1">
                 <div className="flex-1 h-px" style={{ background: 'var(--color-tg-border)' }} />
-                <span className="text-[10px] text-tg-muted shrink-0">האסטרטגיות שלי</span>
+                {/* Already the visible heading for the group below it, so it
+                    names that group rather than a second label being added. */}
+                <span id={personalStrategyLabelId} className="text-[10px] text-tg-muted shrink-0">האסטרטגיות שלי</span>
                 <div className="flex-1 h-px" style={{ background: 'var(--color-tg-border)' }} />
               </div>
               {personalStrategyRows.length > 0 ? (
-                <div className="flex flex-wrap gap-2">
+                <div role="group" aria-labelledby={personalStrategyLabelId} className="flex flex-wrap gap-2">
                   {personalStrategyRows.map((s) => (
                     <StrategyChip
                       key={s.id}
@@ -887,6 +921,9 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                       step="any"
                       placeholder="0"
                       value={form.units}
+                      // The note below the pair explains both fields, and the
+                      // error replaces nothing — it is read in addition.
+                      aria-describedby={pnlFieldsError && !hasUnits ? `${sizingNoteId} ${sizingErrorId}` : sizingNoteId}
                       onChange={(e) => { setForm({ ...form, units: e.target.value }); setPnlFieldsError(false); }}
                       className="w-full h-10 px-2 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors text-center"
                       style={{
@@ -903,6 +940,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                       step="any"
                       placeholder="1"
                       value={form.point_value}
+                      aria-describedby={sizingNoteId}
                       onChange={(e) => setForm({ ...form, point_value: e.target.value })}
                       className="w-full h-10 px-2 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors text-center"
                       style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)' }}
@@ -910,11 +948,11 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                   </div>
                 </div>
               </div>
-              <p className="text-[10px] text-tg-muted">
+              <p id={sizingNoteId} className="text-[10px] text-tg-muted">
                 יחידות/חוזים — שדה חובה. שווי נקודה ($) — אופציונלי, ברירת מחדל 1. נדרשים כדי שהמערכת תחשב עבורך רווח/הפסד ({currency}) בסגירת העסקה
               </p>
               {pnlFieldsError && (
-                <div className="px-3 py-2 rounded-xl text-xs animate-fade-in"
+                <div id={sizingErrorId} className="px-3 py-2 rounded-xl text-xs animate-fade-in"
                   style={{ background: 'var(--color-tg-danger-muted)', color: 'var(--color-tg-danger)' }}>
                   יש למלא יחידות תקינות כדי להגיש את התוכנית
                 </div>
@@ -1040,8 +1078,10 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                       </button>
                     ))}
                   </div>
-                  <div ref={(el) => { fieldRefs.current.trade_reason = el; }} style={fieldHighlightStyle('trade_reason')}>
+                  <div ref={(el) => { fieldRefs.current.trade_reason = el; }} style={fieldHighlightStyle('trade_reason')} className="flex flex-col gap-1">
+                    <label htmlFor={reasonId} className="text-xs font-medium text-tg-muted">סיבת הכניסה</label>
                     <textarea
+                      id={reasonId}
                       rows={2}
                       placeholder="תאר מה אתה רואה בגרף..."
                       value={form.trade_reason}
@@ -1224,6 +1264,10 @@ function StrategyChip({
 }) {
   return (
     <button
+      type="button"
+      // Selection was carried by colour alone before this. aria-pressed is what
+      // tells a screen reader which chip is the chosen one.
+      aria-pressed={selected}
       onClick={onClick}
       className="px-3 py-1.5 rounded-full text-sm border transition-all duration-150"
       style={{
@@ -1302,6 +1346,7 @@ function PriceInput({
   // Generated per instance: the component renders three times in the form
   // (entry / stop loss / take profit), so a fixed id would collide.
   const inputId = useId();
+  const hintId = useId();
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -1314,6 +1359,11 @@ function PriceInput({
         step="any"
         placeholder="0.00"
         value={value}
+        // The hint was rendered but never associated, so the resolved price
+        // ("מחיר: 4512.5") and the "enter an entry price first" prompt were
+        // both invisible to a screen reader. Only referenced when one is on
+        // screen — pointing at an absent id announces nothing.
+        aria-describedby={hint ? hintId : undefined}
         onChange={(e) => onChange(e.target.value)}
         className="w-full h-10 px-2 rounded-xl text-sm text-tg-text border focus:outline-none transition-colors text-center"
         style={{
@@ -1322,7 +1372,7 @@ function PriceInput({
         }}
       />
       {hint && (
-        <span className="text-[10px] text-center truncate" style={{ color: 'var(--color-tg-muted)' }}>
+        <span id={hintId} className="text-[10px] text-center truncate" style={{ color: 'var(--color-tg-muted)' }}>
           {hint}
         </span>
       )}
