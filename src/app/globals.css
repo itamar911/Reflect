@@ -272,6 +272,42 @@ html.light .rule-event-colours {
   --rule-event-attention: #b45309;
 }
 
+/* ── Today-context colours ───────────────────────────────
+   Scoped to components/trade/TodayContextPanel.tsx, for the same reason the
+   block above exists: the app-wide tokens fail AA where this panel needs
+   them, and the panel sits inside a form whose accessibility statement is a
+   legal document.
+
+   Measured against the surface the panel actually renders on
+   (--color-tg-surface-2: #383840 dark, #e9ecf0 light) rather than the page
+   background, because that is what the text sits on:
+
+     loss       #fb8c8c  5.1:1 dark   |  #b91c1c  5.5:1 light
+     gain       #22c55e  5.1:1 dark   |  #166534  6.0:1 light
+     attention  #f59e0b  5.4:1 dark   |  #b45309  4.2:1 light
+
+   loss and gain are TEXT (an amount of money), so both themes clear 4.5:1.
+   --color-tg-danger would not: #ef4444 measures about 3.1:1 on the dark
+   surface and #ef5350 about 3.2:1 on the light one. Same story for
+   --color-tg-success. The hue is kept; only the lightness moves.
+
+   attention is never text — it draws the frame and the warning icon on the
+   two broker-failure states, where the sentence itself stays in
+   --color-tg-text. It only needs the 3:1 non-text threshold, which the light
+   value clears at 4.2:1.
+
+   Red is on money lost and nothing else. Counts are never coloured. */
+.today-context-colours {
+  --today-context-loss:      #fb8c8c;
+  --today-context-gain:      #22c55e;
+  --today-context-attention: #f59e0b;
+}
+html.light .today-context-colours {
+  --today-context-loss:      #b91c1c;
+  --today-context-gain:      #166534;
+  --today-context-attention: #b45309;
+}
+
 /* ── Sidebar toggle handle ────────────────────────────────
    Half-pill tab attached to the sidebar's edge (RTL: rounded on the left,
    flat against the panel). The outer button (.sidebar-handle-btn, inline

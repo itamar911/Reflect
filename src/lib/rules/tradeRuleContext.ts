@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/client';
-import { tradeMoneyPnl } from '@/lib/pnl';
+import { hasMoneyPnl, tradeMoneyPnl } from '@/lib/pnl';
+import type { PnlCurrency, RuleContextSource } from '@/lib/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 /**
@@ -44,7 +45,68 @@ interface ClosedTradeRow {
   fomo_entry?: boolean | null;
   exited_early?: boolean | null;
   moved_sl?: boolean | null;
+  /** Selected only by the closed-today query, for the panel's display totals. */
+  pnl_currency?: string | null;
 }
+
+/**
+ * Today's money in ONE currency.
+ *
+ * Per currency, and never summed across them, because `pnl_amount` is a bare
+ * number with its unit in a second column: a ₪ figure and a $ figure added
+ * together produce a number that is in no currency at all. The rule thresholds
+ * do exactly that (see `todayLossAmount` below) and that is a known defect, not
+ * a pattern to copy — REF-99 settles it by making the product dollar-only.
+ * Until then the panel shows each currency on its own.
+ */
+export interface TodayMoneyInCurrency {
+  currency: PnlCurrency;
+  /** Wins and losses netted, signed. Negative means the day is down. */
+  net: number;
+  /** Money lost, as a positive number. Gross: winners are not deducted. */
+  lost: number;
+}
+
+/**
+ * What the user's day looks like, for the form's context panel to describe.
+ *
+ * DISPLAY ONLY. No rule reads any of this, and it must stay that way: these
+ * figures are scoped and split for a sentence a human reads, while the rule
+ * thresholds below are deliberately the cruder numbers the gate has always
+ * compared against. Two shapes of the same day, for two different jobs.
+ *
+ * Derived from the same closed-today query the loss threshold uses, via the
+ * same tradeMoneyPnl() — so the panel cannot tell the user one thing while the
+ * rules act on another (REF-82 §4.5).
+ */
+export interface TodayClosedSummary {
+  /** Plans closed today, whether or not they carry a money figure. */
+  count: number;
+  /** How many of those lost money. */
+  losingCount: number;
+  /**
+   * One entry per currency appearing among today's money-bearing closes, in a
+   * fixed order so the panel does not reshuffle between loads. Empty when
+   * nothing closed today carries a money figure.
+   */
+  money: readonly TodayMoneyInCurrency[];
+}
+
+/**
+ * Whether this user has a Tradovate connection at all.
+ *
+ * Three values, not a boolean, because "we could not find out" is its own
+ * state: a failed read rendered as "not connected" is how a connected user
+ * gets told to connect. Same distinction `readFailed` carries in
+ * components/settings/TradovateConnectionCard.tsx, for the same reason.
+ */
+export type BrokerConnectionPresence =
+  /** The read succeeded and there is no connection row. */
+  | 'none'
+  /** A row exists, in whatever state. */
+  | 'present'
+  /** The read failed, or could not be attempted. */
+  | 'unknown';
 
 /** Everything the preset and custom rule checks need from trade history. */
 export interface TradeRuleContext {
@@ -69,6 +131,46 @@ export interface TradeRuleContext {
   lastTradeFomo: boolean;
   lastTradeExitedEarly: boolean;
   lastTradeMovedSl: boolean;
+
+  // ── Not rule inputs: what the day looked like, for the form to say so ──────
+
+  /**
+   * Where this view of the user's day came from (REF-82 §6).
+   *
+   * ALWAYS 'reflect_only' TODAY, and hardcoded rather than derived, because it
+   * is the truth: the broker pull layer does not exist. The form can only judge
+   * what the user recorded in Reflect, so that is what it declares.
+   *
+   * >>> THIS IS WHERE REF-90 CONNECTS THE BROKER DATA. <<<
+   *
+   * REF-90 fetches today's executed trades from Tradovate when the form opens
+   * (§2.4 — one REST call, on demand, no cron and no socket) and merges them
+   * into the figures above. It sets this field to what actually happened:
+   * 'broker_verified' when the fetch returned, 'broker_expired' when the
+   * connection had lapsed, 'broker_unavailable' when the fetch failed. It must
+   * set it HERE, on this one object, so that the gate in AppShell and the form
+   * can never disagree about whose day they are looking at — the divergence
+   * this module exists to have ended (see the header).
+   *
+   * The context panel already renders all four states; nothing else needs
+   * writing on the display side. What it must not do is write this to
+   * trade_plans.rule_context_source before migration 032 has run — see the
+   * submit path in components/trade/TradePlanForm.tsx.
+   */
+  source: RuleContextSource;
+
+  /**
+   * Whether a Tradovate connection exists — for the panel's wording only.
+   *
+   * Separate from `source` and NOT derivable from it. Today every user is
+   * 'reflect_only' whether or not they are connected, because nothing pulls the
+   * data yet; the panel invites a user to connect only when there is nothing to
+   * reconnect, and this is the field that tells those two apart.
+   */
+  brokerConnection: BrokerConnectionPresence;
+
+  /** Today's closes, shaped for the sentence the panel writes. Display only. */
+  todayClosed: TodayClosedSummary;
 }
 
 /** Fields every query here needs for tradeMoneyPnl() to be usable. */
@@ -88,6 +190,93 @@ const MONEY_FIELDS = 'status, exit_price, pnl_amount, actual_pnl';
  */
 export function startOfTodayIso(): string {
   return new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
+}
+
+/**
+ * The order currencies appear in on screen.
+ *
+ * Fixed, so two loads of the same day cannot list them in two orders — the
+ * query guarantees no ordering of its own. Dollars first: REF-99 makes the
+ * product dollar-only, so that is the column the product is moving toward.
+ */
+const CURRENCY_ORDER: readonly PnlCurrency[] = ['$', '₪'];
+
+/** The currency a closed row's money is in. `?? '₪'` app-wide — see JournalClient. */
+function currencyOf(row: ClosedTradeRow): PnlCurrency {
+  return row.pnl_currency === '$' ? '$' : '₪';
+}
+
+/**
+ * Today's closes, split by currency, for the panel.
+ *
+ * Only rows that carry a money figure reach the `money` array — hasMoneyPnl(),
+ * the same filter the journal and the calendar use when they collect which
+ * currencies a set of trades spans. Without it a close with no exit price (so
+ * tradeMoneyPnl() returns 0) would add its currency with a zero total, and the
+ * panel would announce two currencies because of a row that holds no money.
+ */
+function summariseTodayCloses(rows: readonly ClosedTradeRow[]): TodayClosedSummary {
+  const byCurrency = new Map<PnlCurrency, { net: number; lost: number }>();
+  let losingCount = 0;
+
+  for (const row of rows) {
+    if (!hasMoneyPnl(row)) continue;
+    const pnl = tradeMoneyPnl(row);
+    if (pnl < 0) losingCount++;
+
+    const currency = currencyOf(row);
+    const entry = byCurrency.get(currency) ?? { net: 0, lost: 0 };
+    entry.net += pnl;
+    if (pnl < 0) entry.lost += Math.abs(pnl);
+    byCurrency.set(currency, entry);
+  }
+
+  return {
+    count: rows.length,
+    losingCount,
+    money: CURRENCY_ORDER.flatMap((currency) => {
+      const entry = byCurrency.get(currency);
+      return entry ? [{ currency, net: entry.net, lost: entry.lost }] : [];
+    }),
+  };
+}
+
+/**
+ * Whether a Tradovate connection row exists for this user.
+ *
+ * Read from the browser under the user's own RLS, not through the server: 017
+ * grants `SELECT (id, user_id, status, …)` on tradovate_connections to
+ * `authenticated` and policy `tradovate_connections_select_own` limits it to
+ * their own row, so one column is readable here without the service role. The
+ * token columns are excluded from that grant, so nothing secret can come back —
+ * and this asks for `status` alone.
+ *
+ * Nothing here touches the connection itself. No renewal, no status write, no
+ * import of lib/tradovate/connections.ts — that module pulls in the
+ * service-role client and must never be named from a browser path.
+ *
+ * Every failure becomes 'unknown' rather than throwing. This is one line of
+ * wording on a panel; it is not worth failing a rule check over, and a thrown
+ * error here would take the gate down with it.
+ */
+async function readBrokerConnection(
+  userId: string,
+  client: SupabaseClient
+): Promise<BrokerConnectionPresence> {
+  try {
+    // limit(1) over maybeSingle(): a duplicate row would make maybeSingle
+    // error, and two rows is still an answer to "is there a connection".
+    const { data, error } = await client
+      .from('tradovate_connections')
+      .select('status')
+      .eq('user_id', userId)
+      .limit(1);
+
+    if (error) return 'unknown';
+    return (data?.length ?? 0) > 0 ? 'present' : 'none';
+  } catch {
+    return 'unknown';
+  }
 }
 
 /** Money lost today, positive, summed over closed rows. */
@@ -143,7 +332,7 @@ export async function loadTradeRuleContext(
 ): Promise<TradeRuleContext> {
   const todayStart = startOfTodayIso();
 
-  const [takenRes, closedTodayRes, recentRes] = await Promise.all([
+  const [takenRes, closedTodayRes, recentRes, brokerConnection] = await Promise.all([
     // Taken today — by submitted_at, so a plan counts the moment it is logged
     // whether or not it has been closed.
     //
@@ -160,9 +349,14 @@ export async function loadTradeRuleContext(
       .gte('submitted_at', todayStart),
     // Closed today — by closed_at, because the loss is realised on the close,
     // not on the entry. A trade opened yesterday and closed today counts today.
+    //
+    // pnl_currency rides along for the panel's per-currency totals. One extra
+    // column on the query that already fetches exactly these rows, rather than
+    // a second query asking the same question — the panel and the loss
+    // threshold must be reading the same closes (§4.5).
     client
       .from('trade_plans')
-      .select(MONEY_FIELDS)
+      .select(`${MONEY_FIELDS}, pnl_currency`)
       .eq('user_id', userId)
       .eq('status', 'closed')
       .gte('closed_at', todayStart),
@@ -173,6 +367,12 @@ export async function loadTradeRuleContext(
       .eq('status', 'closed')
       .order('closed_at', { ascending: false })
       .limit(10),
+    // Not a rule input — it decides one sentence in the form's context panel.
+    // Here rather than in the form because this is the object REF-90 will set
+    // `source` on, and `source` is the same fact one step further on: it needs
+    // the connection to tell 'broker_verified' from 'broker_expired'. One read,
+    // one place, both arms of the rule mechanism seeing the same answer.
+    readBrokerConnection(userId, client),
   ]);
 
   const closedToday = (closedTodayRes.data ?? []) as ClosedTradeRow[];
@@ -189,5 +389,10 @@ export async function loadTradeRuleContext(
     lastTradeFomo: !!lastTrade?.fomo_entry,
     lastTradeExitedEarly: !!lastTrade?.exited_early,
     lastTradeMovedSl: !!lastTrade?.moved_sl,
+    // 'reflect_only' until REF-90 — see the field's own note, which is where
+    // that work connects.
+    source: 'reflect_only',
+    brokerConnection,
+    todayClosed: summariseTodayCloses(closedToday),
   };
 }

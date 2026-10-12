@@ -12,17 +12,23 @@ import ValidationResultBanner from './ValidationResultBanner';
 import EmotionalStateSlider from './EmotionalStateSlider';
 import ConfidenceLevelSlider from './ConfidenceLevelSlider';
 import OpenPlanPrompt, { type OpenPlanFromPreviousDay } from './OpenPlanPrompt';
+import TodayContextPanel from './TodayContextPanel';
 import CloseTrade from '@/components/journal/CloseTrade';
 import dynamic from 'next/dynamic';
 const TradingViewChart = dynamic(() => import('./TradingViewChart'), { ssr: false });
 import Button from '@/components/ui/Button';
 import Select from '@/components/ui/Select';
-import type { TradePlanInput, PresetRules, RulesetValidationResult, TradeStrategy, PnlCurrency, Timeframe } from '@/lib/types';
+import type { TradePlanInput, PresetRules, RulesetValidationResult, TradeStrategy, PnlCurrency, RuleContextSource, Timeframe } from '@/lib/types';
 import type { PersonalStrategy } from '@/components/strategies/StrategiesClient';
 import { getPlanLimits, type PlanTier } from '@/lib/plans/config';
 import { fetchActiveRuleViolation } from '@/lib/rules/fetchActiveRuleViolation';
 import { logRuleViolations, overrideRuleViolations, type RuleViolationLogInput } from '@/lib/rules/logRuleViolation';
-import { loadTradeRuleContext, startOfTodayIso } from '@/lib/rules/tradeRuleContext';
+import {
+  loadTradeRuleContext,
+  startOfTodayIso,
+  type BrokerConnectionPresence,
+  type TodayClosedSummary,
+} from '@/lib/rules/tradeRuleContext';
 import { tradeDirection } from '@/lib/pnl';
 import { NOT_ENTERED } from '@/lib/trades/status';
 
@@ -107,6 +113,10 @@ const EMPTY_FORM: TradePlanInput = {
 };
 
 type FormState = 'empty' | 'editing' | 'validating' | 'warning' | 'blocked' | 'success' | 'error';
+
+/** Before the first load. Paired with `contextLoaded`, which is what the panel
+ *  actually keys off — these zeros are never shown to the user as fact. */
+const EMPTY_TODAY_CLOSED: TodayClosedSummary = { count: 0, losingCount: 0, money: [] };
 
 // Mirrors the required-field conditions in isFormFilled below — one entry per condition,
 // used to tell the user exactly what's missing instead of just disabling the button.
@@ -286,6 +296,19 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
   const [loading, setLoading] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [todayLossAmount, setTodayLossAmount] = useState(0);
+
+  // ── The context panel's view of today (REF-82 §2.1) ────────────────────────
+  //
+  // All of it comes off the SAME loadTradeRuleContext result as the three rule
+  // inputs above. No second query and no second arithmetic: the panel tells the
+  // user what the rules are about to act on, so a figure of its own would be a
+  // way for the two to disagree — see the header of lib/rules/tradeRuleContext.ts.
+  const [todayClosed, setTodayClosed] = useState<TodayClosedSummary>(EMPTY_TODAY_CLOSED);
+  const [contextSource, setContextSource] = useState<RuleContextSource>('reflect_only');
+  const [brokerConnection, setBrokerConnection] = useState<BrokerConnectionPresence>('unknown');
+  /** False until the first load returns, so the panel never states zeros as fact. */
+  const [contextLoaded, setContextLoaded] = useState(false);
+  const todayContextHeadingId = useId();
   const [personalStrategyRows, setPersonalStrategyRows] = useState<PersonalStrategy[]>([]);
   // Session override wins over the saved preference, which wins over the default
   const [pnlModeOverride, setPnlModeOverride] = useState<'points' | 'percent' | null>(null);
@@ -402,6 +425,15 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     setTodayCount(history.todayTradeCount);
     setTodayLossAmount(history.todayLossAmount);
     setLossCount(history.lossStreak);
+
+    // The panel's figures, off the same object. `source` is 'reflect_only' for
+    // every user until REF-90 builds the broker pull — the panel renders all
+    // four of its states regardless, so that work is a change to the context
+    // module and not to any of this.
+    setTodayClosed(history.todayClosed);
+    setContextSource(history.source);
+    setBrokerConnection(history.brokerConnection);
+    setContextLoaded(true);
 
     // `?? []` rather than the `if (data)` guard the two above use: an empty
     // list is the honest state when the query failed, and showing nothing is
@@ -960,6 +992,33 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
               busyPlanId={markingPlanId}
               error={openPlanError}
               registerFirstButton={registerPlanButton}
+            />
+
+            {/* Today's context (REF-82 §2.1). Below the open-plan card on
+                purpose: that card asks about a day that is already over and
+                its answer CHANGES these numbers — "סגרתי אותה" reloads the
+                context — so the question reads above the state it affects.
+
+                Unlike that card this one always renders. It is the half of the
+                one-form decision that differs between a connected and an
+                unconnected user, and a user with no data to show is being told
+                exactly that rather than being shown a gap. */}
+            <TodayContextPanel
+              headingId={todayContextHeadingId}
+              loaded={contextLoaded}
+              tradeCount={todayCount}
+              closed={todayClosed}
+              // The user's OWN limits, from their rules row — not
+              // DEFAULT_PRESET_RULES. The validator falls back to those
+              // defaults so a user with no row is still protected, but the
+              // panel says "שהגדרת" ("that you set"), and attributing a
+              // default of 5 to a user who never chose it would be a lie in
+              // the one sentence that is meant to read their own number back
+              // to them. No row, no comparison.
+              maxDailyTrades={presetRules?.max_daily_trades ?? null}
+              maxDailyLoss={presetRules?.max_daily_loss ?? null}
+              source={contextSource}
+              brokerConnection={brokerConnection}
             />
 
             {/* Step 1 — Asset, direction & strategy */}
