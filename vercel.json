@@ -99,6 +99,10 @@
     {
       "path": "/api/cron/security-assertions",
       "schedule": "30 3 * * *"
+    },
+    {
+      "path": "/api/cron/tradovate-keepalive",
+      "schedule": "0 3 * * *"
     }
   ]
 }

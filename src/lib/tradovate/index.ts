@@ -64,7 +64,13 @@ export {
 // private to ./connections.ts, which is the only module that should hold a raw
 // token alongside the key.
 
-export { ACCESS_DENIED, buildAuthorizeUrl, exchangeCodeForToken, fetchTradovateUser } from './oauth';
+export {
+  ACCESS_DENIED,
+  buildAuthorizeUrl,
+  exchangeCodeForToken,
+  exchangeRefreshToken,
+  fetchTradovateUser,
+} from './oauth';
 export type { ExchangedToken } from './oauth';
 
 export {
@@ -74,8 +80,20 @@ export {
   disconnectUser,
   forgetCachedToken,
   clearAllCachedTokens,
+  redeemRefreshToken,
+  listConnectionsDueForRefresh,
 } from './connections';
-export type { ConnectionStatus, ConnectionSummary } from './connections';
+export type {
+  ConnectionStatus,
+  ConnectionSummary,
+  RefreshRedemption,
+  StoredConnection,
+} from './connections';
+
+// The keep-alive loop (REF-100). The cron route is its only caller in the app;
+// scripts/tradovate-refresh-check.ts drives it against a stubbed client.
+export { runKeepAlive, KEEPALIVE_WINDOW_MS } from './keepalive';
+export type { KeepAliveCounts } from './keepalive';
 
 export {
   isAllowlistConfigured,

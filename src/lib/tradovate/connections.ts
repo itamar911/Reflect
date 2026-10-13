@@ -31,11 +31,28 @@
  *
  * What is different, and it matters:
  *
- * - **There is no automatic fallback when renewal fails.** ./session.ts can
- *   always re-authenticate with Reflect's own username and password. Here the
- *   only credential this module uses is the access token itself, so a renewal
- *   the server REFUSED leaves nothing to recover with in-process: the
- *   connection is marked 'expired' and the user must reconnect.
+ * - **A renewal the server REFUSED is the end of the road; a refresh token is
+ *   not.** ./session.ts can always re-authenticate with Reflect's own username
+ *   and password. Here there is no password, but there are two stored
+ *   credentials rather than one, and REF-100 put the second to use:
+ *
+ *   {@link redeemRefreshToken} redeems the refresh token at POST
+ *   /auth/oauthtoken, which needs no live access token and therefore recovers
+ *   the case renewal cannot — a user away for longer than one 80-minute access
+ *   token. The refresh token lasts 26 hours and ROTATES on every redemption, so
+ *   each one both issues a new access token and pushes the deadline out another
+ *   26 hours. Two things keep it rolling: a daily cron
+ *   (/api/cron/tradovate-keepalive) and {@link redeemRefreshTokenIfDue} on the
+ *   ordinary request path. The goal is that a connected user never reconnects
+ *   unless they revoke the grant themselves.
+ *
+ *   The rotation is also why saving a redemption is a COMPARE-AND-SWAP rather
+ *   than an upsert — two concurrent redemptions hold two different new refresh
+ *   tokens and only the later one works. See `expectRefreshTokenCiphertext` on
+ *   {@link saveConnection} and the reconcile step in {@link redeemRefreshToken}.
+ *
+ *   Only a refusal by Tradovate marks a connection 'expired'. A redemption that
+ *   merely failed to complete leaves the row exactly as it was.
  *
  *   A renewal that merely did not complete is a different fact, and the
  *   distinction is the whole of REF-101. /auth/renewaccesstoken is rate limited
@@ -50,15 +67,13 @@
  *   holds the rule: only proof of refusal is treated as refusal, the default is
  *   transient, and a transient failure writes NOTHING to the database. Marking a
  *   live connection dead is the expensive mistake, because it is the one the
- *   user cannot wait out.
+ *   user cannot wait out. The refresh grant goes through the same classifier,
+ *   for the same reason and with a wider blast radius: it runs over every
+ *   connection at once, from a cron.
  *
- *   The exchange DOES issue a refresh token — observed in production, against
- *   both migration 017's comment and this module's original one. It is stored,
- *   and `refresh_expires_at` records how long it lasts, but nothing here redeems
- *   it: sessions are extended in place with GET /auth/renewaccesstoken using the
- *   access token, which is the call that does not open a second session. The
- *   refresh token is what a returning user re-authorizes against, and wiring
- *   that up is separate work from this cache.
+ *   (The per-IP limit turned out not to apply to us — 20 consecutive renewals
+ *   succeeded in production on 13 Oct 2026 — but the classification it forced is
+ *   right on its own merits and nothing here was loosened.)
  *
  * - **The two-concurrent-sessions cap belongs to the USER, not to us.** A trader
  *   with our connection open plus their own Tradovate desktop or web session is
@@ -91,6 +106,8 @@ import {
   TradovateTransientError,
 } from './errors';
 import type { TradovateEnvironment } from './hosts';
+import { exchangeRefreshToken } from './oauth';
+import { loadOAuthConfig, type TradovateOAuthConfig } from './oauth-config';
 import { redactSecrets } from './redact';
 import { decryptToken, encryptToken } from './token-crypto';
 import type { TradovateApiHosts, UserTokenSnapshot } from './types';
@@ -110,6 +127,22 @@ const RENEW_MARGIN_MS = 15 * 60_000;
 const MIN_REMAINING_MS = 30_000;
 
 /**
+ * Redeem the refresh token once it is within this window of expiring.
+ *
+ * 12 hours against a measured 26-hour lifetime (`refresh_token_expires_in`
+ * 93600, 13 Oct 2026). Deliberately not a tight margin like RENEW_MARGIN_MS:
+ * the daily cron is the primary mechanism and this is its backstop, so the
+ * window has to survive a cron run that was late (Vercel allows roughly an hour
+ * of drift on a daily schedule) or did not happen. Anything below ~2 hours
+ * would mean a single skipped run could strand a user.
+ *
+ * Redeeming early is close to free: the grant issues a FRESH 26-hour refresh
+ * token every time, so an early redemption moves the deadline out rather than
+ * consuming a budget, and — measured — it opens no second session.
+ */
+const REFRESH_REDEEM_MARGIN_MS = 12 * 60 * 60_000;
+
+/**
  * Cap on cached users, so a process serving many traders cannot grow this map
  * without bound. Eviction is oldest-inserted-first; an evicted user simply pays
  * one extra database read on their next request.
@@ -121,7 +154,15 @@ const inFlight = new Map<string, Promise<UserTokenSnapshot>>();
 
 export type ConnectionStatus = 'active' | 'expired' | 'revoked';
 
-/** The row as this module reads it. */
+/**
+ * The row as this module reads it.
+ *
+ * Exported as {@link StoredConnection} so that the keep-alive can hand a row it
+ * got from {@link listConnectionsDueForRefresh} straight back to
+ * {@link redeemRefreshToken} without reading the table itself — this is still
+ * the only module that touches `tradovate_connections`. The two token fields
+ * are ciphertext and nothing outside this module can decrypt them.
+ */
 interface ConnectionRow {
   user_id: string;
   access_token_encrypted: string;
@@ -137,6 +178,58 @@ interface ConnectionRow {
   refresh_expires_at: string | null;
   token_type: string | null;
   api_hosts: TradovateApiHosts | null;
+}
+
+export type StoredConnection = ConnectionRow;
+
+/**
+ * Every column this module needs to use or carry forward a connection.
+ *
+ * One constant rather than a string per query, because the hazard is not a typo:
+ * saveConnection() writes every column on every save, so a read that forgets one
+ * leads to a save that nulls it. See {@link carryForward}.
+ */
+const CONNECTION_COLUMNS =
+  'user_id, access_token_encrypted, refresh_token_encrypted, expires_at, ' +
+  'tradovate_user_id, environment, status, refresh_expires_at, token_type, api_hosts';
+
+/**
+ * Every argument {@link saveConnection} needs other than the access token and
+ * its expiry, taken off the stored row.
+ *
+ * This exists because of the trap documented on saveConnection's parameters:
+ * every column is written on every save, so a caller that omits `refreshToken`,
+ * `refreshExpiresAt`, `tokenType` or `apiHosts` does not leave the stored value
+ * alone — it writes NULL over it. Both writing paths in this module spread this
+ * object and override only what their response restated, so no field can be
+ * forgotten at a call site.
+ *
+ * Decrypts and re-encrypts the refresh token rather than copying the ciphertext
+ * across, because the AAD binds each value to its user and column and
+ * saveConnection owns that binding; the fresh IV on re-encryption is expected,
+ * and on the keep-alive path it is load-bearing — see
+ * `expectRefreshTokenCiphertext`.
+ *
+ * Throws if the stored ciphertext or the key is unreadable. Called before any
+ * upstream request for that reason: the moment to discover an undecryptable row
+ * is before a grant has been spent on it, not after, when the result would have
+ * nowhere to be saved.
+ */
+function carryForward(row: ConnectionRow) {
+  const refreshExpiresAt = row.refresh_expires_at ? Date.parse(row.refresh_expires_at) : Number.NaN;
+  return {
+    userId: row.user_id,
+    tradovateUserId: row.tradovate_user_id,
+    // From the row, never from configuration: the row records which environment
+    // actually minted the token, and nothing here may relabel it.
+    environment: row.environment,
+    refreshToken: row.refresh_token_encrypted
+      ? decryptToken(row.refresh_token_encrypted, 'refresh', row.user_id)
+      : undefined,
+    refreshExpiresAt: Number.isFinite(refreshExpiresAt) ? refreshExpiresAt : undefined,
+    tokenType: row.token_type ?? undefined,
+    apiHosts: row.api_hosts ?? undefined,
+  };
 }
 
 /** Non-secret view of a connection, safe to return from a route. */
@@ -233,10 +326,32 @@ export async function saveConnection(params: {
    * guessing would mean reading simulated fills as though they were real ones.
    */
   environment: TradovateEnvironment;
+  /**
+   * COMPARE-AND-SWAP: the `refresh_token_encrypted` ciphertext this save expects
+   * to find in the row, exactly as it was read.
+   *
+   * When set, the write becomes a conditional UPDATE instead of an upsert, and
+   * `applied: false` comes back if the stored ciphertext no longer matches —
+   * nothing is written and the cache is left alone.
+   *
+   * This exists because the refresh grant ROTATES the refresh token (measured
+   * 13 Oct 2026). Two concurrent redemptions therefore hold two different new
+   * refresh tokens, only one of which Tradovate still honours, and an
+   * unconditional upsert would let the loser overwrite the winner — storing a
+   * refresh token that has already been spent and costing the user the
+   * connection REF-100 exists to preserve. The ciphertext is the version
+   * marker: the table has no version column, and it does not need one, because
+   * a fresh IV per encryption means every write produces a distinct value for
+   * the column that is itself the thing being swapped.
+   *
+   * Compared as ciphertext rather than plaintext for the same reason: this is a
+   * test of "is the row still as I read it", not of what the token says.
+   */
+  expectRefreshTokenCiphertext?: string;
   admin?: SupabaseClient;
-}): Promise<void> {
+}): Promise<{ applied: boolean }> {
   const { userId, accessToken, refreshToken, expiresAt, tradovateUserId, environment } = params;
-  const { refreshExpiresAt, tokenType, apiHosts } = params;
+  const { refreshExpiresAt, tokenType, apiHosts, expectRefreshTokenCiphertext } = params;
   const admin = params.admin ?? createAdminClient();
 
   // The in-memory cache needs milliseconds whichever form arrived, and an
@@ -247,38 +362,66 @@ export async function saveConnection(params: {
     throw new Error('Refusing to store a Tradovate connection with an unparsable expiry.');
   }
 
-  const { error } = await admin.from('tradovate_connections').upsert(
-    {
-      user_id: userId,
-      access_token_encrypted: encryptToken(accessToken, 'access', userId),
-      // Always written, never left untouched: reconnecting must clear a stale
-      // value rather than leave one behind from a previous connection. The cost
-      // of that choice is that a caller which forgets to pass refreshToken
-      // silently erases it — see the warning on the parameter.
-      refresh_token_encrypted: refreshToken ? encryptToken(refreshToken, 'refresh', userId) : null,
-      // A string here is the server's own expirationTime, stored as it was sent.
-      // Only a number — the exchange path, which is given seconds and nothing
-      // else — goes through our clock.
-      expires_at: typeof expiresAt === 'string' ? expiresAt : new Date(expiresAt).toISOString(),
-      tradovate_user_id: tradovateUserId,
-      environment,
-      // Always written, under the same rule as refresh_token_encrypted above and
-      // with the same cost: a caller that forgets one of these erases it.
-      refresh_expires_at:
-        refreshExpiresAt === undefined ? null : new Date(refreshExpiresAt).toISOString(),
-      token_type: tokenType ?? null,
-      api_hosts: apiHosts ?? null,
-      status: 'active',
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: 'user_id' }
-  );
+  const row = {
+    user_id: userId,
+    access_token_encrypted: encryptToken(accessToken, 'access', userId),
+    // Always written, never left untouched: reconnecting must clear a stale
+    // value rather than leave one behind from a previous connection. The cost
+    // of that choice is that a caller which forgets to pass refreshToken
+    // silently erases it — see the warning on the parameter.
+    refresh_token_encrypted: refreshToken ? encryptToken(refreshToken, 'refresh', userId) : null,
+    // A string here is the server's own expirationTime, stored as it was sent.
+    // Only a number — the exchange path, which is given seconds and nothing
+    // else — goes through our clock.
+    expires_at: typeof expiresAt === 'string' ? expiresAt : new Date(expiresAt).toISOString(),
+    tradovate_user_id: tradovateUserId,
+    environment,
+    // Always written, under the same rule as refresh_token_encrypted above and
+    // with the same cost: a caller that forgets one of these erases it.
+    refresh_expires_at:
+      refreshExpiresAt === undefined ? null : new Date(refreshExpiresAt).toISOString(),
+    token_type: tokenType ?? null,
+    api_hosts: apiHosts ?? null,
+    status: 'active' as const,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (expectRefreshTokenCiphertext !== undefined) {
+    // UPDATE, not upsert: an upsert has no WHERE clause to hang the condition
+    // on, and this path only ever runs against a row that was just read, so
+    // there is nothing to insert. `select()` is what makes the outcome
+    // observable — PostgREST reports zero matched rows as an empty array, not
+    // as an error, so without it a lost swap would look exactly like a win.
+    const { data, error } = await admin
+      .from('tradovate_connections')
+      .update(row)
+      .eq('user_id', userId)
+      .eq('refresh_token_encrypted', expectRefreshTokenCiphertext)
+      .select('user_id');
+
+    if (error) throw new Error(`Failed to store the Tradovate connection: ${error.message}`);
+
+    // Zero rows means the condition did not hold: another redemption rotated
+    // the refresh token between our read and this write. Nothing was written,
+    // and deliberately nothing is cached either — the tokens in hand are the
+    // ones that lost, and remembering them would hand a spent access token to
+    // the next caller.
+    if (!data || data.length === 0) return { applied: false };
+
+    remember(userId, { accessToken, expiresAt: expiresAtMs, tradovateUserId });
+    return { applied: true };
+  }
+
+  const { error } = await admin
+    .from('tradovate_connections')
+    .upsert(row, { onConflict: 'user_id' });
 
   // A Supabase error carries the failing statement, not the values, so this
   // cannot leak a token. The row we just built is not logged either.
   if (error) throw new Error(`Failed to store the Tradovate connection: ${error.message}`);
 
   remember(userId, { accessToken, expiresAt: expiresAtMs, tradovateUserId });
+  return { applied: true };
 }
 
 /** The non-secret columns a summary needs. Never a token column. */
@@ -383,9 +526,23 @@ async function markStatus(
  * close to expiry.
  *
  * Throws TradovateNotConnectedError when there is nothing usable: no row, a
- * disconnected or expired connection, or a renewal Tradovate refused. That is
- * the signal to prompt the user to reconnect. There is no silent recovery: a
- * refresh token may be stored, but nothing here redeems one — see the header.
+ * disconnected or expired connection, or a credential Tradovate refused. That
+ * is the signal to prompt the user to reconnect.
+ *
+ * Two things can happen on the way, in this order:
+ *
+ *   1. If the stored refresh token is within {@link REFRESH_REDEEM_MARGIN_MS} of
+ *      expiring, it is redeemed — which yields a fresh access token as well, so
+ *      the renewal below becomes unnecessary. A redemption that fails
+ *      transiently does NOT fail the request: the stored access token is used
+ *      instead. See {@link redeemRefreshTokenIfDue}.
+ *   2. If the access token is within RENEW_MARGIN_MS, it is renewed.
+ *
+ * Note what the cache does to (1): a cached snapshot short-circuits this
+ * function entirely, so the refresh check runs at most once per cached token —
+ * roughly hourly for an active user. That is deliberate and sufficient, because
+ * the margin is 12 hours wide and the daily cron covers users who are not
+ * active at all.
  *
  * Throws TradovateTransientError when the renewal could not be completed —
  * rate limited, timed out, 5xx, unreadable — AND the stored token had already
@@ -446,7 +603,29 @@ function statesTokenRejected(errorText: string): boolean {
 }
 
 /**
- * What a renewal failure licenses us to do.
+ * OAuth `error` codes at the token endpoint that are a verdict on the grant we
+ * presented rather than on the request or on our own registration.
+ *
+ * `invalid_grant` is the one RFC 6749 §5.2 defines for a refresh token that is
+ * "invalid, expired, revoked … or was issued to another client", which is
+ * exactly the claim that licenses marking a connection expired.
+ *
+ * `access_denied` is the user having withdrawn the authorization — the same
+ * code ./oauth.ts exports as ACCESS_DENIED for the consent screen. On a refresh
+ * grant it can only mean the grant is gone, so it is a verdict too.
+ *
+ * DELIBERATELY ABSENT, though they arrive as 400s through this same branch:
+ * `invalid_client`, `invalid_request` and `unauthorized_client` are verdicts on
+ * OUR credentials, OUR request shape or OUR registration, not on the user's
+ * grant. Treating a rotated client secret as a dead connection would mark every
+ * user expired in a single cron run — the REF-101 failure mode with a far wider
+ * blast radius, and the one thing a daily job over all connections must not be
+ * able to do.
+ */
+const GRANT_REJECTED_OAUTH_ERRORS = new Set(['invalid_grant', 'access_denied']);
+
+/**
+ * What a failed token operation licenses us to do.
  *
  * `detail` is for a log line and carries no secret: it is built from the error's
  * type, its HTTP status and its own message — never from a response body, which
@@ -462,10 +641,18 @@ type RenewalVerdict =
     };
 
 /**
- * Decide whether a thrown renewal failure proves the token is dead.
+ * Decide whether a thrown token failure proves the stored credential is dead.
  *
- * The default is 'transient', and every branch that cannot produce evidence of
- * refusal falls into it. See the header for why that asymmetry is deliberate.
+ * Shared by the two operations that present a stored credential to Tradovate:
+ * GET /auth/renewaccesstoken (the access token) and POST /auth/oauthtoken with
+ * `grant_type=refresh_token` (the refresh token). The question is the same for
+ * both — did the server judge what we handed it, or did it merely fail to
+ * answer — and so is the asymmetry: the default is 'transient', and every
+ * branch that cannot produce evidence of refusal falls into it. See the header
+ * for why.
+ *
+ * REF-100 added the TradovateOAuthError branch. The rest is REF-101's and is
+ * unchanged.
  */
 function classifyRenewalFailure(error: unknown): RenewalVerdict {
   // Rate limited, captcha included. The limiter rejected the request before
@@ -508,6 +695,41 @@ function classifyRenewalFailure(error: unknown): RenewalVerdict {
         };
   }
 
+  // The refresh grant's own failure shape (REF-100). ./oauth.ts raises this for
+  // an `error` field in the token response, and for the two server faults that
+  // are not an error field at all: a 2xx with no access_token, and an
+  // unusable expires_in.
+  if (error instanceof TradovateOAuthError) {
+    if (error.oauthError && GRANT_REJECTED_OAUTH_ERRORS.has(error.oauthError)) {
+      return { kind: 'rejected', detail: `OAuth ${error.oauthError} at the token endpoint` };
+    }
+    // An unrecognised `error` code is read the same way an unrecognised
+    // errorText is: only on both halves of a statement about the credential.
+    // The message has already been through redactSecrets() in ./oauth.ts.
+    if (error.oauthError && statesTokenRejected(error.message)) {
+      return {
+        kind: 'rejected',
+        detail: `OAuth ${error.oauthError}, described as a refusal of the credential`,
+      };
+    }
+    // Everything else: a token issued without a readable lifetime, a 2xx with
+    // no token in it, or an `error` code we do not recognise and whose
+    // description claims nothing about the grant. All server faults.
+    //
+    // Worth knowing when this is the no-lifetime case: the refresh token HAS
+    // been spent by then and its replacement could not be stored, so the
+    // connection may genuinely be broken. It is still not ours to declare dead
+    // — we were never told it was refused — and the next run reads the row and
+    // tries again with whatever is stored.
+    return {
+      kind: 'transient',
+      reason: 'unknown',
+      detail: error.oauthError
+        ? `OAuth ${error.oauthError}, no verdict on the credential`
+        : `token endpoint answered unusably at stage ${error.stage}`,
+    };
+  }
+
   // Whatever is left came from the fetch itself — DNS, TLS, a reset, or an abort
   // on timeout — and the request may never have reached Tradovate at all. The
   // message is ours, not a response body, but it still goes through
@@ -519,16 +741,400 @@ function classifyRenewalFailure(error: unknown): RenewalVerdict {
   };
 }
 
+/**
+ * The outcome of trying to redeem a refresh token.
+ *
+ * Five cases, and the reason they are returned rather than thrown is that four
+ * of the five are not failures of the caller's request: the keep-alive counts
+ * them, and getUserAccessToken() carries on with the access token it already
+ * has. Only the caller knows whether it has something to fall back on, so only
+ * the caller decides what becomes an exception.
+ *
+ * No case carries a token value, a user id or a response body. `detail` is built
+ * from error types and statuses and is safe to log.
+ */
+export type RefreshRedemption =
+  /** Redeemed and stored. The snapshot holds the new access token. */
+  | { outcome: 'refreshed'; snapshot: UserTokenSnapshot }
+  /**
+   * Another redemption rotated the refresh token first, so this one lost the
+   * compare-and-swap (or found the row already moved on). The connection is
+   * healthy and the snapshot is the WINNER's token, re-read from the row —
+   * which is the point: a loser that reported failure would have the caller
+   * prompt a reconnect for a connection that was just successfully refreshed.
+   */
+  | { outcome: 'superseded'; snapshot: UserTokenSnapshot }
+  /** Tradovate refused the refresh token. `status` is now 'expired'. */
+  | { outcome: 'expired'; detail: string }
+  /** Nothing was judged and nothing was written. Try again later. */
+  | {
+      outcome: 'transient';
+      reason: TradovateTransientError['reason'];
+      retryAfterSeconds?: number;
+      detail: string;
+    }
+  /** There was nothing to do. Nothing was sent and nothing was written. */
+  | { outcome: 'skipped'; reason: 'no_refresh_token' | 'not_active' | 'environment'; detail: string };
+
+/**
+ * Redeem a connection's refresh token, storing the tokens it returns — the
+ * storage half of REF-100.
+ *
+ * This is what makes "a connected user never has to reconnect" possible. The
+ * access token lives 80 minutes and GET /auth/renewaccesstoken extends it, but
+ * renewal needs a LIVE access token to present, so a user away for longer than
+ * one lifetime used to come back to a dead connection with no way out. The
+ * refresh token lasts 26 hours and redeeming it needs no access token at all,
+ * which turns a hard expiry into a rolling one: each redemption issues a fresh
+ * 26-hour refresh token, so the window never closes while anything keeps
+ * redeeming it.
+ *
+ * It also yields a brand-new access token, which is why the renewal path does
+ * not need to run afterwards.
+ *
+ *
+ * THE RACE, AND WHY THE SAVE IS A COMPARE-AND-SWAP
+ * -----------------------------------------------
+ *
+ * The refresh token ROTATES (measured 13 Oct 2026): the value we send is spent
+ * and its replacement comes back in the response. So two concurrent redemptions
+ * — the daily cron and a user request landing together, or two lambdas serving
+ * the same user — each hold a different new refresh token, and only the one
+ * Tradovate issued last is honoured. An unconditional save would let whichever
+ * finished second write a refresh token that was already dead, which costs the
+ * user exactly the reconnect this ticket exists to prevent.
+ *
+ * Two guards, and both are needed because they cover different halves of the
+ * window:
+ *
+ *   1. The save is conditional on the stored refresh-token ciphertext still
+ *      being the one we read (see `expectRefreshTokenCiphertext`). A loser
+ *      writes nothing.
+ *   2. On ANY failure — lost swap, refusal, timeout — the row is RE-READ before
+ *      anything is classified. If the stored refresh token has changed since we
+ *      read it, someone else redeemed successfully in the meantime, and our
+ *      failure says nothing about the connection: we adopt their tokens and
+ *      report 'superseded'. Without this, a redemption that failed *because*
+ *      the token had just been rotated out from under it would be read as
+ *      "Tradovate refused the credential" and mark a freshly refreshed
+ *      connection expired.
+ *
+ * Nothing here opens a transaction or takes a lock. It does not need one: the
+ * conditional UPDATE is itself atomic in Postgres, and the only state worth
+ * protecting is that single column.
+ */
+export async function redeemRefreshToken(params: {
+  /** The row as read from the table, by the caller. */
+  connection: StoredConnection;
+  config: TradovateOAuthConfig;
+  admin: SupabaseClient;
+  signal?: AbortSignal;
+}): Promise<RefreshRedemption> {
+  const { connection, config, admin, signal } = params;
+  const userId = connection.user_id;
+
+  if (connection.status !== 'active') {
+    return {
+      outcome: 'skipped',
+      reason: 'not_active',
+      detail: `connection status is ${connection.status}`,
+    };
+  }
+
+  if (!connection.refresh_token_encrypted) {
+    return {
+      outcome: 'skipped',
+      reason: 'no_refresh_token',
+      detail: 'the row has no refresh token to redeem',
+    };
+  }
+
+  // The refresh token was minted by one environment and the token endpoint
+  // belongs to this deployment. Posting a demo grant to the live endpoint would
+  // fail in a way that says nothing about the token, and classifying that noise
+  // is how a working connection gets marked expired. Refuse instead.
+  if (config.environment !== connection.environment) {
+    return {
+      outcome: 'skipped',
+      reason: 'environment',
+      detail:
+        `the connection is ${connection.environment} but this deployment's token endpoint is ` +
+        `${config.environment}`,
+    };
+  }
+
+  // The ciphertext exactly as read: the compare-and-swap's expected value, and
+  // the thing the re-read below compares against. Captured before any await.
+  const redeemedCiphertext = connection.refresh_token_encrypted;
+
+  /**
+   * Re-read the row and decide whether our failure was really someone else's
+   * success. Used by every failure path below.
+   */
+  const reconcile = async (): Promise<RefreshRedemption | null> => {
+    const { data, error } = await admin
+      .from('tradovate_connections')
+      .select(CONNECTION_COLUMNS)
+      .eq('user_id', userId)
+      .maybeSingle<ConnectionRow>();
+
+    // Could not re-read, so we cannot tell a lost race from a real refusal.
+    // Transient is the only safe answer: it writes nothing.
+    if (error) {
+      return {
+        outcome: 'transient',
+        reason: 'unknown',
+        detail: `could not re-read the connection to reconcile (${error.code ?? 'no code'})`,
+      };
+    }
+
+    // The row is gone — the user disconnected while we were redeeming. Not a
+    // failure to report and certainly not a status to write.
+    if (!data) {
+      cache.delete(userId);
+      return {
+        outcome: 'skipped',
+        reason: 'not_active',
+        detail: 'the connection was deleted while the grant was in flight',
+      };
+    }
+
+    // Unchanged: nobody else won, so the caller's own verdict stands.
+    if (data.refresh_token_encrypted === redeemedCiphertext) return null;
+
+    // Changed. Someone redeemed successfully while we were failing, so their
+    // tokens are the live ones. Adopt them rather than reporting a failure
+    // about a connection that is demonstrably fine.
+    if (data.status !== 'active' || !data.refresh_token_encrypted) {
+      return {
+        outcome: 'skipped',
+        reason: 'not_active',
+        detail: `the row changed under us and is now ${data.status}`,
+      };
+    }
+
+    const winnerExpiry = Date.parse(data.expires_at);
+    if (!Number.isFinite(winnerExpiry)) {
+      return {
+        outcome: 'transient',
+        reason: 'unknown',
+        detail: 'another redemption won but stored an unparsable expiry',
+      };
+    }
+
+    return {
+      outcome: 'superseded',
+      snapshot: remember(userId, {
+        accessToken: decryptToken(data.access_token_encrypted, 'access', userId),
+        expiresAt: winnerExpiry,
+        tradovateUserId: data.tradovate_user_id,
+      }),
+    };
+  };
+
+  // Decrypted BEFORE the grant, deliberately: decryptToken() throws on a bad key
+  // or an altered row, and the moment to discover that is before a single-use
+  // refresh token has been spent on it. See carryForward().
+  let carried: ReturnType<typeof carryForward>;
+  try {
+    carried = carryForward(connection);
+  } catch (error) {
+    // Not 'expired', even though the user does have to reconnect: a key problem
+    // is identical in shape for every row, so classifying it as a dead
+    // connection would empty the table's worth of connections in one cron run.
+    // The message names no value — see token-crypto.ts.
+    const detail = error instanceof Error ? error.name : 'non-Error throw';
+    console.error(
+      redactSecrets(`[tradovate] could not read the stored refresh token (${detail}); nothing sent`)
+    );
+    return { outcome: 'transient', reason: 'unknown', detail: `unreadable stored token (${detail})` };
+  }
+
+  // Always set: carryForward() decrypts it whenever the column is non-null, and
+  // the guard at the top of this function already returned if it was null.
+  const refreshToken = carried.refreshToken;
+  if (!refreshToken) {
+    return {
+      outcome: 'skipped',
+      reason: 'no_refresh_token',
+      detail: 'the row has no refresh token to redeem',
+    };
+  }
+
+  let token;
+  try {
+    token = await exchangeRefreshToken(config, refreshToken, signal);
+  } catch (error) {
+    // No `cause` chained on anything thrown or returned from here: a grant
+    // failure can carry the response body, and that body can carry a token.
+    const verdict = classifyRenewalFailure(error);
+
+    // Re-read first, whatever the verdict. A refusal that arrived *because*
+    // another redemption had just rotated this token away is not a refusal of
+    // the connection.
+    const reconciled = await reconcile();
+    if (reconciled) {
+      console.warn(
+        redactSecrets(
+          `[tradovate] refresh redemption failed (${verdict.kind}: ${verdict.detail}) but the ` +
+            `stored refresh token had changed; using the winning tokens instead`
+        )
+      );
+      return reconciled;
+    }
+
+    if (verdict.kind === 'rejected') {
+      cache.delete(userId);
+      await markStatus(userId, 'expired', admin);
+      return { outcome: 'expired', detail: verdict.detail };
+    }
+
+    // Transient. Nothing written: not the status, not updated_at. The row still
+    // describes the connection we read, and the next run tries again.
+    console.warn(
+      redactSecrets(
+        `[tradovate] refresh redemption failed transiently (${verdict.reason}: ` +
+          `${verdict.detail}); connection left untouched`
+      )
+    );
+    return {
+      outcome: 'transient',
+      reason: verdict.reason,
+      retryAfterSeconds: verdict.retryAfterSeconds,
+      detail: verdict.detail,
+    };
+  }
+
+  // Redeemed. Everything saveConnection() writes is supplied — the carried
+  // values for every column the response did not restate, because omitting one
+  // writes NULL over it.
+  const saved = await saveConnection({
+    ...carried,
+    accessToken: token.accessToken,
+    // Epoch milliseconds from `expires_in`: this endpoint states a number of
+    // seconds and no absolute instant, so the clock reading belongs here. The
+    // renewal path, which IS given an instant, stores that verbatim instead.
+    expiresAt: token.expiresAt,
+    // The rotated refresh token. Falls back to the one we sent for a response
+    // that did not restate it — no rotation means the value we hold is still
+    // the live one, and passing undefined would erase it.
+    refreshToken: token.refreshToken ?? carried.refreshToken,
+    refreshExpiresAt: token.refreshExpiresAt ?? carried.refreshExpiresAt,
+    tokenType: token.tokenType ?? carried.tokenType,
+    apiHosts: token.apiHosts ?? carried.apiHosts,
+    expectRefreshTokenCiphertext: redeemedCiphertext,
+    admin,
+  });
+
+  if (!saved.applied) {
+    // We won the grant but lost the swap, which means another redemption landed
+    // between our read and our write. Both tokens are real; theirs is the one
+    // the row describes and the one Tradovate issued second, so theirs wins.
+    // Ours is discarded unused — spending a grant for nothing is the cost of
+    // not needing a lock.
+    const reconciled = await reconcile();
+    if (reconciled) return reconciled;
+
+    // The swap failed but the refresh token is unchanged, so the condition
+    // should have held. Something else moved (the row was deleted and
+    // reinserted, say). Nothing was written; report it and let the next run
+    // read fresh state.
+    return {
+      outcome: 'transient',
+      reason: 'unknown',
+      detail: 'the conditional save matched no row and the stored refresh token was unchanged',
+    };
+  }
+
+  return {
+    outcome: 'refreshed',
+    snapshot: { accessToken: token.accessToken, expiresAt: token.expiresAt, tradovateUserId: carried.tradovateUserId },
+  };
+}
+
+/**
+ * Active connections whose refresh token expires within `withinMs`.
+ *
+ * For the daily keep-alive. Reads the table here rather than in the cron route
+ * because this module is the only one that touches `tradovate_connections` —
+ * the caller gets rows it cannot decrypt and hands them straight back to
+ * {@link redeemRefreshToken}.
+ *
+ * `refresh_expires_at IS NULL` rows are deliberately NOT selected. A null means
+ * we never recorded a lifetime — every row written before migration 030 added
+ * the column — and redeeming on a guess about an unknown expiry is the kind of
+ * invention this integration refuses everywhere else. Those connections behave
+ * exactly as they did before this change; they recover by reconnecting once,
+ * after which the column is populated.
+ */
+export async function listConnectionsDueForRefresh(params: {
+  admin: SupabaseClient;
+  withinMs: number;
+}): Promise<StoredConnection[]> {
+  const { admin, withinMs } = params;
+  const cutoff = new Date(Date.now() + withinMs).toISOString();
+
+  const { data, error } = await admin
+    .from('tradovate_connections')
+    .select(CONNECTION_COLUMNS)
+    .eq('status', 'active')
+    .not('refresh_token_encrypted', 'is', null)
+    .not('refresh_expires_at', 'is', null)
+    .lte('refresh_expires_at', cutoff)
+    // Soonest to expire first, so a run that is cut off short has done the most
+    // urgent work rather than an arbitrary slice of it.
+    .order('refresh_expires_at', { ascending: true })
+    .returns<ConnectionRow[]>();
+
+  if (error) {
+    throw new Error(`Failed to list Tradovate connections due for refresh: ${error.message}`);
+  }
+  return data ?? [];
+}
+
+/**
+ * Redeem this connection's refresh token if it is close enough to expiring, on
+ * the way to serving an ordinary request. Returns null when nothing was due.
+ *
+ * The threshold is {@link REFRESH_REDEEM_MARGIN_MS} — 12 hours out of a measured
+ * 26-hour lifetime. Wide on purpose: this is the backstop for the daily cron,
+ * which Vercel may run up to about an hour late and may not run at all, so the
+ * margin has to cover a missed day rather than merely a slow one. Redeeming
+ * early costs nothing, because every redemption issues a fresh 26-hour refresh
+ * token and the grant does not open a session.
+ *
+ * Nothing happens when the lifetime is unknown (`refresh_expires_at` null or
+ * unparsable) — see {@link listConnectionsDueForRefresh} for why a guess is
+ * refused there too.
+ *
+ * A configuration failure here is not fatal and not logged per call: a
+ * deployment with no OAuth configuration cannot redeem anything, and the
+ * renewal path below still works. The connect route is where that gets
+ * reported, loudly, to someone who can fix it.
+ */
+async function redeemRefreshTokenIfDue(
+  row: ConnectionRow,
+  admin: SupabaseClient
+): Promise<RefreshRedemption | null> {
+  if (!row.refresh_token_encrypted || !row.refresh_expires_at) return null;
+
+  const refreshExpiry = Date.parse(row.refresh_expires_at);
+  if (!Number.isFinite(refreshExpiry)) return null;
+  if (refreshExpiry - Date.now() > REFRESH_REDEEM_MARGIN_MS) return null;
+
+  const config = loadOAuthConfig();
+  if (!config.ok) return null;
+
+  return redeemRefreshToken({ connection: row, config: config.config, admin });
+}
+
 async function loadOrRenew(
   userId: string,
   admin: SupabaseClient
 ): Promise<UserTokenSnapshot> {
   const { data, error } = await admin
     .from('tradovate_connections')
-    .select(
-      'user_id, access_token_encrypted, refresh_token_encrypted, expires_at, ' +
-        'tradovate_user_id, environment, status, refresh_expires_at, token_type, api_hosts'
-    )
+    .select(CONNECTION_COLUMNS)
     .eq('user_id', userId)
     .maybeSingle<ConnectionRow>();
 
@@ -547,17 +1153,69 @@ async function loadOrRenew(
   const accessToken = decryptToken(data.access_token_encrypted, 'access', userId);
   const tradovateUserId = data.tradovate_user_id;
 
+  // The refresh token first, because it is the one with a deadline that cannot
+  // be recovered from. The access token can always be renewed while it is live;
+  // a refresh token that lapses means a reconnect, and this is the path that
+  // keeps that from happening between daily cron runs — a missed run, an hour
+  // of Vercel drift, or a user whose connection was made just after the last
+  // one. Checked even when the access token is fresh, which is why it sits
+  // above the early return.
+  const refreshRedemption = await redeemRefreshTokenIfDue(data, admin);
+
+  if (refreshRedemption) {
+    if (refreshRedemption.outcome === 'refreshed' || refreshRedemption.outcome === 'superseded') {
+      // The grant issued a new access token too, with a full lifetime ahead of
+      // it, so there is nothing left for the renewal below to do.
+      return remember(userId, refreshRedemption.snapshot);
+    }
+    if (refreshRedemption.outcome === 'expired') {
+      cache.delete(userId);
+      throw new TradovateNotConnectedError(userId, 'expired');
+    }
+    // 'transient' or 'skipped': nothing was written and the stored access token
+    // is untouched. Fall through — a refresh-token problem must not cost the
+    // caller a request the access token in hand can still serve.
+  }
+
   // Another instance may have renewed since this one last looked; if the stored
   // token is comfortably fresh, use it rather than renewing again.
   if (Number.isFinite(storedExpiry) && storedExpiry - Date.now() > RENEW_MARGIN_MS) {
     return remember(userId, { accessToken, expiresAt: storedExpiry, tradovateUserId });
   }
 
-  // Renewal has to present a live token, so one that has already lapsed cannot be
-  // recovered here — and no other path in this module redeems the refresh token,
-  // so not anywhere else either. The user reconnects.
+  // Renewal has to present a live token, so one that has already lapsed cannot
+  // be recovered by renewing. Reaching here means the refresh token could not
+  // recover it either: either there is none, its own expiry has passed, or the
+  // redemption above failed transiently.
   if (!Number.isFinite(storedExpiry) || storedExpiry - Date.now() <= MIN_REMAINING_MS) {
     cache.delete(userId);
+
+    // A refresh token that is still in date changes what this moment means, and
+    // REF-100 is why. The access token lapsing used to be the end of the
+    // connection, so writing 'expired' recorded a fact. Now it is recoverable:
+    // the only way to be here with a live refresh token is a redemption that
+    // failed WITHOUT a verdict a moment ago (a definitive refusal returns
+    // 'expired' above and never reaches this line), and a transient failure is
+    // precisely what must not be written down. Marking it expired would have the
+    // status gate refuse the row on every later call, so a 5xx at the wrong
+    // minute would cost a user a reconnect that the next run would otherwise
+    // have avoided — REF-101's mistake, reintroduced one layer down.
+    const refreshExpiry = data.refresh_expires_at ? Date.parse(data.refresh_expires_at) : Number.NaN;
+    if (
+      data.refresh_token_encrypted &&
+      Number.isFinite(refreshExpiry) &&
+      refreshExpiry - Date.now() > 0
+    ) {
+      throw new TradovateTransientError(
+        'The Tradovate access token has run out and the refresh token could not be redeemed ' +
+          'just now. The refresh token is still in date, so the connection is presumed intact. ' +
+          'Retry later.',
+        { reason: refreshRedemption?.outcome === 'transient' ? refreshRedemption.reason : 'unknown' }
+      );
+    }
+
+    // Nothing left to recover with: no refresh token, or its own lifetime has
+    // run out too. This is the state the user does have to reconnect from.
     await markStatus(userId, 'expired', admin);
     throw new TradovateNotConnectedError(userId, 'expired');
   }
