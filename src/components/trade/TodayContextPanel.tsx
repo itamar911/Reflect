@@ -344,18 +344,23 @@ export default function TodayContextPanel({
 /**
  * Where the figures above came from, stated outright.
  *
- * All four states are built, though only 'reflect_only' can occur until REF-90
- * lands — the pull layer does not exist, so there is nothing to verify against,
- * expire or fail to reach. They are written now because §6's decision is
- * already made and the three broker states are the part of it that is easy to
- * get wrong later under time pressure: the failure states have to be as loud as
- * the success state, and that is a design choice, not a code path.
+ * All four states were written on REF-82, before the pull layer existed, and
+ * REF-90 made all four reachable. The failure states are as loud as the success
+ * state by design, not by accident.
+ *
+ * The 'broker_verified' line names BOTH scopes, and that is REF-90's doing. The
+ * broker reports closes, so the closed-trade sentences above are Tradovate's,
+ * while "how many trades today" counts plans the trader logged here and stays
+ * Reflect's — different sets, as the BIDI-and-scopes note at the top of this
+ * file already explains for a different pair. One line that says "the closes
+ * came from the broker" would be read as covering the count too, which would
+ * be a sentence this panel cannot stand behind.
  */
 function SourceDeclaration({ source }: { source: RuleContextSource }) {
   if (source === 'broker_verified') {
     return (
       <p className="text-xs leading-relaxed" style={{ color: 'var(--color-tg-text-2)' }}>
-        כולל עסקאות מ-Tradovate.
+        הסגירות של היום נקראו מ-Tradovate. מספר העסקאות לפי מה שתיעדת כאן.
       </p>
     );
   }

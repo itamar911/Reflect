@@ -138,6 +138,40 @@ export class TradovateTransientError extends TradovateError {
 }
 
 /**
+ * Tradovate answered, and the answer cannot be stated in the unit the rules
+ * compare against (REF-90).
+ *
+ * Three things can cause it, and all three mean the same thing: a round trip
+ * this user closed today cannot be turned into a dollar figure. A product with
+ * no `valuePerPoint` leaves a number of POINTS, which is the unit bug
+ * lib/rules/tradeRuleContext.ts records having already shipped once. A product
+ * denominated in anything but US dollars cannot be added to a total REF-99
+ * made dollars-only. A fill pair whose legs are missing from /fill/list cannot
+ * even be dated.
+ *
+ * WHY THIS IS AN ERROR RATHER THAN A SKIP. Dropping the trade we cannot price
+ * and totalling the rest would under-report a real loss, and under-reporting is
+ * the failure that lifts a block the trader set for themselves — silently, with
+ * a panel saying the figures came from the broker. Refusing the whole pull falls
+ * back to Reflect's own data and says so on screen, which is wrong in the
+ * direction a discipline tool can afford.
+ *
+ * Mapped to `broker_unavailable`. That value means "the fetch did not produce
+ * usable figures", which is exactly what happened; it does not claim the cause
+ * was transient, and this one is not — a non-USD account stays non-USD. The
+ * reason is logged, through redactSecrets() like every other diagnostic here.
+ */
+export class TradovateUnpriceableError extends TradovateError {
+  readonly reason: 'no_value_per_point' | 'foreign_currency' | 'unknown_currency' | 'missing_fill';
+
+  constructor(message: string, reason: TradovateUnpriceableError['reason']) {
+    super(message);
+    this.name = 'TradovateUnpriceableError';
+    this.reason = reason;
+  }
+}
+
+/**
  * A user has no usable Tradovate connection: never connected, disconnected, or
  * the token lapsed with nothing in ./connections.ts able to recover it (a
  * refresh token may be stored, but nothing redeems one).

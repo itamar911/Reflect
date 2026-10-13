@@ -659,6 +659,101 @@ export async function getUserAccessToken(
 }
 
 /**
+ * A user's token together with the host it is addressed to (REF-90).
+ *
+ * The two travel as one value because ./client.ts requires them together:
+ * `UserTokenRequestOptions` will not accept an `accessToken` without an
+ * `apiUrl`, since a user's hosts are a property of the user and sending their
+ * token to the deployment's host answers a dedicated-infrastructure trader with
+ * a 307 that surfaces as a confusing 401 (REF-92). Handing callers a token and
+ * leaving them to find the host would put that decision back at every call
+ * site; this returns both or neither.
+ */
+export interface UserTradingApi {
+  accessToken: string;
+  /** Epoch milliseconds. */
+  expiresAt: number;
+  tradovateUserId: number | null;
+  /** REST base including the version segment, for this user's connection. */
+  apiUrl: string;
+  environment: TradovateEnvironment;
+}
+
+/**
+ * Everything needed to make a read on a connected user's behalf.
+ *
+ * Throws exactly what {@link getUserAccessToken} throws, and means the same
+ * things by them: TradovateNotConnectedError when the credential was refused or
+ * was never there, TradovateTransientError when nothing could be judged.
+ *
+ * TWO READS, IN THIS ORDER, AND THE ORDER IS THE POINT. The token is resolved
+ * first because resolving it can REPLACE the row: a due refresh token is
+ * redeemed on this path, and the redemption's response carries a fresh
+ * `apiHosts` which is saved. Reading the hosts afterwards therefore sees the
+ * newest ones. Reading them first would hand back a host from before a rotation
+ * that had just moved it — rare, and exactly the class of bug that is invisible
+ * until a dedicated-infrastructure user hits it.
+ *
+ * The second read is three columns on an indexed primary key, inside a request
+ * that is about to make seven upstream calls. Caching it alongside the token
+ * snapshot was the alternative and it is not worth the extra invalidation path.
+ */
+export async function getUserTradingApi(
+  userId: string,
+  options: { admin?: SupabaseClient } = {}
+): Promise<UserTradingApi> {
+  const admin = options.admin ?? createAdminClient();
+  const token = await getUserAccessToken(userId, { admin });
+
+  const { data, error } = await admin
+    .from('tradovate_connections')
+    .select('environment, api_hosts')
+    .eq('user_id', userId)
+    .maybeSingle<{ environment: TradovateEnvironment; api_hosts: TradovateApiHosts | null }>();
+
+  // The read failed; the connection was not judged. Same rule as everywhere
+  // else in this module — a failure to ask must never be reported as an answer.
+  if (error) {
+    throw new TradovateTransientError(
+      `Could not read the connection's hosts (${error.code ?? 'no code'}).`,
+      { reason: 'unknown' }
+    );
+  }
+
+  // The row was there a moment ago, so it was deleted between the two reads —
+  // the user disconnected mid-request. 'missing' rather than 'expired': there
+  // is nothing to reconnect FROM, and the source mapping turns it into
+  // 'reflect_only' rather than asking them to fix a connection they just
+  // removed.
+  if (!data) throw new TradovateNotConnectedError(userId, 'missing');
+
+  const resolved = resolveTradingApiUrl({
+    environment: data.environment,
+    apiHosts: data.api_hosts,
+  });
+  if (resolved.rejected) {
+    // A hostname, not a secret — see the same log on the renewal path. Through
+    // redactSecrets() anyway: the value came from outside this process, and
+    // every diagnostic in this integration goes through it.
+    console.warn(
+      redactSecrets(
+        '[tradovate] stored api_hosts.' +
+          `${data.environment} is not a usable bare hostname (${resolved.rejected}); ` +
+          `using ${resolved.url} instead`
+      )
+    );
+  }
+
+  return {
+    accessToken: token.accessToken,
+    expiresAt: token.expiresAt,
+    tradovateUserId: token.tradovateUserId,
+    apiUrl: resolved.url,
+    environment: data.environment,
+  };
+}
+
+/**
  * The only HTTP statuses on the renewal endpoint that prove the token was
  * rejected.
  *

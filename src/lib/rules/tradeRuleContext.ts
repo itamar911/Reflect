@@ -2,6 +2,9 @@ import { createClient } from '@/lib/supabase/client';
 import { hasMoneyPnl, tradeMoneyPnl } from '@/lib/pnl';
 import type { RuleContextSource } from '@/lib/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
+// Type-only, so there is no runtime import cycle: that module imports
+// startOfTodayIso() from this one to send the day boundary to the route.
+import type { BrokerDayPull } from './brokerDayContext';
 
 /**
  * The one answer to "what has happened to this user's trades that rules care
@@ -81,9 +84,11 @@ export interface TodayMoney {
  * below are deliberately the cruder numbers the gate has always compared
  * against. Two shapes of the same day, for two different jobs.
  *
- * Derived from the same closed-today query the loss threshold uses, via the
- * same tradeMoneyPnl() — so the panel cannot tell the user one thing while the
- * rules act on another (REF-82 §4.5).
+ * Derived from the same source as the loss threshold beside it — the
+ * closed-today query via tradeMoneyPnl(), or the broker's priced round trips
+ * when there are any — so the panel cannot tell the user one thing while the
+ * rules act on another (REF-82 §4.5). The two move together by construction:
+ * they are built in the same branch of loadTradeRuleContext().
  */
 export interface TodayClosedSummary {
   /** Plans closed today, whether or not they carry a money figure. */
@@ -124,27 +129,25 @@ export interface TradeRuleContext {
   // ── Not rule inputs: what the day looked like, for the form to say so ──────
 
   /**
-   * Where this view of the user's day came from (REF-82 §6).
+   * Where this view of the user's day came from (REF-82 §6, REF-90).
    *
-   * ALWAYS 'reflect_only' TODAY, and hardcoded rather than derived, because it
-   * is the truth: the broker pull layer does not exist. The form can only judge
-   * what the user recorded in Reflect, so that is what it declares.
+   * Not derived here and not decidable here: it is the `source` of the
+   * {@link BrokerDayPull} this function was handed, passed through unchanged.
+   * The route decides it, because the route is the only thing that knows
+   * whether Tradovate answered — see lib/rules/brokerDayContext.ts for the
+   * mapping and lib/tradovate/errors.ts for why an expiry and a rate limit are
+   * not the same claim.
    *
-   * >>> THIS IS WHERE REF-90 CONNECTS THE BROKER DATA. <<<
+   * It is reported on this one object so that the gate in AppShell and the
+   * form cannot disagree about whose day they are looking at, which is the
+   * divergence this module exists to have ended (see the header).
    *
-   * REF-90 fetches today's executed trades from Tradovate when the form opens
-   * (§2.4 — one REST call, on demand, no cron and no socket) and merges them
-   * into the figures above. It sets this field to what actually happened:
-   * 'broker_verified' when the fetch returned, 'broker_expired' when the
-   * connection had lapsed, 'broker_unavailable' when the fetch failed. It must
-   * set it HERE, on this one object, so that the gate in AppShell and the form
-   * can never disagree about whose day they are looking at — the divergence
-   * this module exists to have ended (see the header).
-   *
-   * The context panel already renders all four states; nothing else needs
-   * writing on the display side. What it must not do is write this to
-   * trade_plans.rule_context_source before migration 032 has run — see the
-   * submit path in components/trade/TradePlanForm.tsx.
+   * STILL NOT WRITTEN TO trade_plans.rule_context_source. Migration 032 adds
+   * that column and is run by hand; until the owner has run it, an insert
+   * naming the column fails and takes the trade plan with it. The value is
+   * live and on screen, and persisting it is a one-line follow-up once 032 is
+   * confirmed applied — see the submit path in
+   * components/trade/TradePlanForm.tsx.
    */
   source: RuleContextSource;
 
@@ -243,9 +246,56 @@ function measureLossStreak(rows: readonly ClosedTradeRow[]): {
  * `client` exists so a caller that already holds a browser client can pass it
  * rather than making a second one; the default is the ordinary browser client,
  * because both callers run in the browser under the user's own RLS.
+ *
+ *
+ * `broker` IS MANDATORY, AND IT COMES SECOND (REF-90)
+ * --------------------------------------------------
+ *
+ * Before the optional `client`, so that no call site can leave it out and
+ * silently get Reflect-only enforcement while the other path gets the broker's
+ * view. There are two enforcement paths and they must agree; the compiler is
+ * the only reviewer that reads every call site. The same move as `apiUrl`
+ * beside `accessToken` in lib/tradovate/client.ts, for the same reason.
+ *
+ * Fetch it with loadBrokerDayPull() from ./brokerDayContext.ts, which caches
+ * briefly so that one form opening costs one pull. Pass REFLECT_ONLY from the
+ * same module when there is deliberately no broker view to consult.
+ *
+ *
+ * WHAT THE BROKER REPLACES, AND WHAT IT CANNOT
+ * -------------------------------------------
+ *
+ * On `broker_verified` the broker is THE source for everything about closed
+ * trades — today's loss total, the streak, the minutes since the streak's last
+ * close, and the panel's closed-trade figures. Reflect's own closed rows are
+ * not added to them and not compared against them (investigation §6, option
+ * A): the same trade recorded in both places would otherwise be counted twice,
+ * doubling a loss total and inflating a streak, and nothing links the two
+ * records — matching a broker fill to a Reflect plan is REF-80 and is not this.
+ *
+ * Two figures stay Reflect's in every state, because the broker has no view of
+ * them:
+ *
+ * - **`todayTradeCount`.** It counts trades TAKEN, by `submitted_at`, which is
+ *   a plan the trader logged — including one still open and one they later
+ *   marked never entered. The broker reports CLOSES. They are different sets
+ *   and `max_daily_trades` is about the former, so taking a closed-trade count
+ *   as a trades-taken count would under-report the limit the user set.
+ * - **the three `*_last_trade` flags.** FOMO, exiting early and moving a stop
+ *   are self-reported in CloseTrade.tsx. No broker knows them.
+ *
+ * THE RISK THIS ACCEPTS, STATED PLAINLY. A trade the trader closed in Reflect
+ * that Tradovate has not paired yet — or closed at a broker Reflect is not
+ * connected to — is not in the broker's figures, so a loss total can read lower
+ * than what the trader recorded, and a block can lift. That is option A's known
+ * cost, chosen over double counting and over `max(reflect, broker)`, whose
+ * number is not a number anyone could explain in the panel. It applies ONLY to
+ * `broker_verified`; the three other states fall through to Reflect's figures
+ * below, so a broker that is expired or unreachable can never unblock anybody.
  */
 export async function loadTradeRuleContext(
   userId: string,
+  broker: BrokerDayPull,
   client: SupabaseClient = createClient()
 ): Promise<TradeRuleContext> {
   const todayStart = startOfTodayIso();
@@ -293,7 +343,10 @@ export async function loadTradeRuleContext(
 
   const { lossStreak, minutesSinceLastClose } = measureLossStreak(recent);
 
-  return {
+  // Reflect's own answer, which is the whole answer in three of the four
+  // source states — and the floor under the fourth, for the two figures no
+  // broker can produce.
+  const context: TradeRuleContext = {
     todayTradeCount: takenRes.data?.length ?? 0,
     todayLossAmount: sumLosses(closedToday),
     lossStreak,
@@ -301,9 +354,31 @@ export async function loadTradeRuleContext(
     lastTradeFomo: !!lastTrade?.fomo_entry,
     lastTradeExitedEarly: !!lastTrade?.exited_early,
     lastTradeMovedSl: !!lastTrade?.moved_sl,
-    // 'reflect_only' until REF-90 — see the field's own note, which is where
-    // that work connects.
-    source: 'reflect_only',
+    source: broker.source,
     todayClosed: summariseTodayCloses(closedToday),
+  };
+
+  // 'broker_expired', 'broker_unavailable' and 'reflect_only' all land here:
+  // the figures are Reflect's and `source` says so, which is the failure policy
+  // in one line. A broker we could not reach must not be able to lift a block
+  // the user's own records put them under, so there is nothing to zero and
+  // nothing to clear — the honest fallback is the data we already have.
+  if (broker.source !== 'broker_verified') return context;
+
+  const day = broker.day;
+
+  return {
+    ...context,
+    todayLossAmount: day.lost,
+    lossStreak: day.lossStreak,
+    minutesSinceLastClose: day.minutesSinceLastClose,
+    todayClosed: {
+      count: day.closedCount,
+      losingCount: day.losingCount,
+      // Every priced round trip carries a figure, so `money` is absent exactly
+      // when there were no closes — unlike the Reflect query, where a close
+      // with no exit price is a row that carries no money at all.
+      money: day.closedCount > 0 ? { net: day.net, lost: day.lost } : null,
+    },
   };
 }

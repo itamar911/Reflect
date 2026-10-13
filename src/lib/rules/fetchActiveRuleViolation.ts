@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/client';
 import { loadTradeRuleContext } from './tradeRuleContext';
+import type { BrokerDayPull } from './brokerDayContext';
 import {
   checkActiveViolation,
   checkCustomRules,
@@ -25,17 +26,28 @@ export interface RuleViolationResult {
  *
  * When realTimeBlocking is false (non-pro plans), a matching rule can never
  * block trade submission — it's downgraded to a warning instead.
+ *
+ * `broker` is the day as Tradovate reported it, and it is MANDATORY — see the
+ * note on loadTradeRuleContext, which is where it goes. It sits before
+ * `realTimeBlocking` so that a call site cannot supply the optional argument
+ * and quietly skip this one; both existing callers pass both.
  */
-export async function fetchActiveRuleViolation(userId: string, realTimeBlocking: boolean = true): Promise<RuleViolationResult | null> {
+export async function fetchActiveRuleViolation(
+  userId: string,
+  broker: BrokerDayPull,
+  realTimeBlocking: boolean = true
+): Promise<RuleViolationResult | null> {
   const supabase = createClient();
 
   // Trade history comes from ./tradeRuleContext.ts, which the trade form
   // calls too. It used to be worked out here and, differently, there — see
-  // that module's header for what the two definitions disagreed about.
+  // that module's header for what the two definitions disagreed about. The
+  // broker pull is threaded through rather than fetched here for the same
+  // reason: the form must judge the same day this gate judged.
   const [rulesRes, customRulesRes, history] = await Promise.all([
     supabase.from('preset_rules').select('*').eq('user_id', userId).single(),
     supabase.from('custom_rules').select('*').eq('user_id', userId).eq('is_active', true).order('created_at'),
-    loadTradeRuleContext(userId, supabase),
+    loadTradeRuleContext(userId, broker, supabase),
   ]);
 
   const presetRules: PresetRules =

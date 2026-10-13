@@ -10,6 +10,7 @@ import '@/lib/demo/fetchGuard';
 import TradePlanForm from '@/components/trade/TradePlanForm';
 import RuleBlockedModal from '@/components/rules/RuleBlockedModal';
 import { fetchActiveRuleViolation, type RuleViolationResult } from '@/lib/rules/fetchActiveRuleViolation';
+import { loadBrokerDayPull } from '@/lib/rules/brokerDayContext';
 import { logRuleViolations } from '@/lib/rules/logRuleViolation';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
 import { MAIN_CONTENT_ID } from '@/components/accessibility/SkipLink';
@@ -256,7 +257,14 @@ export default function AppShell({
       setFormOpen(true);
       return;
     }
-    const violation = await fetchActiveRuleViolation(userId, limits.realTimeBlocking);
+    // Today as the broker reports it, before the rules are checked against it
+    // (REF-90). Fetched here rather than inside the gate so that the form,
+    // which opens a moment later and runs the second enforcement path, shares
+    // this answer — loadBrokerDayPull() holds it briefly for exactly that. It
+    // never rejects: a failure is one of the four provenance states, and all
+    // four fall back to Reflect's own figures except the verified one.
+    const broker = await loadBrokerDayPull(userId);
+    const violation = await fetchActiveRuleViolation(userId, broker, limits.realTimeBlocking);
     if (violation && (violation.actionType === 'block_day' || violation.actionType === 'block_timer')) {
       setRuleBlock(violation);
       if (violation.customRule) {

@@ -23,6 +23,7 @@ import type { TradePlanInput, PresetRules, RulesetValidationResult, TradeStrateg
 import type { PersonalStrategy } from '@/components/strategies/StrategiesClient';
 import { getPlanLimits, type PlanTier } from '@/lib/plans/config';
 import { fetchActiveRuleViolation } from '@/lib/rules/fetchActiveRuleViolation';
+import { loadBrokerDayPull } from '@/lib/rules/brokerDayContext';
 import { logRuleViolations, overrideRuleViolations, type RuleViolationLogInput } from '@/lib/rules/logRuleViolation';
 import {
   loadTradeRuleContext,
@@ -390,10 +391,16 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     // instead of "money was lost" — which meant the gate and this form could
     // disagree about the same two preset rules for the same user at the same
     // moment. See lib/rules/tradeRuleContext.ts.
+    //
+    // Today as the broker reports it (REF-90). The gate in AppShell pulled this
+    // a moment ago, on its way to opening this form, and loadBrokerDayPull()
+    // holds a pull briefly — so this is normally the SAME object the gate
+    // judged, rather than a second look at a day that may have moved. Started
+    // inside the Promise.all so the pull overlaps the three queries.
     const [rulesRes, personalRes, history, openPlansRes] = await Promise.all([
       supabase.from('preset_rules').select('*').eq('user_id', userId).single(),
       supabase.from('personal_strategies').select('*').eq('user_id', userId).order('created_at'),
-      loadTradeRuleContext(userId, supabase),
+      loadBrokerDayPull(userId).then((broker) => loadTradeRuleContext(userId, broker, supabase)),
       // Plans still open from BEFORE today (REF-82 §5.2).
       //
       // The day boundary is startOfTodayIso() from tradeRuleContext — the same
@@ -421,10 +428,10 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     setTodayLossAmount(history.todayLossAmount);
     setLossCount(history.lossStreak);
 
-    // The panel's figures, off the same object. `source` is 'reflect_only' for
-    // every user until REF-90 builds the broker pull — the panel renders all
-    // four of its states regardless, so that work is a change to the context
-    // module and not to any of this.
+    // The panel's figures, off the same object the three rule inputs above came
+    // from — so when `source` is 'broker_verified' the sentence the user reads
+    // describes the broker's closes, which are the closes the rules just acted
+    // on, and when it is anything else both describe Reflect's.
     setTodayClosed(history.todayClosed);
     setContextSource(history.source);
     setContextLoaded(true);
@@ -777,8 +784,17 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     // the generic (non-custom) preset branch it can also return is ignored here since
     // validateTradePlan above already covers preset rules. Skipped when the user has
     // turned off discipline alerts — matches the gate at form-open time in AppShell.
+    //
+    // THE BROKER PULL HERE IS DELIBERATELY ALLOWED TO BE NEWER than the one the
+    // figures above came from (REF-90). Those are the open-time figures, which
+    // the gate in AppShell judged the same day against — that pairing is the
+    // one that must not diverge, and it does not. This check is the extra look
+    // at a day that may have moved in the twenty minutes since, and it can only
+    // ADD a block: `customBlocked` is OR-ed into the verdict below and never
+    // clears one. Newer data in the conservative direction, which is the whole
+    // point of re-checking.
     const activeCheck = disciplineAlertsEnabled
-      ? await fetchActiveRuleViolation(userId, limits.realTimeBlocking)
+      ? await fetchActiveRuleViolation(userId, await loadBrokerDayPull(userId), limits.realTimeBlocking)
       : null;
     const customViolation = activeCheck?.customRule ? activeCheck : null;
     const customBlocked = customViolation !== null

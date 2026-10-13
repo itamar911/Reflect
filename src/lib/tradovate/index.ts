@@ -1,11 +1,14 @@
 /**
- * Tradovate integration — authentication groundwork.
+ * Tradovate integration.
  *
  * SERVER ONLY. Never import this from a client component; it reads the
  * Tradovate password and API secret from the environment.
  *
- * Scope: authentication, token lifecycle, and an authenticated request helper.
- * Read-only by design — there is no order entry or trade management here.
+ * Scope: authentication, token lifecycle, an authenticated request helper, and
+ * — since REF-90 — reading a connected user's closed trades for the day.
+ * Read-only by design: there is no order entry or trade management here, and
+ * adding one should be a deliberate decision rather than a side effect of
+ * needing a POST.
  *
  * Market data is deliberately absent: the Market Data WebSocket requires CME
  * sub-vendor registration, which Reflect does not have. Everything the app
@@ -52,6 +55,7 @@ export {
   TradovateOAuthError,
   TradovateNotConnectedError,
   TradovateTransientError,
+  TradovateUnpriceableError,
 } from './errors';
 
 // --- OAuth: connecting an end user's Tradovate account ----------------------
@@ -75,6 +79,7 @@ export type { ExchangedToken } from './oauth';
 
 export {
   getUserAccessToken,
+  getUserTradingApi,
   getConnectionSummary,
   saveConnection,
   disconnectUser,
@@ -88,7 +93,19 @@ export type {
   ConnectionSummary,
   RefreshRedemption,
   StoredConnection,
+  UserTradingApi,
 } from './connections';
+
+// The day pull (REF-90) — the first thing here that reads trading data rather
+// than authenticating. Driven by src/app/api/tradovate/today/route.ts; see
+// src/lib/rules/brokerDayContext.ts for how its answer reaches the rules.
+export { loadBrokerDay } from './fills';
+export type { BrokerDayContext, BrokerDayRequest, TradovateReader } from './fills';
+
+export { selectTradingAccounts } from './accounts';
+
+export { closedToday, minutesSince, parseDayStart, DAY_START_PARAM } from './trading-day';
+export type { DayStartParse } from './trading-day';
 
 // The keep-alive loop (REF-100). The cron route is its only caller in the app;
 // scripts/tradovate-refresh-check.ts drives it against a stubbed client.
@@ -128,4 +145,12 @@ export type {
   TradovateMeResponse,
   TradovateConfig,
   UserTokenSnapshot,
+  TradovateAccount,
+  TradovateContract,
+  TradovateCurrency,
+  TradovateFill,
+  TradovateFillPair,
+  TradovatePosition,
+  TradovateProduct,
+  TradovateTradeDate,
 } from './types';

@@ -207,3 +207,176 @@ export interface UserTokenSnapshot {
   expiresAt: number;
   tradovateUserId: number | null;
 }
+
+// ── Trading entities (REF-90) ────────────────────────────────────────────────
+//
+// The entities the day pull reads, and nothing more. Every field below appears
+// in the schema on partner.tradovate.com for its endpoint; optional here means
+// optional there, not "we are not sure". The response bodies are typed by a
+// plain cast like every other body in this module, so these are claims about
+// the server rather than guarantees about the value in hand — ./fills.ts
+// validates what it depends on before doing arithmetic with it.
+//
+// WHAT IS NOT HERE, AND WHY. `/<entity>/list` takes no filter parameters at
+// all ("Fetches all Fill entities", and the cheat sheet's "all of the entities
+// that are within the logged on user's visible scope"), so there is no query
+// shape to model: the filtering is ours and it happens after the response
+// lands. That is the finding that makes a day pull a chain of calls rather
+// than one.
+//   https://partner.tradovate.com/resources/reference/api-cheat-sheet
+
+/**
+ * A `{year, month, day}` session label.
+ *
+ * READ BY NOTHING IN REF-90, and typed anyway because three of the entities
+ * below carry it and a field nobody wrote down is a field someone later
+ * mistakes for a day boundary. The hour at which it rolls over is NOT
+ * documented — I looked at the endpoint pages, the architecture overview and
+ * the cheat sheet — and the trading-hours article that would settle it is not
+ * fetchable. So the day pull dates every trade by `Fill.timestamp`, a real
+ * instant, and converts that to the trader's day itself. See ./trading-day.ts.
+ */
+export interface TradovateTradeDate {
+  year: number;
+  month: number;
+  day: number;
+}
+
+/**
+ * One execution. GET /v1/fill/list.
+ *
+ * NOT a trade: a single order can fill in several pieces, so counting these
+ * would inflate "how many trades today", sometimes several-fold.
+ * `finallyPaired` is the hint that it happened.
+ *
+ * Carries no accountId and no P&L — which is why the chain needs
+ * /position/list for the account and /fillPair/list for the round trip.
+ *   https://partner.tradovate.com/api/rest-api-endpoints/orders/fill-list
+ */
+export interface TradovateFill {
+  id: number;
+  orderId: number;
+  contractId: number;
+  /** ISO 8601 instant. The only field in this family that is one. */
+  timestamp: string;
+  tradeDate: TradovateTradeDate;
+  action: 'Buy' | 'Sell';
+  qty: number;
+  price: number;
+  active?: boolean;
+  finallyPaired?: boolean;
+}
+
+/**
+ * A round trip: an entry fill matched against the exit fill that closed it.
+ * GET /v1/fillPair/list.
+ *
+ * The closest thing the API has to "a trade" in the sense a discipline rule
+ * means, and the reason the P&L arithmetic is possible at all: both legs'
+ * prices are here. It carries no date, no account and no currency, so each
+ * pair is dated through its fills and attributed through its position.
+ *
+ * `active` is documented only as "Whether the fill pair is currently active";
+ * what it says about a pair that has closed is not stated anywhere, so nothing
+ * here branches on it.
+ *   https://partner.tradovate.com/api/rest-api-endpoints/positions/fill-pair-list
+ */
+export interface TradovateFillPair {
+  id: number;
+  positionId: number;
+  buyFillId: number;
+  sellFillId: number;
+  qty: number;
+  buyPrice: number;
+  sellPrice: number;
+  active?: boolean;
+}
+
+/**
+ * A position, per contract per trading day. GET /v1/position/list.
+ *
+ * Read for one thing: `accountId`. It is the only link from a fill pair to an
+ * account, and therefore the only way to answer "is this trade mine" — see
+ * ./accounts.ts.
+ *   https://partner.tradovate.com/api/rest-api-endpoints/positions/position-list
+ */
+export interface TradovatePosition {
+  id: number;
+  accountId: number;
+  contractId: number;
+  timestamp: string;
+  tradeDate: TradovateTradeDate;
+  netPos: number;
+}
+
+/**
+ * A trading account. GET /v1/account/list.
+ *
+ * The list is everything in the user's visible scope, which for a funded or
+ * prop trader can include accounts they did not trade — hence `userId`, which
+ * is matched against the connection's stored `tradovate_user_id`.
+ *
+ * There is no "primary" flag and no currency field. Account selection is
+ * therefore a product decision rather than a lookup; ./accounts.ts holds it.
+ *   https://partner.tradovate.com/api/rest-api-endpoints/accounting/account-list
+ */
+export interface TradovateAccount {
+  id: number;
+  name: string;
+  userId: number;
+  accountType: 'Customer' | 'Employee' | 'Giveup' | 'House' | 'Omnibus' | 'Wash';
+  active?: boolean;
+  closed?: boolean;
+  restricted?: boolean;
+  readonly?: boolean;
+  futuresDisabled?: boolean;
+}
+
+/**
+ * A contract. GET /v1/contract/item?id=…
+ *
+ * Read for `productId`, the step towards a value per point.
+ *   https://partner.tradovate.com/api/rest-api-endpoints/contract-library/contract-item
+ */
+export interface TradovateContract {
+  id: number;
+  name: string;
+  productId: number;
+}
+
+/**
+ * A product. GET /v1/product/item?id=…
+ *
+ * The two fields that decide whether a round trip can be priced at all:
+ *
+ * - `valuePerPoint` — what one point of price movement is worth. Without it
+ *   `(sellPrice − buyPrice) × qty` is a number of points, not money, and
+ *   comparing it to a dollar threshold is the unit bug the rule context
+ *   module's header records having already been made once.
+ * - `currencyId` — resolved against /currency/list. REF-99 made every amount
+ *   in this product US dollars, so a product denominated in anything else
+ *   cannot be added to that total. Checked rather than assumed: no endpoint
+ *   states that an account's realised P&L is in USD.
+ *   https://partner.tradovate.com/api/rest-api-endpoints/contract-library/product-item
+ */
+export interface TradovateProduct {
+  id: number;
+  name: string;
+  currencyId: number;
+  valuePerPoint?: number;
+  priceFormatType?: string;
+  tickSize?: number;
+}
+
+/**
+ * A currency. GET /v1/currency/list.
+ *
+ * `name` is the ISO code ('USD'). The only place in the API where a numeric
+ * currencyId can be turned into something a person — or a threshold — can
+ * compare.
+ *   https://partner.tradovate.com/api/rest-api-endpoints/contract-library/currency-list
+ */
+export interface TradovateCurrency {
+  id: number;
+  name: string;
+}

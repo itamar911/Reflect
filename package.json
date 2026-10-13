@@ -12,7 +12,8 @@
     "tradovate:verify-key": "tsx --env-file-if-exists=.env.local scripts/tradovate-verify-key.ts",
     "tradovate:refresh-check": "tsx scripts/tradovate-refresh-check.ts",
     "test:translation": "node scripts/translation-check.mjs",
-    "test:money": "tsx scripts/money-format-check.ts"
+    "test:money": "tsx scripts/money-format-check.ts",
+    "test:broker-day": "tsx scripts/tradovate-today-check.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.96.0",
