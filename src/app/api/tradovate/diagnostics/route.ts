@@ -57,24 +57,25 @@
  *     burns 20 renewals per call reachable in production is a liability even
  *     behind an allowlist.
  *
- * THE ONE RESIDUAL RISK, STATED RATHER THAN HIDDEN
- * ------------------------------------------------
+ * HOW THE CONNECTION IS PROTECTED
+ * -------------------------------
  *
- * ?action=rate saves the newest token ONCE, after the loop. Between a renewal
- * and that save, the stored access token is older than the one Tradovate last
- * issued. renewAccessToken() takes no AbortSignal and Node's fetch has no
- * default timeout, so a socket that hangs can in principle run past
- * maxDuration and the save never happens — {@link LOOP_BUDGET_MS} leaves 35
- * seconds of headroom for exactly that, and the loop checks the clock between
- * calls, but it cannot interrupt one call.
+ * ?action=rate saves through saveConnection() after EVERY successful renewal,
+ * not once at the end. The window that choice closes: renewAccessToken() takes
+ * no AbortSignal and Node's fetch has no default timeout, so a socket that
+ * hangs can run past maxDuration — and a loop cut off before its save would
+ * leave the stored access token older than the one Tradovate last issued, with
+ * no measurement of whether renewal invalidates the token it replaces to say
+ * whether that costs the connection. Saving per call means the row is never
+ * more than one renewal behind, and the loop stops the moment a save fails
+ * (`stoppedBecause: 'save-failed'`) rather than renewing on top of a token it
+ * could not record.
  *
- * Whether that loses the connection depends on something nobody has measured:
- * whether renewal invalidates the token it replaces. The documentation says
- * renewal "extends the current session without creating a new one", which
- * suggests the previous token lives out its own 80 minutes — and ?action=refresh
- * measures the equivalent question for the refresh grant. If that turns out to
- * be wrong, make the loop save after every success instead; it costs one upsert
- * per call and removes the window entirely.
+ * ?action=refresh refuses to run at all when the current access token has less
+ * than {@link MIN_ACCESS_TOKEN_REMAINING_MS} left, because its whole
+ * measurement — does the PREVIOUS access token survive the refresh grant — is
+ * meaningless against a token that was about to lapse on its own. Natural
+ * expiry and rejection-by-the-grant are indistinguishable in that state.
  *
  * NO SECRET LEAVES THIS FILE. No token value, no client secret, no encryption
  * key appears in a response, in a log line, or in the report. Every upstream
@@ -132,15 +133,29 @@ const ENABLE_ENV_VAR = 'TRADOVATE_DIAGNOSTICS_ENABLED';
 const MAX_RENEWALS = 20;
 
 /**
- * Stop renewing with this much of {@link maxDuration} left, so the final
- * saveConnection() always runs. Losing the connection is a worse outcome than a
- * short run — the owner would have to re-authorize before anything else in
- * REF-90 or REF-100 can be tested.
+ * Stop starting new renewals once the loop has run this long, so a run that is
+ * going slowly ends with a response instead of a timeout. Each iteration now
+ * carries its own save, so being cut off here costs the measurement nothing
+ * beyond the calls not made — the row already holds the last token issued.
  */
 const LOOP_BUDGET_MS = 25_000;
 
 /** The literal ?confirm= value ?action=refresh demands. */
 const REFRESH_CONFIRM = 'not-in-trade';
+
+/**
+ * ?action=refresh refuses to run when the stored access token has less than
+ * this left.
+ *
+ * Not a safety margin — a precondition for the measurement to mean anything.
+ * The question is whether redeeming the refresh token invalidates the PREVIOUS
+ * access token, and the evidence is that token being refused by /auth/me. A
+ * token that was within minutes of lapsing anyway would be refused either way,
+ * and the result could not tell the two causes apart. ?action=rate renews the
+ * token, so running it first puts the connection in a state where this probe
+ * is conclusive.
+ */
+const MIN_ACCESS_TOKEN_REMAINING_MS = 10 * 60_000;
 
 /** Where the egress IP is read from, so a reader knows it is not our claim. */
 const IP_LOOKUP_URL = 'https://api.ipify.org?format=json';
@@ -268,6 +283,18 @@ interface RenewalAttempt {
   errorText: string | null;
   /** Which host the call went to, and whether it came from the stored apiHosts. */
   hostSource: 'stored' | 'fallback';
+  /**
+   * Whether THIS renewal's token reached the database. Null when there was no
+   * token to save, which is every outcome other than 'ok'.
+   *
+   * Recorded per call because the save happens per call: the row is never more
+   * than one renewal behind, and `false` here stops the loop.
+   */
+  saved: boolean | null;
+  /** How long the upsert took. Excluded from durationMs, which is the renewal. */
+  saveMs: number | null;
+  /** Redacted. Set only when the save failed. */
+  saveError: string | null;
 }
 
 function describeFailure(
@@ -285,6 +312,10 @@ function describeFailure(
     pTimeSeconds: null as number | null,
     captcha: null as boolean | null,
     errorText: safeMessage(error),
+    // A failed renewal issued no token, so there was nothing to save.
+    saved: null,
+    saveMs: null,
+    saveError: null,
   };
 
   if (error instanceof TradovatePenaltyError) {
@@ -322,9 +353,12 @@ async function measureRenewalRate(params: {
   const attempts: RenewalAttempt[] = [];
   let token = startingToken;
   let apiHosts: TradovateApiHosts | undefined = row.api_hosts ?? undefined;
-  /** The newest token Tradovate issued, and the expiry it stated for it. */
-  let latest: { accessToken: string; expirationTime: string } | null = null;
-  let stoppedBecause: 'completed' | 'failure' | 'unparsable-expiry' | 'time-budget' = 'completed';
+  let stoppedBecause:
+    | 'completed'
+    | 'failure'
+    | 'unparsable-expiry'
+    | 'time-budget'
+    | 'save-failed' = 'completed';
 
   const loopStarted = Date.now();
 
@@ -344,8 +378,8 @@ async function measureRenewalRate(params: {
       const durationMs = Date.now() - started;
 
       // Same refusal as saveConnection's: a token whose expiry we cannot read
-      // is a token we must not store. Stop rather than adopt it, and keep the
-      // previous success as the one to save.
+      // is a token we must not store. Stop rather than adopt it; the row still
+      // holds the previous call's token, which was saved when it arrived.
       if (!Number.isFinite(Date.parse(renewed.expirationTime))) {
         attempts.push({
           call,
@@ -357,6 +391,9 @@ async function measureRenewalRate(params: {
           captcha: null,
           errorText: 'renewal succeeded but expirationTime was unparsable',
           hostSource: resolved.source,
+          saved: null,
+          saveMs: null,
+          saveError: null,
         });
         stoppedBecause = 'unparsable-expiry';
         break;
@@ -365,8 +402,33 @@ async function measureRenewalRate(params: {
       // Each success feeds the next call, which is what makes this a measurement
       // of the renewal budget rather than 20 calls with one stale token.
       token = renewed.accessToken;
-      latest = { accessToken: renewed.accessToken, expirationTime: renewed.expirationTime };
       apiHosts = readApiHosts(renewed) ?? apiHosts;
+
+      // Stored here, not after the loop. Every field saveConnection() writes is
+      // supplied: this renewal's token and the expiry Tradovate stated for it,
+      // the freshest apiHosts, and everything else carried off the row —
+      // omitting any one of them would null a column. See carryForward.
+      const saveStarted = Date.now();
+      let saved = true;
+      let saveError: string | null = null;
+      try {
+        await saveConnection({
+          ...carried,
+          accessToken: renewed.accessToken,
+          // The server's own expirationTime string, stored verbatim, exactly as
+          // the renewal path in connections.ts does it.
+          expiresAt: renewed.expirationTime,
+          apiHosts: apiHosts ?? carried.apiHosts,
+          admin,
+        });
+      } catch (error) {
+        saved = false;
+        saveError = safeMessage(error);
+        console.error(
+          `[tradovate][diag] FAILED to save the token from renewal ${call}; stopping the loop ` +
+            `so nothing is renewed on top of a token we could not record: ${saveError}`
+        );
+      }
 
       attempts.push({
         call,
@@ -378,7 +440,19 @@ async function measureRenewalRate(params: {
         captcha: null,
         errorText: null,
         hostSource: resolved.source,
+        saved,
+        saveMs: Date.now() - saveStarted,
+        saveError,
       });
+
+      // A renewal we could not record is where this stops. Carrying on would
+      // walk the stored token further and further behind the live one, and the
+      // next failure would leave the row pointing at a token several renewals
+      // old — the exact outcome every other decision in this file avoids.
+      if (!saved) {
+        stoppedBecause = 'save-failed';
+        break;
+      }
     } catch (error) {
       attempts.push(describeFailure(call, Date.now() - started, resolved.source, error));
       stoppedBecause = 'failure';
@@ -386,36 +460,8 @@ async function measureRenewalRate(params: {
     }
   }
 
-  // The part that must not be skipped. Every field saveConnection() writes is
-  // supplied: the token and its expiry from the last success, everything else
-  // carried off the row. Omitting any one of them would null a column — see
-  // carryForward.
-  let save: { attempted: boolean; ok: boolean; error: string | null };
-  if (latest) {
-    try {
-      await saveConnection({
-        ...carried,
-        accessToken: latest.accessToken,
-        // The server's own expirationTime string, stored verbatim, exactly as
-        // the renewal path in connections.ts does it.
-        expiresAt: latest.expirationTime,
-        apiHosts: apiHosts ?? carried.apiHosts,
-        admin,
-      });
-      save = { attempted: true, ok: true, error: null };
-    } catch (error) {
-      save = { attempted: true, ok: false, error: safeMessage(error) };
-      console.error(
-        '[tradovate][diag] FAILED to save the renewed token; the stored access token is now ' +
-          `older than the one Tradovate last issued: ${save.error}`
-      );
-    }
-  } else {
-    // Nothing was renewed, so nothing is stored. The row is untouched.
-    save = { attempted: false, ok: false, error: null };
-  }
-
   const successes = attempts.filter((attempt) => attempt.outcome === 'ok').length;
+  const persisted = attempts.filter((attempt) => attempt.saved === true);
 
   return {
     attempts,
@@ -429,7 +475,14 @@ async function measureRenewalRate(params: {
         : successes === 15
           ? 'stopped after exactly 15 — consistent with 15/hour/IP'
           : `stopped after ${successes} — read the attempt that failed before concluding anything`,
-    save,
+    save: {
+      mode: 'after-each-renewal',
+      /** How many of the renewals reached the database. Should equal successes. */
+      saved: persisted.length,
+      lastSavedAtCall: persisted.length > 0 ? persisted[persisted.length - 1].call : null,
+      failedAtCall: attempts.find((attempt) => attempt.saved === false)?.call ?? null,
+      error: attempts.find((attempt) => attempt.saved === false)?.saveError ?? null,
+    },
   };
 }
 
@@ -500,8 +553,19 @@ async function redeemRefreshToken(config: TradovateOAuthConfig, refreshToken: st
 async function probePreviousToken(
   config: TradovateOAuthConfig,
   previousAccessToken: string,
-  storedTradovateUserId: number | null
+  storedTradovateUserId: number | null,
+  /** The previous token's own expiry, epoch ms, from the row read before the grant. */
+  previousExpiresAtMs: number
 ) {
+  // Captured at the probe, not at the start of the request: the grant itself
+  // took time. Positive means the previous token had life left of its own, so a
+  // refusal below is attributable to the grant and not to natural expiry. The
+  // guard in the handler keeps this well clear of zero, and reporting it makes
+  // that checkable rather than assumed.
+  const msUntilExpiryAtProbe = Number.isFinite(previousExpiresAtMs)
+    ? previousExpiresAtMs - Date.now()
+    : null;
+
   try {
     const me = await tradovateGet<TradovateMeResponse>('/auth/me', undefined, {
       apiUrl: config.liveApiUrl,
@@ -516,6 +580,7 @@ async function probePreviousToken(
     return {
       outcome: 'ok' as const,
       httpStatus: null as number | null,
+      msUntilExpiryAtProbe,
       /** True only on a 2xx. Every other value of `outcome` means "not known". */
       stillValid: true as boolean | null,
       returnedUserId: typeof me?.userId === 'number',
@@ -528,6 +593,7 @@ async function probePreviousToken(
   } catch (error) {
     const shape = {
       httpStatus: null as number | null,
+      msUntilExpiryAtProbe,
       // null, not false: "I could not ask" is not "the token was refused". Only
       // a 401 or 403 below turns this into a definite false.
       stillValid: null as boolean | null,
@@ -694,7 +760,14 @@ async function measureRefreshRedemption(params: {
     console.error(`[tradovate][diag] FAILED to save the refreshed tokens: ${saved.error}`);
   }
 
-  const previousToken = await probePreviousToken(config, previousAccessToken, row.tradovate_user_id);
+  const previousToken = await probePreviousToken(
+    config,
+    previousAccessToken,
+    row.tradovate_user_id,
+    // From the row read before the grant, so this is the PREVIOUS token's
+    // expiry and not the one just saved over it.
+    Date.parse(row.expires_at)
+  );
 
   return {
     ok: true,
@@ -706,9 +779,10 @@ async function measureRefreshRedemption(params: {
         ? 'the previous access token still answers /auth/me — the existing session survived, so ' +
           'the refresh grant did not open a second one'
         : previousToken.stillValid === false
-          ? `the previous access token was refused (HTTP ${previousToken.httpStatus}) — ` +
-            'redeeming the refresh token appears to have replaced the session, which counts ' +
-            'against the two-session cap and can evict a trading terminal'
+          ? `the previous access token was refused (HTTP ${previousToken.httpStatus}) with ` +
+            `${previousToken.msUntilExpiryAtProbe}ms of its own life left — redeeming the ` +
+            'refresh token appears to have replaced the session, which counts against the ' +
+            'two-session cap and can evict a trading terminal'
           : 'INCONCLUSIVE — the probe neither succeeded nor produced a 401/403, so it says ' +
             'nothing either way. Read previousAccessToken.outcome and errorText, then re-run.',
   };
@@ -889,6 +963,28 @@ export async function GET(request: NextRequest) {
           `the stored connection is ${row.environment} but this deployment's ` +
           `TRADOVATE_API_URL declares ${oauth.config.environment}; the refresh grant would ` +
           'go to the wrong token endpoint',
+        connection,
+      },
+      { status: 409 }
+    );
+  }
+
+  // The precondition for the measurement, checked before anything is redeemed.
+  // The probe's evidence is the previous access token being refused by
+  // /auth/me — and a token that was about to lapse anyway would be refused for
+  // its own reasons, leaving natural expiry and rejection-by-the-grant
+  // indistinguishable. Nothing is spent on a run that could not conclude.
+  if (connection.msUntilAccessTokenExpiry < MIN_ACCESS_TOKEN_REMAINING_MS) {
+    return NextResponse.json(
+      {
+        error: 'Access token too close to expiry to measure anything',
+        detail:
+          'The current access token has expired or is close to expiring, so a refusal of the ' +
+          'previous token afterwards could not be told apart from natural expiry. Run ' +
+          '?action=rate first — it renews the token — and then ?action=refresh.',
+        msUntilAccessTokenExpiry: connection.msUntilAccessTokenExpiry,
+        requiredMs: MIN_ACCESS_TOKEN_REMAINING_MS,
+        nothingRedeemed: true,
         connection,
       },
       { status: 409 }
