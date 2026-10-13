@@ -392,6 +392,16 @@ export async function saveConnection(params: {
     // there is nothing to insert. `select()` is what makes the outcome
     // observable — PostgREST reports zero matched rows as an empty array, not
     // as an error, so without it a lost swap would look exactly like a win.
+    //
+    // NOTE THE ABSENCE OF A `status` PREDICATE, AND DO NOT ADD ONE. Filtering
+    // on status='active' here looks like tightening and is the opposite: it is
+    // what HEALS a row that a racing loser has just marked 'expired'. `row`
+    // above carries status='active', so a save that matches an expired row
+    // writes it back to active — which is the whole recovery for the
+    // interleaving where the loser's status write lands before the winner's
+    // save. With a status filter the save would match nothing, the row would
+    // stay expired, and the connection would be dead until the user
+    // reconnected. See markExpiredIfRefreshUnchanged().
     const { data, error } = await admin
       .from('tradovate_connections')
       .update(row)
@@ -519,6 +529,85 @@ async function markStatus(
     .from('tradovate_connections')
     .update({ status, updated_at: new Date().toISOString() })
     .eq('user_id', userId);
+}
+
+/**
+ * Mark a connection 'expired', but ONLY if its refresh token is still the one
+ * whose refusal we are acting on.
+ *
+ * This is {@link markStatus} with the compare-and-swap that every expired write
+ * turns out to need, and it closes a race that cost a live connection
+ * permanently.
+ *
+ * THE RACE IT CLOSES. Two redemptions read the same refresh token C0. A redeems
+ * first and gets C1; B presents the now-spent C0 and is told `invalid_grant`.
+ * B's reconcile() reads the row, still sees C0 because A's save (230–700ms in
+ * production) has not landed, and concludes the refusal was real. Then:
+ *
+ *   B: reconcile() reads C0           → verdict stands
+ *   A: conditional save lands         → C1, status='active', A is finished
+ *   B: markStatus('expired')          → unconditional, overwrites A's status
+ *
+ * The row ends 'expired' holding A's perfectly good tokens, and nothing heals
+ * it: the status gate in loadOrRenew() refuses the row on every later call, and
+ * listConnectionsDueForRefresh() selects status='active' only, so the keep-alive
+ * never looks at it again. The user has to reconnect — which is REF-101's
+ * failure mode, reintroduced through a race.
+ *
+ * Reconciling harder cannot fix that. A read at T₁ and a write at T₂ with a
+ * network round trip between them is check-then-act, however many times it
+ * checks. The predicate has to travel WITH the write, so that Postgres
+ * evaluates it atomically at commit: then no interleaving can defeat it, rather
+ * than the window merely being narrower.
+ *
+ * `expectRefreshTokenCiphertext` is the ciphertext the CALLER read, null
+ * included — a row that had no refresh token and still has none is as much a
+ * match as an unchanged one, and it is the state at the lapsed-with-nothing-to-
+ * recover-with call site.
+ *
+ * On `applied: false` the caller must NOT report the connection expired. It
+ * means the row moved under us, so the refusal we hold is a verdict on a
+ * credential the row no longer uses.
+ *
+ * Unlike markStatus(), a failure is reported rather than swallowed — but it is
+ * reported as `applied: false`, which is the fail-safe direction: a write we
+ * cannot confirm must not become a claim that the connection is dead.
+ */
+async function markExpiredIfRefreshUnchanged(params: {
+  userId: string;
+  expectRefreshTokenCiphertext: string | null;
+  admin: SupabaseClient;
+}): Promise<{ applied: boolean }> {
+  const { userId, expectRefreshTokenCiphertext, admin } = params;
+
+  const update = admin
+    .from('tradovate_connections')
+    .update({ status: 'expired' satisfies ConnectionStatus, updated_at: new Date().toISOString() })
+    .eq('user_id', userId);
+
+  // `.is` for null and `.eq` for a value: PostgREST will not match NULL with an
+  // equality filter, so a row that legitimately has no refresh token needs the
+  // IS NULL form or this would never apply.
+  const filtered =
+    expectRefreshTokenCiphertext === null
+      ? update.is('refresh_token_encrypted', null)
+      : update.eq('refresh_token_encrypted', expectRefreshTokenCiphertext);
+
+  // select() for the same reason the save's compare-and-swap needs it: zero
+  // matched rows come back as an empty array, not as an error.
+  const { data, error } = await filtered.select('user_id');
+
+  if (error) {
+    console.error(
+      redactSecrets(
+        `[tradovate] could not record an expired connection (${error.code ?? 'no code'}); ` +
+          'leaving the row as it was'
+      )
+    );
+    return { applied: false };
+  }
+
+  return { applied: Boolean(data && data.length > 0) };
 }
 
 /**
@@ -985,8 +1074,41 @@ export async function redeemRefreshToken(params: {
 
     if (verdict.kind === 'rejected') {
       cache.delete(userId);
-      await markStatus(userId, 'expired', admin);
-      return { outcome: 'expired', detail: verdict.detail };
+
+      // The refusal is real as far as reconcile() could see. Still conditional:
+      // reconcile() read the row a round trip ago, and the winning save can land
+      // in that gap — see markExpiredIfRefreshUnchanged().
+      const marked = await markExpiredIfRefreshUnchanged({
+        userId,
+        expectRefreshTokenCiphertext: redeemedCiphertext,
+        admin,
+      });
+
+      if (marked.applied) return { outcome: 'expired', detail: verdict.detail };
+
+      // Nothing was written: the row moved between reconcile() and the write.
+      // Ask once more what it moved to — by now the winner's save has certainly
+      // committed, because it is what made the predicate fail.
+      const afterRace = await reconcile();
+      if (afterRace) {
+        console.warn(
+          redactSecrets(
+            `[tradovate] refresh redemption was refused (${verdict.detail}) but the row had ` +
+              'already moved on; the refusal was of a credential the row no longer uses'
+          )
+        );
+        return afterRace;
+      }
+
+      // The predicate failed and yet the refresh token reads as unchanged, so
+      // the row moved in some way this function cannot name. Transient, never
+      // expired: the one thing that must not happen here is declaring a
+      // connection dead on evidence we can no longer attach to it.
+      return {
+        outcome: 'transient',
+        reason: 'unknown',
+        detail: 'the connection was refused but the row moved before it could be recorded',
+      };
     }
 
     // Transient. Nothing written: not the status, not updated_at. The row still
@@ -1144,6 +1266,17 @@ async function loadOrRenew(
     cache.delete(userId);
     throw new TradovateNotConnectedError(userId, 'missing');
   }
+  // TODO(REF-100 follow-up): make this gate self-healing. A row that is
+  // 'expired' but still holds a refresh token whose refresh_expires_at is in
+  // the future is recoverable — one redemption would revive it — and refusing
+  // it here is what makes any stray 'expired' permanent, since
+  // listConnectionsDueForRefresh() also selects status='active' only. That
+  // would recover rows stranded by causes this branch cannot see: REF-101
+  // before its fix, the rotation race before
+  // markExpiredIfRefreshUnchanged(), and any future write that gets it wrong.
+  // Deliberately NOT done here — it needs a guard against redeeming in a loop
+  // on a row that is expired for a good reason, which is more than this change
+  // should carry.
   if (data.status !== 'active') {
     cache.delete(userId);
     throw new TradovateNotConnectedError(userId, data.status === 'revoked' ? 'revoked' : 'expired');
@@ -1216,7 +1349,28 @@ async function loadOrRenew(
 
     // Nothing left to recover with: no refresh token, or its own lifetime has
     // run out too. This is the state the user does have to reconnect from.
-    await markStatus(userId, 'expired', admin);
+    //
+    // Conditional even here, where the row looked unrecoverable: this read is
+    // older than the write, and a redemption committing in between would have
+    // left a live connection that this call is about to declare dead. A row
+    // with no refresh token matches on IS NULL, so the ordinary case is
+    // unaffected.
+    const marked = await markExpiredIfRefreshUnchanged({
+      userId,
+      expectRefreshTokenCiphertext: data.refresh_token_encrypted,
+      admin,
+    });
+    if (!marked.applied) {
+      // Someone stored a new refresh token while we were deciding, so this
+      // conclusion is about a row that no longer exists in that form. Nothing
+      // was written; the next call reads the row and will find the tokens that
+      // replaced ours.
+      throw new TradovateTransientError(
+        'The Tradovate access token had run out, but the connection changed while that was ' +
+          'being recorded. Nothing was written. Retry.',
+        { reason: 'unknown' }
+      );
+    }
     throw new TradovateNotConnectedError(userId, 'expired');
   }
 
@@ -1257,7 +1411,24 @@ async function loadOrRenew(
       // fallback here — see the header — so record the state and make the caller
       // deal with a disconnected account.
       cache.delete(userId);
-      await markStatus(userId, 'expired', admin);
+
+      // Conditional, like the other two expired writes. The renewal presented
+      // the access token THIS call read, and a concurrent redemption may have
+      // replaced it since: a 401 on a token that has already been superseded is
+      // a verdict on a credential the row no longer uses, and recording it
+      // would kill a connection that was just refreshed.
+      const marked = await markExpiredIfRefreshUnchanged({
+        userId,
+        expectRefreshTokenCiphertext: data.refresh_token_encrypted,
+        admin,
+      });
+      if (!marked.applied) {
+        throw new TradovateTransientError(
+          'Tradovate refused the stored access token, but the connection had already been ' +
+            'refreshed by another call. Nothing was written. Retry.',
+          { reason: 'unknown' }
+        );
+      }
       throw new TradovateNotConnectedError(userId, 'expired');
     }
 

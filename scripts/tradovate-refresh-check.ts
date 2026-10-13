@@ -60,7 +60,13 @@
 import { randomBytes } from 'node:crypto';
 
 import { GET as keepAliveRoute } from '../src/app/api/cron/tradovate-keepalive/route';
-import { clearAllCachedTokens, getUserAccessToken } from '../src/lib/tradovate/connections';
+import {
+  clearAllCachedTokens,
+  getUserAccessToken,
+  redeemRefreshToken,
+  saveConnection,
+  type StoredConnection,
+} from '../src/lib/tradovate/connections';
 import * as tradovateErrors from '../src/lib/tradovate/errors';
 import { TradovateNotConnectedError } from '../src/lib/tradovate/errors';
 import { runKeepAlive } from '../src/lib/tradovate/keepalive';
@@ -124,16 +130,28 @@ const SLOW_FAILURE_MS = 6_000;
 
 /** What the stub client was asked to do. */
 interface Writes {
+  /** Status writes that actually matched a row. A refused one is NOT here. */
   statusUpdates: string[];
   upserts: number;
   /** Conditional saves whose condition held, so the row was written. */
   casApplied: number;
   /** Conditional saves that matched no row — a lost rotation race. */
   casRejected: number;
+  /**
+   * Conditional `expired` writes that matched no row because the refresh token
+   * had moved on. The count that proves the REF-100 race fix is doing its job.
+   */
+  statusWritesRefused: number;
 }
 
 function noWrites(): Writes {
-  return { statusUpdates: [], upserts: 0, casApplied: 0, casRejected: 0 };
+  return {
+    statusUpdates: [],
+    upserts: 0,
+    casApplied: 0,
+    casRejected: 0,
+    statusWritesRefused: 0,
+  };
 }
 
 type Row = Record<string, unknown>;
@@ -162,7 +180,24 @@ type Row = Record<string, unknown>;
  * The two terminal forms on an update are how the two write paths are told
  * apart: markStatus awaits the builder, the compare-and-swap calls .select().
  */
-function storeAdmin(store: Map<string, Row>, writes: Writes) {
+/**
+ * A one-shot window for landing a competing write at an exact point.
+ *
+ * Fires on the first SELECT after it is armed, AFTER that select has been
+ * served — which is precisely the gap the REF-100 race lives in: reconcile()
+ * reads the old ciphertext, the winner commits, and only then does the loser
+ * write its verdict. Armed by the stubbed token endpoint so that it cannot fire
+ * on the read that precedes the grant.
+ *
+ * Deterministic by construction: no sleeps, no Promise.all, no reliance on
+ * which continuation the event loop happens to run first.
+ */
+interface RaceWindow {
+  armed: boolean;
+  run: () => void | Promise<void>;
+}
+
+function storeAdmin(store: Map<string, Row>, writes: Writes, race?: RaceWindow) {
   const rows = () => [...store.values()];
 
   function selectBuilder() {
@@ -198,7 +233,17 @@ function storeAdmin(store: Map<string, Row>, writes: Writes) {
       },
       maybeSingle: async () => {
         const found = rows().filter((row) => filters.every((f) => f(row)));
-        return { data: found[0] ?? null, error: null };
+        // A COPY, not the stored object. PostgREST hands back JSON, so a caller
+        // holding a result cannot see a later write — and the race tests depend
+        // on exactly that: reconcile() must keep seeing the ciphertext it was
+        // served even after the winner has overwritten the row.
+        const snapshot = found[0] ? { ...found[0] } : null;
+        // After the read is served, before the caller acts on it.
+        if (race?.armed) {
+          race.armed = false;
+          await race.run();
+        }
+        return { data: snapshot, error: null };
       },
       // Awaitable, for the list query. Returns a plain promise rather than
       // itself, so awaiting cannot recurse.
@@ -210,7 +255,9 @@ function storeAdmin(store: Map<string, Row>, writes: Writes) {
         if (orderBy) {
           found.sort((a, b) => String(a[orderBy!] ?? '').localeCompare(String(b[orderBy!] ?? '')));
         }
-        return Promise.resolve({ data: found, error: null }).then(resolve, reject);
+        // Copies, for the same reason as maybeSingle() above.
+        const snapshot = found.map((row) => ({ ...row }));
+        return Promise.resolve({ data: snapshot, error: null }).then(resolve, reject);
       },
     };
     return builder;
@@ -231,17 +278,47 @@ function storeAdmin(store: Map<string, Row>, writes: Writes) {
         filters.push((row) => row[column] === value);
         return builder;
       },
-      /** The compare-and-swap's terminal call. */
+      /**
+       * Only ever called as .is(column, null), for the expired write against a
+       * row that legitimately holds no refresh token. `?? null` so a column
+       * that is absent from a stub row reads as NULL, like Postgres.
+       */
+      is(column: string, value: unknown) {
+        filters.push((row) => (row[column] ?? null) === value);
+        return builder;
+      },
+      /**
+       * The terminal call for BOTH conditional writes, told apart by shape:
+       * only the full-row save carries access_token_encrypted, and only the
+       * status write carries status alone.
+       *
+       * A write that matched no row wrote NOTHING, so it must not be recorded
+       * as a status update — that distinction is the whole of the REF-100 race
+       * fix, and recording it anyway would make the regression test pass
+       * against the broken code.
+       */
       select() {
         const found = apply();
-        if (found.length > 0) writes.casApplied += 1;
-        else writes.casRejected += 1;
+        const isFullRowSave = 'access_token_encrypted' in values;
+
+        if (isFullRowSave) {
+          if (found.length > 0) writes.casApplied += 1;
+          else writes.casRejected += 1;
+        } else if (found.length > 0) {
+          writes.statusUpdates.push(String(values.status));
+        } else {
+          writes.statusWritesRefused += 1;
+        }
+
         return Promise.resolve({
           data: found.map((row) => ({ user_id: row.user_id })),
           error: null,
         });
       },
-      /** markStatus()'s terminal form: it just awaits the builder. */
+      /**
+       * markStatus()'s terminal form: it just awaits the builder. Still used by
+       * the unconditional paths — disconnectUser()'s 'revoked' write.
+       */
       then<T>(resolve: (value: { data: null; error: null }) => T, reject?: (reason: unknown) => T) {
         apply();
         writes.statusUpdates.push(String(values.status));
@@ -552,15 +629,24 @@ function keepAliveRow(params: {
 }
 
 /** A successful refresh-grant body, in the shape production returned. */
-function grantBody(refreshToken: string | null = ROTATED_REFRESH): string {
+function grantBody(
+  refreshToken: string | null = ROTATED_REFRESH,
+  accessToken: string = REDEEMED_TOKEN
+): string {
   return JSON.stringify({
-    access_token: REDEEMED_TOKEN,
+    access_token: accessToken,
     expires_in: ACCESS_LIFETIME_SEC,
     ...(refreshToken === null ? {} : { refresh_token: refreshToken }),
     refresh_token_expires_in: REFRESH_LIFETIME_SEC,
     token_type: 'Bearer',
   });
 }
+
+/** An `invalid_grant` body — a spent refresh token, definitively refused. */
+const INVALID_GRANT_BODY = JSON.stringify({
+  error: 'invalid_grant',
+  error_description: 'refresh token is expired or has already been used',
+});
 
 /**
  * A fetch that answers the token endpoint and refuses everything else.
@@ -803,6 +889,246 @@ function describeKeepAlive(e: KeepAliveExpectation): string {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// PART 2b — REF-100: the rotation race itself
+//
+// The three cases that pin the race fix. They are separate from the table above
+// because each needs its own orchestration rather than one stubbed response,
+// and because what they assert is not "which token came back" but "what was
+// written, and what was REFUSED".
+// ════════════════════════════════════════════════════════════════════════════
+
+/**
+ * TEST 1 — a successful save HEALS a row that a racing loser marked expired.
+ *
+ * Pins the deliberate absence of a `status` predicate on the save's
+ * compare-and-swap. Driven through saveConnection() directly rather than
+ * getUserAccessToken(), because the status gate in loadOrRenew() refuses an
+ * expired row before any of this is reached — which is itself the reason the
+ * healing has to happen inside the save.
+ *
+ * Fails the moment someone "tightens" the save with .eq('status','active').
+ */
+async function observeCasHealsExpiredRow(): Promise<{
+  actual: string;
+  expected: string;
+  note: string;
+}> {
+  const userId = 'bbbb2222-0000-4000-8000-000000000001';
+  const row = keepAliveRow({ userId });
+  // A racing loser's expired write already landed.
+  row.status = 'expired';
+  const c0 = String(row.refresh_token_encrypted);
+
+  const store = singleRowStore(row);
+  const writes = noWrites();
+
+  const saved = await saveConnection({
+    userId,
+    accessToken: REDEEMED_TOKEN,
+    expiresAt: Date.now() + ACCESS_LIFETIME_SEC * 1000,
+    refreshToken: ROTATED_REFRESH,
+    refreshExpiresAt: Date.now() + REFRESH_LIFETIME_SEC * 1000,
+    tradovateUserId: 12345,
+    environment: 'demo',
+    tokenType: 'Bearer',
+    expectRefreshTokenCiphertext: c0,
+    admin: storeAdmin(store, writes),
+  });
+
+  const after = store.get(userId);
+  return {
+    actual: `applied=${saved.applied} status=${String(after?.status)}`,
+    expected: 'applied=true status=active',
+    note: `cas:applied×${writes.casApplied}`,
+  };
+}
+
+/**
+ * TEST 2 — the expired write is REFUSED when the row moved under it.
+ *
+ * The interleaving that cost a live connection permanently:
+ *
+ *   B: grant → invalid_grant (B presented the refresh token A had just spent)
+ *   B: reconcile() reads     → still C0, because A's save has not landed
+ *   A: full real redemption  → commits C1, status='active', A is finished
+ *   B: expired write         → must match NOTHING
+ *
+ * A is a REAL redemption — redeemRefreshToken() with its own stubbed endpoint —
+ * not a hand-written row mutation, so both code paths are the shipped ones. It
+ * is injected through the race window, so the ordering is exact rather than
+ * lucky.
+ *
+ * Before the fix: B's markStatus() was unconditional on user_id, so it wrote
+ * status='expired' over A's healthy row and nothing ever healed it.
+ */
+async function observeExpiredWriteRefused(): Promise<{
+  actual: string;
+  expected: string;
+  note: string;
+}> {
+  const userId = 'bbbb2222-0000-4000-8000-000000000002';
+  const row = keepAliveRow({ userId });
+  const store = singleRowStore(row);
+  const writes = noWrites();
+
+  // The row exactly as B read it, which is also what A read — both start from
+  // the same ciphertext, which is what makes this a race rather than a sequence.
+  const asBothRead = { ...row } as unknown as StoredConnection;
+
+  const race: RaceWindow = { armed: false, run: () => {} };
+  const winnerWrites = noWrites();
+
+  race.run = async () => {
+    // A's grant succeeds and returns its own rotated token.
+    const duringRace = globalThis.fetch;
+    globalThis.fetch = tokenEndpointFetch({
+      status: 200,
+      body: grantBody(WINNER_REFRESH, WINNER_ACCESS),
+    });
+    try {
+      await redeemRefreshToken({
+        connection: asBothRead,
+        config: FAKE_CONFIG,
+        admin: storeAdmin(store, winnerWrites),
+      });
+    } finally {
+      globalThis.fetch = duringRace;
+    }
+  };
+
+  const realFetch = globalThis.fetch;
+  // B's grant is refused, and responding arms the window so that A lands on
+  // B's next select — which is reconcile().
+  globalThis.fetch = tokenEndpointFetch({
+    status: 400,
+    body: INVALID_GRANT_BODY,
+    beforeRespond: () => {
+      race.armed = true;
+    },
+  });
+
+  clearAllCachedTokens();
+  let outcome: string;
+  try {
+    const result = await redeemRefreshToken({
+      connection: asBothRead,
+      config: FAKE_CONFIG,
+      admin: storeAdmin(store, writes, race),
+    });
+    outcome = result.outcome;
+  } catch (thrown: unknown) {
+    outcome = `threw ${thrown instanceof Error ? thrown.name : typeof thrown}`;
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+
+  const after = store.get(userId);
+  const storedRefresh =
+    after?.refresh_token_encrypted &&
+    decryptToken(String(after.refresh_token_encrypted), 'refresh', userId) === WINNER_REFRESH
+      ? 'winner'
+      : 'other';
+
+  return {
+    actual:
+      `outcome=${outcome} statusWrites=${writes.statusUpdates.length} ` +
+      `refused=${writes.statusWritesRefused} row=${String(after?.status)} refresh=${storedRefresh}`,
+    expected: 'outcome=superseded statusWrites=0 refused=1 row=active refresh=winner',
+    note: `winner cas:applied×${winnerWrites.casApplied}`,
+  };
+}
+
+/**
+ * TEST 5 — the cron must not report a death that did not happen.
+ *
+ * Two connections: one healthy, one whose grant is refused while its row moves
+ * underneath. The counts must say refreshed=1 superseded=1 expired=0 — a run
+ * that claimed expired=1 would be reporting a live connection as dead, which is
+ * the observability half of the same bug.
+ *
+ * The competing write here is a direct row mutation rather than a second real
+ * redemption: TEST 2 already covers the real-code-path version, and keeping
+ * this one simple keeps the assertion about the COUNTS.
+ */
+async function observeCronNoFalseDeath(): Promise<{
+  actual: string;
+  expected: string;
+  note: string;
+}> {
+  const healthy = 'cccc3333-0000-4000-8000-000000000001';
+  const racing = 'cccc3333-0000-4000-8000-000000000002';
+
+  const refreshTokens: Record<string, string> = {
+    [healthy]: 'refresh-for-healthy',
+    [racing]: 'refresh-for-racing',
+  };
+
+  const store = new Map<string, Row>();
+  for (const userId of [healthy, racing]) {
+    store.set(userId, keepAliveRow({ userId, refreshToken: refreshTokens[userId] }));
+  }
+
+  const writes = noWrites();
+  const race: RaceWindow = {
+    armed: false,
+    run: () => {
+      // The winner commits: a new refresh token and a fresh access token.
+      const row = store.get(racing)!;
+      row.refresh_token_encrypted = encryptToken(WINNER_REFRESH, 'refresh', racing);
+      row.access_token_encrypted = encryptToken(WINNER_ACCESS, 'access', racing);
+      row.expires_at = new Date(Date.now() + ACCESS_LIFETIME_SEC * 1000).toISOString();
+      row.refresh_expires_at = new Date(Date.now() + REFRESH_LIFETIME_SEC * 1000).toISOString();
+      row.status = 'active';
+    },
+  };
+
+  const previousAllowlist = process.env.TRADOVATE_OAUTH_ALLOWED_USER_IDS;
+  process.env.TRADOVATE_OAUTH_ALLOWED_USER_IDS = [healthy, racing].join(',');
+
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: unknown, init: unknown) => {
+    const href = String(url);
+    if (!href.includes('/auth/oauthtoken')) throw new Error(`unexpected call to ${href}`);
+    const sent = new URLSearchParams(
+      String((init as { body?: unknown } | undefined)?.body ?? '')
+    ).get('refresh_token');
+
+    if (sent === refreshTokens[healthy]) {
+      return { ok: true, status: 200, text: async () => grantBody() };
+    }
+    // The racing one: refused, and responding arms the winner's commit for the
+    // reconcile read that follows.
+    race.armed = true;
+    return { ok: false, status: 400, text: async () => INVALID_GRANT_BODY };
+  }) as unknown as typeof fetch;
+
+  clearAllCachedTokens();
+  let actual: string;
+  try {
+    const counts = await runKeepAlive({
+      admin: storeAdmin(store, writes, race),
+      config: FAKE_CONFIG,
+    });
+    actual =
+      `checked=${counts.checked} refreshed=${counts.refreshed} ` +
+      `superseded=${counts.superseded} transient=${counts.transient} ` +
+      `expired=${counts.expired} statusWrites=${writes.statusUpdates.length}`;
+  } catch (thrown: unknown) {
+    actual = `threw ${thrown instanceof Error ? thrown.message : String(thrown)}`;
+  } finally {
+    globalThis.fetch = realFetch;
+    if (previousAllowlist === undefined) delete process.env.TRADOVATE_OAUTH_ALLOWED_USER_IDS;
+    else process.env.TRADOVATE_OAUTH_ALLOWED_USER_IDS = previousAllowlist;
+  }
+
+  return {
+    actual,
+    expected: 'checked=2 refreshed=1 superseded=1 transient=0 expired=0 statusWrites=0',
+    note: `expired writes refused: ${writes.statusWritesRefused}`,
+  };
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // PART 3 — REF-100: the cron
 // ════════════════════════════════════════════════════════════════════════════
 
@@ -1002,6 +1328,47 @@ async function main(): Promise<number> {
         `${describeKeepAlive(testCase.expect).padEnd(58)} ${describeKeepAlive(actual)}`
     );
     notes.push(`    ${testCase.name} — ${testCase.why}${note ? ` [${note}]` : ''}`);
+  }
+
+  // ── Part 2b ───────────────────────────────────────────────────────────────
+  console.log('\n\nREF-100 — the rotation race\n');
+  console.log('  Each case lands a competing write at an exact point through a one-shot race');
+  console.log('  window. No sleeps and no Promise.all: the ordering is constructed, not hoped\n');
+  console.log('  for. What is asserted is what was WRITTEN and what was REFUSED.\n');
+  console.log(`  ${'case'.padEnd(36)} ${'expected'.padEnd(66)} actual`);
+  console.log(`  ${'-'.repeat(36)} ${'-'.repeat(66)} ${'-'.repeat(66)}`);
+
+  const raceCases: Array<{
+    name: string;
+    why: string;
+    run: () => Promise<{ actual: string; expected: string; note: string }>;
+  }> = [
+    {
+      name: 'save heals an expired row',
+      why: "the save's CAS deliberately has NO status predicate — that is what revives a row a racing loser marked expired",
+      run: observeCasHealsExpiredRow,
+    },
+    {
+      name: 'expired write refused (row moved)',
+      why: 'the fix: a real competing redemption commits between reconcile() and the verdict, so the expired write must match nothing',
+      run: observeExpiredWriteRefused,
+    },
+    {
+      name: 'cron reports no false death',
+      why: 'a connection that merely lost the race must count as superseded, never as expired',
+      run: observeCronNoFalseDeath,
+    },
+  ];
+
+  for (const raceCase of raceCases) {
+    const { actual, expected, note } = await raceCase.run();
+    const ok = actual === expected;
+    total += 1;
+    if (!ok) failures += 1;
+    console.log(
+      `  ${(ok ? 'PASS ' : 'FAIL ') + raceCase.name.padEnd(31)} ${expected.padEnd(66)} ${actual}`
+    );
+    notes.push(`    ${raceCase.name} — ${raceCase.why}${note ? ` [${note}]` : ''}`);
   }
 
   // ── Part 3 ────────────────────────────────────────────────────────────────
