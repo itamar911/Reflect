@@ -51,6 +51,7 @@ export {
   TradovateRequestError,
   TradovateOAuthError,
   TradovateNotConnectedError,
+  TradovateTransientError,
 } from './errors';
 
 // --- OAuth: connecting an end user's Tradovate account ----------------------

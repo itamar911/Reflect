@@ -33,10 +33,24 @@
  *
  * - **There is no automatic fallback when renewal fails.** ./session.ts can
  *   always re-authenticate with Reflect's own username and password. Here the
- *   only credential this module uses is the access token itself, so a failed
- *   renewal leaves nothing to recover with in-process: the connection is marked
- *   'expired' and the user must reconnect. Failing loudly is the point; silently
- *   retrying would only burn rate limit.
+ *   only credential this module uses is the access token itself, so a renewal
+ *   the server REFUSED leaves nothing to recover with in-process: the
+ *   connection is marked 'expired' and the user must reconnect.
+ *
+ *   A renewal that merely did not complete is a different fact, and the
+ *   distinction is the whole of REF-101. /auth/renewaccesstoken is rate limited
+ *   at 15 calls an hour BY IP ADDRESS, and on Vercel every lambda shares a small
+ *   pool of egress addresses — so one tenant's traffic can make our renewal
+ *   fail. Treating that as a dead connection wrote status='expired', after which
+ *   the status gate above rejects the row immediately on every later call and a
+ *   working connection is permanently dead until the user reconnects. The same
+ *   went for a timeout, a reset, a 500, or a body we could not parse.
+ *
+ *   So the catch classifies before it writes, and {@link classifyRenewalFailure}
+ *   holds the rule: only proof of refusal is treated as refusal, the default is
+ *   transient, and a transient failure writes NOTHING to the database. Marking a
+ *   live connection dead is the expensive mistake, because it is the one the
+ *   user cannot wait out.
  *
  *   The exchange DOES issue a refresh token — observed in production, against
  *   both migration 017's comment and this module's original one. It is stored,
@@ -68,8 +82,16 @@ import { createAdminClient } from '@/lib/supabase/admin';
 
 import { readApiHosts, resolveTradingApiUrl } from './api-hosts';
 import { renewAccessToken } from './auth';
-import { TradovateNotConnectedError, TradovateOAuthError } from './errors';
+import {
+  TradovateAuthError,
+  TradovateNotConnectedError,
+  TradovateOAuthError,
+  TradovatePenaltyError,
+  TradovateRequestError,
+  TradovateTransientError,
+} from './errors';
 import type { TradovateEnvironment } from './hosts';
+import { redactSecrets } from './redact';
 import { decryptToken, encryptToken } from './token-crypto';
 import type { TradovateApiHosts, UserTokenSnapshot } from './types';
 
@@ -361,9 +383,16 @@ async function markStatus(
  * close to expiry.
  *
  * Throws TradovateNotConnectedError when there is nothing usable: no row, a
- * disconnected or expired connection, or a renewal that failed. That is the
- * signal to prompt the user to reconnect. There is no silent recovery: a refresh
- * token may be stored, but nothing here redeems one — see the header.
+ * disconnected or expired connection, or a renewal Tradovate refused. That is
+ * the signal to prompt the user to reconnect. There is no silent recovery: a
+ * refresh token may be stored, but nothing here redeems one — see the header.
+ *
+ * Throws TradovateTransientError when the renewal could not be completed —
+ * rate limited, timed out, 5xx, unreadable — AND the stored token had already
+ * run out. That is NOT a signal to prompt the user: nothing was written, the
+ * connection is presumed intact, and the caller should retry later or degrade.
+ * If the stored token is still live, such a failure is not raised at all; the
+ * stored token is returned and the renewal is retried on the next call.
  */
 export async function getUserAccessToken(
   userId: string,
@@ -381,6 +410,113 @@ export async function getUserAccessToken(
   const work = loadOrRenew(userId, admin).finally(() => inFlight.delete(userId));
   inFlight.set(userId, work);
   return work;
+}
+
+/**
+ * The only HTTP statuses on the renewal endpoint that prove the token was
+ * rejected.
+ *
+ * 429 is deliberately absent: that is the rate limiter answering, and it never
+ * looked at the credential. So is every 5xx — a server that failed to answer
+ * has said nothing about what it was handed.
+ */
+const TOKEN_REJECTED_STATUSES = new Set([401, 403]);
+
+/**
+ * Whether an `errorText` states that the credential is no good.
+ *
+ * Tradovate reports some failures as HTTP 200 with `errorText` set (see
+ * TradovateAuthError), so the status code alone cannot settle those. Both halves
+ * must match — a subject that is the credential, and a verdict against it — so
+ * that "Access token is expired" counts and a bare "expired" or "Internal
+ * error" does not.
+ *
+ * The exact strings this endpoint returns have NOT been measured; the live
+ * connection expired on 9 Oct 2026 before anyone renewed against it (handoff
+ * §3). Requiring both halves is what makes an unmeasured list safe to ship: text
+ * we do not recognise falls through to transient, which costs a renewal retry
+ * on the next call, while a loose match would cost a user their connection. If
+ * a real rejection string ever shows up in the logs as transient, add it here.
+ */
+function statesTokenRejected(errorText: string): boolean {
+  const subject = /\b(?:access[\s_-]?token|token|session|credential|authoriz\w*)\b/i;
+  const verdict =
+    /\b(?:invalid|expired|revoked|denied|unauthoriz\w*|rejected|not\s+(?:valid|found|authoriz\w*))\b/i;
+  return subject.test(errorText) && verdict.test(errorText);
+}
+
+/**
+ * What a renewal failure licenses us to do.
+ *
+ * `detail` is for a log line and carries no secret: it is built from the error's
+ * type, its HTTP status and its own message — never from a response body, which
+ * on these endpoints can be a token.
+ */
+type RenewalVerdict =
+  | { kind: 'rejected'; detail: string }
+  | {
+      kind: 'transient';
+      reason: TradovateTransientError['reason'];
+      detail: string;
+      retryAfterSeconds?: number;
+    };
+
+/**
+ * Decide whether a thrown renewal failure proves the token is dead.
+ *
+ * The default is 'transient', and every branch that cannot produce evidence of
+ * refusal falls into it. See the header for why that asymmetry is deliberate.
+ */
+function classifyRenewalFailure(error: unknown): RenewalVerdict {
+  // Rate limited, captcha included. The limiter rejected the request before
+  // anything read the token — and on this endpoint the budget is per IP, so the
+  // traffic that spent it may not even be ours.
+  if (error instanceof TradovatePenaltyError) {
+    return {
+      kind: 'transient',
+      reason: 'penalty',
+      detail: error.captcha ? 'rate limit penalty (captcha)' : 'rate limit penalty',
+      retryAfterSeconds: error.retryAfterSeconds,
+    };
+  }
+
+  if (error instanceof TradovateRequestError) {
+    // Checked before anything about the body: ./auth.ts parses the response
+    // before it tests res.ok, so a 401 carrying unparsable JSON arrives here as
+    // this same error. The status is evidence and the unreadable body is not,
+    // so the status decides.
+    if (TOKEN_REJECTED_STATUSES.has(error.status)) {
+      return { kind: 'rejected', detail: `HTTP ${error.status} from ${error.path}` };
+    }
+    // Everything else this error covers is about the exchange rather than the
+    // credential: a 5xx, a body that would not parse, or a 200 that arrived
+    // without an accessToken. None of them is a verdict on the token.
+    return {
+      kind: 'transient',
+      reason: error.status >= 500 ? 'server' : 'unknown',
+      detail: `HTTP ${error.status} from ${error.path}`,
+    };
+  }
+
+  if (error instanceof TradovateAuthError) {
+    return statesTokenRejected(error.errorText)
+      ? { kind: 'rejected', detail: 'errorText states the credential was refused' }
+      : {
+          kind: 'transient',
+          reason: 'unknown',
+          detail: 'errorText did not state a verdict on the credential',
+        };
+  }
+
+  // Whatever is left came from the fetch itself — DNS, TLS, a reset, or an abort
+  // on timeout — and the request may never have reached Tradovate at all. The
+  // message is ours, not a response body, but it still goes through
+  // redactSecrets() at the log site like every other diagnostic here.
+  return {
+    kind: 'transient',
+    reason: 'network',
+    detail: error instanceof Error ? `${error.name}: ${error.message}` : 'non-Error throw',
+  };
 }
 
 async function loadOrRenew(
@@ -452,20 +588,72 @@ async function loadOrRenew(
   let renewed;
   try {
     renewed = await renewAccessToken({ apiUrl: resolved.url }, accessToken);
-  } catch {
-    // The cause is deliberately not chained: a renewal failure can carry the
-    // response body, and that body can carry a token. There is no
-    // re-authentication fallback here — see the header — so record the state and
-    // make the caller deal with a disconnected account.
+  } catch (error) {
+    // No cause is chained on anything thrown from this block: a renewal failure
+    // can carry the response body, and that body can carry a token. The verdict
+    // is read off the error's type and status instead.
+    const verdict = classifyRenewalFailure(error);
+
+    if (verdict.kind === 'rejected') {
+      // Tradovate refused the credential. There is no re-authentication
+      // fallback here — see the header — so record the state and make the caller
+      // deal with a disconnected account.
+      cache.delete(userId);
+      await markStatus(userId, 'expired', admin);
+      throw new TradovateNotConnectedError(userId, 'expired');
+    }
+
+    // Transient. Nothing is written: not the status, not updated_at. The row
+    // still describes a connection that was working a moment ago, and the next
+    // call retries the renewal from a fresh read.
+    //
+    // Worth a log line because this path is otherwise invisible — it returns a
+    // usable token and the caller sees an ordinary success. Through
+    // redactSecrets() like every diagnostic in this integration.
+    console.warn(
+      redactSecrets(
+        `[tradovate] renewal failed transiently (${verdict.reason}: ${verdict.detail}); ` +
+          'connection left untouched'
+      )
+    );
+
+    // The stored token is usually still good: this point is only reached inside
+    // the renewal margin, which is 15 minutes wide, so there is normally plenty
+    // left. Hand it back rather than throwing — a rate limit we may not even
+    // have caused must not cost the user a request they could have served.
+    //
+    // Re-measured rather than trusted from the guard above, because the renewal
+    // itself awaited: a request that hung until it timed out can easily have
+    // spent the margin that guard saw. Deliberately not cached either, so the
+    // next call reads the row and tries the renewal again — remember() would be
+    // inert here anyway, since getUserAccessToken() ignores a cache entry this
+    // close to expiry.
+    const remainingMs = storedExpiry - Date.now();
+    if (Number.isFinite(storedExpiry) && remainingMs > MIN_REMAINING_MS) {
+      return { accessToken, expiresAt: storedExpiry, tradovateUserId };
+    }
+
+    // The token ran out while the renewal was failing. Still no write: the token
+    // lapsing is not the same claim as the server refusing it, and the next
+    // call reaches the expiry guard above, which marks the row then.
     cache.delete(userId);
-    await markStatus(userId, 'expired', admin);
-    throw new TradovateNotConnectedError(userId, 'expired');
+    throw new TradovateTransientError(
+      `Could not renew the Tradovate token (${verdict.reason}) and the stored one has ` +
+        'run out. Retry later.',
+      { reason: verdict.reason, retryAfterSeconds: verdict.retryAfterSeconds }
+    );
   }
 
   const expiresAt = Date.parse(renewed.expirationTime);
   if (Number.isNaN(expiresAt)) {
+    // No status write here either, for the same reason as the transient branch
+    // above, and this one was the starker case: the renewal SUCCEEDED and
+    // Tradovate issued a fresh token — we just cannot read the expiry it came
+    // with. Recording 'expired' made the status gate refuse the row on every
+    // later call, so a malformed field in one response killed a connection that
+    // the exchange had just renewed. REF-90 §7.3 classes this
+    // broker_unavailable, a server fault, and not the user's connection.
     cache.delete(userId);
-    await markStatus(userId, 'expired', admin);
     throw new TradovateOAuthError(
       'Tradovate renewed the token but returned an unparsable expirationTime.',
       { stage: 'exchange' }

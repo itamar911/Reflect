@@ -102,12 +102,51 @@ export class TradovateOAuthError extends TradovateError {
 }
 
 /**
+ * The operation failed for a reason that is expected to pass on its own: a rate
+ * limit, a network fault, a 5xx, or an answer we could not make sense of.
+ *
+ * The point of this type is what it tells a caller NOT to do. It means the
+ * stored credential was never judged — so nothing should be marked expired,
+ * nothing should be written to the database, and the user must not be told to
+ * reconnect. Retry later instead.
+ *
+ * Contrast TradovateNotConnectedError, which is the opposite claim: the
+ * credential was presented and refused. Collapsing the two is REF-101 — a
+ * per-IP rate limit on /auth/renewaccesstoken was turning live connections into
+ * permanently dead rows.
+ *
+ * `reason` is for triage and for mapping to `rule_context_source`; all four
+ * values belong to `broker_unavailable`, never `broker_expired`.
+ *
+ * Carries no `cause`. An upstream failure can hold the response body, and on
+ * these endpoints the body can be a token.
+ */
+export class TradovateTransientError extends TradovateError {
+  readonly reason: 'penalty' | 'network' | 'server' | 'unknown';
+  /** Seconds to wait, when the upstream told us. */
+  readonly retryAfterSeconds?: number;
+
+  constructor(
+    message: string,
+    opts: { reason: TradovateTransientError['reason']; retryAfterSeconds?: number }
+  ) {
+    super(message);
+    this.name = 'TradovateTransientError';
+    this.reason = opts.reason;
+    this.retryAfterSeconds = opts.retryAfterSeconds;
+  }
+}
+
+/**
  * A user has no usable Tradovate connection: never connected, disconnected, or
  * the token lapsed with nothing in ./connections.ts able to recover it (a
  * refresh token may be stored, but nothing redeems one).
  *
  * Distinct from TradovateAuthError because the remedy is different — this one is
  * fixed by the user reconnecting, not by correcting server configuration.
+ *
+ * Throw this only on evidence that the credential itself was refused. When the
+ * renewal merely failed to complete, that is TradovateTransientError.
  */
 export class TradovateNotConnectedError extends TradovateError {
   readonly userId: string;
