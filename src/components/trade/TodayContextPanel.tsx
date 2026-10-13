@@ -1,9 +1,8 @@
 'use client';
 
 import { AlertTriangle, CalendarDays } from 'lucide-react';
-import Link from 'next/link';
 import { formatPnlIls } from '@/lib/utils';
-import type { BrokerConnectionPresence, TodayClosedSummary } from '@/lib/rules/tradeRuleContext';
+import type { TodayClosedSummary } from '@/lib/rules/tradeRuleContext';
 import type { PnlCurrency, RuleContextSource } from '@/lib/types';
 
 /**
@@ -231,8 +230,6 @@ export interface TodayContextPanelProps {
   maxDailyLoss: number | null;
   /** What the day's figures are based on (REF-82 §6). */
   source: RuleContextSource;
-  /** Whether a Tradovate connection exists — decides the invitation line only. */
-  brokerConnection: BrokerConnectionPresence;
 }
 
 export default function TodayContextPanel({
@@ -243,7 +240,6 @@ export default function TodayContextPanel({
   maxDailyTrades,
   maxDailyLoss,
   source,
-  brokerConnection,
 }: TodayContextPanelProps) {
   const failed = source === 'broker_expired' || source === 'broker_unavailable';
 
@@ -361,7 +357,7 @@ export default function TodayContextPanel({
                 </>
               )}
 
-              <SourceDeclaration source={source} brokerConnection={brokerConnection} />
+              <SourceDeclaration source={source} />
             </>
           )}
         </div>
@@ -380,13 +376,7 @@ export default function TodayContextPanel({
  * get wrong later under time pressure: the failure states have to be as loud as
  * the success state, and that is a design choice, not a code path.
  */
-function SourceDeclaration({
-  source,
-  brokerConnection,
-}: {
-  source: RuleContextSource;
-  brokerConnection: BrokerConnectionPresence;
-}) {
+function SourceDeclaration({ source }: { source: RuleContextSource }) {
   if (source === 'broker_verified') {
     return (
       <p className="text-xs leading-relaxed" style={{ color: 'var(--color-tg-text-2)' }}>
@@ -428,30 +418,12 @@ function SourceDeclaration({
     );
   }
 
+  // Unconditional: the panel states what it is reporting on and stops there.
+  // No connection invitation and no link out of the form — the trade form is
+  // not where a broker connection gets sold or set up.
   return (
-    <div className="flex flex-col gap-1">
-      <p className="text-xs leading-relaxed" style={{ color: 'var(--color-tg-text-2)' }}>
-        מוצגות רק עסקאות שתיעדת ב-Reflect.
-      </p>
-      {/* Only when we KNOW there is no connection. On a failed read
-          (brokerConnection === 'unknown') this stays off: inviting a connected
-          user to connect is the same mistake as telling them they are not
-          connected, and a user whose connection merely lapsed has nothing to
-          be invited to — they have a reconnect to do, which is the state above.
-
-          "מאפשר" and not a promise: §8 bans advice-shaped copy and bans "will"
-          where "may" belongs. */}
-      {brokerConnection === 'none' && (
-        <p className="text-xs leading-relaxed" style={{ color: 'var(--color-tg-text-2)' }}>
-          חיבור ל-Tradovate מאפשר לכלול כאן גם עסקאות שלא רשמת ב-Reflect.{' '}
-          <Link
-            href="/settings"
-            className="font-semibold underline text-tg-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tg-primary rounded"
-          >
-            הגדרות החיבור
-          </Link>
-        </p>
-      )}
-    </div>
+    <p className="text-xs leading-relaxed" style={{ color: 'var(--color-tg-text-2)' }}>
+      מוצגות רק עסקאות שתיעדת ב-Reflect.
+    </p>
   );
 }

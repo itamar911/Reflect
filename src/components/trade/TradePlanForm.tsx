@@ -26,7 +26,6 @@ import { logRuleViolations, overrideRuleViolations, type RuleViolationLogInput }
 import {
   loadTradeRuleContext,
   startOfTodayIso,
-  type BrokerConnectionPresence,
   type TodayClosedSummary,
 } from '@/lib/rules/tradeRuleContext';
 import { tradeDirection } from '@/lib/pnl';
@@ -305,7 +304,6 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
   // way for the two to disagree — see the header of lib/rules/tradeRuleContext.ts.
   const [todayClosed, setTodayClosed] = useState<TodayClosedSummary>(EMPTY_TODAY_CLOSED);
   const [contextSource, setContextSource] = useState<RuleContextSource>('reflect_only');
-  const [brokerConnection, setBrokerConnection] = useState<BrokerConnectionPresence>('unknown');
   /** False until the first load returns, so the panel never states zeros as fact. */
   const [contextLoaded, setContextLoaded] = useState(false);
   const todayContextHeadingId = useId();
@@ -432,7 +430,6 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     // module and not to any of this.
     setTodayClosed(history.todayClosed);
     setContextSource(history.source);
-    setBrokerConnection(history.brokerConnection);
     setContextLoaded(true);
 
     // `?? []` rather than the `if (data)` guard the two above use: an empty
@@ -1018,7 +1015,6 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
               maxDailyTrades={presetRules?.max_daily_trades ?? null}
               maxDailyLoss={presetRules?.max_daily_loss ?? null}
               source={contextSource}
-              brokerConnection={brokerConnection}
             />
 
             {/* Step 1 — Asset, direction & strategy */}

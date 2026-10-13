@@ -92,22 +92,6 @@ export interface TodayClosedSummary {
   money: readonly TodayMoneyInCurrency[];
 }
 
-/**
- * Whether this user has a Tradovate connection at all.
- *
- * Three values, not a boolean, because "we could not find out" is its own
- * state: a failed read rendered as "not connected" is how a connected user
- * gets told to connect. Same distinction `readFailed` carries in
- * components/settings/TradovateConnectionCard.tsx, for the same reason.
- */
-export type BrokerConnectionPresence =
-  /** The read succeeded and there is no connection row. */
-  | 'none'
-  /** A row exists, in whatever state. */
-  | 'present'
-  /** The read failed, or could not be attempted. */
-  | 'unknown';
-
 /** Everything the preset and custom rule checks need from trade history. */
 export interface TradeRuleContext {
   /** Trades TAKEN today, counted by submitted_at. No close required — but a
@@ -158,16 +142,6 @@ export interface TradeRuleContext {
    * submit path in components/trade/TradePlanForm.tsx.
    */
   source: RuleContextSource;
-
-  /**
-   * Whether a Tradovate connection exists — for the panel's wording only.
-   *
-   * Separate from `source` and NOT derivable from it. Today every user is
-   * 'reflect_only' whether or not they are connected, because nothing pulls the
-   * data yet; the panel invites a user to connect only when there is nothing to
-   * reconnect, and this is the field that tells those two apart.
-   */
-  brokerConnection: BrokerConnectionPresence;
 
   /** Today's closes, shaped for the sentence the panel writes. Display only. */
   todayClosed: TodayClosedSummary;
@@ -241,44 +215,6 @@ function summariseTodayCloses(rows: readonly ClosedTradeRow[]): TodayClosedSumma
   };
 }
 
-/**
- * Whether a Tradovate connection row exists for this user.
- *
- * Read from the browser under the user's own RLS, not through the server: 017
- * grants `SELECT (id, user_id, status, …)` on tradovate_connections to
- * `authenticated` and policy `tradovate_connections_select_own` limits it to
- * their own row, so one column is readable here without the service role. The
- * token columns are excluded from that grant, so nothing secret can come back —
- * and this asks for `status` alone.
- *
- * Nothing here touches the connection itself. No renewal, no status write, no
- * import of lib/tradovate/connections.ts — that module pulls in the
- * service-role client and must never be named from a browser path.
- *
- * Every failure becomes 'unknown' rather than throwing. This is one line of
- * wording on a panel; it is not worth failing a rule check over, and a thrown
- * error here would take the gate down with it.
- */
-async function readBrokerConnection(
-  userId: string,
-  client: SupabaseClient
-): Promise<BrokerConnectionPresence> {
-  try {
-    // limit(1) over maybeSingle(): a duplicate row would make maybeSingle
-    // error, and two rows is still an answer to "is there a connection".
-    const { data, error } = await client
-      .from('tradovate_connections')
-      .select('status')
-      .eq('user_id', userId)
-      .limit(1);
-
-    if (error) return 'unknown';
-    return (data?.length ?? 0) > 0 ? 'present' : 'none';
-  } catch {
-    return 'unknown';
-  }
-}
-
 /** Money lost today, positive, summed over closed rows. */
 function sumLosses(rows: readonly ClosedTradeRow[]): number {
   let total = 0;
@@ -332,7 +268,7 @@ export async function loadTradeRuleContext(
 ): Promise<TradeRuleContext> {
   const todayStart = startOfTodayIso();
 
-  const [takenRes, closedTodayRes, recentRes, brokerConnection] = await Promise.all([
+  const [takenRes, closedTodayRes, recentRes] = await Promise.all([
     // Taken today — by submitted_at, so a plan counts the moment it is logged
     // whether or not it has been closed.
     //
@@ -367,12 +303,6 @@ export async function loadTradeRuleContext(
       .eq('status', 'closed')
       .order('closed_at', { ascending: false })
       .limit(10),
-    // Not a rule input — it decides one sentence in the form's context panel.
-    // Here rather than in the form because this is the object REF-90 will set
-    // `source` on, and `source` is the same fact one step further on: it needs
-    // the connection to tell 'broker_verified' from 'broker_expired'. One read,
-    // one place, both arms of the rule mechanism seeing the same answer.
-    readBrokerConnection(userId, client),
   ]);
 
   const closedToday = (closedTodayRes.data ?? []) as ClosedTradeRow[];
@@ -392,7 +322,6 @@ export async function loadTradeRuleContext(
     // 'reflect_only' until REF-90 — see the field's own note, which is where
     // that work connects.
     source: 'reflect_only',
-    brokerConnection,
     todayClosed: summariseTodayCloses(closedToday),
   };
 }
