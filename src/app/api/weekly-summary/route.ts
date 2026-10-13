@@ -24,7 +24,13 @@ export interface WeeklyStats {
   losing_trades: number;
   win_rate: number | null;
   total_pnl: number;
-  pnl_currency: string;
+  // REF-99: a `pnl_currency` field sat here, set from the first trade in the
+  // week that happened to carry one and then stamped on the whole week's
+  // total. It is gone rather than pinned to '$': this object is persisted as a
+  // JSONB blob in weekly_summaries.stats, so summaries generated before this
+  // change still have '₪' inside them, and the only way to stop that
+  // misreporting a dollar total is for the display side to not read it. See
+  // WeeklyDayCard in components/dashboard/DashboardClient.tsx.
   avg_process_score: number | null;
   daily_pnl: DailyPnl[];
   avg_emotional_state: number | null;
@@ -44,14 +50,13 @@ interface TradeRow {
   status: string;
   pnl_amount: number | string | null;
   actual_pnl: number | string | null;
-  pnl_currency: string | null;
   closed_at: string | null;
   submitted_at: string;
   exit_reason: string | null;
   post_trade_notes: string | null;
 }
 
-const TRADE_SELECT_FIELDS = 'strategy,entry_price,exit_price,take_profit,stop_loss,emotional_state,plan_score,status,pnl_amount,actual_pnl,pnl_currency,closed_at,submitted_at,exit_reason,post_trade_notes';
+const TRADE_SELECT_FIELDS = 'strategy,entry_price,exit_price,take_profit,stop_loss,emotional_state,plan_score,status,pnl_amount,actual_pnl,closed_at,submitted_at,exit_reason,post_trade_notes';
 
 function tradePoints(t: TradeRow): number {
   const entry = Number(t.entry_price);
@@ -156,15 +161,12 @@ function computeWeeklyStats(trades: TradeRow[], weekStart: Date): WeeklyStats {
   for (const t of trades) strategyCounts[t.strategy] = (strategyCounts[t.strategy] ?? 0) + 1;
   const mostUsedStrategy = Object.entries(strategyCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
 
-  const withCurrency = trades.find(t => t.pnl_amount != null && t.pnl_currency);
-
   return {
     total_trades: trades.length,
     winning_trades: winning.length,
     losing_trades: losing.length,
     win_rate: winRate,
     total_pnl: Math.round(totalPnl * 100) / 100,
-    pnl_currency: withCurrency?.pnl_currency ?? '₪',
     avg_process_score: avgProcessScore,
     daily_pnl: dailyPnl,
     avg_emotional_state: avgEmotionalState,

@@ -1,4 +1,5 @@
 import type { TraderIdentity } from './types';
+import { formatMoney } from '@/lib/money';
 
 export type { TraderIdentity };
 
@@ -172,7 +173,7 @@ export function computeTraderProfile(trades: TradeStat[]): TraderProfile {
   if (revengePct > 0.1) weaknesses.push(`${Math.round(revengePct * 100)}% עסקאות Revenge — עלות גבוהה`);
   if (revengeClosed.length >= 2) {
     const loss = revengeClosed.reduce((s, t) => s + (t.entry_price - Number(t.exit_price)), 0);
-    weaknesses.push(`${revengeClosed.length} עסקאות Revenge הפסידו $${loss.toFixed(1)}`);
+    weaknesses.push(`${revengeClosed.length} עסקאות Revenge הפסידו ${formatMoney(loss, { decimals: 1, sign: 'none' })}`);
   }
   if (worstHour && worstHour[1].w / worstHour[1].n < 0.35 && worstHour[1].n >= 2)
     weaknesses.push(`שעה ${worstHour[0]}:00 — ${Math.round((worstHour[1].w / worstHour[1].n) * 100)}% הצלחה בלבד`);

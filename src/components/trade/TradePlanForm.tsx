@@ -8,6 +8,7 @@ import { validateTradePlan, DEFAULT_PRESET_RULES } from '@/lib/validators/Rulese
 import { useModalDialog } from '@/lib/a11y/useModalDialog';
 import { useHydrated } from '@/lib/hooks';
 import { calcRR } from '@/lib/utils';
+import { TRADING_CURRENCY } from '@/lib/money';
 import ValidationResultBanner from './ValidationResultBanner';
 import EmotionalStateSlider from './EmotionalStateSlider';
 import ConfidenceLevelSlider from './ConfidenceLevelSlider';
@@ -18,7 +19,7 @@ import dynamic from 'next/dynamic';
 const TradingViewChart = dynamic(() => import('./TradingViewChart'), { ssr: false });
 import Button from '@/components/ui/Button';
 import Select from '@/components/ui/Select';
-import type { TradePlanInput, PresetRules, RulesetValidationResult, TradeStrategy, PnlCurrency, RuleContextSource, Timeframe } from '@/lib/types';
+import type { TradePlanInput, PresetRules, RulesetValidationResult, TradeStrategy, RuleContextSource, Timeframe } from '@/lib/types';
 import type { PersonalStrategy } from '@/components/strategies/StrategiesClient';
 import { getPlanLimits, type PlanTier } from '@/lib/plans/config';
 import { fetchActiveRuleViolation } from '@/lib/rules/fetchActiveRuleViolation';
@@ -39,10 +40,14 @@ const getSavedPnlMode = (): 'points' | 'percent' | null => {
   const saved = localStorage.getItem('trade-plan-pnl-mode');
   return saved === 'points' || saved === 'percent' ? saved : null;
 };
-const getSavedCurrency = (): PnlCurrency | null => {
-  const saved = localStorage.getItem('trade-plan-pnl-currency');
-  return saved === '₪' || saved === '$' ? saved : null;
-};
+
+// REF-99: there was a `getSavedCurrency()` here reading a per-browser
+// localStorage key, 'trade-plan-pnl-currency'. It was the user's default
+// currency and it lived in the browser, so the same trader got one default on
+// their phone and another on their desktop, and no rule knew about either. The
+// product is dollar-only now; the key is simply no longer read. Nothing clears
+// it — a stale value does no harm and a cleanup pass would be a write to every
+// user's browser for no visible gain.
 
 // The app's focus convention (see TradovateConnectionCard / AccessibilityWidget):
 // a turquoise ring on keyboard focus only. A ring, not an outline, because the
@@ -115,7 +120,7 @@ type FormState = 'empty' | 'editing' | 'validating' | 'warning' | 'blocked' | 's
 
 /** Before the first load. Paired with `contextLoaded`, which is what the panel
  *  actually keys off — these zeros are never shown to the user as fact. */
-const EMPTY_TODAY_CLOSED: TodayClosedSummary = { count: 0, losingCount: 0, money: [] };
+const EMPTY_TODAY_CLOSED: TodayClosedSummary = { count: 0, losingCount: 0, money: null };
 
 // Mirrors the required-field conditions in isFormFilled below — one entry per condition,
 // used to tell the user exactly what's missing instead of just disabling the button.
@@ -310,7 +315,6 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
   const [personalStrategyRows, setPersonalStrategyRows] = useState<PersonalStrategy[]>([]);
   // Session override wins over the saved preference, which wins over the default
   const [pnlModeOverride, setPnlModeOverride] = useState<'points' | 'percent' | null>(null);
-  const [currencyOverride, setCurrencyOverride] = useState<PnlCurrency | null>(null);
   const [pnlFieldsError, setPnlFieldsError] = useState(false);
   const [slInput, setSlInput] = useState('');
   const [tpInput, setTpInput] = useState('');
@@ -325,9 +329,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
   const supabase = useMemo(() => createClient(), []);
 
   const savedPnlMode = useSyncExternalStore(emptySubscribe, getSavedPnlMode, getServerNull);
-  const savedCurrency = useSyncExternalStore(emptySubscribe, getSavedCurrency, getServerNull);
   const pnlMode = pnlModeOverride ?? savedPnlMode ?? 'points';
-  const currency = currencyOverride ?? savedCurrency ?? '₪';
 
   function toggleChecklistItem(item: string) {
     setCheckedItems((prev) => {
@@ -348,11 +350,6 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
   function changePnlMode(mode: 'points' | 'percent') {
     setPnlModeOverride(mode);
     localStorage.setItem('trade-plan-pnl-mode', mode);
-  }
-
-  function changeCurrency(c: PnlCurrency) {
-    setCurrencyOverride(c);
-    localStorage.setItem('trade-plan-pnl-currency', c);
   }
 
   const entryNum = parseFloat(form.entry_price);
@@ -827,7 +824,9 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
       status: 'open',
       units: unitsNum,
       point_value: pointValueNum,
-      pnl_currency: currency,
+      // Written explicitly rather than left to the column default, so a plan
+      // created before migration 033 runs is already '$' (REF-99 req. 3).
+      pnl_currency: TRADING_CURRENCY,
       strategy_conditions_checked: entryConditions.length > 0
         ? entryConditions.map((condition) => ({ condition, checked: strategyConditionsChecked[condition] === true }))
         : null,
@@ -1175,31 +1174,10 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                   />
                 </div>
               </div>
+              {/* REF-99: a ₪/$ toggle sat above this pair. The product is
+                  dollar-only, so there is nothing to choose and the row is
+                  gone — the note below the fields names the currency. */}
               <div className="flex flex-col gap-1.5">
-                <div className="flex items-center justify-end">
-                  <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-tg-border)' }}>
-                    <button
-                      type="button"
-                      onClick={() => changeCurrency('₪')}
-                      className="px-2 py-0.5 text-[10px] font-semibold transition-all"
-                      style={{
-                        background: currency === '₪' ? 'var(--color-tg-primary-muted)' : 'transparent',
-                        color: currency === '₪' ? 'var(--color-tg-primary)' : 'var(--color-tg-muted)',
-                      }}>
-                      ₪
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => changeCurrency('$')}
-                      className="px-2 py-0.5 text-[10px] font-semibold transition-all"
-                      style={{
-                        background: currency === '$' ? 'var(--color-tg-primary-muted)' : 'transparent',
-                        color: currency === '$' ? 'var(--color-tg-primary)' : 'var(--color-tg-muted)',
-                      }}>
-                      $
-                    </button>
-                  </div>
-                </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div ref={(el) => { fieldRefs.current.units = el; }} style={fieldHighlightStyle('units')} className="flex flex-col gap-1">
                     <label htmlFor="trade-units" className="text-xs font-medium text-tg-muted">יחידות/חוזים</label>
@@ -1237,7 +1215,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                 </div>
               </div>
               <p id={sizingNoteId} className="text-[10px] text-tg-muted">
-                יחידות/חוזים — שדה חובה. שווי נקודה ($) — אופציונלי, ברירת מחדל 1. נדרשים כדי שהמערכת תחשב עבורך רווח/הפסד ({currency}) בסגירת העסקה
+                יחידות/חוזים — שדה חובה. שווי נקודה ($) — אופציונלי, ברירת מחדל 1. נדרשים כדי שהמערכת תחשב עבורך רווח/הפסד ({TRADING_CURRENCY}) בסגירת העסקה
               </p>
               {pnlFieldsError && (
                 <div id={sizingErrorId} className="px-3 py-2 rounded-xl text-xs animate-fade-in"
@@ -1574,7 +1552,6 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
             direction={closingPlan.direction}
             units={closingPlan.units}
             pointValue={closingPlan.point_value}
-            pnlCurrency={closingPlan.pnl_currency}
             exitPriceRef={closePlanExitPriceRef}
             onClosed={() => handlePlanClosed(closingPlan.id)}
           />

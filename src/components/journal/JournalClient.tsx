@@ -7,10 +7,10 @@ import { AlertTriangle, Bot, Eye, Inbox, MoreHorizontal, Pencil, Trash2, X } fro
 import CloseTrade, { AIDebriefView, type AIDebriefResult } from '@/components/journal/CloseTrade';
 import EmotionalStateSlider from '@/components/trade/EmotionalStateSlider';
 import { createClient } from '@/lib/supabase/client';
-import { formatPnlIls, formatPnlPoints, calcRR } from '@/lib/utils';
+import { formatPnlPoints, calcRR } from '@/lib/utils';
+import { formatMoney, TRADING_CURRENCY } from '@/lib/money';
 import { tradeMoneyPnl, hasMoneyPnl, isWinningTrade } from '@/lib/pnl';
 import { isTradeTaken, NOT_ENTERED, NOT_ENTERED_LABEL, tradeStatusLabel } from '@/lib/trades/status';
-import type { PnlCurrency } from '@/lib/types';
 import { useHydrated } from '@/lib/hooks';
 import { useModalDialog } from '@/lib/a11y/useModalDialog';
 import './journal.css';
@@ -123,7 +123,7 @@ function rowAccessibleName(t: Trade): string {
   if (win === null) return `${title}, ${dir}, סגורה, ${date}`;
 
   const amount = hasMoneyPnl(t)
-    ? `${t.pnl_currency ?? '₪'}${Math.round(Math.abs(tradeMoneyPnl(t))).toLocaleString('en-US')}`
+    ? formatMoney(tradeMoneyPnl(t), { decimals: 0, sign: 'none' })
     : `${Math.round(Math.abs(calcPnl(t) ?? 0))} נקודות`;
   return `${title}, ${dir}, ${date}, ${win ? 'רווח' : 'הפסד'} ${amount}`;
 }
@@ -202,7 +202,7 @@ function MobileTradeCard({ t, onView, onEdit, onDelete, onClose, onDebrief, hasD
             hasMoneyPnl(t) ? (
               <span className="flex items-baseline gap-1.5">
                 <span className="jr-num" style={{ fontSize: 16, fontWeight: 700, color: tradeMoneyPnl(t) >= 0 ? GREEN : RED }}>
-                  {formatPnlIls(tradeMoneyPnl(t), t.pnl_currency ?? '₪')}
+                  {formatMoney(tradeMoneyPnl(t))}
                 </span>
                 <span className="jr-num" style={{ fontSize: 13, color: MUTED, fontWeight: 600 }}>
                   {formatPnlPoints(pnl)}
@@ -283,9 +283,11 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
   const pfNum       = grossLoss > 0 ? grossProfit / grossLoss : null;
   const pfStr       = pfNum !== null ? pfNum.toFixed(2) : grossProfit > 0 ? '∞' : '—';
 
-  const pnlCurrencies     = useMemo(() => Array.from(new Set(moneyClosed.map(t => t.pnl_currency ?? '₪'))), [moneyClosed]);
+  // REF-99: this used to collect the set of currencies across the closed
+  // trades and fall back to ₪ whenever there was more than one — AFTER having
+  // already summed the amounts together. One currency now, so the total is in
+  // the currency it claims to be in.
   const totalPnlAmount    = moneyClosed.reduce((s, t) => s + tradeMoneyPnl(t), 0);
-  const pnlAmountCurrency = pnlCurrencies.length === 1 ? pnlCurrencies[0] : '₪';
   const hasPnlAmount      = moneyClosed.length > 0;
 
   // ── Filtered + sorted ─────────────────────────────────────────────────────
@@ -394,7 +396,7 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
         <SummaryStat label="אחוז הצלחה" value={`${winRate}%`}
           color={winRate >= 50 ? GREEN : RED} />
         <SummaryStat label="רווח/הפסד כולל"
-          value={hasPnlAmount ? formatPnlIls(totalPnlAmount, pnlAmountCurrency) : fmtPnl(totalPnl)}
+          value={hasPnlAmount ? formatMoney(totalPnlAmount) : fmtPnl(totalPnl)}
           color={(hasPnlAmount ? totalPnlAmount : totalPnl) >= 0 ? GREEN : RED}
           big />
         <SummaryStat label="פקטור רווח" value={pfStr}
@@ -639,7 +641,7 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
                         hasMoneyPnl(t) ? (
                           <div className="flex flex-col gap-0.5">
                             <span className="jr-num" style={{ fontSize: 16, fontWeight: 700, color: tradeMoneyPnl(t) >= 0 ? GREEN : RED }}>
-                              {formatPnlIls(tradeMoneyPnl(t), t.pnl_currency ?? '₪')}
+                              {formatMoney(tradeMoneyPnl(t))}
                             </span>
                             <span className="jr-num" style={{ fontSize: 13, color: MUTED, fontWeight: 600 }}>
                               {formatPnlPoints(pnl)}
@@ -754,7 +756,6 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
               direction={inferDirection(t)}
               units={t.units ?? t.quantity}
               pointValue={t.point_value}
-              pnlCurrency={t.pnl_currency}
               exitPriceRef={closeExitPriceRef}
               onClosed={() => { setClosingTradeId(null); router.refresh(); }}
               onDebrief={result => setDebriefResults(prev => ({ ...prev, [t.id]: result }))}
@@ -1176,7 +1177,7 @@ function TradeDetailModal({ trade, onClose, debriefResult, onDebrief }: {
           {pnlPoints !== null && (
             hasMoneyPnl(trade) ? (
               <span className="text-sm font-bold" style={{ color: tradeMoneyPnl(trade) >= 0 ? '#22c55e' : '#ef4444' }}>
-                {formatPnlIls(tradeMoneyPnl(trade), trade.pnl_currency ?? '₪')}
+                {formatMoney(tradeMoneyPnl(trade))}
                 <span className="text-xs font-semibold" style={{ opacity: 0.6 }}> ({formatPnlPoints(pnlPoints)})</span>
               </span>
             ) : (
@@ -1249,7 +1250,6 @@ function EditTradeModal({ trade, onClose, onSaved }: {
   const [stopLoss, setStopLoss] = useState(String(trade.stop_loss));
   const [takeProfit, setTakeProfit] = useState(String(trade.take_profit));
   const [quantity, setQuantity] = useState(trade.quantity != null ? String(trade.quantity) : '');
-  const [currency, setCurrency] = useState<PnlCurrency>((trade.pnl_currency as PnlCurrency) ?? '₪');
   const [tradeReason, setTradeReason] = useState(trade.trade_reason);
   const [notes, setNotes] = useState(trade.post_trade_notes ?? '');
   const [emotionalState, setEmotionalState] = useState(trade.emotional_state);
@@ -1288,7 +1288,10 @@ function EditTradeModal({ trade, onClose, onSaved }: {
       take_profit: tp,
       rr_ratio: calcRR(entry, sl, tp),
       quantity: qty,
-      pnl_currency: currency,
+      // Rewritten to '$' on every edit rather than preserved: editing a row is
+      // the one moment the app is already touching it, and a '₪' label left on
+      // a dollar amount is the defect REF-99 closes.
+      pnl_currency: TRADING_CURRENCY,
       trade_reason: tradeReason.trim(),
       post_trade_notes: notes.trim() || null,
       emotional_state: emotionalState,
@@ -1361,23 +1364,12 @@ function EditTradeModal({ trade, onClose, onSaved }: {
         </Field>
       </div>
 
-      <Field label="כמות ומטבע">
-        <div className="flex items-center gap-1.5">
-          <input type="number" step="any" value={quantity} onChange={e => setQuantity(e.target.value)}
-            className={`${FIELD_CLASS} text-center flex-1`} style={fieldStyle} />
-          <div className="flex rounded-lg overflow-hidden shrink-0 h-[38px]" style={{ border: `1px solid ${BORDER}` }}>
-            <button type="button" onClick={() => setCurrency('₪')}
-              className="px-2.5 text-xs font-semibold transition-all"
-              style={{ background: currency === '₪' ? 'rgba(0,210,210,0.12)' : 'transparent', color: currency === '₪' ? GOLD : MUTED }}>
-              ₪
-            </button>
-            <button type="button" onClick={() => setCurrency('$')}
-              className="px-2.5 text-xs font-semibold transition-all"
-              style={{ background: currency === '$' ? 'rgba(0,210,210,0.12)' : 'transparent', color: currency === '$' ? GOLD : MUTED }}>
-              $
-            </button>
-          </div>
-        </div>
+      {/* REF-99: this field was "כמות ומטבע" with a ₪/$ pair that could change
+          the currency of an already-CLOSED trade. Dollar-only now, so the
+          control is gone and the field is what it always really was. */}
+      <Field label="כמות">
+        <input type="number" step="any" value={quantity} onChange={e => setQuantity(e.target.value)}
+          className={`${FIELD_CLASS} text-center`} style={fieldStyle} />
       </Field>
 
       <Field label="סיבת כניסה">

@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getUserPlan } from '@/lib/plans/getUserPlan';
 import { describeCustomRule, ACTION_LABELS } from '@/lib/validators/RulesetValidator';
+import { formatMoney } from '@/lib/money';
 import type { CustomRule } from '@/lib/types';
 import { PLAIN_HEBREW_PROSE_CLAUSE } from '@/lib/ai/prompts';
 
@@ -246,7 +247,12 @@ function buildUserContext(data: {
     `R:R מינימלי: ${presetRules.min_rr_ratio}`,
     `עסקאות מקסימום ביום: ${presetRules.max_daily_trades}`,
     `Cooldown אחרי ${presetRules.cooldown_after_losses} הפסדים`,
-    presetRules.max_daily_loss ? `הפסד יומי מקסימלי: ${presetRules.max_daily_loss}` : null,
+    // presetRules is an untyped row here, so the threshold is coerced before
+    // formatting. REF-99 gave this line a currency symbol — it was the one
+    // place a money threshold reached the model as a bare number.
+    Number(presetRules.max_daily_loss) > 0
+      ? `הפסד יומי מקסימלי: ${formatMoney(Number(presetRules.max_daily_loss), { decimals: 0, sign: 'none' })}`
+      : null,
     `מצב רגשי מינימלי: ${presetRules.min_emotional_state}/5`,
   ].filter(Boolean).join(', ') : 'לא הוגדרו';
 

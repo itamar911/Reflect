@@ -6,6 +6,7 @@
 // and stats always look current without reseeding.
 
 import { isWinningTrade, tradeMoneyPnl } from '@/lib/pnl';
+import { TRADING_CURRENCY } from '@/lib/money';
 
 // ── Demo user ─────────────────────────────────────────────────────────────────
 
@@ -153,8 +154,8 @@ const TRADE_SPECS: TradeSpec[] = [
     reason: 'קנייה בבדיקת אזור ביקוש יומי', exitReason: 'הגיע ליעד Take Profit', setup: 'demo-setup-vwap' },
 ];
 
-// ₪ per index point (micro-contract equivalent)
-const PT_VALUE_ILS: Record<'NQ' | 'ES', number> = { NQ: 7, ES: 18 };
+// Dollars per index point (micro-contract equivalent)
+const PT_VALUE_USD: Record<'NQ' | 'ES', number> = { NQ: 7, ES: 18 };
 
 function buildTrade(spec: TradeSpec, i: number) {
   const submitted = iso(spec.d, spec.h);
@@ -163,7 +164,7 @@ function buildTrade(spec: TradeSpec, i: number) {
     ? (spec.dir === 'long' ? spec.exit - spec.entry : spec.entry - spec.exit)
     : null;
   const units = spec.u ?? 1;
-  const pnl = points != null ? Math.round(points * PT_VALUE_ILS[spec.sym] * units) : null;
+  const pnl = points != null ? Math.round(points * PT_VALUE_USD[spec.sym] * units) : null;
   const rr = Math.round((Math.abs(spec.tp - spec.entry) / Math.abs(spec.entry - spec.sl)) * 10) / 10;
   const isClosed = spec.exit != null;
 
@@ -191,7 +192,7 @@ function buildTrade(spec: TradeSpec, i: number) {
     closed_at: closed,
     quantity: units,
     pnl_amount: pnl,
-    pnl_currency: pnl != null ? '₪' : null,
+    pnl_currency: pnl != null ? TRADING_CURRENCY : null,
     followed_plan: isClosed ? (spec.followed ?? true) : null,
     kept_sl: isClosed ? !(spec.movedSl ?? false) : null,
     proper_size: isClosed ? true : null,
@@ -201,8 +202,8 @@ function buildTrade(spec: TradeSpec, i: number) {
     revenge_trade: isClosed ? (spec.revenge ?? false) : null,
     direction: spec.dir,
     units,
-    point_value: PT_VALUE_ILS[spec.sym],
-    risk_amount: Math.round(Math.abs(spec.entry - spec.sl) * PT_VALUE_ILS[spec.sym] * units),
+    point_value: PT_VALUE_USD[spec.sym],
+    risk_amount: Math.round(Math.abs(spec.entry - spec.sl) * PT_VALUE_USD[spec.sym] * units),
     risk_type: 'dollar',
     actual_pnl: pnl,
     strategy_conditions_checked: isClosed
@@ -495,7 +496,6 @@ function weeklyStatsFor(weekStart: Date) {
     losing_trades: losing.length,
     win_rate: rows.length > 0 ? Math.round((winning.length / rows.length) * 100) : null,
     total_pnl: totalPnl,
-    pnl_currency: '₪',
     avg_process_score: scored.length > 0
       ? Math.round(scored.reduce((s, t) => s + Number(t.plan_score), 0) / scored.length)
       : null,

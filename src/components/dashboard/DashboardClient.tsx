@@ -2,7 +2,8 @@
 
 import { useState, useMemo, useEffect, useCallback, useId, useSyncExternalStore } from 'react';
 import { Sparkles, TrendingUp, TrendingDown, RefreshCw, CheckCircle, AlertCircle, AlertTriangle, Heart, Target, ChevronRight, ChevronLeft, Quote, Clock, Plug } from 'lucide-react';
-import { formatPnlIls, formatPnlPoints } from '@/lib/utils';
+import { formatPnlPoints } from '@/lib/utils';
+import { formatMoney } from '@/lib/money';
 import { createClient } from '@/lib/supabase/client';
 import { DASH_TRADE_SELECT, mapDashTrade } from '@/lib/dashboard/trades';
 import type { DashTrade } from '@/lib/dashboard/trades';
@@ -67,7 +68,7 @@ function recentRowName(t: DashTrade): string {
   const win   = isWinningTrade(t);
   if (win === null) return `${title}, ${dir}, פתוחה, ${fmtDateTime(t.submitted_at)}`;
   const amount = hasMoneyPnl(t)
-    ? `${t.pnl_currency ?? '₪'}${Math.round(Math.abs(tradeMoneyPnl(t))).toLocaleString('en-US')}`
+    ? formatMoney(tradeMoneyPnl(t), { decimals: 0, sign: 'none' })
     : `${Math.round(Math.abs(calcPnl(t) ?? 0))} נקודות`;
   return `${title}, ${dir}, ${fmtDateTime(t.submitted_at)}, ${win ? 'רווח' : 'הפסד'} ${amount}`;
 }
@@ -200,7 +201,7 @@ function computeAll(trades: DashTrade[], now: Date) {
   const winCount      = winTrades.length;
   const lossCount     = lossTrades.length;
   const neutralTrades = closed.length - winCount - lossCount;
-  // Monetary (₪/$) aggregates — driven by actual_pnl (falling back to pnl_amount),
+  // Monetary aggregates — driven by actual_pnl (falling back to pnl_amount),
   // classified by the money value's own sign so buckets match the amounts averaged
   const moneyWins     = closed.filter(t => tradeMoneyPnl(t) > 0);
   const moneyLosses   = closed.filter(t => tradeMoneyPnl(t) < 0);
@@ -211,10 +212,10 @@ function computeAll(trades: DashTrade[], now: Date) {
   const avgLoss       = moneyLosses.length > 0 ? grossLoss   / moneyLosses.length : 0;
   const totalPnlPoints = pnls.reduce((s, p) => s + p, 0);
 
+  // REF-99: a currency Set with a silent ₪ fallback for the mixed case lived
+  // here, downstream of sums that had already added the two together. Gone.
   const closedWithAmount = closed.filter(hasMoneyPnl);
   const hasPnlAmount     = closedWithAmount.length > 0;
-  const pnlCurrencies    = Array.from(new Set(closedWithAmount.map(t => t.pnl_currency ?? '₪')));
-  const pnlCurrency      = pnlCurrencies.length === 1 ? pnlCurrencies[0] : '₪';
 
   // Period P&L = current calendar month
   const periodPnl = closed.reduce((s, t) => {
@@ -346,7 +347,7 @@ function computeAll(trades: DashTrade[], now: Date) {
     profitDays, lossDays, neutralDays, profitDayPct,
     winTrades: winCount, lossTrades: lossCount, neutralTrades, winPct,
     avgWin, avgLoss, grossProfit, grossLoss, totalPnl, totalPnlPoints,
-    hasPnlAmount, pnlCurrency, periodPnl,
+    hasPnlAmount, periodPnl,
     dailyPnl, dailyCount, weeklyPnl, weeklyCount, monthlyPnl, monthlyCount, totalCount,
     disciplineScores, performanceScores, hasStrategyConditions, hasDrawdownCtrl,
     disciplineTrend, performanceTrend,
@@ -853,7 +854,7 @@ function MonthCalendar({
       {/* Monthly summary */}
       <div className="grid grid-cols-3 gap-2 mt-1">
         {[
-          { label: 'P&L חודשי', value: formatPnlIls(monthPnl), color: monthPnl >= 0 ? GREEN : RED },
+          { label: 'P&L חודשי', value: formatMoney(monthPnl), color: monthPnl >= 0 ? GREEN : RED },
           { label: 'ימי מסחר', value: String(tradeDays), color: TEXT },
           { label: 'ימים רווחיים', value: tradeDays > 0 ? `${Math.round(profitDs / tradeDays * 100)}%` : '—', color: GREEN },
         ].map(({ label, value, color }) => (
@@ -929,7 +930,7 @@ function TradeDetailPanel({ trade, onClose, aiReview, aiLoading, onAiReview }: {
               <p className="text-2xl font-bold" style={{ color: (hasMoneyPnl(trade) ? tradeMoneyPnl(trade) : pnl) >= 0 ? GREEN : RED }}>
                 {hasMoneyPnl(trade) ? (
                   <>
-                    {formatPnlIls(tradeMoneyPnl(trade), trade.pnl_currency ?? '₪')}
+                    {formatMoney(tradeMoneyPnl(trade))}
                     <span className="text-sm font-semibold" style={{ opacity: 0.6 }}> ({formatPnlPoints(pnl)})</span>
                   </>
                 ) : fmtPnl(pnl)}
@@ -1071,7 +1072,6 @@ interface WeeklyStats {
   losing_trades: number;
   win_rate: number | null;
   total_pnl: number;
-  pnl_currency: string;
   avg_process_score: number | null;
   daily_pnl: WeeklyDailyPnl[];
   avg_emotional_state: number | null;
@@ -1179,7 +1179,7 @@ function SummaryQuote({ segments }: { segments: { heading: string; lines: string
 
 // One compact day card for the weekly daily-breakdown column: green if profitable,
 // red if a loss, gray if no trades, with a thin bar showing relative size vs other days.
-function WeeklyDayCard({ label, pnl, trades, currency, maxAbs }: { label: string; pnl: number; trades: number; currency: string; maxAbs: number }) {
+function WeeklyDayCard({ label, pnl, trades, maxAbs }: { label: string; pnl: number; trades: number; maxAbs: number }) {
   const tone = trades === 0 || pnl === 0 ? 'neutral' : pnl > 0 ? 'pos' : 'neg';
   const color = tone === 'pos' ? GREEN : tone === 'neg' ? RED : MUTED;
   const borderColor = tone === 'pos' ? GREEN : tone === 'neg' ? RED : SUBTLE;
@@ -1191,7 +1191,7 @@ function WeeklyDayCard({ label, pnl, trades, currency, maxAbs }: { label: string
         <span style={{ fontSize: 13, fontWeight: 700, color: TEXT2 }}>{label}</span>
         <div className="flex items-baseline gap-2">
           <span style={{ fontSize: 15, fontWeight: 700, color }}>
-            {trades === 0 ? '—' : formatPnlIls(pnl, currency)}
+            {trades === 0 ? '—' : formatMoney(pnl)}
           </span>
           <span style={{ fontSize: 10, color: MUTED, fontWeight: 600 }}>
             {trades} עסקאות
@@ -1503,7 +1503,7 @@ export default function DashboardClient({
   const { pnl: selPeriodPnl, count: selPeriodCount } = pnlPeriodMap[pnlPeriod];
   const selPeriodDisplay = !stats.hasPnlAmount && pnlPeriod === 'total'
     ? fmtPnl(stats.totalPnlPoints)
-    : formatPnlIls(selPeriodPnl, stats.pnlCurrency);
+    : formatMoney(selPeriodPnl);
 
   const barData  = barMode === 'daily' ? stats.dailySeries : barMode === 'weekly' ? stats.weeklySeries : stats.monthlySeries;
   const lineData = lineMode === 'cumulative' ? stats.cumulativeSeries : stats.dailySeries;
@@ -1615,8 +1615,8 @@ export default function DashboardClient({
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: isMobile ? undefined : 1 }}>
                   <SplitBar left={stats.avgWin} right={Math.abs(stats.avgLoss)} leftColor={GREEN} rightColor={RED} />
                   <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'flex-start' : 'center', gap: isMobile ? 2 : undefined, justifyContent: isMobile ? undefined : 'space-between' }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: GREEN, fontVariantNumeric: 'tabular-nums' }}>{formatPnlIls(stats.avgWin, stats.pnlCurrency)}</span>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: RED, fontVariantNumeric: 'tabular-nums' }}>{formatPnlIls(stats.avgLoss, stats.pnlCurrency)}</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: GREEN, fontVariantNumeric: 'tabular-nums' }}>{formatMoney(stats.avgWin)}</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: RED, fontVariantNumeric: 'tabular-nums' }}>{formatMoney(stats.avgLoss)}</span>
                   </div>
                 </div>
               </div>
@@ -1646,7 +1646,7 @@ export default function DashboardClient({
               <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
                 {/* LTR isolation keeps the leading +/- glued to the amount inside
                     the RTL card (bidi otherwise strands it on its own line), and
-                    the clamp lets long ₪ amounts fit narrow cards without clipping */}
+                    the clamp lets long $ amounts fit narrow cards without clipping */}
                 <span style={{ fontSize: isMobile ? 'clamp(15px, 5.6vw, 20px)' : 'clamp(20px, 2.4vw, 36px)', fontWeight: 800, letterSpacing: '-0.02em', whiteSpace: 'nowrap', direction: 'ltr', unicodeBidi: 'isolate', fontVariantNumeric: 'tabular-nums', color: selPeriodPnl >= 0 ? GREEN : RED }}>
                   {selPeriodDisplay}
                 </span>
@@ -1736,7 +1736,7 @@ export default function DashboardClient({
               {lineData.length > 0 && (
                 <p className="text-xs font-bold mt-2"
                   style={{ color: lineData[lineData.length - 1].value >= 0 ? GREEN : RED }}>
-                  {formatPnlIls(lineData[lineData.length - 1].value)}
+                  {formatMoney(lineData[lineData.length - 1].value)}
                 </p>
               )}
             </Card>
@@ -1824,7 +1824,7 @@ export default function DashboardClient({
                           <p className="text-[11px] sm:text-sm font-bold" style={{ color: (hasMoneyPnl(t) ? tradeMoneyPnl(t) : pnl) >= 0 ? GREEN : RED }}>
                             {hasMoneyPnl(t) ? (
                               <>
-                                {formatPnlIls(tradeMoneyPnl(t), t.pnl_currency ?? '₪')}
+                                {formatMoney(tradeMoneyPnl(t))}
                                 <span className="text-[8px] sm:text-xs font-semibold" style={{ opacity: 0.6 }}> ({formatPnlPoints(pnl)})</span>
                               </>
                             ) : fmtPnl(pnl)}
@@ -1927,7 +1927,6 @@ export default function DashboardClient({
                   label={weeklyLabelsReversed[i]}
                   pnl={d.pnl}
                   trades={d.trades ?? 0}
-                  currency={weeklySummary.stats.pnl_currency}
                   maxAbs={weeklyDayMaxAbs}
                 />
               ))}

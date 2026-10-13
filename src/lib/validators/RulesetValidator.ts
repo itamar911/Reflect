@@ -1,5 +1,17 @@
 import type { TradePlanInput, PresetRules, CustomRule, ConditionType, ActionType, RulesetValidationResult, PresetRuleKey, PresetRuleViolation } from '@/lib/types';
 import { calcRR } from '@/lib/utils';
+import { formatMoney, TRADING_CURRENCY } from '@/lib/money';
+
+/**
+ * A rule threshold or a day's loss, as it appears in a Hebrew message.
+ *
+ * Whole dollars with thousands separators — `$1,500`, not `$1500` and not
+ * `$1,500.00`. These strings are read mid-sentence and a threshold the user
+ * typed as a round number should read back as one.
+ */
+function money(value: number): string {
+  return formatMoney(value, { decimals: 0, sign: 'none' });
+}
 
 export const PRESET_RULE_LABELS: Record<PresetRuleKey, string> = {
   min_emotional_state: 'מצב רגשי מינימלי',
@@ -87,11 +99,11 @@ export function validateTradePlan(
   if (presetRules.max_daily_loss !== null && presetRules.max_daily_loss > 0) {
     if (todayLossAmount >= presetRules.max_daily_loss) {
       addViolation('max_daily_loss', 'block',
-        `הפסד יומי של $${todayLossAmount.toFixed(0)} עבר את המגבלה שלך ($${presetRules.max_daily_loss})`
+        `הפסד יומי של ${money(todayLossAmount)} עבר את המגבלה שלך (${money(presetRules.max_daily_loss)})`
       );
     } else if (todayLossAmount >= presetRules.max_daily_loss * 0.8) {
       addViolation('max_daily_loss', 'warn',
-        `הפסד יומי של $${todayLossAmount.toFixed(0)} — קרוב למגבלה ($${presetRules.max_daily_loss})`
+        `הפסד יומי של ${money(todayLossAmount)} — קרוב למגבלה (${money(presetRules.max_daily_loss)})`
       );
     }
   }
@@ -196,7 +208,7 @@ export function checkActiveViolation(
     return {
       ruleKey: 'max_daily_loss',
       ruleName: PRESET_RULE_LABELS.max_daily_loss,
-      description: `הפסד יומי עבר $${presetRules.max_daily_loss}`,
+      description: `הפסד יומי עבר ${money(presetRules.max_daily_loss)}`,
     };
   }
 
@@ -215,7 +227,11 @@ export function checkActiveViolation(
 //   - revenge_trade has no condition at all, although CloseTrade.tsx records
 //     it alongside the three *_last_trade flags that do.
 export const CONDITION_LABELS: Record<ConditionType, string> = {
-  daily_loss_dollar: 'הפסד יומי עבר סכום קבוע ($)',
+  // The condition_type identifier stays 'daily_loss_dollar': it is pinned by a
+  // CHECK constraint in the database (schema.sql) and renaming it would need a
+  // migration on that constraint for no user-visible gain. Under REF-99 the
+  // name is simply accurate.
+  daily_loss_dollar: `הפסד יומי עבר סכום קבוע (${TRADING_CURRENCY})`,
   daily_loss_percent: 'הפסד יומי עבר אחוז מהתיק (%)',
   daily_trades_count: 'מספר עסקאות היום עבר',
   loss_streak: 'רצף הפסדים רצוף הגיע ל',
@@ -246,11 +262,18 @@ export function conditionNeedsThreshold(conditionType: ConditionType): boolean {
   return !CONDITIONS_WITHOUT_THRESHOLD.includes(conditionType);
 }
 
-/** Human-readable Hebrew description of a rule's condition, e.g. "הפסד יומי עבר $200". */
+/**
+ * Human-readable Hebrew description of a rule's condition, e.g. "הפסד יומי עבר $200".
+ *
+ * Note that RulesEditor SAVES this string into custom_rules.name, so rows
+ * written before REF-99 carry whatever this produced at the time. The only
+ * difference is digit grouping on four-figure thresholds ($1500 → $1,500);
+ * the currency was already a dollar sign here.
+ */
 export function describeCustomRule(rule: Pick<CustomRule, 'condition_type' | 'threshold_value'>): string {
   const t = rule.threshold_value ?? 0;
   switch (rule.condition_type) {
-    case 'daily_loss_dollar': return `הפסד יומי עבר $${t}`;
+    case 'daily_loss_dollar': return `הפסד יומי עבר ${money(t)}`;
     case 'daily_loss_percent': return `הפסד יומי עבר ${t}% מהתיק`;
     case 'daily_trades_count': return `מספר עסקאות היום עבר ${t}`;
     case 'loss_streak': return `רצף הפסדים רצוף הגיע ל-${t}`;
@@ -263,7 +286,7 @@ export function describeCustomRule(rule: Pick<CustomRule, 'condition_type' | 'th
 }
 
 export interface CustomRuleCheckContext {
-  /** Dollar amount lost today (positive number), from realized (closed) trades. */
+  /** Dollars lost today (positive number), from realized (closed) trades. */
   todayLossAmount: number;
   /** Today's loss as % of portfolio, or null if portfolio size is unknown (condition is skipped). */
   todayLossPercent: number | null;

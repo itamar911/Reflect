@@ -166,7 +166,19 @@ export type RuleContextSource =
   /** The fetch failed upstream. */
   | 'broker_unavailable';
 
-export type PnlCurrency = '₪' | '$';
+/**
+ * The currency a trading amount is in. One member, deliberately (REF-99).
+ *
+ * `trade_plans.pnl_currency` is still a column and still read, because rows
+ * written before migration 033 carry '₪' as a LABEL on a number the user
+ * already entered in dollars. Nothing converts; the migration relabels. Typing
+ * this as a single-member union makes any attempt to write a shekel back a
+ * compile error rather than a row that disagrees with the rest of the table.
+ *
+ * Our own subscription pricing is in shekels and is NOT a trading amount — it
+ * never touches this type. See lib/money.ts.
+ */
+export type PnlCurrency = '$';
 
 export interface TradePlanInput {
   strategy: TradeStrategy | string;

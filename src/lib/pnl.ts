@@ -31,12 +31,12 @@ export function tradePointsPnl(t: PointsPnlTrade): number | null {
   return tradeDirection(t) === 'long' ? diff : -diff;
 }
 
-/** Whether the trade carries any monetary (₪/$) P&L value. */
+/** Whether the trade carries any monetary (dollar) P&L value. */
 export function hasMoneyPnl(t: MoneyPnlTrade): boolean {
   return t.status === 'closed' && t.exit_price != null && (t.actual_pnl ?? t.pnl_amount) != null;
 }
 
-/** Monetary (₪/$) P&L: actual_pnl if present, else pnl_amount, else 0. */
+/** Monetary (dollar) P&L: actual_pnl if present, else pnl_amount, else 0. */
 export function tradeMoneyPnl(t: MoneyPnlTrade): number {
   if (t.status !== 'closed' || t.exit_price == null) return 0;
   const v = t.actual_pnl ?? t.pnl_amount;

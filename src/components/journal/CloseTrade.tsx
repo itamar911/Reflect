@@ -5,7 +5,8 @@ import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
 import { Bot, Target, BarChart3, ShieldCheck } from 'lucide-react';
-import { formatPnlIls, formatPnlPoints } from '@/lib/utils';
+import { formatPnlPoints } from '@/lib/utils';
+import { formatMoney, TRADING_CURRENCY } from '@/lib/money';
 import { renderPlainAiText } from '@/lib/ai/textFormatting';
 
 export interface ScoreCategory {
@@ -74,7 +75,6 @@ interface CloseTradeProps {
   direction: 'long' | 'short';
   units: number | null;
   pointValue: number | null;
-  pnlCurrency: string | null;
   onClosed: () => void;
   onDebrief?: (result: AIDebriefResult) => void;
   /** Lets the hosting dialog land initial focus on the exit-price field — the
@@ -95,7 +95,7 @@ const EXIT_REASONS = [
 
 export default function CloseTrade({
   tradeId, entryPrice, stopLoss, takeProfit, rrRatio,
-  emotionalState, strategy, tradeReason, direction, units, pointValue, pnlCurrency, onClosed, onDebrief,
+  emotionalState, strategy, tradeReason, direction, units, pointValue, onClosed, onDebrief,
   exitPriceRef
 }: CloseTradeProps) {
   const [exitPrice, setExitPrice] = useState('');
@@ -106,7 +106,6 @@ export default function CloseTrade({
   const [fomoEntry, setFomoEntry] = useState(false);
   const [revengeTrade, setRevengeTrade] = useState(false);
   const [actualPnl, setActualPnl] = useState('');
-  const [actualPnlCurrency, setActualPnlCurrency] = useState<'₪' | '$'>((pnlCurrency as '₪' | '$') ?? '₪');
   const [postTradeNotes, setPostTradeNotes] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -131,7 +130,6 @@ export default function CloseTrade({
   const hasActualPnl = actualPnl.trim() !== '' && !isNaN(actualPnlNum);
 
   const finalAmount = hasActualPnl ? actualPnlNum : calculatedAmount;
-  const finalCurrency = hasActualPnl ? actualPnlCurrency : pnlCurrency;
   const isWin = finalAmount !== null ? finalAmount > 0 : (pnlPoints !== null ? pnlPoints > 0 : null);
 
   async function handleClose() {
@@ -140,7 +138,10 @@ export default function CloseTrade({
     setError('');
 
     const pnlAmount = finalAmount;
-    const pnlCurrencyValue = pnlAmount != null ? (finalCurrency ?? '₪') : null;
+    // Still null when there is no money figure at all — NULL means "no amount
+    // recorded", which is not the same as an amount of zero dollars, and
+    // migration 033 leaves those NULLs alone for exactly that reason.
+    const pnlCurrencyValue = pnlAmount != null ? TRADING_CURRENCY : null;
     const notesValue = postTradeNotes.trim() || null;
 
     // kept_sl / proper_size are legacy columns retained for the AI-debrief score formula;
@@ -309,34 +310,16 @@ export default function CloseTrade({
 
       {calculatedAmount !== null && (
         <div className="flex flex-col gap-1">
-          <label className="text-xs text-tg-muted">PnL בפועל (אופציונלי)</label>
-          <div className="flex items-center gap-2">
-            <input type="number" step="any" placeholder={calculatedAmount.toFixed(2)} value={actualPnl}
-              onChange={(e) => setActualPnl(e.target.value)}
-              className="flex-1 h-10 px-3 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary"
-              style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)' }}
-            />
-            <div className="flex rounded-lg overflow-hidden shrink-0" style={{ border: '1px solid var(--color-tg-border)' }}>
-              <button
-                onClick={() => setActualPnlCurrency('₪')}
-                className="px-2 py-1 text-[10px] font-semibold transition-all"
-                style={{
-                  background: actualPnlCurrency === '₪' ? 'var(--color-tg-primary-muted)' : 'transparent',
-                  color: actualPnlCurrency === '₪' ? 'var(--color-tg-primary)' : 'var(--color-tg-muted)',
-                }}>
-                ₪
-              </button>
-              <button
-                onClick={() => setActualPnlCurrency('$')}
-                className="px-2 py-1 text-[10px] font-semibold transition-all"
-                style={{
-                  background: actualPnlCurrency === '$' ? 'var(--color-tg-primary-muted)' : 'transparent',
-                  color: actualPnlCurrency === '$' ? 'var(--color-tg-primary)' : 'var(--color-tg-muted)',
-                }}>
-                $
-              </button>
-            </div>
-          </div>
+          {/* REF-99: a ₪/$ toggle sat beside this field, and it let a trade be
+              CLOSED in a different currency from the one it was planned in.
+              Dollar-only now, so the currency is stated in the label — where a
+              screen reader reaches it — rather than drawn as a dead control. */}
+          <label className="text-xs text-tg-muted">PnL בפועל ({TRADING_CURRENCY}, אופציונלי)</label>
+          <input type="number" step="any" placeholder={calculatedAmount.toFixed(2)} value={actualPnl}
+            onChange={(e) => setActualPnl(e.target.value)}
+            className="w-full h-10 px-3 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary"
+            style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)' }}
+          />
           <p className="text-[10px] text-tg-muted">אם שונה מהחישוב האוטומטי (עמלות, סליפג&apos;)</p>
         </div>
       )}
@@ -425,8 +408,11 @@ export function AIDebriefView({ result }: { result: AIDebriefResult }) {
   const outcomePoints = outcome
     ? `${outcome.points >= 0 ? '+' : '-'}${formatPnlPoints(outcome.points)}`
     : null;
+  // outcome.currency is still carried by the debrief payload for rows written
+  // before migration 033, and deliberately ignored: the amount is in dollars
+  // either way, so a '₪' label on an old row would misreport it (REF-99).
   const outcomeAmount = outcome?.amount != null
-    ? formatPnlIls(outcome.amount, outcome.currency ?? '₪')
+    ? formatMoney(outcome.amount)
     : null;
 
   const breakdownCategories: [string, number, number][] | null = result.breakdown

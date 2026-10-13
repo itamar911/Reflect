@@ -1,6 +1,7 @@
 'use client';
 import { useState, useMemo } from 'react';
 import { tradeMoneyPnl, hasMoneyPnl } from '@/lib/pnl';
+import { formatMoney } from '@/lib/money';
 
 interface Trade {
   id: string;
@@ -54,14 +55,15 @@ function toDayKey(d: Date): string {
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
 }
 
-function pnlLabel(pnl: number, decimals = 1, currency = '₪'): string {
-  if (pnl === 0) return `${currency}0`;
-  const abs = Math.abs(pnl);
-  // Large values drop the fraction and gain thousands separators — otherwise
-  // they overflow the fixed-width day cells and the header stat slots
-  const d = abs >= 1000 ? 0 : decimals;
-  const num = abs.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
-  return `${pnl > 0 ? '+' : '−'}${currency}${num}`;
+// Large values drop the fraction and gain thousands separators — otherwise
+// they overflow the fixed-width day cells and the header stat slots.
+//
+// A flat day is "$0", not "$0.0": these cells are narrow and a fraction on a
+// zero carries nothing. Kept as its own case, exactly as it was before REF-99
+// moved the rest of the formatting into lib/money.ts.
+function pnlLabel(pnl: number, decimals = 1): string {
+  if (pnl === 0) return formatMoney(0, { decimals: 0 });
+  return formatMoney(pnl, { decimals, minus: '−', dropFractionAtThousand: true });
 }
 
 function pnlColor(pnl: number): string {
@@ -72,13 +74,6 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
   const today = new Date();
   const [year, setYear]   = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
-
-  // Display currency — same rule as the All Trades summary: a single uniform
-  // trade currency wins, anything mixed (or no money data) falls back to ₪.
-  const currency = useMemo(() => {
-    const set = new Set(trades.filter(hasMoneyPnl).map(t => t.pnl_currency ?? '₪'));
-    return set.size === 1 ? [...set][0] : '₪';
-  }, [trades]);
 
   const dailyMap = useMemo<Map<string, DayData>>(() => {
     const map = new Map<string, DayData>();
@@ -165,7 +160,7 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
     : monthStats.profitFactor.toFixed(2);
 
   const headerStats = [
-    { label: 'רווח/הפסד כולל', value: pnlLabel(monthStats.totalPnl, 2, currency), color: pnlColor(monthStats.totalPnl) },
+    { label: 'רווח/הפסד כולל', value: pnlLabel(monthStats.totalPnl, 2), color: pnlColor(monthStats.totalPnl) },
     { label: 'סה"כ עסקאות',    value: String(monthStats.totalCount),   color: 'var(--color-tg-text)' },
     { label: 'ימי מסחר',       value: String(monthStats.tradingDays),  color: 'var(--color-tg-text)' },
     { label: 'אחוז הצלחה',     value: `${monthStats.winRate.toFixed(0)}%`, color: 'var(--color-tg-text)' },
@@ -200,7 +195,7 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
 
       {/* ── Header stats bar ────────────────────────────────── */}
       {/* 3-per-row below sm — six columns squeeze to ~60px on phones and the
-          overflow-hidden container clips long ₪ totals mid-digit */}
+          overflow-hidden container clips long $ totals mid-digit */}
       <div
         className="grid grid-cols-3 sm:grid-cols-6 rounded-2xl overflow-hidden"
         style={{ background: 'var(--color-tg-surface)' }}
@@ -321,7 +316,7 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
                     {data && (
                       <div className="flex flex-col items-center gap-0.5">
                         <span className="text-sm font-extrabold leading-tight" style={{ color: pnlColor(data.pnl) }}>
-                          {pnlLabel(data.pnl, 1, currency)}
+                          {pnlLabel(data.pnl, 1)}
                         </span>
                         <span className="text-[10px]" style={{ color: 'var(--color-tg-muted)' }}>
                           {data.tradeCount} עסקאות
@@ -351,7 +346,7 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
                 {week.trades > 0 ? (
                   <>
                     <span className="text-[11px] font-bold leading-tight text-center" style={{ color: pnlColor(week.pnl) }}>
-                      {pnlLabel(week.pnl, 0, currency)}
+                      {pnlLabel(week.pnl, 0)}
                     </span>
                     <span className="text-[9px] leading-none text-center" style={{ color: 'var(--color-tg-muted)' }}>
                       {week.trades} עסקאות

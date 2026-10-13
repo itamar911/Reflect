@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/client';
 import { hasMoneyPnl, tradeMoneyPnl } from '@/lib/pnl';
-import type { PnlCurrency, RuleContextSource } from '@/lib/types';
+import type { RuleContextSource } from '@/lib/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 /**
@@ -33,6 +33,15 @@ import type { SupabaseClient } from '@supabase/supabase-js';
  *
  * THE DIVERGENCE WAS THE BUG, NOT THE ARITHMETIC. Nothing in the rule
  * mechanism should derive these numbers for itself again; call this.
+ *
+ * ONE UNIT LEFT TO FIX, AND REF-99 FIXED IT. The paragraph above says the two
+ * sides of the comparison are both in currency, which was true and still not
+ * enough: `sumLosses()` added every closed row's loss together while each
+ * row's unit lived in its own `pnl_currency`, so a ₪200 loss and a $200 loss
+ * both pushed `todayLossAmount` up by 200 and the thresholds they were
+ * measured against carried no currency at all. Same family of defect as the
+ * original, one level up — both sides money, not the same money. REF-99 made
+ * the product dollar-only, so the sum is now in a unit: dollars.
  */
 
 /** Minimal row shape for the money and streak maths. */
@@ -45,22 +54,19 @@ interface ClosedTradeRow {
   fomo_entry?: boolean | null;
   exited_early?: boolean | null;
   moved_sl?: boolean | null;
-  /** Selected only by the closed-today query, for the panel's display totals. */
-  pnl_currency?: string | null;
 }
 
 /**
- * Today's money in ONE currency.
+ * Today's money.
  *
- * Per currency, and never summed across them, because `pnl_amount` is a bare
- * number with its unit in a second column: a ₪ figure and a $ figure added
- * together produce a number that is in no currency at all. The rule thresholds
- * do exactly that (see `todayLossAmount` below) and that is a known defect, not
- * a pattern to copy — REF-99 settles it by making the product dollar-only.
- * Until then the panel shows each currency on its own.
+ * REF-82 shipped this as an array, one entry per currency, because
+ * `pnl_amount` was a bare number with its unit in `pnl_currency` and a ₪
+ * figure added to a $ figure is a number in no currency at all. REF-99 settled
+ * that by making the product dollar-only, so there is one total again and the
+ * split is gone — along with the ₪ fallback the panel used when a day spanned
+ * both, and the suppressed daily-loss line that came with it.
  */
-export interface TodayMoneyInCurrency {
-  currency: PnlCurrency;
+export interface TodayMoney {
   /** Wins and losses netted, signed. Negative means the day is down. */
   net: number;
   /** Money lost, as a positive number. Gross: winners are not deducted. */
@@ -71,9 +77,9 @@ export interface TodayMoneyInCurrency {
  * What the user's day looks like, for the form's context panel to describe.
  *
  * DISPLAY ONLY. No rule reads any of this, and it must stay that way: these
- * figures are scoped and split for a sentence a human reads, while the rule
- * thresholds below are deliberately the cruder numbers the gate has always
- * compared against. Two shapes of the same day, for two different jobs.
+ * figures are scoped for a sentence a human reads, while the rule thresholds
+ * below are deliberately the cruder numbers the gate has always compared
+ * against. Two shapes of the same day, for two different jobs.
  *
  * Derived from the same closed-today query the loss threshold uses, via the
  * same tradeMoneyPnl() — so the panel cannot tell the user one thing while the
@@ -85,11 +91,10 @@ export interface TodayClosedSummary {
   /** How many of those lost money. */
   losingCount: number;
   /**
-   * One entry per currency appearing among today's money-bearing closes, in a
-   * fixed order so the panel does not reshuffle between loads. Empty when
-   * nothing closed today carries a money figure.
+   * Today's money across the closes that carry a figure, or null when none of
+   * them do — which is not the same as a day that netted zero.
    */
-  money: readonly TodayMoneyInCurrency[];
+  money: TodayMoney | null;
 }
 
 /** Everything the preset and custom rule checks need from trade history. */
@@ -99,7 +104,7 @@ export interface TradeRuleContext {
   todayTradeCount: number;
   /**
    * Money lost today, as a positive number, from trades CLOSED today.
-   * Currency, not points — see the header.
+   * Dollars, not points — see the header.
    */
   todayLossAmount: number;
   /** Consecutive money-losing trades counting back from the most recent close. */
@@ -167,30 +172,16 @@ export function startOfTodayIso(): string {
 }
 
 /**
- * The order currencies appear in on screen.
+ * Today's closes, totalled, for the panel.
  *
- * Fixed, so two loads of the same day cannot list them in two orders — the
- * query guarantees no ordering of its own. Dollars first: REF-99 makes the
- * product dollar-only, so that is the column the product is moving toward.
- */
-const CURRENCY_ORDER: readonly PnlCurrency[] = ['$', '₪'];
-
-/** The currency a closed row's money is in. `?? '₪'` app-wide — see JournalClient. */
-function currencyOf(row: ClosedTradeRow): PnlCurrency {
-  return row.pnl_currency === '$' ? '$' : '₪';
-}
-
-/**
- * Today's closes, split by currency, for the panel.
- *
- * Only rows that carry a money figure reach the `money` array — hasMoneyPnl(),
- * the same filter the journal and the calendar use when they collect which
- * currencies a set of trades spans. Without it a close with no exit price (so
- * tradeMoneyPnl() returns 0) would add its currency with a zero total, and the
- * panel would announce two currencies because of a row that holds no money.
+ * Only rows that carry a money figure are counted — hasMoneyPnl(), the same
+ * filter the journal and the calendar use. Without it a close with no exit
+ * price (so tradeMoneyPnl() returns 0) would drag `money` into existence with
+ * a zero total, and the panel would report a balanced day on the strength of a
+ * row that holds no money at all.
  */
 function summariseTodayCloses(rows: readonly ClosedTradeRow[]): TodayClosedSummary {
-  const byCurrency = new Map<PnlCurrency, { net: number; lost: number }>();
+  let money: TodayMoney | null = null;
   let losingCount = 0;
 
   for (const row of rows) {
@@ -198,21 +189,12 @@ function summariseTodayCloses(rows: readonly ClosedTradeRow[]): TodayClosedSumma
     const pnl = tradeMoneyPnl(row);
     if (pnl < 0) losingCount++;
 
-    const currency = currencyOf(row);
-    const entry = byCurrency.get(currency) ?? { net: 0, lost: 0 };
-    entry.net += pnl;
-    if (pnl < 0) entry.lost += Math.abs(pnl);
-    byCurrency.set(currency, entry);
+    money ??= { net: 0, lost: 0 };
+    money.net += pnl;
+    if (pnl < 0) money.lost += Math.abs(pnl);
   }
 
-  return {
-    count: rows.length,
-    losingCount,
-    money: CURRENCY_ORDER.flatMap((currency) => {
-      const entry = byCurrency.get(currency);
-      return entry ? [{ currency, net: entry.net, lost: entry.lost }] : [];
-    }),
-  };
+  return { count: rows.length, losingCount, money };
 }
 
 /** Money lost today, positive, summed over closed rows. */
@@ -286,13 +268,13 @@ export async function loadTradeRuleContext(
     // Closed today — by closed_at, because the loss is realised on the close,
     // not on the entry. A trade opened yesterday and closed today counts today.
     //
-    // pnl_currency rides along for the panel's per-currency totals. One extra
-    // column on the query that already fetches exactly these rows, rather than
-    // a second query asking the same question — the panel and the loss
-    // threshold must be reading the same closes (§4.5).
+    // REF-82 also selected pnl_currency here, to split the panel's totals per
+    // currency. REF-99 made the product dollar-only, so there is nothing to
+    // split on and the column is no longer read. The panel and the loss
+    // threshold still come off this one query (§4.5).
     client
       .from('trade_plans')
-      .select(`${MONEY_FIELDS}, pnl_currency`)
+      .select(MONEY_FIELDS)
       .eq('user_id', userId)
       .eq('status', 'closed')
       .gte('closed_at', todayStart),

@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from 'react';
+import { formatMoney } from '@/lib/money';
 
 // ── Design tokens ────────────────────────────────────────────────────────────
 export const SURF   = 'var(--color-tg-surface)';
@@ -19,9 +20,12 @@ export const ACCENT_HEX = '#00d2d2';
 export const GRAY_HEX   = '#64748b';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-export function fmt(v: number, currency: string = '₪'): string {
-  if (v === 0) return `${currency}0`;
-  return `${v > 0 ? '+' : '−'}${currency}${Math.round(Math.abs(v)).toLocaleString('en-US')}`;
+// REF-99: this took a `currency` parameter that defaulted to ₪ and that no
+// caller on the stats page ever passed, so every statistic on the page was
+// labelled in shekels unconditionally while the setups page labelled the same
+// trades in dollars. Dollar-only now, from the one shared formatter.
+export function fmt(v: number): string {
+  return formatMoney(v, { decimals: 0, minus: '−' });
 }
 
 export function pnlColor(v: number): string {

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Sparkles, Target, ImageOff } from 'lucide-react';
 import { renderPlainAiText } from '@/lib/ai/textFormatting';
+import { formatMoney } from '@/lib/money';
 import { SIGNED_URL_TTL_SECONDS, isOwnedPath, removeSetupImage } from '@/lib/setups/imageUrls';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -61,8 +62,10 @@ function pnl(t: LinkedTrade) {
   return Number(t.exit_price) - Number(t.entry_price);
 }
 
+// REF-99: the `$` here used to be hardcoded while the stats page hardcoded ₪
+// for the same trades. Both come from lib/money.ts now.
 function fmt(v: number, d = 1) {
-  return `${v >= 0 ? '+' : '−'}$${Math.abs(v).toFixed(d)}`;
+  return formatMoney(v, { decimals: d, minus: '−' });
 }
 
 function computeStats(setupId: string, trades: LinkedTrade[]) {

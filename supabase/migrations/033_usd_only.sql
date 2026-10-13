@@ -1,0 +1,141 @@
+-- REF-99: one currency. Every trading amount in the product is US dollars.
+--
+-- Relabels, does NOT convert. `trade_plans.pnl_currency` holds a symbol, and
+-- the numbers beside it were always entered by users as dollar amounts — the
+-- '₪' default came from migration 006 and was never a statement about the
+-- value. So this file changes labels and the column default, and touches no
+-- amount: no row's pnl_amount, actual_pnl or risk_amount is read or written.
+--
+-- RUN THIS BY HAND in the Supabase SQL Editor. Nothing in the repo applies
+-- migrations.
+--
+-- NUMBERING: 029 is reserved for rule_violations and setup_images_delete
+-- (REF-89) and still has no file; 021 is reserved for the
+-- `ai-usage-accounting` branch. 030, 031 and 032 are applied. 033 is the next
+-- number that is neither taken nor reserved. Do not reuse 029 or 021.
+--
+--
+-- SCOPE — WHAT IS AND IS NOT A TRADING TABLE
+-- ------------------------------------------
+--
+-- `trade_plans.pnl_currency` is the only currency-bearing column anywhere in
+-- supabase/schema.sql or supabase/migrations/. Specifically NOT touched:
+--
+--   - `preset_rules.max_daily_loss` and `custom_rules.threshold_value` are
+--     bare DECIMAL/NUMERIC with no currency column at all. There is no label
+--     to relabel; the app now states the dollar sign when it renders them.
+--   - `custom_rules.name` is free text that RulesEditor fills from
+--     describeCustomRule(), so existing rows contain strings like
+--     "הפסד יומי עבר $200". Those already say '$' — the old code hardcoded it
+--     — so there is nothing to fix and a blanket UPDATE on a user-editable
+--     name column would be the wrong instrument anyway.
+--   - `weekly_summaries.stats` is a JSONB blob whose historical rows contain
+--     "pnl_currency":"₪", stamped on a whole week's total from whichever trade
+--     happened to be found first. Deliberately left alone: the display side
+--     stopped reading that field in this same change, so rewriting JSON would
+--     be churn on data nothing consults.
+--   - OUR OWN SUBSCRIPTION BILLING. Reflect is priced in shekels. That is not
+--     a trading amount, it does not live in these columns, and REF-99 does not
+--     go near it.
+--
+--
+-- BEFORE RUNNING IT
+-- -----------------
+--
+-- supabase/migrations/ does not describe the live database — objects here have
+-- been created by hand in the dashboard and leave no trace in the repo (see
+-- CLAUDE.md and supabase/README.md). This file was written WITHOUT database
+-- access, from the repo's SQL only. Two things are worth a look first:
+--
+--   1. Run supabase/queries/schema_drift.sql and confirm no other table has
+--      picked up a currency column by hand.
+--
+--   2. See what is actually in there. Read-only:
+--
+--        SELECT COALESCE(pnl_currency, '(null)') AS currency,
+--               COUNT(*) AS rows,
+--               COUNT(DISTINCT user_id) AS users
+--        FROM trade_plans
+--        GROUP BY 1
+--        ORDER BY rows DESC;
+--
+--      `pnl_currency` is TEXT with no NOT NULL and no CHECK (migration 006),
+--      so a value other than '₪' or '$' is possible. Step 1 below catches
+--      anything non-null regardless of what it is, by design.
+--
+--
+-- DEPLOY ORDER DOES NOT MATTER
+-- ----------------------------
+--
+-- The application writes '$' explicitly on every insert and update rather than
+-- relying on the column default (TRADING_CURRENCY in src/lib/money.ts), so a
+-- row created between this deploy and this migration is already correct. The
+-- default below is a backstop for anything that writes the column without
+-- naming it.
+--
+-- NO CHECK CONSTRAINT, on purpose. `CHECK (pnl_currency = '$')` would be
+-- correct after step 1 and is the obvious hardening, but it would also make
+-- the old deployed bundle fail on write the moment this file is applied — the
+-- one thing the explicit-write design above exists to avoid. Worth adding as a
+-- follow-up once the REF-99 bundle is live everywhere.
+--
+-- IDEMPOTENT. Step 1's WHERE clause matches nothing on a second run; step 2 is
+-- a declarative SET DEFAULT. Safe to re-run.
+
+BEGIN;
+
+-- 1. Relabel every recorded currency to '$'.
+--
+-- `IS DISTINCT FROM` rather than `<> '$'`, so the comparison is not swallowed
+-- by NULL. NULL is preserved and must be: CloseTrade.tsx writes NULL when a
+-- trade closes with no money figure at all, which is not the same as an amount
+-- of zero dollars, and the app reads it that way (hasMoneyPnl in lib/pnl.ts).
+UPDATE trade_plans
+   SET pnl_currency = '$'
+ WHERE pnl_currency IS NOT NULL
+   AND pnl_currency IS DISTINCT FROM '$';
+
+-- 2. New rows default to dollars.
+--
+-- Migration 006 created this column as `TEXT DEFAULT '₪'`. Without this, any
+-- future insert that omits the column would reintroduce a shekel label.
+ALTER TABLE trade_plans
+  ALTER COLUMN pnl_currency SET DEFAULT '$';
+
+COMMIT;
+
+
+-- VERIFY (read-only, after COMMIT). Expect exactly one non-null currency, '$',
+-- and no row where an amount is recorded without a label:
+--
+--   SELECT COALESCE(pnl_currency, '(null)') AS currency, COUNT(*) AS rows
+--   FROM trade_plans
+--   GROUP BY 1
+--   ORDER BY rows DESC;
+--
+--   SELECT COUNT(*) AS amount_without_currency
+--   FROM trade_plans
+--   WHERE COALESCE(actual_pnl, pnl_amount) IS NOT NULL
+--     AND pnl_currency IS NULL;
+--
+-- And confirm the default landed:
+--
+--   SELECT column_default
+--   FROM information_schema.columns
+--   WHERE table_name = 'trade_plans' AND column_name = 'pnl_currency';
+--
+--
+-- ROLLBACK
+-- --------
+--
+-- Step 2 reverses cleanly:
+--
+--   ALTER TABLE trade_plans ALTER COLUMN pnl_currency SET DEFAULT '₪';
+--
+-- Step 1 does NOT. Which rows said '₪' before the UPDATE is not recorded
+-- anywhere once it has run. That is accepted rather than mitigated: the column
+-- is a label on a dollar amount, so the information being discarded is a
+-- mislabel. If it needs to be recoverable, snapshot it BEFORE running this:
+--
+--   CREATE TABLE trade_plans_pnl_currency_backup_033 AS
+--   SELECT id, pnl_currency FROM trade_plans WHERE pnl_currency IS NOT NULL;

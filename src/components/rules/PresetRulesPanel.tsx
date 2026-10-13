@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
 import { COOLDOWN_MINUTE_OPTIONS } from '@/lib/validators/RulesetValidator';
+import { TRADING_CURRENCY } from '@/lib/money';
 import type { PresetRules, TradeStrategy } from '@/lib/types';
 
 const STRATEGIES: TradeStrategy[] = ['Breakout', 'Trend Follow', 'Reversal', 'Range', 'Custom'];
@@ -164,7 +165,7 @@ export default function PresetRulesPanel({ rules, onSave }: PresetRulesPanelProp
       {/* Max daily loss */}
       <RuleRow
         controlId="rule-max-daily-loss"
-        label="הפסד יומי מקסימלי ($)"
+        label={`הפסד יומי מקסימלי (${TRADING_CURRENCY})`}
         description="עצירה כשחורגים מגבול ההפסד — ריק = ללא הגבלה"
       >
         <input

@@ -16,10 +16,9 @@ export function formatCurrency(value: number): string {
   return new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
 }
 
-export function formatPnlIls(value: number, currency: string = '₪'): string {
-  const sign = value > 0 ? '+' : value < 0 ? '-' : '';
-  return `${sign}${currency}${Math.abs(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+// Trading amounts are formatted by lib/money.ts — formatMoney() and friends.
+// formatPnlIls() used to live here with a `currency` parameter defaulting to ₪;
+// REF-99 made the product dollar-only and there is no parameter to pass.
 
 export function formatPnlPoints(points: number): string {
   return `${Math.round(Math.abs(points))}נק`;

@@ -1,9 +1,9 @@
 'use client';
 
 import { AlertTriangle, CalendarDays } from 'lucide-react';
-import { formatPnlIls } from '@/lib/utils';
+import { formatMoney, formatMoneyAbs } from '@/lib/money';
 import type { TodayClosedSummary } from '@/lib/rules/tradeRuleContext';
-import type { PnlCurrency, RuleContextSource } from '@/lib/types';
+import type { RuleContextSource } from '@/lib/types';
 
 /**
  * "Your day so far" — the context panel at the top of the trade form
@@ -49,21 +49,19 @@ import type { PnlCurrency, RuleContextSource } from '@/lib/types';
  * is the bug class tradeRuleContext.ts exists to have ended.
  *
  *
- * MONEY, PER CURRENCY
- * -------------------
+ * MONEY
+ * -----
  *
- * pnl_amount is a bare number whose unit lives in pnl_currency, so ₪ and $
- * cannot be added. Each currency is printed on its own (§ REF-99 makes the
- * product dollar-only and settles this; until then, separately).
+ * REF-82 printed each currency on its own line and suppressed the daily-loss
+ * comparison whenever a day spanned two, because the rule's own threshold
+ * comparison was across currencies and this panel must not dress that up as
+ * meaningful. REF-99 made the product dollar-only, so there is one total, the
+ * comparison is always in a single unit, and the loss line is drawn whenever
+ * the user has a limit and today has money in it.
  *
- * The daily-loss line is therefore shown only when the day is in ONE currency.
- * With two, the rule's own threshold comparison is across currencies — a known
- * defect this component must not touch and must not dress up as meaningful, so
- * the comparison is simply not drawn. The per-currency totals above it still
- * are, so nothing about the day is hidden.
- *
- * Amounts come from formatPnlIls(), the same formatter the journal and the
- * dashboard use, so the same money reads identically wherever the user meets it.
+ * Amounts come from lib/money.ts, the one formatter the journal, the dashboard
+ * and the stats page also use, so the same money reads identically wherever
+ * the user meets it.
  *
  *
  * COLOUR (§7)
@@ -96,14 +94,6 @@ import type { PnlCurrency, RuleContextSource } from '@/lib/types';
  * that has already bitten this codebase twice, and the reason RuleEventsCard
  * keeps its separator out too.
  */
-
-/** A bare amount with its symbol, unsigned — for the daily-loss comparison. */
-function formatMoney(value: number, currency: PnlCurrency): string {
-  return `${currency}${Math.abs(value).toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-}
 
 /**
  * An amount, in red when it is money lost and green when it is money gained.
@@ -172,18 +162,12 @@ function ClosedSentence({ closed }: { closed: TodayClosedSummary }) {
   );
 }
 
-/** Today's money, one line, each currency on its own. */
+/** Today's money, one line. */
 function MoneySentence({ closed }: { closed: TodayClosedSummary }) {
   const { money } = closed;
-  if (money.length === 0) return null;
+  if (money === null) return null;
 
-  // With one currency the label carries the direction in words, so the meaning
-  // survives without the sign and without the colour. With two it cannot — one
-  // may be up while the other is down — so the label stays neutral and each
-  // amount carries its own sign and colour.
-  const single = money.length === 1 ? money[0] : null;
-
-  if (single && single.net === 0) {
+  if (money.net === 0) {
     return (
       <p className="text-sm leading-relaxed" style={{ color: 'var(--color-tg-text)' }}>
         העסקאות שנסגרו היום מאוזנות.
@@ -191,28 +175,16 @@ function MoneySentence({ closed }: { closed: TodayClosedSummary }) {
     );
   }
 
-  const label = single
-    ? single.net < 0
-      ? 'הפסד מהעסקאות שנסגרו היום'
-      : 'רווח מהעסקאות שנסגרו היום'
-    : 'רווח והפסד מהעסקאות שנסגרו היום';
+  // The label carries the direction in words, so the meaning survives without
+  // the sign and without the colour.
+  const label = money.net < 0
+    ? 'הפסד מהעסקאות שנסגרו היום'
+    : 'רווח מהעסקאות שנסגרו היום';
 
   return (
     <p className="text-sm leading-relaxed" style={{ color: 'var(--color-tg-text)' }}>
       {label}:{' '}
-      {money.map((entry, i) => (
-        <span key={entry.currency}>
-          {/* The separator stays in the RTL flow, outside both ltr spans. */}
-          {i > 0 && (
-            <span aria-hidden="true" style={{ color: 'var(--color-tg-muted)' }}>
-              {' · '}
-            </span>
-          )}
-          <Ltr style={{ color: amountColour(entry.net) }}>
-            {formatPnlIls(entry.net, entry.currency)}
-          </Ltr>
-        </span>
-      ))}
+      <Ltr style={{ color: amountColour(money.net) }}>{formatMoney(money.net)}</Ltr>
     </p>
   );
 }
@@ -243,10 +215,13 @@ export default function TodayContextPanel({
 }: TodayContextPanelProps) {
   const failed = source === 'broker_expired' || source === 'broker_unavailable';
 
-  // One currency today, so the loss threshold can be stated in it. With two,
-  // the comparison the rule makes is across currencies and is not drawn.
-  const singleCurrency = closed.money.length === 1 ? closed.money[0] : null;
-  const showLossLimit = maxDailyLoss !== null && maxDailyLoss > 0 && singleCurrency !== null;
+  // Dollar-only (REF-99), so the comparison is always in one unit and the only
+  // question left is whether the user set a limit and today has money in it.
+  // Carried as one object rather than a boolean so the amount is narrowed where
+  // it is rendered.
+  const lossLimit = maxDailyLoss !== null && maxDailyLoss > 0 && closed.money !== null
+    ? { lost: closed.money.lost, limit: maxDailyLoss }
+    : null;
 
   const nothingToday = tradeCount === 0 && closed.count === 0;
 
@@ -335,7 +310,7 @@ export default function TodayContextPanel({
                   {closed.count > 0 && <ClosedSentence closed={closed} />}
                   <MoneySentence closed={closed} />
 
-                  {showLossLimit && (
+                  {lossLimit && (
                     <p className="text-sm leading-relaxed" style={{ color: 'var(--color-tg-text)' }}>
                       סך ההפסדים היום:{' '}
                       {/* Red on the amount lost, which is exactly what §7
@@ -344,14 +319,14 @@ export default function TodayContextPanel({
                       <Ltr
                         style={{
                           color:
-                            singleCurrency.lost > 0
+                            lossLimit.lost > 0
                               ? 'var(--today-context-loss)'
                               : 'var(--color-tg-text)',
                         }}
                       >
-                        {formatMoney(singleCurrency.lost, singleCurrency.currency)}
+                        {formatMoneyAbs(lossLimit.lost)}
                       </Ltr>{' '}
-                      מתוך <Ltr>{formatMoney(maxDailyLoss, singleCurrency.currency)}</Ltr> שהגדרת.
+                      מתוך <Ltr>{formatMoneyAbs(lossLimit.limit)}</Ltr> שהגדרת.
                     </p>
                   )}
                 </>

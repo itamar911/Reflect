@@ -6,6 +6,7 @@ import {
   ResponsiveContainer, CartesianGrid, Cell,
 } from 'recharts';
 import { MUTED, TEXT, fmt, pnlColor, GREEN_HEX, RED_HEX, TooltipCard } from './shared';
+import { formatMoneyCompact } from '@/lib/money';
 
 interface TooltipContentProps<T> {
   active?: boolean;
@@ -29,13 +30,6 @@ interface Props {
 }
 
 const PERIODS = [['day', 'יומי'], ['week', 'שבועי'], ['month', 'חודשי']] as const;
-
-function compactCurrency(v: number): string {
-  const abs = Math.abs(v);
-  const sign = v < 0 ? '−' : '';
-  if (abs >= 1000) return `${sign}₪${(abs / 1000).toFixed(abs >= 10000 ? 0 : 1)}k`;
-  return `${sign}₪${Math.round(abs)}`;
-}
 
 export default function PnlChart({ daily, weekly, monthly }: Props) {
   const [period, setPeriod] = useState<Period>('day');
@@ -101,7 +95,7 @@ export default function PnlChart({ daily, weekly, monthly }: Props) {
                 axisLine={false}
                 tickLine={false}
                 width={52}
-                tickFormatter={compactCurrency}
+                tickFormatter={formatMoneyCompact}
               />
               <Tooltip
                 cursor={{ stroke: 'var(--color-tg-border)', strokeDasharray: '3 3' }}
