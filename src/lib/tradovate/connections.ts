@@ -95,7 +95,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { createAdminClient } from '@/lib/supabase/admin';
 
-import { readApiHosts, resolveTradingApiUrl } from './api-hosts';
+import { readApiHosts, resolveTradingApiUrl, type ResolvedApiUrl } from './api-hosts';
 import { renewAccessToken } from './auth';
 import {
   TradovateAuthError,
@@ -760,6 +760,63 @@ export async function getUserTradingApi(
     tradovateUserId: token.tradovateUserId,
     apiUrl: resolved.url,
     environment: data.environment,
+  };
+}
+
+/**
+ * TEMPORARY (diag/ref-90-hosts) — both of a connection's trading hosts.
+ *
+ * {@link getUserTradingApi} resolves the one host the product path uses and
+ * discards the rest, which is correct for serving a request and is exactly
+ * what REF-90's host probe needs to see past: the question there is whether
+ * the OTHER environment's host holds the accounts we found none of. See
+ * ./diag-hosts.ts for why that is the open question.
+ *
+ * A separate function rather than a field on {@link UserTradingApi}, so the
+ * product path's shape and its single read are untouched; and here rather than
+ * in ./diag-hosts.ts, because this module is the only one that reads
+ * `tradovate_connections`. It hands back RESOLVED URLs rather than the raw
+ * `api_hosts` object, which keeps hostname handling — the bare-hostname
+ * validation and the documented fallback — in ./api-hosts.ts where the rest of
+ * it lives.
+ *
+ * Called only when TRADOVATE_DIAG_HOSTS is set, so a production request pays
+ * for neither this read nor the probe.
+ *
+ * READ ONLY: three columns on an indexed primary key, no write, no token.
+ */
+export async function readConnectionTradingHosts(
+  userId: string,
+  options: { admin?: SupabaseClient } = {}
+): Promise<{
+  configured: TradovateEnvironment;
+  hosts: Record<TradovateEnvironment, ResolvedApiUrl>;
+}> {
+  const admin = options.admin ?? createAdminClient();
+
+  const { data, error } = await admin
+    .from('tradovate_connections')
+    .select('environment, api_hosts')
+    .eq('user_id', userId)
+    .maybeSingle<{ environment: TradovateEnvironment; api_hosts: TradovateApiHosts | null }>();
+
+  if (error) {
+    throw new TradovateTransientError(
+      `Could not read the connection's hosts for the probe (${error.code ?? 'no code'}).`,
+      { reason: 'unknown' }
+    );
+  }
+  if (!data) throw new TradovateNotConnectedError(userId, 'missing');
+
+  // Both, by the same resolver the product path uses — including its fallback,
+  // so a row with no api_hosts still produces two askable URLs rather than a
+  // gap the probe would have to report as "not asked".
+  return {
+    configured: data.environment,
+    hosts: {
+      live: resolveTradingApiUrl({ environment: 'live', apiHosts: data.api_hosts }),
+      demo: resolveTradingApiUrl({ environment: 'demo', apiHosts: data.api_hosts }),
+    },
   };
 }
 

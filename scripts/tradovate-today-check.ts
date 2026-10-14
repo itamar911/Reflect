@@ -42,6 +42,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { partitionAccounts, selectTradingAccounts } from '../src/lib/tradovate/accounts';
+import type { ResolvedApiUrl } from '../src/lib/tradovate/api-hosts';
+import { formatHostProbe, probeAccountHosts } from '../src/lib/tradovate/diag-hosts';
 import {
   TradovateNotConnectedError,
   TradovatePenaltyError,
@@ -56,6 +58,7 @@ import {
   type DayPullCounts,
   type TradovateReader,
 } from '../src/lib/tradovate/fills';
+import type { TradovateEnvironment } from '../src/lib/tradovate/hosts';
 import { closedToday, parseDayStart } from '../src/lib/tradovate/trading-day';
 import type {
   TradovateAccount,
@@ -752,6 +755,93 @@ async function main() {
         '4990',
         '2026-10-14',
       ].filter((leak) => formatDayPullCounts(fullDay).includes(leak)),
+      []
+    ),
+  ]);
+
+  // ── The host probe (diag/ref-90-hosts) ────────────────────────────────────
+  //
+  // TEMPORARY, with the probe it covers. `accounts=0 … filter: total=0` proved
+  // the account list came back empty rather than filtered, so the remaining
+  // question is which host was asked — see lib/tradovate/diag-hosts.ts. These
+  // cases pin the line's format and the one property that matters more than the
+  // format: that a hostname cannot reach the log, because apiHosts.demo varies
+  // by organization and would name the prop firm.
+
+  /** A per-organization demo host, the kind that must never be logged. */
+  const PROBE_HOSTS: Record<TradovateEnvironment, ResolvedApiUrl> = {
+    live: { url: 'https://live.tradovateapi.com/v1', source: 'fallback' },
+    demo: { url: 'https://lucid-demo-7f3.tradovateapi.com/v1', source: 'stored' },
+  };
+
+  /** The shape REF-90 predicts: nothing on live, the trader's account on demo. */
+  const probeFound = await probeAccountHosts({
+    configured: 'live',
+    hosts: PROBE_HOSTS,
+    tradovateUserId: ACCOUNT.userId,
+    get: async (apiUrl) =>
+      apiUrl.includes('live.tradovateapi.com')
+        ? []
+        : [ACCOUNT, { ...ACCOUNT, id: 7002, name: 'FIRM7002', userId: 999 }],
+  });
+
+  /** Each host failing differently, to prove neither answer hides the other. */
+  const probeFailed = await probeAccountHosts({
+    configured: 'live',
+    hosts: PROBE_HOSTS,
+    tradovateUserId: ACCOUNT.userId,
+    get: async (apiUrl) => {
+      if (apiUrl.includes('live.tradovateapi.com')) throw new TypeError('socket hang up');
+      throw new TradovateRequestError('/account/list', 401, '{"errorText":"Access token is expired"}');
+    },
+  });
+
+  /** A 200 that is not a list at all — the body REF-90 §1 had to deduce. */
+  const probeNotAList = await probeAccountHosts({
+    configured: 'demo',
+    hosts: PROBE_HOSTS,
+    tradovateUserId: null,
+    get: async () => ({ errorText: 'something' }),
+  });
+
+  group('the host probe reports counts and never a hostname', [
+    c(
+      'the line REF-90 is waiting for: empty on live, the account on demo',
+      formatHostProbe(probeFound),
+      'configured=live live: source=fallback status=200 n=0 owned=0' +
+        ' | demo: source=stored status=200 n=2 owned=1'
+    ),
+    c(
+      'a 401 on one host and a thrown fault on the other, both reported',
+      formatHostProbe(probeFailed),
+      'configured=live live: source=fallback status=err n=0 owned=0' +
+        ' | demo: source=stored status=401 n=0 owned=0'
+    ),
+    c(
+      'a non-array 200 is n=-1, not an empty list, and a null identity owns nothing',
+      formatHostProbe(probeNotAList),
+      'configured=demo live: source=fallback status=200 n=-1 owned=0' +
+        ' | demo: source=stored status=200 n=-1 owned=0'
+    ),
+    // The privacy property, asserted rather than reviewed — the hostname first,
+    // because it is the field this diagnostic holds and the counts one did not.
+    c(
+      'no hostname, account id, account name, userId or response body',
+      [
+        'lucid-demo-7f3.tradovateapi.com',
+        'lucid',
+        'tradovateapi.com',
+        'https',
+        String(ACCOUNT.id),
+        String(ACCOUNT.userId),
+        ACCOUNT.name,
+        'FIRM7002',
+        '999',
+        'errorText',
+        'Access token is expired',
+      ].filter((leak) =>
+        [probeFound, probeFailed, probeNotAList].some((p) => formatHostProbe(p).includes(leak))
+      ),
       []
     ),
   ]);
