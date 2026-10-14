@@ -139,6 +139,16 @@ const MIN_REMAINING_MS = 30_000;
  * Redeeming early is close to free: the grant issues a FRESH 26-hour refresh
  * token every time, so an early redemption moves the deadline out rather than
  * consuming a budget, and — measured — it opens no second session.
+ *
+ * ONE POLICY, TWO NUMBERS. This and `KEEPALIVE_WINDOW_MS` (25h, ./keepalive.ts)
+ * both answer "how close to expiring is close enough to redeem", and they are
+ * gated in opposite directions: the cron selects everything *inside* 25h, this
+ * backstop fires only *inside* 12h. A successful cron run therefore pins
+ * `refresh_expires_at` ~26h out and guarantees this margin cannot fire for the
+ * next ~14 hours — REF-100's 14.10 regression, where the cron working is what
+ * broke the request path. Raising one silences the other, so change neither
+ * without reading both. The `force` path in {@link redeemRefreshTokenIfDue} is
+ * what keeps the overlap from being load-bearing.
  */
 const REFRESH_REDEEM_MARGIN_MS = 12 * 60 * 60_000;
 
@@ -1324,23 +1334,56 @@ export async function listConnectionsDueForRefresh(params: {
  * unparsable) — see {@link listConnectionsDueForRefresh} for why a guess is
  * refused there too.
  *
- * A configuration failure here is not fatal and not logged per call: a
- * deployment with no OAuth configuration cannot redeem anything, and the
- * renewal path below still works. The connect route is where that gets
- * reported, loudly, to someone who can fix it.
+ * A configuration failure here is not fatal and not logged per call on the
+ * ordinary path: a deployment with no OAuth configuration cannot redeem
+ * anything, and the renewal path below still works. The connect route is where
+ * that gets reported, loudly, to someone who can fix it. On the `force` path it
+ * IS logged — see the `options.force` note below.
+ *
+ * @param options.force Skip {@link REFRESH_REDEEM_MARGIN_MS} and redeem now.
+ * Set when the access token has already lapsed: renewal is impossible then (it
+ * must present a live token) and the refresh grant is the ONLY recovery. The
+ * margin exists to space out redemptions against a daily cron; it was never
+ * meant to decide whether a connection is recoverable at all, and leaving it in
+ * charge of that is REF-100's 14.10 regression — a successful cron run pins
+ * `refresh_expires_at` ~26h out, so the margin cannot fire for the ~14 hours in
+ * which the access token that same run issued is already dead. The guards above
+ * the margin stay unconditional: `force` must not turn a missing token or an
+ * unrecorded lifetime into a guess. When the forced path declines anyway it
+ * logs, because the silent `null` here is what cost REF-100 its diagnosis.
  */
 async function redeemRefreshTokenIfDue(
   row: ConnectionRow,
-  admin: SupabaseClient
+  admin: SupabaseClient,
+  options: { force?: boolean } = {}
 ): Promise<RefreshRedemption | null> {
-  if (!row.refresh_token_encrypted || !row.refresh_expires_at) return null;
+  // One line, once, and only when the caller had no other recovery left. The
+  // ordinary path stays silent: declining inside the margin is the design.
+  const declined = (reason: string): null => {
+    if (options.force) {
+      console.warn(
+        redactSecrets(
+          `[tradovate] forced refresh redemption declined (${reason}); the access token has ` +
+            'lapsed and renewal cannot run, so this request has no recovery path'
+        )
+      );
+    }
+    return null;
+  };
+
+  if (!row.refresh_token_encrypted || !row.refresh_expires_at) {
+    return declined('no refresh token, or no recorded refresh lifetime');
+  }
 
   const refreshExpiry = Date.parse(row.refresh_expires_at);
-  if (!Number.isFinite(refreshExpiry)) return null;
-  if (refreshExpiry - Date.now() > REFRESH_REDEEM_MARGIN_MS) return null;
+  if (!Number.isFinite(refreshExpiry)) return declined('refresh_expires_at did not parse');
+  if (!options.force && refreshExpiry - Date.now() > REFRESH_REDEEM_MARGIN_MS) return null;
+  // Still refused when the refresh token is itself past its deadline: there is
+  // nothing to redeem, and the caller's expired write below is the answer.
+  if (refreshExpiry - Date.now() <= 0) return declined('the refresh token is past its own expiry');
 
   const config = loadOAuthConfig();
-  if (!config.ok) return null;
+  if (!config.ok) return declined('Tradovate OAuth is not configured');
 
   return redeemRefreshToken({ connection: row, config: config.config, admin });
 }
@@ -1388,7 +1431,19 @@ async function loadOrRenew(
   // of Vercel drift, or a user whose connection was made just after the last
   // one. Checked even when the access token is fresh, which is why it sits
   // above the early return.
-  const refreshRedemption = await redeemRefreshTokenIfDue(data, admin);
+  //
+  // "While it is live" is the load-bearing clause, so the code has to check it:
+  // with a lapsed access token the renewal below refuses to run at all and the
+  // refresh grant is the only recovery, whatever REFRESH_REDEEM_MARGIN_MS says.
+  // MIN_REMAINING_MS and not RENEW_MARGIN_MS is the threshold on purpose — this
+  // asks "can a renewal still be attempted at all", which is the same question
+  // the lapsed-token guard below answers, not "is it time to renew".
+  const accessTokenUsable =
+    Number.isFinite(storedExpiry) && storedExpiry - Date.now() > MIN_REMAINING_MS;
+
+  const refreshRedemption = await redeemRefreshTokenIfDue(data, admin, {
+    force: !accessTokenUsable,
+  });
 
   if (refreshRedemption) {
     if (refreshRedemption.outcome === 'refreshed' || refreshRedemption.outcome === 'superseded') {

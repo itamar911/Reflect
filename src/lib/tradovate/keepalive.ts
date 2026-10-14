@@ -53,6 +53,14 @@ import { redactSecrets } from './redact';
  * 25 hours, one more than the cadence, so no connection can fall between two
  * runs. With a 26-hour lifetime this selects essentially every active
  * connection every day, which is the intent.
+ *
+ * ONE POLICY, TWO NUMBERS. The request-path backstop uses
+ * `REFRESH_REDEEM_MARGIN_MS` (12h, ./connections.ts) for the same decision, and
+ * because this window selects everything, a successful run leaves every refresh
+ * token *outside* that 12h margin for ~14 hours — so the backstop cannot fire
+ * precisely when it is most needed. That is REF-100's 14.10 regression; the
+ * `force` path in `redeemRefreshTokenIfDue()` is the fix. Widening this window
+ * narrows that backstop's reach: change neither number without reading both.
  */
 export const KEEPALIVE_WINDOW_MS = 25 * 60 * 60_000;
 

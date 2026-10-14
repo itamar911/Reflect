@@ -794,6 +794,34 @@ const keepAliveCases: KeepAliveCase[] = [
     fetch: () => tokenEndpointFetch({ status: 503, body: 'Service Unavailable' }),
     expect: { status: null, error: 'transient', token: null, storedRefresh: 'original' },
   },
+  // The fourth cell of {access live, dead} × {refresh inside, outside 12h}.
+  // The other three were covered and this one was production: ACCESS_EXPIRES_IN_60_MIN
+  // keeps the margin case above honest about what triggered a redemption, and
+  // that same isolation is what kept the pair below from ever being combined.
+  {
+    name: 'dead access token, refresh 20h out',
+    why: 'the 14.10 regression: renewal is impossible with a lapsed access token, so the refresh grant is the ONLY recovery and the 12h margin must not gate it — a successful cron run keeps every refresh token outside that margin all day',
+    row: (userId) =>
+      keepAliveRow({
+        userId,
+        accessExpiresInMs: -60_000,
+        refreshExpiresInMs: REFRESH_EXPIRES_IN_20_H,
+      }),
+    fetch: () => tokenEndpointFetch({ status: 200, body: grantBody() }),
+    expect: { status: null, error: null, token: 'redeemed', storedRefresh: 'rotated' },
+  },
+  {
+    name: 'dead access token, refresh 20h out, 5xx',
+    why: 'the forced path must keep REF-101\'s rule: a 5xx is no verdict on the token, so nothing is written and the caller gets Transient — the same guard the inside-the-margin 5xx case gives, now for the forced one',
+    row: (userId) =>
+      keepAliveRow({
+        userId,
+        accessExpiresInMs: -60_000,
+        refreshExpiresInMs: REFRESH_EXPIRES_IN_20_H,
+      }),
+    fetch: () => tokenEndpointFetch({ status: 503, body: 'Service Unavailable' }),
+    expect: { status: null, error: 'transient', token: null, storedRefresh: 'original' },
+  },
   {
     name: 'dead access token, dead refresh',
     why: 'nothing left to recover with, so this is the one state that legitimately marks the row expired',
