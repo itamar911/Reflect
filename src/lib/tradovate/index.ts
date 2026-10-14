@@ -108,7 +108,15 @@ export type {
   TradovateReader,
 } from './fills';
 
-export { partitionAccounts, selectTradingAccounts } from './accounts';
+// Owned OR permitted (REF-90 Stage 2). `permittedAccountIds` is the only thing
+// that reads the TradingPermission entity, and a set of ids is all it returns —
+// see the PII note in ./accounts.ts.
+export {
+  partitionAccounts,
+  permissionsCouldHelp,
+  permittedAccountIds,
+  selectTradingAccounts,
+} from './accounts';
 export type { AccountFilterCounts } from './accounts';
 
 export { closedToday, minutesSince, parseDayStart, DAY_START_PARAM } from './trading-day';
@@ -160,4 +168,5 @@ export type {
   TradovatePosition,
   TradovateProduct,
   TradovateTradeDate,
+  TradovateTradingPermission,
 } from './types';

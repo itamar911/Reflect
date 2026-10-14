@@ -20,6 +20,12 @@
  *   /fillPair/list   → the round trips, with both legs' prices
  *   /fill/list       → the instant each leg executed          (the day boundary)
  *
+ * Plus one conditional read, and the condition is the point:
+ *
+ *   /tradingPermission/list → the accounts this trader may trade but does not
+ *                             own, asked only when some account failed on
+ *                             ownership alone (REF-90 Stage 2, ./accounts.ts)
+ *
  * Then, for each contract that actually appears in the trades we are about to
  * count, two more calls plus one shared lookup turn points into dollars:
  *
@@ -70,7 +76,12 @@
 
 import { TradovateUnpriceableError } from './errors';
 import { closedToday, minutesSince } from './trading-day';
-import { partitionAccounts, type AccountFilterCounts } from './accounts';
+import {
+  partitionAccounts,
+  permissionsCouldHelp,
+  permittedAccountIds,
+  type AccountFilterCounts,
+} from './accounts';
 import type { TradovateEnvironment } from './hosts';
 import type {
   TradovateAccount,
@@ -158,9 +169,12 @@ export interface BrokerDayContext {
  * describes a person or a position.
  */
 export interface DayPullCounts {
-  /** Rows from /account/list, before the ownership and tradeability filter. */
+  /** Rows from /account/list, before the claim and tradeability filter. */
   accounts: number;
-  /** Those that are this trader's own and could have been traded. */
+  /**
+   * Those this trader may trade and could have traded: owned OR permitted.
+   * `filter.permitted` is how many of them got in on the second half.
+   */
   mine: number;
   /** Rows from /position/list. Zero when the pull stopped before asking. */
   positions: number;
@@ -254,9 +268,10 @@ export function formatDayPullCounts(counts: DayPullCounts): string {
     `positions=${counts.positions} minePositions=${counts.minePositions} ` +
     `pairs=${counts.pairs} minePairs=${counts.minePairs} ` +
     `trades=${counts.trades} todays=${counts.todays}` +
-    ` | filter: total=${f.total} noOwner=${f.noOwner} notCustomer=${f.notCustomer} ` +
+    ` | filter: total=${f.total} noOwner=${f.noOwner} noPermission=${f.noPermission} ` +
+    `notCustomer=${f.notCustomer} ` +
     `closed=${f.closed} restricted=${f.restricted} readonly=${f.readonly} ` +
-    `futuresDisabled=${f.futuresDisabled} inactive=${f.inactive}`
+    `futuresDisabled=${f.futuresDisabled} inactive=${f.inactive} permitted=${f.permitted}`
   );
 }
 
@@ -394,7 +409,7 @@ interface ContractUnit {
  * error path.
  */
 interface HostDiscovery {
-  /** Eligible accounts, by the UNCHANGED rule in ./accounts.ts. */
+  /** Eligible accounts: owned OR permitted and tradeable (./accounts.ts). */
   accepted: TradovateAccount[];
   /** Rows the host returned, before the filter. */
   accounts: number;
@@ -402,14 +417,59 @@ interface HostDiscovery {
   filter: AccountFilterCounts;
 }
 
+/**
+ * The account ids this host says our trader is permitted to trade (REF-90
+ * Stage 2), or null when there is no permission evidence to be had.
+ *
+ * ONE CALL, PER HOST, AND ONLY WHEN IT COULD CHANGE AN ANSWER. The caller asks
+ * {@link permissionsCouldHelp} first, so a trader whose accounts are their own
+ * never makes this request at all and Stage 2 costs them nothing. Permissions
+ * are host-local like every other entity here: this host's list is read with
+ * this host's reader and is never consulted for the other host's accounts.
+ *
+ * THE ONE PLACE IN THIS MODULE WHERE A FAILURE IS SWALLOWED, and it is an
+ * explicit exception to {@link loadBrokerDay}'s second failure rule. Everywhere
+ * else a failed read fails the pull, because a swallowed one would under-count
+ * the day and an under-counted day makes every rule more permissive. Here the
+ * direction is the other way round: no permission list means the OWNED-ONLY
+ * rule, which is what this code did before Stage 2 and is strictly the stricter
+ * answer. A 404 is also the expected reply from a host where this entity is not
+ * exposed — the documentation page for the endpoint 404s and the path comes
+ * from a naming convention — so failing a working pull on it would turn Stage 2
+ * into a regression for every trader who does not need it.
+ *
+ * It cannot hide a dead token either: a 401 here means the next read in the
+ * chain gets one too, and that one does fail the pull.
+ */
+async function readPermittedAccounts(
+  reader: TradovateReader,
+  tradovateUserId: number | null
+): Promise<ReadonlySet<number> | null> {
+  try {
+    const body = await reader.get<unknown>('/tradingPermission/list');
+    return permittedAccountIds(body, tradovateUserId);
+  } catch {
+    return null;
+  }
+}
+
 /** Stage one of the chain, on one host. See {@link HostDiscovery}. */
 async function discoverHostAccounts(
   reader: TradovateReader,
   tradovateUserId: number | null
 ): Promise<HostDiscovery> {
-  const accounts = await reader.get<TradovateAccount[]>('/account/list');
-  const { accepted, counts } = partitionAccounts(accounts ?? [], tradovateUserId);
-  return { accepted, accounts: (accounts ?? []).length, filter: counts };
+  const accounts = (await reader.get<TradovateAccount[]>('/account/list')) ?? [];
+
+  // Owned OR permitted (REF-90 Stage 2). The permission list is read only when
+  // some account on this host failed on ownership ALONE — see
+  // permissionsCouldHelp() — which is what keeps the normal trader at the one
+  // extra /account/list that Stage 1 costs them and no more.
+  const permitted = permissionsCouldHelp(accounts, tradovateUserId)
+    ? await readPermittedAccounts(reader, tradovateUserId)
+    : null;
+
+  const { accepted, counts } = partitionAccounts(accounts, tradovateUserId, permitted);
+  return { accepted, accounts: accounts.length, filter: counts };
 }
 
 /** The other one. Two environments, so this is total. */

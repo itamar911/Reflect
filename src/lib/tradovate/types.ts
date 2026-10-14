@@ -333,6 +333,45 @@ export interface TradovateAccount {
 }
 
 /**
+ * A trader's right to trade an account they do not own. GET
+ * /v1/tradingPermission/list, in the logged-on user's visible scope.
+ *
+ * THE JOIN `Account` DOES NOT CARRY (REF-90 Stage 2). Nothing in `Account`
+ * distinguishes "an account I may trade" from "someone else's account in my
+ * visible scope" — no `tradeable`, no `primary`, no permission flag — and a
+ * prop firm's evaluation account is documented as being OWNED BY THE API ADMIN
+ * with the trader holding a permission on it. So `userId` + `accountId` +
+ * `status` is the only thing in this API that can say an account is a trader's
+ * to trade when `Account.userId` says it is not. See ./accounts.ts for the rule.
+ *
+ * THREE FIELDS, AND THE OMISSIONS ARE THE POINT. The documented entity also
+ * carries `id`, `updated`, `approvedById` — and `accountHolderContact`,
+ * `accountHolderEmail`, `ctaContact` and `ctaEmail`, which are two names and
+ * two email addresses, REQUIRED on the entity. They are the first real PII this
+ * integration reads, nothing in Reflect has any use for them, and they are not
+ * declared here so that no code above this type can reach one by autocomplete.
+ * What leaves ./accounts.ts is narrower still: a set of account ids, a shape
+ * that cannot hold a name or an email at all.
+ *
+ * The path is `/<entity>/list` by the API cheat sheet's universal convention —
+ * the documentation page for this endpoint 404s — and was confirmed by
+ * measurement on 14 Oct 2026 before any of this was written (Stage 0, the perm
+ * probe in ./diag-hosts.ts). It takes no parameters.
+ *   https://docs.ninjatrader.com/api/rest-api-endpoints/users/accept-trading-permission
+ */
+export interface TradovateTradingPermission {
+  /** The user the permission is FOR. The rule keys on this and nothing else. */
+  userId: number;
+  /** The account it is on. */
+  accountId: number;
+  /**
+   * The five documented values. Only `Accepted` and `Approved` count —
+   * `Requested` is a pending offer and the other two are refusals.
+   */
+  status: 'Accepted' | 'Approved' | 'Declined' | 'Requested' | 'Revoked';
+}
+
+/**
  * A contract. GET /v1/contract/item?id=…
  *
  * Read for `productId`, the step towards a value per point.

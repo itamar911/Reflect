@@ -98,6 +98,13 @@ function answer(pull: BrokerDayPull) {
  * allowlist is small enough for it to identify a person (see its comment); the
  * same reasoning applies here and is why this carries no identifier at all.
  *
+ * Since Stage 2 the pull also reads `/tradingPermission/list`, whose entity
+ * carries two names and two email addresses as required fields — the first real
+ * PII this integration touches. None of it can reach this line: what the rule
+ * keeps from that response is a set of account ids (lib/tradovate/accounts.ts),
+ * and `noPermission` and `permitted` here are counts of accounts like every
+ * other field in the line.
+ *
  * Through redactSecrets() regardless — every diagnostic in this integration
  * goes through it, and a formatter that is safe today should not be the reason
  * the next person skips it.

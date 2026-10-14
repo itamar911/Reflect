@@ -41,7 +41,12 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import { partitionAccounts, selectTradingAccounts } from '../src/lib/tradovate/accounts';
+import {
+  partitionAccounts,
+  permissionsCouldHelp,
+  permittedAccountIds,
+  selectTradingAccounts,
+} from '../src/lib/tradovate/accounts';
 import type { ResolvedApiUrl } from '../src/lib/tradovate/api-hosts';
 import {
   formatHostProbe,
@@ -74,6 +79,7 @@ import type {
   TradovateFillPair,
   TradovatePosition,
   TradovateProduct,
+  TradovateTradingPermission,
 } from '../src/lib/tradovate/types';
 import {
   classifyDayPullFailure,
@@ -167,6 +173,48 @@ const CONTRACT: TradovateContract = { id: CONTRACT_ID, name: 'ESZ6', productId: 
 /** ES: $50 a point. */
 const PRODUCT: TradovateProduct = { id: PRODUCT_ID, name: 'ES', currencyId: USD.id, valuePerPoint: 50 };
 
+/**
+ * The four fields on `TradingPermission` that must never leave this file.
+ *
+ * Every one of them is a REQUIRED field on the documented entity, so a fixture
+ * carrying them is not contrived — it is the shape the real call returns. Two
+ * names and two email addresses, shared by the Stage 0 probe group and the
+ * Stage 2 rule group so that one leak assertion covers both.
+ */
+const PERMISSION_PII = {
+  accountHolderContact: 'Yael Brandwein',
+  accountHolderEmail: 'yael.brandwein@lucidtrading.example',
+  ctaContact: 'Dov Halperin',
+  ctaEmail: 'dov.halperin@lucidtrading.example',
+} as const;
+
+/** The documented entity in full: the three fields read, and the five not. */
+interface PermissionRow extends TradovateTradingPermission {
+  id: number;
+  accountHolderContact: string;
+  accountHolderEmail: string;
+  ctaContact: string;
+  ctaEmail: string;
+}
+
+/** The one permission id every fixture uses, so a leak test can look for it. */
+const PERMISSION_ID = 4401;
+
+/** A permission row, PII and all. `userId` defaults to the trader's own. */
+function permission(fields: {
+  userId?: number;
+  accountId: number;
+  status: TradovateTradingPermission['status'];
+}): PermissionRow {
+  return {
+    id: PERMISSION_ID,
+    userId: fields.userId ?? ACCOUNT.userId,
+    accountId: fields.accountId,
+    status: fields.status,
+    ...PERMISSION_PII,
+  };
+}
+
 interface Scene {
   accounts: TradovateAccount[];
   positions: TradovatePosition[];
@@ -175,6 +223,15 @@ interface Scene {
   contracts: TradovateContract[];
   products: TradovateProduct[];
   currencies: TradovateCurrency[];
+  /**
+   * The /tradingPermission/list body, or null for a host that 404s it.
+   *
+   * NULL IS THE DEFAULT, AND DELIBERATELY SO: every fixture written before
+   * Stage 2 therefore exercises the fail-safe — no readable permission list
+   * means the owned-only rule — which is why none of their assertions had to
+   * change in meaning. A scene that wants the join sets it explicitly.
+   */
+  permissions: PermissionRow[] | null;
 }
 
 function scene(overrides: Partial<Scene> = {}): Scene {
@@ -186,6 +243,7 @@ function scene(overrides: Partial<Scene> = {}): Scene {
     contracts: [CONTRACT],
     products: [PRODUCT],
     currencies: [USD],
+    permissions: null,
     ...overrides,
   };
 }
@@ -277,6 +335,15 @@ function reader(data: Scene): TradovateReader & { calls: string[] } {
           return Promise.resolve(data.pairs as T);
         case '/fill/list':
           return Promise.resolve(data.fills as T);
+        case '/tradingPermission/list':
+          // A 404 for a scene with no permissions: the documentation page for
+          // this endpoint 404s, the path is a naming convention, and a host
+          // that does not expose the entity is the case the fail-safe is for.
+          return data.permissions === null
+            ? Promise.reject(
+                new TradovateRequestError(path, 404, '{"errorText":"Not found"}')
+              )
+            : Promise.resolve(data.permissions as T);
         case '/currency/list':
           return Promise.resolve(data.currencies as T);
         case '/contract/item':
@@ -727,12 +794,17 @@ async function main() {
     c('counted once, under the first reason only', filteredOut.filter, {
       total: 1,
       noOwner: 1,
+      // The permission list was asked for — this account failed on ownership
+      // alone — and it 404'd, so there is no permission evidence and the reason
+      // stays the one it was before Stage 2. See the Stage 2 group below.
+      noPermission: 0,
       notCustomer: 0,
       closed: 0,
       restricted: 0,
       readonly: 0,
       futuresDisabled: 0,
       inactive: 0,
+      permitted: 0,
     }),
     c(
       'the stages after it were never reached, so they are zero',
@@ -763,7 +835,8 @@ async function main() {
       'the filter breakdown accounts for every row it was given',
       (() => {
         const f = partitionAccounts(candidates, ACCOUNT.userId).counts;
-        const dropped = f.noOwner + f.notCustomer + f.closed + f.restricted + f.readonly + f.futuresDisabled + f.inactive;
+        const dropped =
+          f.noOwner + f.noPermission + f.notCustomer + f.closed + f.restricted + f.readonly + f.futuresDisabled + f.inactive;
         return dropped + selectTradingAccounts(candidates, ACCOUNT.userId).length === f.total;
       })(),
       true
@@ -778,13 +851,15 @@ async function main() {
       'the exact format, for the filtered-out account',
       formatDayPullCounts(filteredOut),
       'accounts=1 mine=0 positions=0 minePositions=0 pairs=0 minePairs=0 trades=0 todays=0' +
-        ' | filter: total=1 noOwner=1 notCustomer=0 closed=0 restricted=0 readonly=0 futuresDisabled=0 inactive=0'
+        ' | filter: total=1 noOwner=1 noPermission=0 notCustomer=0 closed=0 restricted=0' +
+        ' readonly=0 futuresDisabled=0 inactive=0 permitted=0'
     ),
     c(
       'and for a day that had a trade in it',
       formatDayPullCounts(fullDay),
       'accounts=1 mine=1 positions=1 minePositions=1 pairs=1 minePairs=1 trades=1 todays=1' +
-        ' | filter: total=1 noOwner=0 notCustomer=0 closed=0 restricted=0 readonly=0 futuresDisabled=0 inactive=0'
+        ' | filter: total=1 noOwner=0 noPermission=0 notCustomer=0 closed=0 restricted=0' +
+        ' readonly=0 futuresDisabled=0 inactive=0 permitted=0'
     ),
     // The privacy property, asserted rather than reviewed. Every number the
     // line carries is a count, so nothing that identifies a person or a
@@ -906,18 +981,16 @@ async function main() {
   /**
    * One permission, dressed in exactly the fields that must never be logged.
    *
-   * Every one of these four is a REQUIRED field on the documented entity, so
-   * this is not a contrived fixture — it is the shape the real call returns.
+   * Not annotated, so the undocumented-`status` case below can hand this probe
+   * a string that the real entity's enum would reject — which is the point of
+   * that case. {@link PERMISSION_PII} is shared with the Stage 2 group.
    */
   const PERMISSION = {
-    id: 4401,
+    id: PERMISSION_ID,
     userId: ACCOUNT.userId,
     accountId: ACCOUNT.id,
     status: 'Accepted',
-    accountHolderContact: 'Yael Brandwein',
-    accountHolderEmail: 'yael.brandwein@lucidtrading.example',
-    ctaContact: 'Dov Halperin',
-    ctaEmail: 'dov.halperin@lucidtrading.example',
+    ...PERMISSION_PII,
   };
 
   /** /user/list's shape: the id we read, and the two fields we must not. */
@@ -1327,9 +1400,372 @@ async function main() {
       formatBrokerDayCounts(named.counts),
       'hosts=2 dropped=0 duplicates=0' +
         ' | live: accounts=1 mine=1 positions=1 minePositions=1 pairs=1 minePairs=1 trades=1 todays=1' +
-        ' | filter: total=1 noOwner=0 notCustomer=0 closed=0 restricted=0 readonly=0 futuresDisabled=0 inactive=0' +
+        ' | filter: total=1 noOwner=0 noPermission=0 notCustomer=0 closed=0 restricted=0' +
+        ' readonly=0 futuresDisabled=0 inactive=0 permitted=0' +
         ' | demo: accounts=1 mine=1 positions=1 minePositions=1 pairs=1 minePairs=1 trades=1 todays=1' +
-        ' | filter: total=1 noOwner=0 notCustomer=0 closed=0 restricted=0 readonly=0 futuresDisabled=0 inactive=0'
+        ' | filter: total=1 noOwner=0 noPermission=0 notCustomer=0 closed=0 restricted=0' +
+        ' readonly=0 futuresDisabled=0 inactive=0 permitted=0'
+    ),
+  ]);
+
+  // ── Stage 2: owned OR permitted ───────────────────────────────────────────
+  //
+  // Measured in production on 14.10, after Stage 1's routing question was
+  // settled: `demo perms=1 mine=1 status=Approved, self=1 on both hosts`. The
+  // account the trader actually trades is owned by the firm's admin user and
+  // our trader holds a TradingPermission on it, so ownership alone drops it —
+  // which is the second of REF-90's two stacked bugs and the one that decides
+  // what counts against a limit.
+  //
+  // THE TWO CASES THAT MATTER MOST HERE ARE THE REFUSALS, not the acceptance.
+  // A rule that accepts too much blocks a trader over money they did not lose,
+  // which ./accounts.ts names as the worst failure available in this
+  // integration: hence the admin-scope leak case, the wrong-account case, the
+  // wrong-host case, and one case per non-accepted status word.
+
+  /** The firm's admin user, who owns the evaluation account by `userId`. */
+  const ADMIN_USER_ID = 999;
+  /** REF-90's actual row: Customer, tradeable, and not ours by ownership. */
+  const FIRM_ACCOUNT: TradovateAccount = {
+    ...ACCOUNT,
+    id: 7004,
+    name: 'FIRM7004',
+    userId: ADMIN_USER_ID,
+  };
+
+  /** That account, one +$1,000 close on it, and whatever the host permits. */
+  const firmScene = (permissions: PermissionRow[] | null) =>
+    withTrips([demoWin], {
+      accounts: [FIRM_ACCOUNT],
+      positions: [{ ...POSITION, accountId: FIRM_ACCOUNT.id }],
+      permissions,
+    });
+
+  const firmPull = (permissions: PermissionRow[] | null) =>
+    pullHosts({ live: firmScene(permissions) });
+
+  const grant = (status: TradovateTradingPermission['status']) =>
+    permission({ accountId: FIRM_ACCOUNT.id, status });
+
+  /** THE ROW. Owned by another userId, permitted to ours, status Approved. */
+  const approved = await firmPull([grant('Approved')]);
+  const liveFilter = (r: typeof approved) => r.counts.hosts.live!.filter;
+
+  const accepted = await firmPull([grant('Accepted')]);
+  const requested = await firmPull([grant('Requested')]);
+  const declined = await firmPull([grant('Declined')]);
+  const revoked = await firmPull([grant('Revoked')]);
+
+  /**
+   * The admin-scope leak. An admin's visible scope returns every trader's
+   * permission, so the list naming OTHER people on this very account must not
+   * move this trader's limits. Both rows are `Approved`; neither is ours.
+   */
+  const otherTraders = await firmPull([
+    permission({ userId: ADMIN_USER_ID, accountId: FIRM_ACCOUNT.id, status: 'Approved' }),
+    permission({ userId: 888, accountId: FIRM_ACCOUNT.id, status: 'Approved' }),
+  ]);
+
+  /** Ours, Approved — on a different account. */
+  const otherAccount = await firmPull([permission({ accountId: ACCOUNT.id, status: 'Approved' })]);
+
+  /**
+   * Permissions are host-local, like every other entity in this API. Live says
+   * the trader holds none; the grant exists only on demo, which holds no
+   * account of ours and is therefore never asked for its list at all.
+   */
+  const permOtherHostDemo = reader(scene({ accounts: [], permissions: [grant('Approved')] }));
+  const permOtherHost = await loadBrokerDay({
+    readers: { live: reader(firmScene([])), demo: permOtherHostDemo },
+    environment: 'live',
+    dayStartMs: DAY_START,
+    tradovateUserId: ACCOUNT.userId,
+    now: NOW,
+  });
+
+  /** The fail-safe, three ways the list can fail to say anything. */
+  const list404 = await firmPull(null);
+  const listEmpty = await firmPull([]);
+  const list401 = await loadBrokerDay({
+    // The grant IS in the scene, and a 401 on the read must still leave the
+    // account out: an unreadable join is the owned-only rule, never a guess.
+    readers: {
+      live: failingReader(
+        firmScene([grant('Approved')]),
+        '/tradingPermission/list',
+        () => new TradovateRequestError('/tradingPermission/list', 401, '{"errorText":"expired"}')
+      ),
+    },
+    environment: 'live',
+    dayStartMs: DAY_START,
+    tradovateUserId: ACCOUNT.userId,
+    now: NOW,
+  });
+
+  /** A permitted account that is closed is still closed. */
+  const PERMITTED_CLOSED: TradovateAccount = {
+    ...FIRM_ACCOUNT,
+    id: 7005,
+    name: 'FIRM7005',
+    closed: true,
+  };
+  const permittedAndClosed = await pullHosts({
+    live: withTrips([demoWin], {
+      accounts: [FIRM_ACCOUNT, PERMITTED_CLOSED],
+      positions: [{ ...POSITION, accountId: FIRM_ACCOUNT.id }],
+      permissions: [grant('Approved'), permission({ accountId: PERMITTED_CLOSED.id, status: 'Approved' })],
+    }),
+  });
+
+  /** What the ordinary trader pays for Stage 2, asserted as calls made. */
+  const ownedReader = reader(withTrips([closedToday1]));
+  await loadBrokerDay({
+    readers: { live: ownedReader },
+    environment: 'live',
+    dayStartMs: DAY_START,
+    tradovateUserId: ACCOUNT.userId,
+    now: NOW,
+  });
+
+  const firmReader = reader(firmScene([grant('Approved')]));
+  await loadBrokerDay({
+    readers: { live: firmReader },
+    environment: 'live',
+    dayStartMs: DAY_START,
+    tradovateUserId: ACCOUNT.userId,
+    now: NOW,
+  });
+
+  /**
+   * BOTH STAGES AT ONCE, which is the connection this ticket was opened for:
+   * the token was minted on live, live holds nothing, and the account on demo
+   * is the firm's with a permission naming our trader. Stage 1 made us ask the
+   * right host and Stage 2 makes the answer count. The Stage 1 group asserts
+   * the same fixture reading zero with no permission list — the two cases are
+   * the before and after of this PR.
+   */
+  const refNinety = await pullHosts({
+    live: scene({ accounts: [] }),
+    demo: firmScene([grant('Approved')]),
+    environment: 'live',
+  });
+
+  /** The partition, on a mixed bag with a permitted account in it. */
+  const stage2Filter = partitionAccounts(
+    [...candidates, FIRM_ACCOUNT, PERMITTED_CLOSED],
+    ACCOUNT.userId,
+    new Set([FIRM_ACCOUNT.id, PERMITTED_CLOSED.id])
+  ).counts;
+
+  group('an account counts when it is tradeable and the trader may trade it', [
+    // THE REF-90 ROW, which is what this whole stage is for.
+    c(
+      'owned by the firm admin, Approved for our trader: counted',
+      [approved.day.closedCount, approved.day.net],
+      [1, 1000]
+    ),
+    c(
+      'and the counts say it got in on a permission, not on ownership',
+      liveFilter(approved),
+      {
+        total: 1,
+        noOwner: 0,
+        noPermission: 0,
+        notCustomer: 0,
+        closed: 0,
+        restricted: 0,
+        readonly: 0,
+        futuresDisabled: 0,
+        inactive: 0,
+        permitted: 1,
+      }
+    ),
+    c('Accepted counts too', accepted.day.closedCount, 1),
+    c(
+      'and the whole of REF-90: minted on live, held on demo, permitted to us',
+      [
+        refNinety.day.closedCount,
+        refNinety.day.net,
+        refNinety.counts.hosts.demo!.filter.permitted,
+        refNinety.counts.hosts.live!.accounts,
+      ],
+      [1, 1000, 1, 0]
+    ),
+
+    // The three statuses that must not count. One case each, because "only
+    // Accepted and Approved" is a claim about four other words.
+    c(
+      'Requested is a pending offer, not an arrangement',
+      [requested.day.closedCount, liveFilter(requested).noPermission],
+      [0, 1]
+    ),
+    c(
+      'Declined does not count',
+      [declined.day.closedCount, liveFilter(declined).noPermission],
+      [0, 1]
+    ),
+    c(
+      'Revoked does not count',
+      [revoked.day.closedCount, liveFilter(revoked).noPermission],
+      [0, 1]
+    ),
+
+    // The leak the rule is keyed to prevent: the permission's OWN userId.
+    c(
+      "another trader's Approved permission on the same account does not count",
+      [otherTraders.day.closedCount, otherTraders.day.net, liveFilter(otherTraders).noPermission],
+      [0, 0, 1]
+    ),
+    c(
+      'our permission on a different account does not count',
+      [otherAccount.day.closedCount, liveFilter(otherAccount).noPermission],
+      [0, 1]
+    ),
+    c(
+      "the other host's permission does not reach this host's account",
+      [permOtherHost.day.closedCount, permOtherHost.counts.hosts.live!.filter.noPermission],
+      [0, 1]
+    ),
+    c(
+      'and a host with no account of ours is never asked for its permissions',
+      permOtherHostDemo.calls,
+      ['/account/list']
+    ),
+
+    // The fail-safe. Under-count, never over-count.
+    c(
+      'a 404 on the list is the owned-only rule',
+      [list404.day.closedCount, liveFilter(list404).noOwner, liveFilter(list404).noPermission],
+      [0, 1, 0]
+    ),
+    c(
+      'so is a 401, even with a grant sitting in the response behind it',
+      [
+        list401.day.closedCount,
+        list401.counts.hosts.live!.filter.noOwner,
+        list401.counts.hosts.live!.filter.permitted,
+      ],
+      [0, 1, 0]
+    ),
+    c(
+      'an empty list is read, and says this trader holds no permission',
+      [listEmpty.day.closedCount, liveFilter(listEmpty).noOwner, liveFilter(listEmpty).noPermission],
+      [0, 0, 1]
+    ),
+    c('a body that is not a list is no evidence at all', permittedAccountIds({ errorText: 'x' }, ACCOUNT.userId), null),
+    c('and neither is any list, when the connection has no identity', permittedAccountIds([grant('Approved')], null), null),
+
+    // The reading itself, where every uncertainty resolves to "not permitted".
+    c(
+      'a row whose accountId is not a number grants nothing',
+      permittedAccountIds(
+        [{ userId: ACCOUNT.userId, accountId: String(FIRM_ACCOUNT.id), status: 'Approved' }],
+        ACCOUNT.userId
+      )?.size,
+      0
+    ),
+    c(
+      'nor does one with no status at all',
+      permittedAccountIds([{ userId: ACCOUNT.userId, accountId: FIRM_ACCOUNT.id }], ACCOUNT.userId)?.size,
+      0
+    ),
+    c(
+      'and a grant of ours is one id, read from three fields',
+      [...(permittedAccountIds([grant('Approved')], ACCOUNT.userId) ?? [])],
+      [FIRM_ACCOUNT.id]
+    ),
+
+    // A permission says WHOSE account it is. It says nothing about tradeability.
+    c(
+      'a permitted account that is closed lands in closed, not in the day',
+      [
+        permittedAndClosed.day.closedCount,
+        permittedAndClosed.counts.hosts.live!.mine,
+        permittedAndClosed.counts.hosts.live!.filter.closed,
+        permittedAndClosed.counts.hosts.live!.filter.permitted,
+      ],
+      [1, 1, 1, 1]
+    ),
+
+    // The cost. A normal trader pays nothing for any of the above.
+    c(
+      'a trader whose accounts are their own never asks for a permission list',
+      ownedReader.calls.includes('/tradingPermission/list'),
+      false
+    ),
+    c(
+      'and a trader who needs it asks exactly once, after /account/list',
+      [
+        firmReader.calls.filter((p) => p === '/tradingPermission/list').length,
+        firmReader.calls.slice(0, 2),
+      ],
+      [1, ['/account/list', '/tradingPermission/list']]
+    ),
+    c(
+      'the question is "would a permission change this verdict", so an untradeable stranger does not provoke it',
+      [
+        permissionsCouldHelp([FIRM_ACCOUNT], ACCOUNT.userId),
+        permissionsCouldHelp([{ ...FIRM_ACCOUNT, closed: true }], ACCOUNT.userId),
+        permissionsCouldHelp([{ ...FIRM_ACCOUNT, accountType: 'House' }], ACCOUNT.userId),
+        permissionsCouldHelp([ACCOUNT], ACCOUNT.userId),
+        permissionsCouldHelp([FIRM_ACCOUNT], null),
+      ],
+      [true, false, false, false, false]
+    ),
+
+    // The partition stays a partition, with noPermission in the fixture.
+    c(
+      'every row is still counted exactly once',
+      (() => {
+        const f = stage2Filter;
+        const dropped =
+          f.noOwner + f.noPermission + f.notCustomer + f.closed + f.restricted + f.readonly + f.futuresDisabled + f.inactive;
+        const accepted = selectTradingAccounts(
+          [...candidates, FIRM_ACCOUNT, PERMITTED_CLOSED],
+          ACCOUNT.userId,
+          new Set([FIRM_ACCOUNT.id, PERMITTED_CLOSED.id])
+        ).length;
+        return [dropped + accepted === f.total, f.noPermission, f.permitted, f.noOwner];
+      })(),
+      // The one stranger in `candidates` is not permitted, so it is the
+      // noPermission; FIRM_ACCOUNT is the permitted acceptance; PERMITTED_CLOSED
+      // is permitted and closed, so it lands in `closed` and not in `permitted`.
+      // Nothing is `noOwner`, because with a list in hand the precise reason is
+      // available for every stranger.
+      [true, 1, 1, 0]
+    ),
+
+    // The privacy property, and the reason this group needed a fixture with PII
+    // in it rather than a tidy one. `TradingPermission` is the first entity in
+    // this integration that carries a person's name and email address, both as
+    // REQUIRED fields, and the pull reads a list of them on the path that logs
+    // a counts line.
+    c(
+      'not one field of the permission entity reaches a formatted line',
+      [
+        PERMISSION_PII.accountHolderEmail,
+        PERMISSION_PII.ctaEmail,
+        PERMISSION_PII.accountHolderContact,
+        PERMISSION_PII.ctaContact,
+        'Yael',
+        'Halperin',
+        'lucidtrading.example',
+        String(PERMISSION_ID),
+        String(FIRM_ACCOUNT.id),
+        String(ADMIN_USER_ID),
+        FIRM_ACCOUNT.name,
+        // Not PII, and the design note would allow it — a status is a closed
+        // enum word. It is still absent, because nothing from this entity is
+        // carried out of the reader at all.
+        'Approved',
+      ].filter((leak) =>
+        [approved, otherTraders, permittedAndClosed].some(
+          (r) =>
+            formatBrokerDayCounts(r.counts).includes(leak) ||
+            formatDayPullCounts(r.counts.hosts.live!).includes(leak)
+        )
+      ),
+      []
     ),
   ]);
 
