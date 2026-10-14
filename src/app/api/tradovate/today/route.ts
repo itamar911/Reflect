@@ -51,11 +51,7 @@ import {
 } from '@/lib/rules/brokerDayContext';
 import { isUserAllowed } from '@/lib/tradovate/allowlist';
 import { tradovateGet } from '@/lib/tradovate/client';
-import {
-  getUserTradingApi,
-  readConnectionTradingHosts,
-  type UserTradingApi,
-} from '@/lib/tradovate/connections';
+import { getUserTradingApi, type UserTradingApi } from '@/lib/tradovate/connections';
 import {
   formatHostProbe,
   formatPermProbe,
@@ -63,9 +59,9 @@ import {
   probeTradingPermissions,
 } from '@/lib/tradovate/diag-hosts';
 import {
-  formatDayPullCounts,
+  formatBrokerDayCounts,
   loadBrokerDay,
-  type DayPullCounts,
+  type BrokerDayCounts,
   type TradovateReader,
 } from '@/lib/tradovate/fills';
 import { redactSecrets } from '@/lib/tradovate/redact';
@@ -106,10 +102,10 @@ function answer(pull: BrokerDayPull) {
  * goes through it, and a formatter that is safe today should not be the reason
  * the next person skips it.
  */
-function logDayPullCounts(counts: DayPullCounts): void {
+function logDayPullCounts(counts: BrokerDayCounts): void {
   if (process.env.TRADOVATE_DIAG_COUNTS !== '1') return;
 
-  console.info(redactSecrets(`[tradovate] today pull counts: ${formatDayPullCounts(counts)}`));
+  console.info(redactSecrets(`[tradovate] today pull counts: ${formatBrokerDayCounts(counts)}`));
 }
 
 /**
@@ -121,9 +117,11 @@ function logDayPullCounts(counts: DayPullCounts): void {
  * cause. What it cannot see is WHICH HOST was asked, and that is now the open
  * question: see the header of lib/tradovate/diag-hosts.ts.
  *
- * OFF UNLESS TRADOVATE_DIAG_HOSTS === '1', and the gate is read before the
- * extra database read as well as before the two GETs, so a production request
- * pays nothing at all for this.
+ * OFF UNLESS TRADOVATE_DIAG_HOSTS === '1', before any of the six GETs, so a
+ * production request pays nothing at all for this. It no longer reads the
+ * connection row either: Stage 1 made both resolved hosts part of
+ * {@link UserTradingApi}, which is where the probe's own read came from, so the
+ * probe now borrows what the product path already has in hand.
  *
  * NEVER THROWS. A diagnostic that can turn a served response into
  * `broker_unavailable` is worse than no diagnostic — the pull has already
@@ -147,11 +145,11 @@ function logDayPullCounts(counts: DayPullCounts): void {
  * closed union of words by type, the same discipline as `HostProbe` and the
  * reason this function cannot leak either.
  */
-async function logHostProbe(userId: string, api: UserTradingApi): Promise<void> {
+async function logHostProbe(api: UserTradingApi): Promise<void> {
   if (process.env.TRADOVATE_DIAG_HOSTS !== '1') return;
 
   try {
-    const { configured, hosts } = await readConnectionTradingHosts(userId);
+    const { environment: configured, hosts } = api;
     const probe = await probeAccountHosts({
       configured,
       hosts,
@@ -228,17 +226,30 @@ export async function GET(request: Request) {
   try {
     const api = await getUserTradingApi(user.id);
 
-    // The token and the host travel together, which ./client.ts requires of
-    // every per-user call: UserTokenRequestOptions does not type-check without
-    // both, because a user's hosts are theirs and the deployment's host answers
-    // a dedicated-infrastructure trader with a 307 (REF-92).
-    const reader: TradovateReader = {
+    // ONE READER PER HOST (REF-90 Stage 1). The token and the host travel
+    // together, which ./client.ts requires of every per-user call:
+    // UserTokenRequestOptions does not type-check without both, because a
+    // user's hosts are theirs and the deployment's host answers a
+    // dedicated-infrastructure trader with a 307 (REF-92). That invariant is
+    // what makes this a record of readers rather than one reader and a list of
+    // hosts — each reader closes over the URL its token is addressed to, and
+    // the two cannot drift apart.
+    //
+    // Both are built because both are asked: `environment` is the token's mint
+    // server and says nothing about where the trader's accounts live, which was
+    // the first of REF-90's two bugs. See loadBrokerDay for what it is still
+    // used for.
+    const readerFor = (apiUrl: string): TradovateReader => ({
       get: (path, query) =>
-        tradovateGet(path, query, { accessToken: api.accessToken, apiUrl: api.apiUrl }),
-    };
+        tradovateGet(path, query, { accessToken: api.accessToken, apiUrl }),
+    });
 
     const { day, counts } = await loadBrokerDay({
-      reader,
+      readers: {
+        live: readerFor(api.hosts.live.url),
+        demo: readerFor(api.hosts.demo.url),
+      },
+      environment: api.environment,
       dayStartMs: dayStart.dayStartMs,
       tradovateUserId: api.tradovateUserId,
     });
@@ -248,7 +259,7 @@ export async function GET(request: Request) {
     // lambda can be frozen the moment the response is returned, and a probe
     // whose log line sometimes does not arrive is a measurement that cannot be
     // trusted. It runs only behind its own flag and cannot throw.
-    await logHostProbe(user.id, api);
+    await logHostProbe(api);
 
     return answer({ source: 'broker_verified', day });
   } catch (error) {

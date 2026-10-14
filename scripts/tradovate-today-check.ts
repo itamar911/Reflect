@@ -57,6 +57,7 @@ import {
   TradovateUnpriceableError,
 } from '../src/lib/tradovate/errors';
 import {
+  formatBrokerDayCounts,
   formatDayPullCounts,
   loadBrokerDay,
   type BrokerDayContext,
@@ -290,15 +291,22 @@ function reader(data: Scene): TradovateReader & { calls: string[] } {
 }
 
 /**
- * The day figures alone.
+ * The day figures alone, from ONE host.
  *
  * loadBrokerDay() returns `{ day, counts }` since diag/ref-90-counts; this
  * unwraps it so every assertion written before that still reads the thing it
  * was written about. {@link pullCounts} is the other half.
+ *
+ * Since Stage 1 it also passes ONE reader where the signature takes a record of
+ * them, which is the point: a connection with a single usable host must behave
+ * exactly as the whole suite below has always asserted. Every group above the
+ * Stage 1 group is therefore a regression test for the routing change, without
+ * a line of it being rewritten.
  */
 async function pull(data: Scene, dayStartMs = DAY_START): Promise<BrokerDayContext> {
   const { day } = await loadBrokerDay({
-    reader: reader(data),
+    readers: { live: reader(data) },
+    environment: 'live',
     dayStartMs,
     tradovateUserId: ACCOUNT.userId,
     now: NOW,
@@ -306,19 +314,54 @@ async function pull(data: Scene, dayStartMs = DAY_START): Promise<BrokerDayConte
   return day;
 }
 
-/** The diagnostic tally alone, for the counts group. */
+/** The diagnostic tally alone, for the counts group. One host, so one entry. */
 async function pullCounts(
   data: Scene,
   tradovateUserId: number | null = ACCOUNT.userId,
   dayStartMs = DAY_START
 ): Promise<DayPullCounts> {
   const { counts } = await loadBrokerDay({
-    reader: reader(data),
+    readers: { live: reader(data) },
+    environment: 'live',
     dayStartMs,
     tradovateUserId,
     now: NOW,
   });
-  return counts;
+  // The per-host breakdown, unwrapped to the single host these fixtures use, so
+  // the counts assertions stay about what emptied rather than about routing.
+  return counts.hosts.live!;
+}
+
+/** Both hosts, for the Stage 1 group. Returns the whole result. */
+function pullHosts(params: {
+  live?: Scene;
+  demo?: Scene;
+  environment?: TradovateEnvironment;
+  tradovateUserId?: number | null;
+  dayStartMs?: number;
+}) {
+  const readers: Partial<Record<TradovateEnvironment, TradovateReader>> = {};
+  if (params.live) readers.live = reader(params.live);
+  if (params.demo) readers.demo = reader(params.demo);
+
+  return loadBrokerDay({
+    readers,
+    environment: params.environment ?? 'live',
+    dayStartMs: params.dayStartMs ?? DAY_START,
+    tradovateUserId: params.tradovateUserId === undefined ? ACCOUNT.userId : params.tradovateUserId,
+    now: NOW,
+  });
+}
+
+/** A reader that fails on one path and answers from a scene on the others. */
+function failingReader(data: Scene, failOn: string, error: () => Error): TradovateReader {
+  const inner = reader(data);
+  return {
+    get<T>(path: string, query?: Record<string, string | number | boolean | undefined>): Promise<T> {
+      if (path === failOn) return Promise.reject(error());
+      return inner.get<T>(path, query);
+    },
+  };
 }
 
 async function main() {
@@ -528,18 +571,11 @@ async function main() {
   // ── Nothing to report, which is not a failure ─────────────────────────────
 
   const noPairs = await pull(scene());
-  const { day: noAccount } = await loadBrokerDay({
-    reader: reader(scene()),
-    dayStartMs: DAY_START,
+  const { day: noAccount } = await pullHosts({
+    live: scene(),
     tradovateUserId: 999, // not the account's owner
-    now: NOW,
   });
-  const { day: unknownOwner } = await loadBrokerDay({
-    reader: reader(scene()),
-    dayStartMs: DAY_START,
-    tradovateUserId: null,
-    now: NOW,
-  });
+  const { day: unknownOwner } = await pullHosts({ live: scene(), tradovateUserId: null });
   const otherAccountsPairs = await pull(
     withTrips(
       [roundTrip({ side: 'long', openAt: '2026-10-14T05:00:00Z', closeAt: '2026-10-14T06:00:00Z', entry: 5000, exit: 4000, positionId: 123456 })],
@@ -566,7 +602,13 @@ async function main() {
   ]);
 
   const cheapReader = reader(scene());
-  await loadBrokerDay({ reader: cheapReader, dayStartMs: DAY_START, tradovateUserId: ACCOUNT.userId, now: NOW });
+  await loadBrokerDay({
+    readers: { live: cheapReader },
+    environment: 'live',
+    dayStartMs: DAY_START,
+    tradovateUserId: ACCOUNT.userId,
+    now: NOW,
+  });
   group('a quiet day costs little', [
     c('no contract pricing when there is nothing to price', cheapReader.calls.includes('/contract/item'), false),
     c('and no currency lookup either', cheapReader.calls.includes('/currency/list'), false),
@@ -979,6 +1021,315 @@ async function main() {
         'Not found',
       ].filter((leak) => [permA, permB, permUnknown].some((p) => formatPermProbe(p).includes(leak))),
       []
+    ),
+  ]);
+
+  // ── Stage 1: routing by purpose ───────────────────────────────────────────
+  //
+  // Measured in production on 14.10: live held nothing, demo held the account.
+  // `environment` is the token's MINT server, so routing trading reads by it
+  // asked the wrong host. (a′) discovers on both and continues only where there
+  // is something to continue with.
+  //
+  // The sharpest cases here are the two about id spaces (§1.2): nothing
+  // documents whether live and demo share them, so the design must be correct
+  // either way, and these are that requirement in executable form.
+
+  /** A second eligible account, for the host that is not the mint host. */
+  const DEMO_ACCOUNT: TradovateAccount = { ...ACCOUNT, id: 7002, name: 'DEMO7002' };
+
+  /** A demo scene holding one of the trader's own accounts and one closed trip. */
+  const demoWin = roundTrip({
+    side: 'long',
+    openAt: '2026-10-14T05:00:00Z',
+    closeAt: '2026-10-14T06:30:00Z',
+    entry: 5000,
+    exit: 5020,
+  });
+  const demoScene = withTrips([demoWin], {
+    accounts: [DEMO_ACCOUNT],
+    positions: [{ ...POSITION, accountId: DEMO_ACCOUNT.id }],
+  });
+
+  // (1) The regression guard. Live holds the account, demo holds nothing, and
+  // the answer must be the one this suite has always asserted.
+  const liveOnlyLive = reader(withTrips([closedToday1]));
+  const liveOnlyDemo = reader(scene({ accounts: [] }));
+  const liveOnly = await loadBrokerDay({
+    readers: { live: liveOnlyLive, demo: liveOnlyDemo },
+    environment: 'live',
+    dayStartMs: DAY_START,
+    tradovateUserId: ACCOUNT.userId,
+    now: NOW,
+  });
+
+  // (2) THE REF-90 CASE, in both of its halves. Routing is fixed here;
+  // ownership is not, and Stage 2 is the PR that changes what counts.
+  const demoOwned = await pullHosts({ live: scene({ accounts: [] }), demo: demoScene });
+  const demoLucid = await pullHosts({
+    live: scene({ accounts: [] }),
+    // The row as production actually reports it: the account is on demo and its
+    // userId is the firm admin's, not ours (host probe `demo n=1 owned=0`).
+    demo: withTrips([demoWin], {
+      accounts: [{ ...DEMO_ACCOUNT, userId: 999 }],
+      positions: [{ ...POSITION, accountId: DEMO_ACCOUNT.id }],
+    }),
+  });
+
+  // (3) Both hosts hold eligible accounts: the day is the sum.
+  const bothHosts = await pullHosts({ live: withTrips([closedToday1]), demo: demoScene });
+
+  // (4) Colliding ids across hosts, which is §1.2 in executable form. The same
+  // `fill.id` 10 and 11 and the same `contractId` on both hosts, and the two
+  // hosts disagree about what that contract is worth. Welding would report one
+  // trade; cross-pricing would price demo's loss at live's $50 a point.
+  const COLLIDING_CONTRACT = 777;
+  const collidingTrip = (buyPrice: number, sellPrice: number, closeAt: string) => ({
+    pair: { id: 1, positionId: 9001, buyFillId: 10, sellFillId: 11, qty: 1, buyPrice, sellPrice },
+    fills: [
+      {
+        id: 10,
+        orderId: 10,
+        contractId: COLLIDING_CONTRACT,
+        timestamp: '2026-10-14T04:00:00.000Z',
+        tradeDate: { year: 2026, month: 10, day: 14 },
+        action: 'Buy' as const,
+        qty: 1,
+        price: buyPrice,
+      },
+      {
+        id: 11,
+        orderId: 11,
+        contractId: COLLIDING_CONTRACT,
+        timestamp: closeAt,
+        tradeDate: { year: 2026, month: 10, day: 14 },
+        action: 'Sell' as const,
+        qty: 1,
+        price: sellPrice,
+      },
+    ],
+  });
+  const collidingScene = (
+    accountId: number,
+    valuePerPoint: number,
+    trip: { pair: TradovateFillPair; fills: TradovateFill[] }
+  ) =>
+    withTrips([trip], {
+      accounts: [{ ...ACCOUNT, id: accountId }],
+      positions: [{ ...POSITION, id: 9001, accountId }],
+      contracts: [{ id: COLLIDING_CONTRACT, name: 'ESZ6', productId: PRODUCT_ID }],
+      products: [{ ...PRODUCT, valuePerPoint }],
+    });
+
+  const colliding = await pullHosts({
+    // +10 points at $50 = +$500
+    live: collidingScene(1, 50, collidingTrip(5000, 5010, '2026-10-14T06:00:00.000Z')),
+    // −10 points at $2 = −$20, and NOT −$500
+    demo: collidingScene(2, 2, collidingTrip(4000, 3990, '2026-10-14T05:30:00.000Z')),
+  });
+
+  // (5) The streak runs on the pooled, sorted list, because the streak is about
+  // the trader. Per host it would read 2 on demo; interleaved it is 1.
+  const streakAcross = await pullHosts({
+    live: withTrips(
+      [roundTrip({ side: 'long', openAt: '2026-10-14T04:30:00Z', closeAt: '2026-10-14T05:00:00Z', entry: 5000, exit: 5010 })],
+      { accounts: [ACCOUNT], positions: [POSITION] }
+    ),
+    demo: withTrips(
+      [
+        roundTrip({ side: 'long', openAt: '2026-10-14T03:30:00Z', closeAt: '2026-10-14T04:00:00Z', entry: 5000, exit: 4990 }),
+        roundTrip({ side: 'long', openAt: '2026-10-14T05:30:00Z', closeAt: '2026-10-14T06:00:00Z', entry: 5000, exit: 4990 }),
+      ],
+      { accounts: [DEMO_ACCOUNT], positions: [{ ...POSITION, accountId: DEMO_ACCOUNT.id }] }
+    ),
+  });
+
+  // (6) The same accountId eligible on both hosts: counted once, preferring the
+  // mint host. Double-counting would block a trader over money they did not
+  // lose, which ./accounts.ts names as the worst failure available here.
+  const sameAccountDemo = reader(withTrips([closedToday1]));
+  const dedupe = await loadBrokerDay({
+    readers: { live: reader(withTrips([closedToday1])), demo: sameAccountDemo },
+    environment: 'live',
+    dayStartMs: DAY_START,
+    tradovateUserId: ACCOUNT.userId,
+    now: NOW,
+  });
+
+  // (7) Discovery fails on the non-mint host. An organization with no demo
+  // provisioning must not start failing pulls that work today.
+  const demoRefused = await loadBrokerDay({
+    readers: {
+      live: reader(withTrips([closedToday1])),
+      demo: failingReader(
+        demoScene,
+        '/account/list',
+        () => new TradovateRequestError('/account/list', 403, '{"errorText":"Forbidden"}')
+      ),
+    },
+    environment: 'live',
+    dayStartMs: DAY_START,
+    tradovateUserId: ACCOUNT.userId,
+    now: NOW,
+  });
+
+  // (8) A failure on a host that DID return eligible accounts. Never a partial
+  // day: an under-counted day makes every rule more permissive.
+  const failureSource = async (run: () => Promise<unknown>): Promise<string> => {
+    try {
+      await run();
+      return 'no throw';
+    } catch (error) {
+      return classifyDayPullFailure(error);
+    }
+  };
+
+  const demoHadAccounts = await failureSource(() =>
+    loadBrokerDay({
+      readers: {
+        live: reader(scene({ accounts: [] })),
+        demo: failingReader(
+          demoScene,
+          '/position/list',
+          () => new TradovateRequestError('/position/list', 500, 'upstream')
+        ),
+      },
+      environment: 'live',
+      dayStartMs: DAY_START,
+      tradovateUserId: ACCOUNT.userId,
+      now: NOW,
+    })
+  );
+
+  const mintDiscoveryFailed = await failureSource(() =>
+    loadBrokerDay({
+      readers: {
+        live: failingReader(
+          scene(),
+          '/account/list',
+          () => new TradovateRequestError('/account/list', 500, 'upstream')
+        ),
+        demo: reader(demoScene),
+      },
+      environment: 'live',
+      dayStartMs: DAY_START,
+      tradovateUserId: ACCOUNT.userId,
+      now: NOW,
+    })
+  );
+
+  // (9) Privacy, with a plausible per-organization hostname in BOTH fixtures —
+  // as an account NAME, which is where one would actually reach the counts
+  // line, since a prop account's name can name the firm.
+  const HOSTNAME_LIVE = 'live.tradovateapi.com';
+  const HOSTNAME_DEMO = 'lucid-demo-7f3.tradovateapi.com';
+  const named = await pullHosts({
+    live: withTrips([closedToday1], { accounts: [{ ...ACCOUNT, name: HOSTNAME_LIVE }] }),
+    demo: withTrips([demoWin], {
+      accounts: [{ ...DEMO_ACCOUNT, name: HOSTNAME_DEMO }],
+      positions: [{ ...POSITION, accountId: DEMO_ACCOUNT.id }],
+    }),
+  });
+
+  group('trading reads are routed by purpose, not by the mint environment', [
+    // (1)
+    c('live holds the account, demo empty: byte-identical to today', liveOnly.day, await pull(withTrips([closedToday1]))),
+    c(
+      "and (a′)'s whole cost is one /account/list on the other host",
+      liveOnlyDemo.calls,
+      ['/account/list']
+    ),
+
+    // (2)
+    c(
+      'demo holds the account: a non-zero day, which is the routing fix',
+      [demoOwned.day.closedCount, demoOwned.day.net],
+      [1, 1000]
+    ),
+    c(
+      "REF-90's actual row is still dropped, because ownership is Stage 2's job",
+      [demoLucid.day.closedCount, demoLucid.day.net, demoLucid.counts.hosts.demo?.filter.noOwner],
+      [0, 0, 1]
+    ),
+
+    // (3)
+    c(
+      'both hosts hold accounts: the day is the sum',
+      [bothHosts.day.closedCount, bothHosts.day.net, bothHosts.day.lost, bothHosts.day.losingCount],
+      [2, -500 + 1000, 500, 1]
+    ),
+
+    // (4) The sharpest two assertions in the file.
+    c(
+      'colliding fill ids are not welded into one trade',
+      colliding.day.closedCount,
+      2
+    ),
+    c(
+      "and one host's valuePerPoint never prices the other host's contract",
+      [colliding.day.net, colliding.day.lost],
+      [500 - 20, 20]
+    ),
+
+    // (5)
+    c(
+      'the streak is interleaved by close time across hosts, not per host',
+      streakAcross.day.lossStreak,
+      1
+    ),
+    c('and the day still counts all three closes', streakAcross.day.closedCount, 3),
+
+    // (6)
+    c(
+      'the same accountId on both hosts is counted once, not doubled',
+      [dedupe.day.closedCount, dedupe.day.net, dedupe.counts.duplicateAccounts],
+      [1, -500, 1]
+    ),
+    c(
+      'and the host that lost the collision is not asked for positions',
+      sameAccountDemo.calls,
+      ['/account/list']
+    ),
+
+    // (7)
+    c(
+      'discovery failing on the non-mint host drops it and the pull succeeds',
+      [demoRefused.day.closedCount, demoRefused.day.net, demoRefused.counts.dropped],
+      [1, -500, 1]
+    ),
+    c('the dropped host has no counts entry at all', demoRefused.counts.hosts.demo, undefined),
+
+    // (8)
+    c('a failure on a host that held accounts fails the whole pull', demoHadAccounts, 'broker_unavailable'),
+    c('and discovery failing on the mint host still fails it', mintDiscoveryFailed, 'broker_unavailable'),
+
+    // (9)
+    c(
+      'the per-host counts line carries no hostname, account name, id or price',
+      [
+        HOSTNAME_LIVE,
+        HOSTNAME_DEMO,
+        'lucid',
+        'tradovateapi.com',
+        'https',
+        String(ACCOUNT.id),
+        String(DEMO_ACCOUNT.id),
+        String(ACCOUNT.userId),
+        'DEMO7002',
+        '5000',
+        '4990',
+        '2026-10-14',
+      ].filter((leak) => formatBrokerDayCounts(named.counts).includes(leak)),
+      []
+    ),
+    c(
+      'and it says which host answered, which is an enum word and not a host',
+      formatBrokerDayCounts(named.counts),
+      'hosts=2 dropped=0 duplicates=0' +
+        ' | live: accounts=1 mine=1 positions=1 minePositions=1 pairs=1 minePairs=1 trades=1 todays=1' +
+        ' | filter: total=1 noOwner=0 notCustomer=0 closed=0 restricted=0 readonly=0 futuresDisabled=0 inactive=0' +
+        ' | demo: accounts=1 mine=1 positions=1 minePositions=1 pairs=1 minePairs=1 trades=1 todays=1' +
+        ' | filter: total=1 noOwner=0 notCustomer=0 closed=0 restricted=0 readonly=0 futuresDisabled=0 inactive=0'
     ),
   ]);
 

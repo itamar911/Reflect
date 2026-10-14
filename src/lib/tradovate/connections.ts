@@ -684,8 +684,34 @@ export interface UserTradingApi {
   /** Epoch milliseconds. */
   expiresAt: number;
   tradovateUserId: number | null;
-  /** REST base including the version segment, for this user's connection. */
-  apiUrl: string;
+  /**
+   * BOTH trading hosts, resolved (REF-90 Stage 1).
+   *
+   * This was one `apiUrl`, keyed by `environment`, and that was the first of
+   * REF-90's two bugs: `environment` records WHICH SERVER MINTED THE TOKEN, and
+   * the deployment copies it from TRADOVATE_API_URL at callback time. It says
+   * nothing about where the trader's accounts live — and for a prop-firm trader
+   * whose evaluation account is provisioned in Demo, the answer was an empty
+   * list from the wrong host. Measured in production on 14.10: live held
+   * nothing, demo held the account.
+   *
+   * So the caller gets both and asks both. `/account/list` on each host is the
+   * discovery step; the rest of the chain runs only where there was something
+   * to continue with (see loadBrokerDay in ./fills.ts). Each host's reads must
+   * carry THAT host's URL with the token — ./client.ts requires the pair — so
+   * this is a record and not a list.
+   */
+  hosts: Record<TradovateEnvironment, ResolvedApiUrl>;
+  /**
+   * Which server minted the token. NOT where the accounts are.
+   *
+   * Still carried, and still meaningful, for the two things it actually
+   * decides: it is the known-good host, so a discovery failure HERE fails the
+   * pull while a discovery failure on the other host only drops that host; and
+   * it wins any cross-host account-id collision. The keep-alive guard and the
+   * renewal host read the column for their own reasons and must keep doing so
+   * — see the header of this module and §3.1 of the fix design.
+   */
   environment: TradovateEnvironment;
 }
 
@@ -714,6 +740,47 @@ export async function getUserTradingApi(
 ): Promise<UserTradingApi> {
   const admin = options.admin ?? createAdminClient();
   const token = await getUserAccessToken(userId, { admin });
+  const { configured, hosts } = await readConnectionTradingHosts(userId, { admin });
+
+  return {
+    accessToken: token.accessToken,
+    expiresAt: token.expiresAt,
+    tradovateUserId: token.tradovateUserId,
+    hosts,
+    environment: configured,
+  };
+}
+
+/**
+ * Both of a connection's trading hosts, resolved (REF-90 Stage 1).
+ *
+ * Written for the host probe, which needed to see past the one host the product
+ * path used; promoted here because the product path now needs exactly the same
+ * thing, and for the same reason. `environment` is the token's MINT server, so
+ * routing trading reads by it asked the wrong host for every trader whose
+ * accounts live in the other environment — the measured cause of REF-90. The
+ * fix is to ask both, which means resolving both, which this already did.
+ *
+ * Here rather than in ./api-hosts.ts because this module is the only one that
+ * reads `tradovate_connections`, and it hands back RESOLVED URLs rather than
+ * the raw `api_hosts` object, which keeps hostname handling — the bare-hostname
+ * validation and the documented fallback — in ./api-hosts.ts where the rest of
+ * it lives.
+ *
+ * `configured` is the mint environment, unchanged in meaning. Its two jobs
+ * downstream are to be the host whose failure is fatal and to win a cross-host
+ * account-id collision; see {@link UserTradingApi}.
+ *
+ * READ ONLY: two columns on an indexed primary key, no write, no token.
+ */
+export async function readConnectionTradingHosts(
+  userId: string,
+  options: { admin?: SupabaseClient } = {}
+): Promise<{
+  configured: TradovateEnvironment;
+  hosts: Record<TradovateEnvironment, ResolvedApiUrl>;
+}> {
+  const admin = options.admin ?? createAdminClient();
 
   const { data, error } = await admin
     .from('tradovate_connections')
@@ -737,87 +804,32 @@ export async function getUserTradingApi(
   // removed.
   if (!data) throw new TradovateNotConnectedError(userId, 'missing');
 
-  const resolved = resolveTradingApiUrl({
-    environment: data.environment,
-    apiHosts: data.api_hosts,
-  });
-  if (resolved.rejected) {
-    // A hostname, not a secret — see the same log on the renewal path. Through
-    // redactSecrets() anyway: the value came from outside this process, and
-    // every diagnostic in this integration goes through it.
+  // Both, by the same resolver the product path has always used — including its
+  // fallback, so a row with no api_hosts still produces two askable URLs rather
+  // than a gap the caller would have to treat as "not asked".
+  const hosts = {
+    live: resolveTradingApiUrl({ environment: 'live', apiHosts: data.api_hosts }),
+    demo: resolveTradingApiUrl({ environment: 'demo', apiHosts: data.api_hosts }),
+  };
+
+  // A hostname, not a secret — see the same log on the renewal path. Through
+  // redactSecrets() anyway: the value came from outside this process, and every
+  // diagnostic in this integration goes through it. Both keys are reported now,
+  // because both are asked: a rejected `demo` host used to be invisible here
+  // and is now a host the pull actually reads.
+  for (const environment of ['live', 'demo'] as const) {
+    const resolved = hosts[environment];
+    if (!resolved.rejected) continue;
     console.warn(
       redactSecrets(
         '[tradovate] stored api_hosts.' +
-          `${data.environment} is not a usable bare hostname (${resolved.rejected}); ` +
+          `${environment} is not a usable bare hostname (${resolved.rejected}); ` +
           `using ${resolved.url} instead`
       )
     );
   }
 
-  return {
-    accessToken: token.accessToken,
-    expiresAt: token.expiresAt,
-    tradovateUserId: token.tradovateUserId,
-    apiUrl: resolved.url,
-    environment: data.environment,
-  };
-}
-
-/**
- * TEMPORARY (diag/ref-90-hosts) — both of a connection's trading hosts.
- *
- * {@link getUserTradingApi} resolves the one host the product path uses and
- * discards the rest, which is correct for serving a request and is exactly
- * what REF-90's host probe needs to see past: the question there is whether
- * the OTHER environment's host holds the accounts we found none of. See
- * ./diag-hosts.ts for why that is the open question.
- *
- * A separate function rather than a field on {@link UserTradingApi}, so the
- * product path's shape and its single read are untouched; and here rather than
- * in ./diag-hosts.ts, because this module is the only one that reads
- * `tradovate_connections`. It hands back RESOLVED URLs rather than the raw
- * `api_hosts` object, which keeps hostname handling — the bare-hostname
- * validation and the documented fallback — in ./api-hosts.ts where the rest of
- * it lives.
- *
- * Called only when TRADOVATE_DIAG_HOSTS is set, so a production request pays
- * for neither this read nor the probe.
- *
- * READ ONLY: three columns on an indexed primary key, no write, no token.
- */
-export async function readConnectionTradingHosts(
-  userId: string,
-  options: { admin?: SupabaseClient } = {}
-): Promise<{
-  configured: TradovateEnvironment;
-  hosts: Record<TradovateEnvironment, ResolvedApiUrl>;
-}> {
-  const admin = options.admin ?? createAdminClient();
-
-  const { data, error } = await admin
-    .from('tradovate_connections')
-    .select('environment, api_hosts')
-    .eq('user_id', userId)
-    .maybeSingle<{ environment: TradovateEnvironment; api_hosts: TradovateApiHosts | null }>();
-
-  if (error) {
-    throw new TradovateTransientError(
-      `Could not read the connection's hosts for the probe (${error.code ?? 'no code'}).`,
-      { reason: 'unknown' }
-    );
-  }
-  if (!data) throw new TradovateNotConnectedError(userId, 'missing');
-
-  // Both, by the same resolver the product path uses — including its fallback,
-  // so a row with no api_hosts still produces two askable URLs rather than a
-  // gap the probe would have to report as "not asked".
-  return {
-    configured: data.environment,
-    hosts: {
-      live: resolveTradingApiUrl({ environment: 'live', apiHosts: data.api_hosts }),
-      demo: resolveTradingApiUrl({ environment: 'demo', apiHosts: data.api_hosts }),
-    },
-  };
+  return { configured: data.environment, hosts };
 }
 
 /**
