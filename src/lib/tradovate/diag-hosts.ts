@@ -47,6 +47,41 @@
  *
  * READ ONLY. Two GETs and no writes. It does not touch the OAuth URLs,
  * TRADOVATE_API_URL, or the stored row.
+ *
+ *
+ * THE SECOND QUESTION (diag/ref-90-perms, Stage 0)
+ * ------------------------------------------------
+ *
+ * The host probe answered the first one and opened a second. It came back
+ * `configured=live live: … n=0 owned=0 | demo: … n=1 owned=0`: the account is
+ * on demo, a live-minted token reads demo fine — and the account's `userId` is
+ * NOT ours, so the ownership test at ./accounts.ts:107 would drop it even once
+ * the routing is fixed. Two hypotheses survive that, and they are a small PR
+ * apart:
+ *
+ *   A  the account belongs to the firm's admin user and our trader holds a
+ *      TradingPermission on it     → ./accounts.ts gains `owned OR permitted`
+ *   B  user identity is numbered PER HOST, and /auth/me (live-only) gave us the
+ *      live id for a human whose demo id is different
+ *                                  → the stored id is the wrong key entirely,
+ *                                     and no permission join can fix it
+ *
+ * {@link probeTradingPermissions} separates them with five more integers per
+ * host: a permission of ours on demo is A, while `users=1 self=0` — a visible
+ * user registry that does not contain us — is B.
+ *
+ * It reads TWO MORE ENTITIES, AND BOTH CARRY REAL PII. `TradingPermission` has
+ * `accountHolderContact`, `accountHolderEmail`, `ctaContact` and `ctaEmail` —
+ * two names and two email addresses, required fields — and `/user/list` carries
+ * `name` and `email`. Nothing above the probe may ever see them, so the probe
+ * reads `userId`, `id` and `status` and NOTHING ELSE, and {@link PermProbeSide}
+ * is integers plus one closed union of words BY TYPE, exactly as
+ * {@link HostProbeSide} is the reason a hostname cannot be logged by accident.
+ * A `status` that is not one of the five documented words reports `other`
+ * rather than itself — an unvalidated string from this entity is precisely what
+ * must not reach a log line.
+ *
+ * Still read only. Four more GETs, no writes.
  */
 
 import type { ResolvedApiUrl } from './api-hosts';
@@ -189,4 +224,219 @@ export async function probeAccountHosts(params: {
     : NOT_ASKED;
 
   return { configured, live, demo };
+}
+
+// ── The permission probe (diag/ref-90-perms, Stage 0) ───────────────────────
+
+/** The five documented `TradingPermission.status` values. */
+const PERMISSION_STATUSES = [
+  'Accepted',
+  'Approved',
+  'Declined',
+  'Requested',
+  'Revoked',
+] as const;
+
+/**
+ * One word for the status of the permission we found, and the three ways there
+ * is no word to give:
+ *
+ * - `'-'`  no permission of ours in the list, so nothing has a status.
+ * - `'err'` the list did not answer at all.
+ * - `'other'` a 200 carrying a `status` that is not one of the five documented
+ *   words. It reports `other` and NOT the value: `/tradingPermission/list` is
+ *   unverified (the docs page 404s, see the design note §2.2), its real
+ *   response shape is therefore unknown, and an unknown string from an entity
+ *   whose other fields are two names and two email addresses is the last thing
+ *   that should be interpolated into a log line. A deliberate dead end — if
+ *   this is what the probe reports, read the status from a debugger, not here.
+ */
+export type PermStatusWord = (typeof PERMISSION_STATUSES)[number] | '-' | 'err' | 'other';
+
+/**
+ * What one host said about permissions and users. Four integers and one word,
+ * BY TYPE — there is no field here that could hold a name, an email, an
+ * account id or a hostname, which is what makes the formatter below safe to
+ * read rather than something to audit.
+ */
+export interface PermProbeSide {
+  /**
+   * Length of `/tradingPermission/list`, in the logged-on user's visible scope.
+   *
+   * -1 for a non-array 200 and for a call that failed — distinguished by
+   * `status`, which is `err` only in the second case. Both readings matter:
+   * the path is a convention rather than a documented slug, so `perms=-1
+   * status=err` is the answer "not where we guessed", and `perms=-1 status=-`
+   * is "answered, but not with a list".
+   */
+  perms: number;
+  /** How many of them have `userId === tradovate_user_id`. */
+  mine: number;
+  /** The status of the FIRST `mine` permission. {@link PermStatusWord}. */
+  status: PermStatusWord;
+  /** Length of `/user/list`. -1 for a non-array 200 or a failed call. */
+  users: number;
+  /**
+   * 1 when some entry has `id === tradovate_user_id`.
+   *
+   * The whole of hypothesis B rests on this one bit: `users>0 self=0` on demo
+   * says the host has a user registry that does not contain the id /auth/me
+   * gave us, and then no permission join can help.
+   */
+  self: 0 | 1;
+}
+
+/** What both hosts said. No `configured` — the host probe's line carries it. */
+export interface PermProbe {
+  live: PermProbeSide;
+  demo: PermProbeSide;
+}
+
+/** Neither endpoint was asked, because the host itself was absent. */
+const PERM_NOT_ASKED: PermProbeSide = { perms: -1, mine: 0, status: 'err', users: -1, self: 0 };
+
+/**
+ * One line, in the order the hypotheses are tested: how many permissions exist,
+ * how many are ours, what the first one of ours says, then the user registry.
+ *
+ * Asserted in full by scripts/tradovate-today-check.ts, like the host line.
+ */
+export function formatPermProbe(probe: PermProbe): string {
+  const side = (s: PermProbeSide): string =>
+    `perms=${s.perms} mine=${s.mine} status=${s.status} users=${s.users} self=${s.self}`;
+
+  return `live: ${side(probe.live)} | demo: ${side(probe.demo)}`;
+}
+
+/**
+ * Reduce a `/tradingPermission/list` body to two integers and one word.
+ *
+ * READS `userId` AND `status`, AND NOTHING ELSE. Not
+ * `accountHolderContact`/`accountHolderEmail`, not `ctaContact`/`ctaEmail`, not
+ * even `accountId` — which the rule in §2.3 will need and this probe does not,
+ * so it is not read.
+ *
+ * Defensive about the body for the reason the whole module is: this is an
+ * endpoint we have never successfully called, at a path taken from a naming
+ * convention. A null `tradovateUserId` counts nothing rather than guessing,
+ * the same fail-safe direction as selectTradingAccounts().
+ */
+function readPermissions(
+  body: unknown,
+  tradovateUserId: number | null
+): { perms: number; mine: number; status: PermStatusWord } {
+  if (!Array.isArray(body)) return { perms: -1, mine: 0, status: '-' };
+  if (tradovateUserId === null) return { perms: body.length, mine: 0, status: '-' };
+
+  let mine = 0;
+  let status: PermStatusWord = '-';
+
+  for (const entry of body) {
+    if (typeof entry !== 'object' || entry === null) continue;
+    const { userId, status: raw } = entry as { userId?: unknown; status?: unknown };
+    if (userId !== tradovateUserId) continue;
+
+    mine++;
+    if (mine > 1) continue;
+    status =
+      typeof raw === 'string' && (PERMISSION_STATUSES as readonly string[]).includes(raw)
+        ? (raw as PermStatusWord)
+        : 'other';
+  }
+
+  return { perms: body.length, mine, status };
+}
+
+/**
+ * Reduce a `/user/list` body to one integer and one bit.
+ *
+ * READS `id` AND NOTHING ELSE — this entity carries `name` and `email`.
+ */
+function readUsers(
+  body: unknown,
+  tradovateUserId: number | null
+): { users: number; self: 0 | 1 } {
+  if (!Array.isArray(body)) return { users: -1, self: 0 };
+  if (tradovateUserId === null) return { users: body.length, self: 0 };
+
+  let self: 0 | 1 = 0;
+  for (const entry of body) {
+    if (typeof entry !== 'object' || entry === null) continue;
+    if ((entry as { id?: unknown }).id === tradovateUserId) self = 1;
+  }
+
+  return { users: body.length, self };
+}
+
+/**
+ * Ask one host both questions.
+ *
+ * Each call is caught SEPARATELY, so a 404 on the unverified permission path
+ * does not cost us the `/user/list` answer that decides hypothesis B — the same
+ * reasoning that makes the host probe ask both hosts. The catch wraps the
+ * reduction as well as the request, so a bug in either reports `err` rather
+ * than escaping: the pull this runs after has already succeeded, and a
+ * diagnostic must not be able to turn a served response into a failure.
+ */
+async function probePermissionsOne(params: {
+  apiUrl: string;
+  tradovateUserId: number | null;
+  get: (apiUrl: string, path: string) => Promise<unknown>;
+}): Promise<PermProbeSide> {
+  const { apiUrl, tradovateUserId, get } = params;
+
+  let perms = -1;
+  let mine = 0;
+  let status: PermStatusWord = 'err';
+  try {
+    ({ perms, mine, status } = readPermissions(
+      await get(apiUrl, '/tradingPermission/list'),
+      tradovateUserId
+    ));
+  } catch {
+    // The status code is not carried: `status` is spoken for by the permission's
+    // own enum word, and one field cannot mean two things. `err` says the call
+    // did not answer, which is the reading that matters here — a 401 and a 404
+    // both mean this join is not available to us at this path.
+    perms = -1;
+    mine = 0;
+    status = 'err';
+  }
+
+  let users = -1;
+  let self: 0 | 1 = 0;
+  try {
+    ({ users, self } = readUsers(await get(apiUrl, '/user/list'), tradovateUserId));
+  } catch {
+    users = -1;
+    self = 0;
+  }
+
+  return { perms, mine, status, users, self };
+}
+
+/**
+ * Ask both hosts, sequentially, for the same reason {@link probeAccountHosts}
+ * does: Tradovate rate-limits per second as well as per hour, and this is four
+ * calls made on behalf of a user who asked for none of them. There is no
+ * deadline — the response has already been computed.
+ *
+ * CANNOT THROW. Every call and every reduction is caught in
+ * {@link probePermissionsOne}, and a failure is one word in the line.
+ */
+export async function probeTradingPermissions(params: {
+  hosts: Record<TradovateEnvironment, ResolvedApiUrl>;
+  tradovateUserId: number | null;
+  get: (apiUrl: string, path: string) => Promise<unknown>;
+}): Promise<PermProbe> {
+  const { hosts, tradovateUserId, get } = params;
+
+  const live = hosts.live
+    ? await probePermissionsOne({ apiUrl: hosts.live.url, tradovateUserId, get })
+    : PERM_NOT_ASKED;
+  const demo = hosts.demo
+    ? await probePermissionsOne({ apiUrl: hosts.demo.url, tradovateUserId, get })
+    : PERM_NOT_ASKED;
+
+  return { live, demo };
 }

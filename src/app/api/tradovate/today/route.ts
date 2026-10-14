@@ -56,7 +56,12 @@ import {
   readConnectionTradingHosts,
   type UserTradingApi,
 } from '@/lib/tradovate/connections';
-import { formatHostProbe, probeAccountHosts } from '@/lib/tradovate/diag-hosts';
+import {
+  formatHostProbe,
+  formatPermProbe,
+  probeAccountHosts,
+  probeTradingPermissions,
+} from '@/lib/tradovate/diag-hosts';
 import {
   formatDayPullCounts,
   loadBrokerDay,
@@ -131,6 +136,16 @@ function logDayPullCounts(counts: DayPullCounts): void {
  * list as the counts line: no user id, no `tradovate_user_id`, no account ids
  * or names, no P&L, no timestamps, no token. `HostProbe` is counts-only by
  * type, so there is no hostname in hand here to log by accident.
+ *
+ * THE SECOND LINE (diag/ref-90-perms, Stage 0) answers what the first one
+ * opened: the demo account's `userId` is not ours, so is it the firm admin's
+ * with a TradingPermission naming our trader, or is user identity numbered per
+ * host? See the header of lib/tradovate/diag-hosts.ts. It is four more GETs
+ * behind the same flag, and it reads two entities that carry REAL PII — two
+ * names and two email addresses on `TradingPermission`, `name` and `email` on
+ * `/user/list`. None of it is in hand here: `PermProbe` is integers and one
+ * closed union of words by type, the same discipline as `HostProbe` and the
+ * reason this function cannot leak either.
  */
 async function logHostProbe(userId: string, api: UserTradingApi): Promise<void> {
   if (process.env.TRADOVATE_DIAG_HOSTS !== '1') return;
@@ -152,6 +167,18 @@ async function logHostProbe(userId: string, api: UserTradingApi): Promise<void> 
     });
 
     console.info(redactSecrets(`[tradovate] host probe: ${formatHostProbe(probe)}`));
+
+    // After the host line, and deliberately after: this one cannot throw, so
+    // the line above is already emitted whatever happens here, and the two
+    // reads are independent findings that should not share a failure.
+    const perms = await probeTradingPermissions({
+      hosts,
+      tradovateUserId: api.tradovateUserId,
+      get: (apiUrl, path) =>
+        tradovateGet<unknown>(path, undefined, { accessToken: api.accessToken, apiUrl }),
+    });
+
+    console.info(redactSecrets(`[tradovate] perm probe: ${formatPermProbe(perms)}`));
   } catch (error) {
     // Names the exception's type and nothing else: the probe reads a row and
     // calls two hosts, and either could fail in a way whose message carries a

@@ -43,7 +43,12 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { partitionAccounts, selectTradingAccounts } from '../src/lib/tradovate/accounts';
 import type { ResolvedApiUrl } from '../src/lib/tradovate/api-hosts';
-import { formatHostProbe, probeAccountHosts } from '../src/lib/tradovate/diag-hosts';
+import {
+  formatHostProbe,
+  formatPermProbe,
+  probeAccountHosts,
+  probeTradingPermissions,
+} from '../src/lib/tradovate/diag-hosts';
 import {
   TradovateNotConnectedError,
   TradovatePenaltyError,
@@ -842,6 +847,137 @@ async function main() {
       ].filter((leak) =>
         [probeFound, probeFailed, probeNotAList].some((p) => formatHostProbe(p).includes(leak))
       ),
+      []
+    ),
+  ]);
+
+  // ── The permission probe (diag/ref-90-perms, Stage 0) ─────────────────────
+  //
+  // TEMPORARY, with the probe it covers. The host line came back `demo n=1
+  // owned=0`: the account is there and it is not ours by userId. These cases
+  // pin the second line's format for each hypothesis it has to tell apart, and
+  // the property that matters more than the format — that this probe reads two
+  // entities carrying REAL PII (two names and two email addresses on
+  // TradingPermission, name and email on /user/list) and cannot put any of it
+  // in a log line.
+
+  /**
+   * One permission, dressed in exactly the fields that must never be logged.
+   *
+   * Every one of these four is a REQUIRED field on the documented entity, so
+   * this is not a contrived fixture — it is the shape the real call returns.
+   */
+  const PERMISSION = {
+    id: 4401,
+    userId: ACCOUNT.userId,
+    accountId: ACCOUNT.id,
+    status: 'Accepted',
+    accountHolderContact: 'Yael Brandwein',
+    accountHolderEmail: 'yael.brandwein@lucidtrading.example',
+    ctaContact: 'Dov Halperin',
+    ctaEmail: 'dov.halperin@lucidtrading.example',
+  };
+
+  /** /user/list's shape: the id we read, and the two fields we must not. */
+  const USER_ROW = { id: ACCOUNT.userId, name: 'Yael Brandwein', email: 'yael.brandwein@lucidtrading.example' };
+
+  /** Hypothesis A: the firm admin owns the account, our trader is permitted. */
+  const permA = await probeTradingPermissions({
+    hosts: PROBE_HOSTS,
+    tradovateUserId: ACCOUNT.userId,
+    get: async (apiUrl, path) => {
+      // Identity is central under A, so both hosts know us; the permission
+      // lives only where the account does. The first permission in demo's list
+      // is another trader's, which is also the assertion that `mine` counts by
+      // the permission's own userId and `status` reports OUR one.
+      if (path !== '/tradingPermission/list') {
+        return [USER_ROW, { id: 999, name: 'Lucid Admin', email: 'admin@lucidtrading.example' }];
+      }
+      return apiUrl.includes('live.tradovateapi.com')
+        ? []
+        : [{ ...PERMISSION, id: 4400, userId: 999, status: 'Revoked' }, PERMISSION];
+    },
+  });
+
+  /**
+   * Hypothesis B: demo has a user registry, and we are not in it. No
+   * permission of ours anywhere, so §2.3's rule could never fire.
+   */
+  const permB = await probeTradingPermissions({
+    hosts: PROBE_HOSTS,
+    tradovateUserId: ACCOUNT.userId,
+    get: async (_apiUrl, path) =>
+      path === '/tradingPermission/list' ? [] : [{ id: 888, name: 'Other Person', email: 'other@lucidtrading.example' }],
+  });
+
+  /**
+   * The unverified path, both ways it can fail to be a list: a 404 (the slug
+   * is a naming convention, not a documented endpoint) and a 200 that is not an
+   * array. Both are perms=-1, and `status` is what separates them. /user/list
+   * answers on live and faults on demo, so one endpoint cannot hide the other.
+   *
+   * Demo's permission also carries a `status` that is not one of the five
+   * documented words — and an email, because that is the worst thing an
+   * unvalidated string from this entity could be.
+   */
+  const permUnknown = await probeTradingPermissions({
+    hosts: PROBE_HOSTS,
+    tradovateUserId: ACCOUNT.userId,
+    get: async (apiUrl, path) => {
+      const live = apiUrl.includes('live.tradovateapi.com');
+      if (path === '/tradingPermission/list') {
+        if (live) throw new TradovateRequestError('/tradingPermission/list', 404, '{"errorText":"Not found"}');
+        return [{ ...PERMISSION, status: 'ctaEmail:dov.halperin@lucidtrading.example' }];
+      }
+      if (live) return [USER_ROW];
+      throw new TypeError('socket hang up');
+    },
+  });
+
+  group('the permission probe settles A against B, and carries no PII', [
+    c(
+      'hypothesis A: a permission of ours on demo, and its status word',
+      formatPermProbe(permA),
+      'live: perms=0 mine=0 status=- users=2 self=1' +
+        ' | demo: perms=2 mine=1 status=Accepted users=2 self=1'
+    ),
+    c(
+      'hypothesis B: a user registry on demo that does not contain us',
+      formatPermProbe(permB),
+      'live: perms=0 mine=0 status=- users=1 self=0' +
+        ' | demo: perms=0 mine=0 status=- users=1 self=0'
+    ),
+    c(
+      'a 404 is status=err, an undocumented status word is other, and each endpoint fails alone',
+      formatPermProbe(permUnknown),
+      'live: perms=-1 mine=0 status=err users=1 self=1' +
+        ' | demo: perms=1 mine=1 status=other users=-1 self=0'
+    ),
+    // The privacy property, asserted rather than reviewed, and the reason this
+    // group exists: TradingPermission and /user/list are the first PII this
+    // integration reads. Two names, two email addresses, a per-organization
+    // hostname, and the response body of the 404.
+    c(
+      'no email, name, hostname, account id, permission id or response body',
+      [
+        PERMISSION.accountHolderEmail,
+        PERMISSION.ctaEmail,
+        PERMISSION.accountHolderContact,
+        PERMISSION.ctaContact,
+        'admin@lucidtrading.example',
+        'Lucid Admin',
+        'Yael',
+        'Halperin',
+        'lucidtrading.example',
+        'lucid-demo-7f3.tradovateapi.com',
+        'tradovateapi.com',
+        'https',
+        String(PERMISSION.id),
+        String(PERMISSION.accountId),
+        String(ACCOUNT.userId),
+        'errorText',
+        'Not found',
+      ].filter((leak) => [permA, permB, permUnknown].some((p) => formatPermProbe(p).includes(leak))),
       []
     ),
   ]);
