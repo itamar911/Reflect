@@ -47,13 +47,6 @@ import {
   permittedAccountIds,
   selectTradingAccounts,
 } from '../src/lib/tradovate/accounts';
-import type { ResolvedApiUrl } from '../src/lib/tradovate/api-hosts';
-import {
-  formatHostProbe,
-  formatPermProbe,
-  probeAccountHosts,
-  probeTradingPermissions,
-} from '../src/lib/tradovate/diag-hosts';
 import {
   TradovateNotConnectedError,
   TradovatePenaltyError,
@@ -62,11 +55,8 @@ import {
   TradovateUnpriceableError,
 } from '../src/lib/tradovate/errors';
 import {
-  formatBrokerDayCounts,
-  formatDayPullCounts,
   loadBrokerDay,
   type BrokerDayContext,
-  type DayPullCounts,
   type TradovateReader,
 } from '../src/lib/tradovate/fills';
 import type { TradovateEnvironment } from '../src/lib/tradovate/hosts';
@@ -178,8 +168,8 @@ const PRODUCT: TradovateProduct = { id: PRODUCT_ID, name: 'ES', currencyId: USD.
  *
  * Every one of them is a REQUIRED field on the documented entity, so a fixture
  * carrying them is not contrived — it is the shape the real call returns. Two
- * names and two email addresses, shared by the Stage 0 probe group and the
- * Stage 2 rule group so that one leak assertion covers both.
+ * names and two email addresses, so that the Stage 2 group's leak assertion
+ * has something real to look for.
  */
 const PERMISSION_PII = {
   accountHolderContact: 'Yael Brandwein',
@@ -358,48 +348,25 @@ function reader(data: Scene): TradovateReader & { calls: string[] } {
 }
 
 /**
- * The day figures alone, from ONE host.
+ * The day figures, from ONE host.
  *
- * loadBrokerDay() returns `{ day, counts }` since diag/ref-90-counts; this
- * unwraps it so every assertion written before that still reads the thing it
- * was written about. {@link pullCounts} is the other half.
- *
- * Since Stage 1 it also passes ONE reader where the signature takes a record of
- * them, which is the point: a connection with a single usable host must behave
- * exactly as the whole suite below has always asserted. Every group above the
- * Stage 1 group is therefore a regression test for the routing change, without
- * a line of it being rewritten.
+ * Passes ONE reader where the signature takes a record of them, which is the
+ * point: a connection with a single usable host must behave exactly as the
+ * whole suite below has always asserted. Every group above the Stage 1 group is
+ * therefore a regression test for the routing change, without a line of it
+ * being rewritten.
  */
-async function pull(data: Scene, dayStartMs = DAY_START): Promise<BrokerDayContext> {
-  const { day } = await loadBrokerDay({
+function pull(data: Scene, dayStartMs = DAY_START): Promise<BrokerDayContext> {
+  return loadBrokerDay({
     readers: { live: reader(data) },
     environment: 'live',
     dayStartMs,
     tradovateUserId: ACCOUNT.userId,
     now: NOW,
   });
-  return day;
 }
 
-/** The diagnostic tally alone, for the counts group. One host, so one entry. */
-async function pullCounts(
-  data: Scene,
-  tradovateUserId: number | null = ACCOUNT.userId,
-  dayStartMs = DAY_START
-): Promise<DayPullCounts> {
-  const { counts } = await loadBrokerDay({
-    readers: { live: reader(data) },
-    environment: 'live',
-    dayStartMs,
-    tradovateUserId,
-    now: NOW,
-  });
-  // The per-host breakdown, unwrapped to the single host these fixtures use, so
-  // the counts assertions stay about what emptied rather than about routing.
-  return counts.hosts.live!;
-}
-
-/** Both hosts, for the Stage 1 group. Returns the whole result. */
+/** Both hosts, for the Stage 1 group. */
 function pullHosts(params: {
   live?: Scene;
   demo?: Scene;
@@ -638,11 +605,11 @@ async function main() {
   // ── Nothing to report, which is not a failure ─────────────────────────────
 
   const noPairs = await pull(scene());
-  const { day: noAccount } = await pullHosts({
+  const noAccount = await pullHosts({
     live: scene(),
     tradovateUserId: 999, // not the account's owner
   });
-  const { day: unknownOwner } = await pullHosts({ live: scene(), tradovateUserId: null });
+  const unknownOwner = await pullHosts({ live: scene(), tradovateUserId: null });
   const otherAccountsPairs = await pull(
     withTrips(
       [roundTrip({ side: 'long', openAt: '2026-10-14T05:00:00Z', closeAt: '2026-10-14T06:00:00Z', entry: 5000, exit: 4000, positionId: 123456 })],
@@ -755,348 +722,6 @@ async function main() {
     c('a flag that is absent is not a flag that is false', selectTradingAccounts([ACCOUNT], ACCOUNT.userId).length, 1),
   ]);
 
-  // ── The counts that tell four zeros apart (diag/ref-90-counts) ────────────
-  //
-  // Each case below is one of loadBrokerDay()'s honest-zero exits. The day
-  // figures are identical in all of them — that is the bug being diagnosed —
-  // so what is asserted is that the COUNTS differ, and differ at the stage
-  // that actually emptied.
-
-  const closedToday1 = roundTrip({
-    side: 'long',
-    openAt: '2026-10-14T05:00:00Z',
-    closeAt: '2026-10-14T06:00:00Z',
-    entry: 5000,
-    exit: 4990,
-  });
-
-  // Exit 1: the account was filtered out. One account came back, none was
-  // this trader's. This is the shape the 13.10 prop-account report would show.
-  const filteredOut = await pullCounts(scene(), 999);
-
-  // The same exit, reached because the connection has no stored identity.
-  const unknownIdentity = await pullCounts(scene(), null);
-
-  // Exit 2: the account counts, but the position belongs to another one — so
-  // the pair has no link to it. `mine` is 1 here, which is what separates this
-  // from the case above.
-  const noPositionOfMine = await pullCounts(
-    withTrips([closedToday1], { positions: [{ ...POSITION, accountId: 8002 }] })
-  );
-
-  // A full day: every stage populated, nothing dropped.
-  const fullDay = await pullCounts(withTrips([closedToday1]));
-
-  group('the counts tell the four zeros apart', [
-    // Exit 1 — and the filter breakdown names the reason.
-    c('filtered-out account: one seen, none mine', [filteredOut.accounts, filteredOut.mine], [1, 0]),
-    c('and the reason is ownership', filteredOut.filter.noOwner, 1),
-    c('counted once, under the first reason only', filteredOut.filter, {
-      total: 1,
-      noOwner: 1,
-      // The permission list was asked for — this account failed on ownership
-      // alone — and it 404'd, so there is no permission evidence and the reason
-      // stays the one it was before Stage 2. See the Stage 2 group below.
-      noPermission: 0,
-      notCustomer: 0,
-      closed: 0,
-      restricted: 0,
-      readonly: 0,
-      futuresDisabled: 0,
-      inactive: 0,
-      permitted: 0,
-    }),
-    c(
-      'the stages after it were never reached, so they are zero',
-      [filteredOut.positions, filteredOut.pairs, filteredOut.trades, filteredOut.todays],
-      [0, 0, 0, 0]
-    ),
-
-    // Exit 1 again, by the other route into it: a connection stored before
-    // /auth/me was recorded, so ownership cannot be checked at all. It has to
-    // read as an ownership failure and not as some other flag, because it is
-    // one of the live candidates for the 13.10 report and the log line is what
-    // would name it.
-    c('null identity: ownership is the reason, for every account', [unknownIdentity.mine, unknownIdentity.filter.noOwner], [0, 1]),
-    c('and it is not attributed to any other flag', unknownIdentity.filter.inactive + unknownIdentity.filter.notCustomer, 0),
-
-    // Exit 2 — distinguishable from exit 1 precisely because mine is 1.
-    c('position of another account: mine is 1, minePositions is 0', [noPositionOfMine.mine, noPositionOfMine.minePositions], [1, 0]),
-    c('so the pair stage was never reached', [noPositionOfMine.pairs, noPositionOfMine.minePairs], [0, 0]),
-    c('and no account was dropped', noPositionOfMine.filter.noOwner, 0),
-
-    // A closed pair that did land in the day — the control for all of the above.
-    c('closed pair today: one trade, one of them today', [fullDay.trades, fullDay.todays], [1, 1]),
-    c('every stage populated', [fullDay.accounts, fullDay.mine, fullDay.minePositions, fullDay.minePairs], [1, 1, 1, 1]),
-    c('and it is the same trade the day figures counted', (await pull(withTrips([closedToday1]))).closedCount, fullDay.todays),
-
-    // The whole-partition property, on the mixed bag from the group above.
-    c(
-      'the filter breakdown accounts for every row it was given',
-      (() => {
-        const f = partitionAccounts(candidates, ACCOUNT.userId).counts;
-        const dropped =
-          f.noOwner + f.noPermission + f.notCustomer + f.closed + f.restricted + f.readonly + f.futuresDisabled + f.inactive;
-        return dropped + selectTradingAccounts(candidates, ACCOUNT.userId).length === f.total;
-      })(),
-      true
-    ),
-  ]);
-
-  // The log line itself. The route decides whether to emit it and runs it
-  // through redactSecrets(); the text is this, and it is asserted in full
-  // because a format string is wrong silently or not at all.
-  group('the diagnostic line says counts and nothing else', [
-    c(
-      'the exact format, for the filtered-out account',
-      formatDayPullCounts(filteredOut),
-      'accounts=1 mine=0 positions=0 minePositions=0 pairs=0 minePairs=0 trades=0 todays=0' +
-        ' | filter: total=1 noOwner=1 noPermission=0 notCustomer=0 closed=0 restricted=0' +
-        ' readonly=0 futuresDisabled=0 inactive=0 permitted=0'
-    ),
-    c(
-      'and for a day that had a trade in it',
-      formatDayPullCounts(fullDay),
-      'accounts=1 mine=1 positions=1 minePositions=1 pairs=1 minePairs=1 trades=1 todays=1' +
-        ' | filter: total=1 noOwner=0 noPermission=0 notCustomer=0 closed=0 restricted=0' +
-        ' readonly=0 futuresDisabled=0 inactive=0 permitted=0'
-    ),
-    // The privacy property, asserted rather than reviewed. Every number the
-    // line carries is a count, so nothing that identifies a person or a
-    // position can appear in it — these are the values that WOULD identify
-    // one, drawn from the fixtures the counts were computed from.
-    c(
-      'no account id, contract id, symbol, price or timestamp',
-      [
-        String(ACCOUNT.id),
-        String(ACCOUNT.userId),
-        String(CONTRACT_ID),
-        CONTRACT.name,
-        String(POSITION.id),
-        '5000',
-        '4990',
-        '2026-10-14',
-      ].filter((leak) => formatDayPullCounts(fullDay).includes(leak)),
-      []
-    ),
-  ]);
-
-  // ── The host probe (diag/ref-90-hosts) ────────────────────────────────────
-  //
-  // TEMPORARY, with the probe it covers. `accounts=0 … filter: total=0` proved
-  // the account list came back empty rather than filtered, so the remaining
-  // question is which host was asked — see lib/tradovate/diag-hosts.ts. These
-  // cases pin the line's format and the one property that matters more than the
-  // format: that a hostname cannot reach the log, because apiHosts.demo varies
-  // by organization and would name the prop firm.
-
-  /** A per-organization demo host, the kind that must never be logged. */
-  const PROBE_HOSTS: Record<TradovateEnvironment, ResolvedApiUrl> = {
-    live: { url: 'https://live.tradovateapi.com/v1', source: 'fallback' },
-    demo: { url: 'https://lucid-demo-7f3.tradovateapi.com/v1', source: 'stored' },
-  };
-
-  /** The shape REF-90 predicts: nothing on live, the trader's account on demo. */
-  const probeFound = await probeAccountHosts({
-    configured: 'live',
-    hosts: PROBE_HOSTS,
-    tradovateUserId: ACCOUNT.userId,
-    get: async (apiUrl) =>
-      apiUrl.includes('live.tradovateapi.com')
-        ? []
-        : [ACCOUNT, { ...ACCOUNT, id: 7002, name: 'FIRM7002', userId: 999 }],
-  });
-
-  /** Each host failing differently, to prove neither answer hides the other. */
-  const probeFailed = await probeAccountHosts({
-    configured: 'live',
-    hosts: PROBE_HOSTS,
-    tradovateUserId: ACCOUNT.userId,
-    get: async (apiUrl) => {
-      if (apiUrl.includes('live.tradovateapi.com')) throw new TypeError('socket hang up');
-      throw new TradovateRequestError('/account/list', 401, '{"errorText":"Access token is expired"}');
-    },
-  });
-
-  /** A 200 that is not a list at all — the body REF-90 §1 had to deduce. */
-  const probeNotAList = await probeAccountHosts({
-    configured: 'demo',
-    hosts: PROBE_HOSTS,
-    tradovateUserId: null,
-    get: async () => ({ errorText: 'something' }),
-  });
-
-  group('the host probe reports counts and never a hostname', [
-    c(
-      'the line REF-90 is waiting for: empty on live, the account on demo',
-      formatHostProbe(probeFound),
-      'configured=live live: source=fallback status=200 n=0 owned=0' +
-        ' | demo: source=stored status=200 n=2 owned=1'
-    ),
-    c(
-      'a 401 on one host and a thrown fault on the other, both reported',
-      formatHostProbe(probeFailed),
-      'configured=live live: source=fallback status=err n=0 owned=0' +
-        ' | demo: source=stored status=401 n=0 owned=0'
-    ),
-    c(
-      'a non-array 200 is n=-1, not an empty list, and a null identity owns nothing',
-      formatHostProbe(probeNotAList),
-      'configured=demo live: source=fallback status=200 n=-1 owned=0' +
-        ' | demo: source=stored status=200 n=-1 owned=0'
-    ),
-    // The privacy property, asserted rather than reviewed — the hostname first,
-    // because it is the field this diagnostic holds and the counts one did not.
-    c(
-      'no hostname, account id, account name, userId or response body',
-      [
-        'lucid-demo-7f3.tradovateapi.com',
-        'lucid',
-        'tradovateapi.com',
-        'https',
-        String(ACCOUNT.id),
-        String(ACCOUNT.userId),
-        ACCOUNT.name,
-        'FIRM7002',
-        '999',
-        'errorText',
-        'Access token is expired',
-      ].filter((leak) =>
-        [probeFound, probeFailed, probeNotAList].some((p) => formatHostProbe(p).includes(leak))
-      ),
-      []
-    ),
-  ]);
-
-  // ── The permission probe (diag/ref-90-perms, Stage 0) ─────────────────────
-  //
-  // TEMPORARY, with the probe it covers. The host line came back `demo n=1
-  // owned=0`: the account is there and it is not ours by userId. These cases
-  // pin the second line's format for each hypothesis it has to tell apart, and
-  // the property that matters more than the format — that this probe reads two
-  // entities carrying REAL PII (two names and two email addresses on
-  // TradingPermission, name and email on /user/list) and cannot put any of it
-  // in a log line.
-
-  /**
-   * One permission, dressed in exactly the fields that must never be logged.
-   *
-   * Not annotated, so the undocumented-`status` case below can hand this probe
-   * a string that the real entity's enum would reject — which is the point of
-   * that case. {@link PERMISSION_PII} is shared with the Stage 2 group.
-   */
-  const PERMISSION = {
-    id: PERMISSION_ID,
-    userId: ACCOUNT.userId,
-    accountId: ACCOUNT.id,
-    status: 'Accepted',
-    ...PERMISSION_PII,
-  };
-
-  /** /user/list's shape: the id we read, and the two fields we must not. */
-  const USER_ROW = { id: ACCOUNT.userId, name: 'Yael Brandwein', email: 'yael.brandwein@lucidtrading.example' };
-
-  /** Hypothesis A: the firm admin owns the account, our trader is permitted. */
-  const permA = await probeTradingPermissions({
-    hosts: PROBE_HOSTS,
-    tradovateUserId: ACCOUNT.userId,
-    get: async (apiUrl, path) => {
-      // Identity is central under A, so both hosts know us; the permission
-      // lives only where the account does. The first permission in demo's list
-      // is another trader's, which is also the assertion that `mine` counts by
-      // the permission's own userId and `status` reports OUR one.
-      if (path !== '/tradingPermission/list') {
-        return [USER_ROW, { id: 999, name: 'Lucid Admin', email: 'admin@lucidtrading.example' }];
-      }
-      return apiUrl.includes('live.tradovateapi.com')
-        ? []
-        : [{ ...PERMISSION, id: 4400, userId: 999, status: 'Revoked' }, PERMISSION];
-    },
-  });
-
-  /**
-   * Hypothesis B: demo has a user registry, and we are not in it. No
-   * permission of ours anywhere, so §2.3's rule could never fire.
-   */
-  const permB = await probeTradingPermissions({
-    hosts: PROBE_HOSTS,
-    tradovateUserId: ACCOUNT.userId,
-    get: async (_apiUrl, path) =>
-      path === '/tradingPermission/list' ? [] : [{ id: 888, name: 'Other Person', email: 'other@lucidtrading.example' }],
-  });
-
-  /**
-   * The unverified path, both ways it can fail to be a list: a 404 (the slug
-   * is a naming convention, not a documented endpoint) and a 200 that is not an
-   * array. Both are perms=-1, and `status` is what separates them. /user/list
-   * answers on live and faults on demo, so one endpoint cannot hide the other.
-   *
-   * Demo's permission also carries a `status` that is not one of the five
-   * documented words — and an email, because that is the worst thing an
-   * unvalidated string from this entity could be.
-   */
-  const permUnknown = await probeTradingPermissions({
-    hosts: PROBE_HOSTS,
-    tradovateUserId: ACCOUNT.userId,
-    get: async (apiUrl, path) => {
-      const live = apiUrl.includes('live.tradovateapi.com');
-      if (path === '/tradingPermission/list') {
-        if (live) throw new TradovateRequestError('/tradingPermission/list', 404, '{"errorText":"Not found"}');
-        return [{ ...PERMISSION, status: 'ctaEmail:dov.halperin@lucidtrading.example' }];
-      }
-      if (live) return [USER_ROW];
-      throw new TypeError('socket hang up');
-    },
-  });
-
-  group('the permission probe settles A against B, and carries no PII', [
-    c(
-      'hypothesis A: a permission of ours on demo, and its status word',
-      formatPermProbe(permA),
-      'live: perms=0 mine=0 status=- users=2 self=1' +
-        ' | demo: perms=2 mine=1 status=Accepted users=2 self=1'
-    ),
-    c(
-      'hypothesis B: a user registry on demo that does not contain us',
-      formatPermProbe(permB),
-      'live: perms=0 mine=0 status=- users=1 self=0' +
-        ' | demo: perms=0 mine=0 status=- users=1 self=0'
-    ),
-    c(
-      'a 404 is status=err, an undocumented status word is other, and each endpoint fails alone',
-      formatPermProbe(permUnknown),
-      'live: perms=-1 mine=0 status=err users=1 self=1' +
-        ' | demo: perms=1 mine=1 status=other users=-1 self=0'
-    ),
-    // The privacy property, asserted rather than reviewed, and the reason this
-    // group exists: TradingPermission and /user/list are the first PII this
-    // integration reads. Two names, two email addresses, a per-organization
-    // hostname, and the response body of the 404.
-    c(
-      'no email, name, hostname, account id, permission id or response body',
-      [
-        PERMISSION.accountHolderEmail,
-        PERMISSION.ctaEmail,
-        PERMISSION.accountHolderContact,
-        PERMISSION.ctaContact,
-        'admin@lucidtrading.example',
-        'Lucid Admin',
-        'Yael',
-        'Halperin',
-        'lucidtrading.example',
-        'lucid-demo-7f3.tradovateapi.com',
-        'tradovateapi.com',
-        'https',
-        String(PERMISSION.id),
-        String(PERMISSION.accountId),
-        String(ACCOUNT.userId),
-        'errorText',
-        'Not found',
-      ].filter((leak) => [permA, permB, permUnknown].some((p) => formatPermProbe(p).includes(leak))),
-      []
-    ),
-  ]);
-
   // ── Stage 1: routing by purpose ───────────────────────────────────────────
   //
   // Measured in production on 14.10: live held nothing, demo held the account.
@@ -1107,6 +732,15 @@ async function main() {
   // The sharpest cases here are the two about id spaces (§1.2): nothing
   // documents whether live and demo share them, so the design must be correct
   // either way, and these are that requirement in executable form.
+
+  /** One −$500 close on the trader's own account. The mint host's fixture. */
+  const closedToday1 = roundTrip({
+    side: 'long',
+    openAt: '2026-10-14T05:00:00Z',
+    closeAt: '2026-10-14T06:00:00Z',
+    entry: 5000,
+    exit: 4990,
+  });
 
   /** A second eligible account, for the host that is not the mint host. */
   const DEMO_ACCOUNT: TradovateAccount = { ...ACCOUNT, id: 7002, name: 'DEMO7002' };
@@ -1141,8 +775,8 @@ async function main() {
   const demoOwned = await pullHosts({ live: scene({ accounts: [] }), demo: demoScene });
   const demoLucid = await pullHosts({
     live: scene({ accounts: [] }),
-    // The row as production actually reports it: the account is on demo and its
-    // userId is the firm admin's, not ours (host probe `demo n=1 owned=0`).
+    // The row as production actually reports it: the account is on demo and
+    // its userId is the firm admin's, not ours.
     demo: withTrips([demoWin], {
       accounts: [{ ...DEMO_ACCOUNT, userId: 999 }],
       positions: [{ ...POSITION, accountId: DEMO_ACCOUNT.id }],
@@ -1291,22 +925,9 @@ async function main() {
     })
   );
 
-  // (9) Privacy, with a plausible per-organization hostname in BOTH fixtures —
-  // as an account NAME, which is where one would actually reach the counts
-  // line, since a prop account's name can name the firm.
-  const HOSTNAME_LIVE = 'live.tradovateapi.com';
-  const HOSTNAME_DEMO = 'lucid-demo-7f3.tradovateapi.com';
-  const named = await pullHosts({
-    live: withTrips([closedToday1], { accounts: [{ ...ACCOUNT, name: HOSTNAME_LIVE }] }),
-    demo: withTrips([demoWin], {
-      accounts: [{ ...DEMO_ACCOUNT, name: HOSTNAME_DEMO }],
-      positions: [{ ...POSITION, accountId: DEMO_ACCOUNT.id }],
-    }),
-  });
-
   group('trading reads are routed by purpose, not by the mint environment', [
     // (1)
-    c('live holds the account, demo empty: byte-identical to today', liveOnly.day, await pull(withTrips([closedToday1]))),
+    c('live holds the account, demo empty: byte-identical to today', liveOnly, await pull(withTrips([closedToday1]))),
     c(
       "and (a′)'s whole cost is one /account/list on the other host",
       liveOnlyDemo.calls,
@@ -1316,47 +937,53 @@ async function main() {
     // (2)
     c(
       'demo holds the account: a non-zero day, which is the routing fix',
-      [demoOwned.day.closedCount, demoOwned.day.net],
+      [demoOwned.closedCount, demoOwned.net],
       [1, 1000]
     ),
     c(
-      "REF-90's actual row is still dropped, because ownership is Stage 2's job",
-      [demoLucid.day.closedCount, demoLucid.day.net, demoLucid.counts.hosts.demo?.filter.noOwner],
-      [0, 0, 1]
+      "REF-90's actual row is still dropped without a permission naming us",
+      [demoLucid.closedCount, demoLucid.net],
+      [0, 0]
+    ),
+    c(
+      'and the reason is ownership, which is what Stage 2 then answers',
+      partitionAccounts([{ ...DEMO_ACCOUNT, userId: 999 }], ACCOUNT.userId).counts.noOwner,
+      1
     ),
 
     // (3)
     c(
       'both hosts hold accounts: the day is the sum',
-      [bothHosts.day.closedCount, bothHosts.day.net, bothHosts.day.lost, bothHosts.day.losingCount],
+      [bothHosts.closedCount, bothHosts.net, bothHosts.lost, bothHosts.losingCount],
       [2, -500 + 1000, 500, 1]
     ),
 
     // (4) The sharpest two assertions in the file.
     c(
       'colliding fill ids are not welded into one trade',
-      colliding.day.closedCount,
+      colliding.closedCount,
       2
     ),
     c(
       "and one host's valuePerPoint never prices the other host's contract",
-      [colliding.day.net, colliding.day.lost],
+      [colliding.net, colliding.lost],
       [500 - 20, 20]
     ),
 
     // (5)
     c(
       'the streak is interleaved by close time across hosts, not per host',
-      streakAcross.day.lossStreak,
+      streakAcross.lossStreak,
       1
     ),
-    c('and the day still counts all three closes', streakAcross.day.closedCount, 3),
+    c('and the day still counts all three closes', streakAcross.closedCount, 3),
 
-    // (6)
+    // (6) The dedupe is visible in the day itself: doubled, this would read two
+    // closes and −$1,000.
     c(
       'the same accountId on both hosts is counted once, not doubled',
-      [dedupe.day.closedCount, dedupe.day.net, dedupe.counts.duplicateAccounts],
-      [1, -500, 1]
+      [dedupe.closedCount, dedupe.net],
+      [1, -500]
     ),
     c(
       'and the host that lost the collision is not asked for positions',
@@ -1367,55 +994,22 @@ async function main() {
     // (7)
     c(
       'discovery failing on the non-mint host drops it and the pull succeeds',
-      [demoRefused.day.closedCount, demoRefused.day.net, demoRefused.counts.dropped],
-      [1, -500, 1]
+      [demoRefused.closedCount, demoRefused.net],
+      [1, -500]
     ),
-    c('the dropped host has no counts entry at all', demoRefused.counts.hosts.demo, undefined),
 
     // (8)
     c('a failure on a host that held accounts fails the whole pull', demoHadAccounts, 'broker_unavailable'),
     c('and discovery failing on the mint host still fails it', mintDiscoveryFailed, 'broker_unavailable'),
-
-    // (9)
-    c(
-      'the per-host counts line carries no hostname, account name, id or price',
-      [
-        HOSTNAME_LIVE,
-        HOSTNAME_DEMO,
-        'lucid',
-        'tradovateapi.com',
-        'https',
-        String(ACCOUNT.id),
-        String(DEMO_ACCOUNT.id),
-        String(ACCOUNT.userId),
-        'DEMO7002',
-        '5000',
-        '4990',
-        '2026-10-14',
-      ].filter((leak) => formatBrokerDayCounts(named.counts).includes(leak)),
-      []
-    ),
-    c(
-      'and it says which host answered, which is an enum word and not a host',
-      formatBrokerDayCounts(named.counts),
-      'hosts=2 dropped=0 duplicates=0' +
-        ' | live: accounts=1 mine=1 positions=1 minePositions=1 pairs=1 minePairs=1 trades=1 todays=1' +
-        ' | filter: total=1 noOwner=0 noPermission=0 notCustomer=0 closed=0 restricted=0' +
-        ' readonly=0 futuresDisabled=0 inactive=0 permitted=0' +
-        ' | demo: accounts=1 mine=1 positions=1 minePositions=1 pairs=1 minePairs=1 trades=1 todays=1' +
-        ' | filter: total=1 noOwner=0 noPermission=0 notCustomer=0 closed=0 restricted=0' +
-        ' readonly=0 futuresDisabled=0 inactive=0 permitted=0'
-    ),
   ]);
 
   // ── Stage 2: owned OR permitted ───────────────────────────────────────────
   //
   // Measured in production on 14.10, after Stage 1's routing question was
-  // settled: `demo perms=1 mine=1 status=Approved, self=1 on both hosts`. The
-  // account the trader actually trades is owned by the firm's admin user and
-  // our trader holds a TradingPermission on it, so ownership alone drops it —
-  // which is the second of REF-90's two stacked bugs and the one that decides
-  // what counts against a limit.
+  // settled: the account the trader actually trades is owned by the firm's
+  // admin user and our trader holds a TradingPermission on it with status
+  // `Approved`, so ownership alone drops it — which is the second of REF-90's
+  // two stacked bugs and the one that decides what counts against a limit.
   //
   // THE TWO CASES THAT MATTER MOST HERE ARE THE REFUSALS, not the acceptance.
   // A rule that accepts too much blocks a trader over money they did not lose,
@@ -1447,9 +1041,24 @@ async function main() {
   const grant = (status: TradovateTradingPermission['status']) =>
     permission({ accountId: FIRM_ACCOUNT.id, status });
 
+  /**
+   * The same verdict the pull reaches, restated at the level the rule lives on.
+   *
+   * `discoverHostAccounts()` composes exactly these two functions in exactly
+   * this order, so this is the pull's own claim decision on FIRM_ACCOUNT — and
+   * unlike the day figures it says WHY an account was dropped, which is what
+   * separates "we read the list and you hold no permission" from "there was no
+   * list to read". Both drop the account; only one of them is evidence.
+   */
+  const firmClaim = (permissions: PermissionRow[] | null) =>
+    partitionAccounts(
+      [FIRM_ACCOUNT],
+      ACCOUNT.userId,
+      permissions === null ? null : permittedAccountIds(permissions, ACCOUNT.userId)
+    ).counts;
+
   /** THE ROW. Owned by another userId, permitted to ours, status Approved. */
   const approved = await firmPull([grant('Approved')]);
-  const liveFilter = (r: typeof approved) => r.counts.hosts.live!.filter;
 
   const accepted = await firmPull([grant('Accepted')]);
   const requested = await firmPull([grant('Requested')]);
@@ -1561,12 +1170,12 @@ async function main() {
     // THE REF-90 ROW, which is what this whole stage is for.
     c(
       'owned by the firm admin, Approved for our trader: counted',
-      [approved.day.closedCount, approved.day.net],
+      [approved.closedCount, approved.net],
       [1, 1000]
     ),
     c(
-      'and the counts say it got in on a permission, not on ownership',
-      liveFilter(approved),
+      'and it got in on a permission, not on ownership',
+      firmClaim([grant('Approved')]),
       {
         total: 1,
         noOwner: 0,
@@ -1580,51 +1189,56 @@ async function main() {
         permitted: 1,
       }
     ),
-    c('Accepted counts too', accepted.day.closedCount, 1),
+    c('Accepted counts too', accepted.closedCount, 1),
     c(
       'and the whole of REF-90: minted on live, held on demo, permitted to us',
-      [
-        refNinety.day.closedCount,
-        refNinety.day.net,
-        refNinety.counts.hosts.demo!.filter.permitted,
-        refNinety.counts.hosts.live!.accounts,
-      ],
-      [1, 1000, 1, 0]
+      [refNinety.closedCount, refNinety.net],
+      [1, 1000]
     ),
 
     // The three statuses that must not count. One case each, because "only
     // Accepted and Approved" is a claim about four other words.
     c(
       'Requested is a pending offer, not an arrangement',
-      [requested.day.closedCount, liveFilter(requested).noPermission],
+      [requested.closedCount, firmClaim([grant('Requested')]).noPermission],
       [0, 1]
     ),
     c(
       'Declined does not count',
-      [declined.day.closedCount, liveFilter(declined).noPermission],
+      [declined.closedCount, firmClaim([grant('Declined')]).noPermission],
       [0, 1]
     ),
     c(
       'Revoked does not count',
-      [revoked.day.closedCount, liveFilter(revoked).noPermission],
+      [revoked.closedCount, firmClaim([grant('Revoked')]).noPermission],
       [0, 1]
     ),
 
     // The leak the rule is keyed to prevent: the permission's OWN userId.
     c(
       "another trader's Approved permission on the same account does not count",
-      [otherTraders.day.closedCount, otherTraders.day.net, liveFilter(otherTraders).noPermission],
+      [
+        otherTraders.closedCount,
+        otherTraders.net,
+        firmClaim([
+          permission({ userId: ADMIN_USER_ID, accountId: FIRM_ACCOUNT.id, status: 'Approved' }),
+          permission({ userId: 888, accountId: FIRM_ACCOUNT.id, status: 'Approved' }),
+        ]).noPermission,
+      ],
       [0, 0, 1]
     ),
     c(
       'our permission on a different account does not count',
-      [otherAccount.day.closedCount, liveFilter(otherAccount).noPermission],
+      [
+        otherAccount.closedCount,
+        firmClaim([permission({ accountId: ACCOUNT.id, status: 'Approved' })]).noPermission,
+      ],
       [0, 1]
     ),
     c(
       "the other host's permission does not reach this host's account",
-      [permOtherHost.day.closedCount, permOtherHost.counts.hosts.live!.filter.noPermission],
-      [0, 1]
+      permOtherHost.closedCount,
+      0
     ),
     c(
       'and a host with no account of ours is never asked for its permissions',
@@ -1632,24 +1246,23 @@ async function main() {
       ['/account/list']
     ),
 
-    // The fail-safe. Under-count, never over-count.
+    // The fail-safe. Under-count, never over-count. An unreadable list and an
+    // empty one are both refusals, and the reason distinguishes them: no
+    // evidence to consult is `noOwner`, a list that does not name us is
+    // `noPermission`.
     c(
       'a 404 on the list is the owned-only rule',
-      [list404.day.closedCount, liveFilter(list404).noOwner, liveFilter(list404).noPermission],
+      [list404.closedCount, firmClaim(null).noOwner, firmClaim(null).noPermission],
       [0, 1, 0]
     ),
     c(
       'so is a 401, even with a grant sitting in the response behind it',
-      [
-        list401.day.closedCount,
-        list401.counts.hosts.live!.filter.noOwner,
-        list401.counts.hosts.live!.filter.permitted,
-      ],
-      [0, 1, 0]
+      list401.closedCount,
+      0
     ),
     c(
       'an empty list is read, and says this trader holds no permission',
-      [listEmpty.day.closedCount, liveFilter(listEmpty).noOwner, liveFilter(listEmpty).noPermission],
+      [listEmpty.closedCount, firmClaim([]).noOwner, firmClaim([]).noPermission],
       [0, 0, 1]
     ),
     c('a body that is not a list is no evidence at all', permittedAccountIds({ errorText: 'x' }, ACCOUNT.userId), null),
@@ -1679,12 +1292,17 @@ async function main() {
     c(
       'a permitted account that is closed lands in closed, not in the day',
       [
-        permittedAndClosed.day.closedCount,
-        permittedAndClosed.counts.hosts.live!.mine,
-        permittedAndClosed.counts.hosts.live!.filter.closed,
-        permittedAndClosed.counts.hosts.live!.filter.permitted,
+        permittedAndClosed.closedCount,
+        (() => {
+          const f = partitionAccounts(
+            [FIRM_ACCOUNT, PERMITTED_CLOSED],
+            ACCOUNT.userId,
+            new Set([FIRM_ACCOUNT.id, PERMITTED_CLOSED.id])
+          );
+          return [f.accepted.length, f.counts.closed, f.counts.permitted];
+        })(),
       ],
-      [1, 1, 1, 1]
+      [1, [1, 1, 1]]
     ),
 
     // The cost. A normal trader pays nothing for any of the above.
@@ -1738,10 +1356,13 @@ async function main() {
     // The privacy property, and the reason this group needed a fixture with PII
     // in it rather than a tidy one. `TradingPermission` is the first entity in
     // this integration that carries a person's name and email address, both as
-    // REQUIRED fields, and the pull reads a list of them on the path that logs
-    // a counts line.
+    // REQUIRED fields, and the pull reads a list of them.
+    //
+    // Asserted against what the pull RETURNS, which is also what the route
+    // sends to the browser: six numbers and a timestamp. The fixture figures
+    // are chosen so that no amount could coincide with an id either.
     c(
-      'not one field of the permission entity reaches a formatted line',
+      'not one field of the permission entity reaches the answer',
       [
         PERMISSION_PII.accountHolderEmail,
         PERMISSION_PII.ctaEmail,
@@ -1759,10 +1380,8 @@ async function main() {
         // carried out of the reader at all.
         'Approved',
       ].filter((leak) =>
-        [approved, otherTraders, permittedAndClosed].some(
-          (r) =>
-            formatBrokerDayCounts(r.counts).includes(leak) ||
-            formatDayPullCounts(r.counts.hosts.live!).includes(leak)
+        [approved, otherTraders, permittedAndClosed].some((day) =>
+          JSON.stringify(day).includes(leak)
         )
       ),
       []

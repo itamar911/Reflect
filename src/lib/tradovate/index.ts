@@ -100,13 +100,7 @@ export type {
 // than authenticating. Driven by src/app/api/tradovate/today/route.ts; see
 // src/lib/rules/brokerDayContext.ts for how its answer reaches the rules.
 export { loadBrokerDay } from './fills';
-export type {
-  BrokerDayContext,
-  BrokerDayRequest,
-  BrokerDayResult,
-  DayPullCounts,
-  TradovateReader,
-} from './fills';
+export type { BrokerDayContext, BrokerDayRequest, TradovateReader } from './fills';
 
 // Owned OR permitted (REF-90 Stage 2). `permittedAccountIds` is the only thing
 // that reads the TradingPermission entity, and a set of ids is all it returns —

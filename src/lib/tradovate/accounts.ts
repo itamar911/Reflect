@@ -100,9 +100,7 @@
  * and that is enforced by shape rather than by discipline: the only thing that
  * leaves {@link permittedAccountIds} is a `Set<number>` of account ids, which
  * cannot hold a name or an email address. ./types.ts does not even declare the
- * four fields, so nothing above it can reach one by autocomplete. Same
- * discipline as `HostProbe` in ./diag-hosts.ts being the reason a hostname
- * cannot be logged by accident.
+ * four fields, so nothing above it can reach one by autocomplete.
  */
 
 import type { TradovateAccount, TradovateTradingPermission } from './types';
@@ -130,10 +128,9 @@ const ACCEPTED_PERMISSION_STATUSES: readonly TradovateTradingPermission['status'
  * this account this trader's", and which one is reported says what was known
  * when it was asked: `noPermission` means the permission list was read and does
  * not name this trader on this account, `noOwner` means there was no permission
- * evidence to consult at all. Behaviour is identical — both are dropped — but a
- * log line that cannot tell "we asked and you have no permission" from "we
- * could not ask" is the kind of line that made this ticket take three
- * measurements.
+ * evidence to consult at all. Behaviour is identical — both are dropped — but
+ * conflating "we asked and you have no permission" with "we could not ask" is
+ * what made this ticket take three measurements, so the two stay separate.
  */
 type AccountRejection =
   | 'noOwner'
@@ -148,24 +145,25 @@ type AccountRejection =
 /**
  * How many accounts the filter saw, and why each one that fell out did.
  *
- * DIAGNOSTIC ONLY (diag/ref-90-counts). Nothing in the product branches on
- * this; it exists because a filtered-out account and a day with no trades are
- * indistinguishable from outside — both are an honest zero carried all the way
- * to `broker_verified` — and a trader whose only account is a prop firm's would
- * see the second message for the first cause.
+ * NOTHING IN THE PRODUCT BRANCHES ON THIS. It travels no further than
+ * {@link partitionAccounts}'s return value — the day pull takes `accepted` and
+ * discards it — and it is here because the day figures cannot say WHY they are
+ * zero: a filtered-out account and a day with no trades are the same honest
+ * zero from outside. That makes it the shape the suite asserts the rule
+ * against, which is its only remaining caller.
  *
  * EACH ACCOUNT IS COUNTED ONCE, under the FIRST reason it failed. So
  * `noOwner + noPermission + notCustomer + … + inactive + accepted === total`,
- * exactly, and the line can be read as a partition rather than as overlapping
+ * exactly, and it can be read as a partition rather than as overlapping
  * tallies. An account that is both `closed` and `readonly` lands in `closed`
  * because that is tested first; the counts answer "where did they go", not "how
  * many flags does each one carry".
  *
  * `permitted` is the one field here that is not a rejection — it is how many of
  * the ACCEPTED got in on a permission rather than on ownership, and so it is
- * not part of the sum above. It exists because `mine=1` alone cannot say
- * whether Stage 2 is doing anything: on the connection this was built for it
- * should read `mine=1 permitted=1`, and on every ordinary trader `permitted=0`.
+ * not part of the sum above. It exists because the accepted count alone cannot
+ * say whether the owned-OR-permitted rule is doing anything: on the connection
+ * this was built for it reads 1, and on every ordinary trader 0.
  */
 export interface AccountFilterCounts {
   total: number;
@@ -231,9 +229,9 @@ function untradeable(account: TradovateAccount): AccountRejection | null {
  * type — see the PII note in this module's header. A `Set<number>` is the
  * narrowest thing that can carry the answer.
  *
- * Defensive about the body in the same way ./diag-hosts.ts is, and for a
- * stronger reason: this is the input that can make an account COUNT, so every
- * uncertainty resolves towards "not permitted". A row whose `userId` is not
+ * Defensive about the body at every step, and for a strong reason: this is the
+ * input that can make an account COUNT, so every uncertainty resolves towards
+ * "not permitted". A row whose `userId` is not
  * exactly ours, whose `accountId` is not a number, or whose `status` is not one
  * of the two accepted words contributes nothing. A body that is not an array
  * answers null — "no evidence" — which is the owned-only rule, and so does a

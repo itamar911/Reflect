@@ -76,12 +76,7 @@
 
 import { TradovateUnpriceableError } from './errors';
 import { closedToday, minutesSince } from './trading-day';
-import {
-  partitionAccounts,
-  permissionsCouldHelp,
-  permittedAccountIds,
-  type AccountFilterCounts,
-} from './accounts';
+import { partitionAccounts, permissionsCouldHelp, permittedAccountIds } from './accounts';
 import type { TradovateEnvironment } from './hosts';
 import type {
   TradovateAccount,
@@ -138,99 +133,6 @@ export interface BrokerDayContext {
 }
 
 /**
- * How many of each entity the pull saw, and how many survived each filter.
- *
- * DIAGNOSTIC ONLY (diag/ref-90-counts). No product code reads these, and the
- * route logs them behind an env flag that is off by default.
- *
- *
- * WHY THEY EXIST
- * --------------
- *
- * loadBrokerDay() has FOUR separate ways to return an honest zero, and from
- * outside they are one answer:
- *
- *   1. no account of this trader's own          (the `accounts.ts` filter)
- *   2. no position belonging to those accounts  (the only account link)
- *   3. no fill pair hanging off those positions
- *   4. pairs exist, none closed inside the day
- *
- * All four produce `broker_verified` with zeros — correct, by design, and
- * documented as "an honest zero, not a failure". But a trader whose only
- * account is a prop firm's falls into (1) and is shown the sentence for (4):
- * the closes were read from Tradovate, and there were none. Nothing in the
- * success path logs anything, so the three live causes cannot be told apart
- * after the fact. These counts are what tells them apart, in one line, on one
- * page load.
- *
- * Counts, deliberately, and nothing else: no account ids, no contract ids, no
- * prices, no timestamps. The narrowing they buy is "which stage emptied", which
- * is the whole question, and it is answerable without a single field that
- * describes a person or a position.
- */
-export interface DayPullCounts {
-  /** Rows from /account/list, before the claim and tradeability filter. */
-  accounts: number;
-  /**
-   * Those this trader may trade and could have traded: owned OR permitted.
-   * `filter.permitted` is how many of them got in on the second half.
-   */
-  mine: number;
-  /** Rows from /position/list. Zero when the pull stopped before asking. */
-  positions: number;
-  /** Those belonging to `mine`. The only link a pair has to an account. */
-  minePositions: number;
-  /** Rows from /fillPair/list. Zero when the pull stopped before asking. */
-  pairs: number;
-  /** Those hanging off `minePositions`. */
-  minePairs: number;
-  /** Round trips after grouping pairs that share a fill into one trade. */
-  trades: number;
-  /** Those that finished on or after the day boundary. */
-  todays: number;
-  /** Why each account that fell out of `accounts` did. */
-  filter: AccountFilterCounts;
-}
-
-/**
- * The same tally, now per host (REF-90 Stage 1).
- *
- * One `DayPullCounts` per host that was ASKED AND ANSWERED. A host that was
- * dropped has no entry — `dropped` is how many, and the absence is the finding:
- * "we asked and it would not answer" reads differently from "we asked and it
- * was empty", and the diagnostic that could not tell those apart is the one
- * that made this ticket take three measurements.
- */
-export interface BrokerDayCounts {
-  /** Keyed by host. Absent for a host that was dropped or never resolved. */
-  hosts: Partial<Record<TradovateEnvironment, DayPullCounts>>;
-  /**
-   * Hosts whose discovery failed and were dropped without failing the pull.
-   *
-   * Only ever the non-mint host — a failure on the mint host fails the whole
-   * pull. See {@link loadBrokerDay}'s two failure rules.
-   */
-  dropped: number;
-  /**
-   * Accounts the second host offered that the first had already claimed.
-   *
-   * Zero on every pull so far, and worth watching: it is the only evidence
-   * this codebase will ever gather about whether live and demo share an entity
-   * id space (§1.2 of the fix design designs around not knowing). A non-zero
-   * here on a trader with genuinely separate accounts means the dedupe is
-   * dropping real money, and the account picker becomes urgent rather than
-   * Stage 3.
-   */
-  duplicateAccounts: number;
-}
-
-/** The day, and the diagnostic tally of how it was arrived at. */
-export interface BrokerDayResult {
-  day: BrokerDayContext;
-  counts: BrokerDayCounts;
-}
-
-/**
  * One finished trade, reduced to the two facts the day needs (REF-90 Stage 1).
  *
  * THIS IS THE ONLY SHAPE THAT CROSSES A HOST BOUNDARY, and that is a
@@ -247,55 +149,6 @@ export interface PricedTrade {
   closedAtMs: number;
   /** Net dollars across the trade's legs. Signed. */
   pnl: number;
-}
-
-/**
- * The counts as one line, for the route's diagnostic log.
- *
- * Here rather than in the route because the shape belongs to the thing being
- * counted, and because a format string is exactly the kind of code that is
- * never wrong until it is: a pure function of the counts can be asserted
- * character for character in scripts/tradovate-today-check.ts, which is what
- * stops a renamed field from reaching production as a silently misleading log.
- *
- * Carries no prefix and no redaction — the route owns both, along with the
- * decision of whether to log at all.
- */
-export function formatDayPullCounts(counts: DayPullCounts): string {
-  const f = counts.filter;
-  return (
-    `accounts=${counts.accounts} mine=${counts.mine} ` +
-    `positions=${counts.positions} minePositions=${counts.minePositions} ` +
-    `pairs=${counts.pairs} minePairs=${counts.minePairs} ` +
-    `trades=${counts.trades} todays=${counts.todays}` +
-    ` | filter: total=${f.total} noOwner=${f.noOwner} noPermission=${f.noPermission} ` +
-    `notCustomer=${f.notCustomer} ` +
-    `closed=${f.closed} restricted=${f.restricted} readonly=${f.readonly} ` +
-    `futuresDisabled=${f.futuresDisabled} inactive=${f.inactive} permitted=${f.permitted}`
-  );
-}
-
-/**
- * The per-host counts as one line, prefixed by what routing decided.
- *
- * `hosts=` is how many were asked and answered, `dropped=` how many were asked
- * and would not, `duplicates=` how many accounts the dedupe discarded. Then one
- * block per host, in a fixed order so two lines from different pulls can be
- * read against each other.
- *
- * Still counts and field names only, and now also HOST KEYS — `live` and
- * `demo`, which are the two values of an enum this codebase has always logged
- * (`configured=live` in the host probe) and not hostnames. The per-organization
- * hostname that must never be logged is in `ResolvedApiUrl`, which this shape
- * does not contain.
- */
-export function formatBrokerDayCounts(counts: BrokerDayCounts): string {
-  const asked = (['live', 'demo'] as const).filter((env) => counts.hosts[env]);
-
-  return (
-    `hosts=${asked.length} dropped=${counts.dropped} duplicates=${counts.duplicateAccounts}` +
-    asked.map((env) => ` | ${env}: ${formatDayPullCounts(counts.hosts[env]!)}`).join('')
-  );
 }
 
 /**
@@ -322,8 +175,7 @@ const STREAK_WINDOW = 10;
 // what the pooled arithmetic produces on its own: loadBrokerDay() has no early
 // return at all, so a pull that found no account, no position or no pair on
 // either host reaches the same reduction as a full day and that reduction sums
-// nothing. One path to the zero instead of five, which is also why the day
-// figures cannot disagree with the counts.
+// nothing. One path to the zero instead of five.
 
 /** A fill pair joined to its instant and its contract, before pricing. */
 interface DatedPair {
@@ -399,25 +251,6 @@ interface ContractUnit {
 }
 
 /**
- * What one host's `/account/list` said: the accounts that count, and the tally.
- *
- * Hoisted out of the per-host chain on purpose. (a′) routes BY WHAT DISCOVERY
- * FOUND — ask both hosts for accounts, then continue the chain only where there
- * is something to continue with — so this stage has to be separable from the
- * six reads that follow it. It is also the stage whose failure is forgivable on
- * one host and fatal on the other, which is the same requirement stated as an
- * error path.
- */
-interface HostDiscovery {
-  /** Eligible accounts: owned OR permitted and tradeable (./accounts.ts). */
-  accepted: TradovateAccount[];
-  /** Rows the host returned, before the filter. */
-  accounts: number;
-  /** Why each one that fell out did. */
-  filter: AccountFilterCounts;
-}
-
-/**
  * The account ids this host says our trader is permitted to trade (REF-90
  * Stage 2), or null when there is no permission evidence to be had.
  *
@@ -453,11 +286,20 @@ async function readPermittedAccounts(
   }
 }
 
-/** Stage one of the chain, on one host. See {@link HostDiscovery}. */
+/**
+ * Stage one of the chain, on one host: the accounts whose fills count here.
+ *
+ * Hoisted out of the per-host chain on purpose. (a′) routes BY WHAT DISCOVERY
+ * FOUND — ask both hosts for accounts, then continue the chain only where there
+ * is something to continue with — so this stage has to be separable from the
+ * six reads that follow it. It is also the stage whose failure is forgivable on
+ * one host and fatal on the other, which is the same requirement stated as an
+ * error path.
+ */
 async function discoverHostAccounts(
   reader: TradovateReader,
   tradovateUserId: number | null
-): Promise<HostDiscovery> {
+): Promise<TradovateAccount[]> {
   const accounts = (await reader.get<TradovateAccount[]>('/account/list')) ?? [];
 
   // Owned OR permitted (REF-90 Stage 2). The permission list is read only when
@@ -468,8 +310,7 @@ async function discoverHostAccounts(
     ? await readPermittedAccounts(reader, tradovateUserId)
     : null;
 
-  const { accepted, counts } = partitionAccounts(accounts, tradovateUserId, permitted);
-  return { accepted, accounts: accounts.length, filter: counts };
+  return partitionAccounts(accounts, tradovateUserId, permitted).accepted;
 }
 
 /** The other one. Two environments, so this is total. */
@@ -504,34 +345,19 @@ function otherHost(environment: TradovateEnvironment): TradovateEnvironment {
  */
 export async function loadHostTrades(params: {
   reader: TradovateReader;
-  discovery: HostDiscovery;
+  /** This host's eligible accounts, from {@link discoverHostAccounts}. */
+  accounts: readonly TradovateAccount[];
   dayStartMs: number;
-}): Promise<{ trades: PricedTrade[]; counts: DayPullCounts }> {
-  const { reader, discovery, dayStartMs } = params;
-
-  // Filled in as each stage narrows. Every early return below carries it as it
-  // stood, so a zero in the line is "this stage was never reached" and not a
-  // missing field — which is the distinction the whole diagnostic turns on.
-  const counts: DayPullCounts = {
-    accounts: discovery.accounts,
-    mine: discovery.accepted.length,
-    positions: 0,
-    minePositions: 0,
-    pairs: 0,
-    minePairs: 0,
-    trades: 0,
-    todays: 0,
-    filter: discovery.filter,
-  };
-  const nothing = () => ({ trades: [] as PricedTrade[], counts });
+}): Promise<PricedTrade[]> {
+  const { reader, accounts, dayStartMs } = params;
 
   // No account of this trader's own that could have been traded. An honest
   // zero, not a failure: see the closing note in ./accounts.ts. The caller does
   // not even get here — it drops such a host before asking — but the guard
   // stays, because this function's contract should not depend on that.
-  if (discovery.accepted.length === 0) return nothing();
+  if (accounts.length === 0) return [];
 
-  const accountIds = new Set(discovery.accepted.map((account) => account.id));
+  const accountIds = new Set(accounts.map((account) => account.id));
 
   // Positions exist to answer one question — whose trade is this — so they are
   // filtered by account and by nothing else. In particular NOT by `tradeDate`,
@@ -541,15 +367,11 @@ export async function loadHostTrades(params: {
   const myPositionIds = new Set(
     (positions ?? []).filter((p) => accountIds.has(p.accountId)).map((p) => p.id)
   );
-  counts.positions = (positions ?? []).length;
-  counts.minePositions = myPositionIds.size;
-  if (myPositionIds.size === 0) return nothing();
+  if (myPositionIds.size === 0) return [];
 
   const allPairs = await reader.get<TradovateFillPair[]>('/fillPair/list');
   const myPairs = (allPairs ?? []).filter((pair) => myPositionIds.has(pair.positionId));
-  counts.pairs = (allPairs ?? []).length;
-  counts.minePairs = myPairs.length;
-  if (myPairs.length === 0) return nothing();
+  if (myPairs.length === 0) return [];
 
   const fills = await reader.get<TradovateFill[]>('/fill/list');
   const fillById = new Map<number, TradovateFill>();
@@ -564,8 +386,6 @@ export async function loadHostTrades(params: {
   // lists in hand by now and pricing all of it would be hundreds of contract
   // lookups for figures nothing reads.
   const todays = trades.filter((t) => closedToday(t.closedAtMs, dayStartMs));
-  counts.trades = trades.length;
-  counts.todays = todays.length;
   const streakWindow = trades.slice(0, STREAK_WINDOW);
   const needed = new Set([...todays, ...streakWindow]);
 
@@ -582,7 +402,7 @@ export async function loadHostTrades(params: {
     });
   }
 
-  return { trades: priced, counts };
+  return priced;
 }
 
 export interface BrokerDayRequest {
@@ -624,7 +444,7 @@ export interface BrokerDayRequest {
  * ----------------------------------------------------------------
  *
  * 1. **Discovery fails on the host that is NOT the connection's mint host** →
- *    drop that host, count it, carry on. Without this, an organization with no
+ *    drop that host and carry on. Without this, an organization with no
  *    demo provisioning — a 401 or 403 on demo — would start failing every pull
  *    that works today. The mint host is known-good; the other host is additive.
  * 2. **Any failure on a host that DID return eligible accounts** → fail the
@@ -645,12 +465,10 @@ export interface BrokerDayRequest {
  * TradovateRequestError, TradovatePenaltyError, a network fault — and the route
  * maps those to `broker_unavailable`.
  */
-export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDayResult> {
+export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDayContext> {
   const { readers, environment, dayStartMs, tradovateUserId } = request;
   const now = request.now ?? Date.now();
   const asOf = new Date(now).toISOString();
-
-  const counts: BrokerDayCounts = { hosts: {}, dropped: 0, duplicateAccounts: 0 };
 
   // The mint host first, and the order is load-bearing: it is the host that
   // wins a collision, so it has to claim its account ids before the other one
@@ -663,53 +481,31 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
   for (const env of order) {
     const reader = readers[env]!;
 
-    let discovery: HostDiscovery;
+    let accepted: TradovateAccount[];
     try {
-      discovery = await discoverHostAccounts(reader, tradovateUserId);
+      accepted = await discoverHostAccounts(reader, tradovateUserId);
     } catch (error) {
       // Rule 1. The mint host answering with a failure is the failure this pull
       // has always had; the other host is new, additive, and must not be able
       // to take a working pull down with it.
       if (env === environment) throw error;
-      counts.dropped++;
       continue;
     }
 
     // The dedupe, before the chain rather than after it: an account already
     // claimed must not contribute positions, pairs or dollars.
-    const fresh = discovery.accepted.filter((account) => !claimed.has(account.id));
-    counts.duplicateAccounts += discovery.accepted.length - fresh.length;
+    const fresh = accepted.filter((account) => !claimed.has(account.id));
     for (const account of fresh) claimed.add(account.id);
 
     // Nothing eligible here — either the host holds none of this trader's
     // accounts, or every one it holds was the first host's. Either way there is
     // nothing to continue with, so the six remaining reads are not made. This
-    // is (a′)'s whole saving. `mine` reads 0 and the filter breakdown says why.
-    if (fresh.length === 0) {
-      counts.hosts[env] = {
-        accounts: discovery.accounts,
-        mine: 0,
-        positions: 0,
-        minePositions: 0,
-        pairs: 0,
-        minePairs: 0,
-        trades: 0,
-        todays: 0,
-        filter: discovery.filter,
-      };
-      continue;
-    }
+    // is (a′)'s whole saving.
+    if (fresh.length === 0) continue;
 
     // Rule 2: no try/catch. This host returned eligible accounts, so a failure
     // from here on is a day that cannot be stated, and the pull fails whole.
-    const host = await loadHostTrades({
-      reader,
-      discovery: { ...discovery, accepted: fresh },
-      dayStartMs,
-    });
-
-    counts.hosts[env] = host.counts;
-    pooled.push(...host.trades);
+    pooled.push(...(await loadHostTrades({ reader, accounts: fresh, dayStartMs })));
   }
 
   // ── Pooled, and from here on there is one trader and one day ──────────────
@@ -750,16 +546,13 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
   }
 
   return {
-    day: {
-      closedCount: todays.length,
-      losingCount,
-      net,
-      lost,
-      lossStreak,
-      minutesSinceLastClose,
-      asOf,
-    },
-    counts,
+    closedCount: todays.length,
+    losingCount,
+    net,
+    lost,
+    lossStreak,
+    minutesSinceLastClose,
+    asOf,
   };
 }
 

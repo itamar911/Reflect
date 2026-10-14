@@ -22,11 +22,19 @@
 -- WHY EACH CHANGE
 -- ---------------
 --
--- 1. environment — Demo and Live tokens are not interchangeable, and a stored
---    token currently carries no record of which server minted it. Reading
---    simulated fills as though they were real ones is a silent, plausible
---    failure, which is the worst kind. The OAuth flow now resolves the
---    environment from TRADOVATE_API_URL and writes it on every save.
+-- 1. environment — WHICH SERVER MINTED THE TOKEN, AND NOTHING ELSE. Demo and
+--    Live tokens are not interchangeable, and a stored token carried no record
+--    of which one issued it. The OAuth flow resolves the environment from
+--    TRADOVATE_API_URL and writes it on every save.
+--
+--    MINT-ONLY. This column is read by OAuth and by renewal, which need the
+--    matching authorize and token hosts, and NEVER BY A TRADING READ. It does
+--    not say where the trader's accounts live: a token minted on Live is
+--    routinely the credential for an account provisioned in Demo, so the day
+--    pull asks BOTH hosts and routes by what /account/list actually returns
+--    (REF-90). Treating this column as the trading host asked the wrong one
+--    and reported an empty day, every day, for every such trader.
+--
 --    Demo and Live also use different authorize and token hosts, and the Demo
 --    host varies by organization:
 --      https://docs.ninjatrader.com/api/oauth
@@ -57,6 +65,9 @@
 
 -- ---------------------------------------------------------------------------
 -- 1. environment
+--
+-- The mint server, read by OAuth and renewal and never by a trading read; see
+-- the note above.
 --
 -- Added nullable, backfilled, then made NOT NULL, so the migration is safe on a
 -- table that already has rows. No column DEFAULT: a default is exactly how a

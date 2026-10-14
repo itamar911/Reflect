@@ -51,19 +51,8 @@ import {
 } from '@/lib/rules/brokerDayContext';
 import { isUserAllowed } from '@/lib/tradovate/allowlist';
 import { tradovateGet } from '@/lib/tradovate/client';
-import { getUserTradingApi, type UserTradingApi } from '@/lib/tradovate/connections';
-import {
-  formatHostProbe,
-  formatPermProbe,
-  probeAccountHosts,
-  probeTradingPermissions,
-} from '@/lib/tradovate/diag-hosts';
-import {
-  formatBrokerDayCounts,
-  loadBrokerDay,
-  type BrokerDayCounts,
-  type TradovateReader,
-} from '@/lib/tradovate/fills';
+import { getUserTradingApi } from '@/lib/tradovate/connections';
+import { loadBrokerDay, type TradovateReader } from '@/lib/tradovate/fills';
 import { redactSecrets } from '@/lib/tradovate/redact';
 import { DAY_START_PARAM, parseDayStart } from '@/lib/tradovate/trading-day';
 
@@ -75,126 +64,6 @@ const NO_STORE = { 'Cache-Control': 'no-store, private' };
 
 function answer(pull: BrokerDayPull) {
   return NextResponse.json(pull, { headers: NO_STORE });
-}
-
-/**
- * TEMPORARY (diag/ref-90-counts). One line, counts only, off by default.
- *
- * A successful pull logs NOTHING on this path, and that is what made the
- * 13.10 report unanswerable: `broker_verified` with zeros has four possible
- * causes (see DayPullCounts in lib/tradovate/fills.ts) and they are
- * indistinguishable from the response, the status code and the logs alike.
- * This says which stage emptied.
- *
- * OFF UNLESS TRADOVATE_DIAG_COUNTS === '1'. Same shape as the REF-100
- * measurement route: a diagnostic that ships disabled and is removed once it
- * has answered its question, rather than a log line that lives in production
- * forever.
- *
- * WHAT IS NOT IN IT, and the list is the point: no user id, no Supabase id, no
- * `tradovate_user_id`, no account ids, no contract ids or symbols, no prices,
- * no P&L, no timestamps, no token. Integers and field names. The existing
- * failure warning below declines to log even the user id, reasoning that the
- * allowlist is small enough for it to identify a person (see its comment); the
- * same reasoning applies here and is why this carries no identifier at all.
- *
- * Since Stage 2 the pull also reads `/tradingPermission/list`, whose entity
- * carries two names and two email addresses as required fields — the first real
- * PII this integration touches. None of it can reach this line: what the rule
- * keeps from that response is a set of account ids (lib/tradovate/accounts.ts),
- * and `noPermission` and `permitted` here are counts of accounts like every
- * other field in the line.
- *
- * Through redactSecrets() regardless — every diagnostic in this integration
- * goes through it, and a formatter that is safe today should not be the reason
- * the next person skips it.
- */
-function logDayPullCounts(counts: BrokerDayCounts): void {
-  if (process.env.TRADOVATE_DIAG_COUNTS !== '1') return;
-
-  console.info(redactSecrets(`[tradovate] today pull counts: ${formatBrokerDayCounts(counts)}`));
-}
-
-/**
- * TEMPORARY (diag/ref-90-hosts). One line, counts only, off by default.
- *
- * The counts line above answered "which stage emptied" with `accounts=0 …
- * filter: total=0` — a 200 carrying an empty array, so no condition in
- * lib/tradovate/accounts.ts ever ran and the ownership filter is not the
- * cause. What it cannot see is WHICH HOST was asked, and that is now the open
- * question: see the header of lib/tradovate/diag-hosts.ts.
- *
- * OFF UNLESS TRADOVATE_DIAG_HOSTS === '1', before any of the six GETs, so a
- * production request pays nothing at all for this. It no longer reads the
- * connection row either: Stage 1 made both resolved hosts part of
- * {@link UserTradingApi}, which is where the probe's own read came from, so the
- * probe now borrows what the product path already has in hand.
- *
- * NEVER THROWS. A diagnostic that can turn a served response into
- * `broker_unavailable` is worse than no diagnostic — the pull has already
- * succeeded by the time this runs, and the answer is already computed. Its own
- * failures are caught here and reported as one word.
- *
- * WHAT IS NOT IN IT: no hostname above all — `apiHosts.demo` varies by
- * organization, so logging it would name the prop firm this user trades for,
- * and `source` answers what a hostname would be reached for. Then the same
- * list as the counts line: no user id, no `tradovate_user_id`, no account ids
- * or names, no P&L, no timestamps, no token. `HostProbe` is counts-only by
- * type, so there is no hostname in hand here to log by accident.
- *
- * THE SECOND LINE (diag/ref-90-perms, Stage 0) answers what the first one
- * opened: the demo account's `userId` is not ours, so is it the firm admin's
- * with a TradingPermission naming our trader, or is user identity numbered per
- * host? See the header of lib/tradovate/diag-hosts.ts. It is four more GETs
- * behind the same flag, and it reads two entities that carry REAL PII — two
- * names and two email addresses on `TradingPermission`, `name` and `email` on
- * `/user/list`. None of it is in hand here: `PermProbe` is integers and one
- * closed union of words by type, the same discipline as `HostProbe` and the
- * reason this function cannot leak either.
- */
-async function logHostProbe(api: UserTradingApi): Promise<void> {
-  if (process.env.TRADOVATE_DIAG_HOSTS !== '1') return;
-
-  try {
-    const { environment: configured, hosts } = api;
-    const probe = await probeAccountHosts({
-      configured,
-      hosts,
-      tradovateUserId: api.tradovateUserId,
-      // The same token against both hosts, which is the comparison: whether a
-      // live-minted OAuth token is accepted by the demo host is the thing no
-      // documentation answers. ./client.ts requires the host to travel with
-      // the token, and here the host is the variable.
-      get: (apiUrl) => tradovateGet<unknown>('/account/list', undefined, {
-        accessToken: api.accessToken,
-        apiUrl,
-      }),
-    });
-
-    console.info(redactSecrets(`[tradovate] host probe: ${formatHostProbe(probe)}`));
-
-    // After the host line, and deliberately after: this one cannot throw, so
-    // the line above is already emitted whatever happens here, and the two
-    // reads are independent findings that should not share a failure.
-    const perms = await probeTradingPermissions({
-      hosts,
-      tradovateUserId: api.tradovateUserId,
-      get: (apiUrl, path) =>
-        tradovateGet<unknown>(path, undefined, { accessToken: api.accessToken, apiUrl }),
-    });
-
-    console.info(redactSecrets(`[tradovate] perm probe: ${formatPermProbe(perms)}`));
-  } catch (error) {
-    // Names the exception's type and nothing else: the probe reads a row and
-    // calls two hosts, and either could fail in a way whose message carries a
-    // response body.
-    console.warn(
-      redactSecrets(
-        '[tradovate] host probe did not run ' +
-          `(${error instanceof Error ? error.name : 'non-Error throw'})`
-      )
-    );
-  }
 }
 
 export async function GET(request: Request) {
@@ -251,7 +120,7 @@ export async function GET(request: Request) {
         tradovateGet(path, query, { accessToken: api.accessToken, apiUrl }),
     });
 
-    const { day, counts } = await loadBrokerDay({
+    const day = await loadBrokerDay({
       readers: {
         live: readerFor(api.hosts.live.url),
         demo: readerFor(api.hosts.demo.url),
@@ -260,13 +129,6 @@ export async function GET(request: Request) {
       dayStartMs: dayStart.dayStartMs,
       tradovateUserId: api.tradovateUserId,
     });
-
-    logDayPullCounts(counts);
-    // Awaited rather than fired and forgotten: on a serverless runtime the
-    // lambda can be frozen the moment the response is returned, and a probe
-    // whose log line sometimes does not arrive is a measurement that cannot be
-    // trusted. It runs only behind its own flag and cannot throw.
-    await logHostProbe(api);
 
     return answer({ source: 'broker_verified', day });
   } catch (error) {

@@ -230,7 +230,7 @@ function carryForward(row: ConnectionRow) {
   return {
     userId: row.user_id,
     tradovateUserId: row.tradovate_user_id,
-    // From the row, never from configuration: the row records which environment
+    // From the row, never from configuration: the row records which server
     // actually minted the token, and nothing here may relabel it.
     environment: row.environment,
     refreshToken: row.refresh_token_encrypted
@@ -331,9 +331,17 @@ export async function saveConnection(params: {
    */
   apiHosts?: TradovateApiHosts;
   /**
-   * Which Tradovate environment minted this token. Required, with no default:
-   * a demo token and a live token are indistinguishable once stored, and
-   * guessing would mean reading simulated fills as though they were real ones.
+   * WHICH SERVER MINTED THIS TOKEN, AND NOTHING ELSE.
+   *
+   * Mint-only. Required, with no default: a demo token and a live token are
+   * indistinguishable once stored, and guessing would mean sending a token to
+   * an endpoint that will not honour it.
+   *
+   * Read by OAuth and by renewal — the authorize and token hosts differ per
+   * environment, and {@link redeemRefreshToken} refuses a connection whose mint
+   * environment is not this deployment's. NEVER BY A TRADING READ: it does not
+   * say where the trader's accounts live, which was the first of REF-90's two
+   * bugs. The day pull asks both hosts (see loadBrokerDay in ./fills.ts).
    */
   environment: TradovateEnvironment;
   /**
@@ -703,14 +711,19 @@ export interface UserTradingApi {
    */
   hosts: Record<TradovateEnvironment, ResolvedApiUrl>;
   /**
-   * Which server minted the token. NOT where the accounts are.
+   * Which server minted the token. MINT-ONLY — NOT where the accounts are.
    *
-   * Still carried, and still meaningful, for the two things it actually
-   * decides: it is the known-good host, so a discovery failure HERE fails the
-   * pull while a discovery failure on the other host only drops that host; and
-   * it wins any cross-host account-id collision. The keep-alive guard and the
-   * renewal host read the column for their own reasons and must keep doing so
-   * — see the header of this module and §3.1 of the fix design.
+   * The column's meaning is read by OAuth and by renewal, which need the
+   * matching authorize and token hosts, and never by a trading read: routing
+   * reads by it asked the wrong host for every trader whose accounts live in
+   * the other environment, which was the first of REF-90's two bugs. Trading
+   * reads go to BOTH hosts in {@link hosts}.
+   *
+   * It is still carried here, and the two things it decides are both
+   * tie-breaks rather than routing: the mint host is the known-good one, so a
+   * discovery failure HERE fails the pull while the same failure on the other
+   * host only drops that host, and it wins a cross-host account-id collision.
+   * Neither chooses which host a read is sent to — both are always asked.
    */
   environment: TradovateEnvironment;
 }
@@ -754,12 +767,10 @@ export async function getUserTradingApi(
 /**
  * Both of a connection's trading hosts, resolved (REF-90 Stage 1).
  *
- * Written for the host probe, which needed to see past the one host the product
- * path used; promoted here because the product path now needs exactly the same
- * thing, and for the same reason. `environment` is the token's MINT server, so
- * routing trading reads by it asked the wrong host for every trader whose
- * accounts live in the other environment — the measured cause of REF-90. The
- * fix is to ask both, which means resolving both, which this already did.
+ * `environment` is the token's MINT server, so routing trading reads by it
+ * asked the wrong host for every trader whose accounts live in the other
+ * environment — the measured cause of REF-90. The fix is to ask both, which
+ * means resolving both.
  *
  * Here rather than in ./api-hosts.ts because this module is the only one that
  * reads `tradovate_connections`, and it hands back RESOLVED URLs rather than
@@ -1723,8 +1734,8 @@ async function loadOrRenew(
     expiresAt: renewed.expirationTime,
     tradovateUserId,
     // Carried from the stored row, not from the caller's config: the row
-    // records which environment actually minted the token, and a renewal must
-    // not be able to relabel it.
+    // records which server actually minted the token, and a renewal must not be
+    // able to relabel it.
     environment: data.environment,
     // Carried forward for the same reason, and it is not optional: every
     // saveConnection writes refresh_token_encrypted, so omitting this argument

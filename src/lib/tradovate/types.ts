@@ -355,8 +355,8 @@ export interface TradovateAccount {
  *
  * The path is `/<entity>/list` by the API cheat sheet's universal convention —
  * the documentation page for this endpoint 404s — and was confirmed by
- * measurement on 14 Oct 2026 before any of this was written (Stage 0, the perm
- * probe in ./diag-hosts.ts). It takes no parameters.
+ * measurement on 14 Oct 2026 before any of this was written (REF-90 Stage 0).
+ * It takes no parameters.
  *   https://docs.ninjatrader.com/api/rest-api-endpoints/users/accept-trading-permission
  */
 export interface TradovateTradingPermission {
