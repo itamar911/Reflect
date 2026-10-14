@@ -57,6 +57,104 @@ import type { TradovateAccount } from './types';
 const TRADEABLE_ACCOUNT_TYPE: TradovateAccount['accountType'] = 'Customer';
 
 /**
+ * Why one account did not count. The order is the order they are tested in,
+ * and that order is the definition — see {@link AccountFilterCounts}.
+ */
+type AccountRejection =
+  | 'noOwner'
+  | 'notCustomer'
+  | 'closed'
+  | 'restricted'
+  | 'readonly'
+  | 'futuresDisabled'
+  | 'inactive';
+
+/**
+ * How many accounts the filter saw, and why each one that fell out did.
+ *
+ * DIAGNOSTIC ONLY (diag/ref-90-counts). Nothing in the product branches on
+ * this; it exists because a filtered-out account and a day with no trades are
+ * indistinguishable from outside — both are an honest zero carried all the way
+ * to `broker_verified` — and a trader whose only account is a prop firm's would
+ * see the second message for the first cause.
+ *
+ * EACH ACCOUNT IS COUNTED ONCE, under the FIRST reason it failed. So
+ * `noOwner + notCustomer + … + inactive + accepted === total`, exactly, and the
+ * line can be read as a partition rather than as overlapping tallies. An
+ * account that is both `closed` and `readonly` lands in `closed` because that
+ * is tested first; the counts answer "where did they go", not "how many flags
+ * does each one carry".
+ */
+export interface AccountFilterCounts {
+  total: number;
+  noOwner: number;
+  notCustomer: number;
+  closed: number;
+  restricted: number;
+  readonly: number;
+  futuresDisabled: number;
+  inactive: number;
+}
+
+/** The first condition this account fails, or null when it counts. */
+function rejectionFor(
+  account: TradovateAccount,
+  tradovateUserId: number | null
+): AccountRejection | null {
+  // Null identity is an ownership failure for EVERY account, not a separate
+  // state: ownership is the thing that cannot be established. That keeps the
+  // partition above true in the one case where no account can ever be accepted.
+  if (tradovateUserId === null || account.userId !== tradovateUserId) return 'noOwner';
+  if (account.accountType !== TRADEABLE_ACCOUNT_TYPE) return 'notCustomer';
+  if (account.closed === true) return 'closed';
+  if (account.restricted === true) return 'restricted';
+  if (account.readonly === true) return 'readonly';
+  if (account.futuresDisabled === true) return 'futuresDisabled';
+  if (account.active === false) return 'inactive';
+  return null;
+}
+
+/**
+ * The accounts whose fills count, and the tally of what was dropped.
+ *
+ * One pass, one predicate — {@link rejectionFor} — so the counts cannot drift
+ * from the selection they describe. That is the whole reason this exists rather
+ * than a second function that re-implements the same seven tests: a diagnostic
+ * that disagrees with the code it is diagnosing is worse than none.
+ */
+export function partitionAccounts(
+  accounts: readonly TradovateAccount[],
+  tradovateUserId: number | null
+): { accepted: TradovateAccount[]; counts: AccountFilterCounts } {
+  const counts: AccountFilterCounts = {
+    total: accounts.length,
+    noOwner: 0,
+    notCustomer: 0,
+    closed: 0,
+    restricted: 0,
+    readonly: 0,
+    futuresDisabled: 0,
+    inactive: 0,
+  };
+
+  const accepted: TradovateAccount[] = [];
+
+  for (const account of accounts) {
+    const rejection = rejectionFor(account, tradovateUserId);
+    if (rejection === null) {
+      accepted.push(account);
+      continue;
+    }
+    // 'inactive' is the counter for `active: false`; the key differs from the
+    // flag so the log line reads as a reason rather than as a field name.
+    if (rejection === 'inactive') counts.inactive++;
+    else counts[rejection]++;
+  }
+
+  return { accepted, counts };
+}
+
+/**
  * The accounts whose fills count towards this user's rules.
  *
  * `tradovateUserId` is null for a connection stored before GET /auth/me was
@@ -70,16 +168,5 @@ export function selectTradingAccounts(
   accounts: readonly TradovateAccount[],
   tradovateUserId: number | null
 ): TradovateAccount[] {
-  if (tradovateUserId === null) return [];
-
-  return accounts.filter((account) => {
-    if (account.userId !== tradovateUserId) return false;
-    if (account.accountType !== TRADEABLE_ACCOUNT_TYPE) return false;
-    if (account.closed === true) return false;
-    if (account.restricted === true) return false;
-    if (account.readonly === true) return false;
-    if (account.futuresDisabled === true) return false;
-    if (account.active === false) return false;
-    return true;
-  });
+  return partitionAccounts(accounts, tradovateUserId).accepted;
 }

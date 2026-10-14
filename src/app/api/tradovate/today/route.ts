@@ -52,7 +52,12 @@ import {
 import { isUserAllowed } from '@/lib/tradovate/allowlist';
 import { tradovateGet } from '@/lib/tradovate/client';
 import { getUserTradingApi } from '@/lib/tradovate/connections';
-import { loadBrokerDay, type TradovateReader } from '@/lib/tradovate/fills';
+import {
+  formatDayPullCounts,
+  loadBrokerDay,
+  type DayPullCounts,
+  type TradovateReader,
+} from '@/lib/tradovate/fills';
 import { redactSecrets } from '@/lib/tradovate/redact';
 import { DAY_START_PARAM, parseDayStart } from '@/lib/tradovate/trading-day';
 
@@ -64,6 +69,37 @@ const NO_STORE = { 'Cache-Control': 'no-store, private' };
 
 function answer(pull: BrokerDayPull) {
   return NextResponse.json(pull, { headers: NO_STORE });
+}
+
+/**
+ * TEMPORARY (diag/ref-90-counts). One line, counts only, off by default.
+ *
+ * A successful pull logs NOTHING on this path, and that is what made the
+ * 13.10 report unanswerable: `broker_verified` with zeros has four possible
+ * causes (see DayPullCounts in lib/tradovate/fills.ts) and they are
+ * indistinguishable from the response, the status code and the logs alike.
+ * This says which stage emptied.
+ *
+ * OFF UNLESS TRADOVATE_DIAG_COUNTS === '1'. Same shape as the REF-100
+ * measurement route: a diagnostic that ships disabled and is removed once it
+ * has answered its question, rather than a log line that lives in production
+ * forever.
+ *
+ * WHAT IS NOT IN IT, and the list is the point: no user id, no Supabase id, no
+ * `tradovate_user_id`, no account ids, no contract ids or symbols, no prices,
+ * no P&L, no timestamps, no token. Integers and field names. The existing
+ * failure warning below declines to log even the user id, reasoning that the
+ * allowlist is small enough for it to identify a person (see its comment); the
+ * same reasoning applies here and is why this carries no identifier at all.
+ *
+ * Through redactSecrets() regardless — every diagnostic in this integration
+ * goes through it, and a formatter that is safe today should not be the reason
+ * the next person skips it.
+ */
+function logDayPullCounts(counts: DayPullCounts): void {
+  if (process.env.TRADOVATE_DIAG_COUNTS !== '1') return;
+
+  console.info(redactSecrets(`[tradovate] today pull counts: ${formatDayPullCounts(counts)}`));
 }
 
 export async function GET(request: Request) {
@@ -111,11 +147,13 @@ export async function GET(request: Request) {
         tradovateGet(path, query, { accessToken: api.accessToken, apiUrl: api.apiUrl }),
     };
 
-    const day = await loadBrokerDay({
+    const { day, counts } = await loadBrokerDay({
       reader,
       dayStartMs: dayStart.dayStartMs,
       tradovateUserId: api.tradovateUserId,
     });
+
+    logDayPullCounts(counts);
 
     return answer({ source: 'broker_verified', day });
   } catch (error) {

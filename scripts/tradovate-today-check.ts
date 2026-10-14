@@ -41,7 +41,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import { selectTradingAccounts } from '../src/lib/tradovate/accounts';
+import { partitionAccounts, selectTradingAccounts } from '../src/lib/tradovate/accounts';
 import {
   TradovateNotConnectedError,
   TradovatePenaltyError,
@@ -49,7 +49,13 @@ import {
   TradovateTransientError,
   TradovateUnpriceableError,
 } from '../src/lib/tradovate/errors';
-import { loadBrokerDay, type BrokerDayContext, type TradovateReader } from '../src/lib/tradovate/fills';
+import {
+  formatDayPullCounts,
+  loadBrokerDay,
+  type BrokerDayContext,
+  type DayPullCounts,
+  type TradovateReader,
+} from '../src/lib/tradovate/fills';
 import { closedToday, parseDayStart } from '../src/lib/tradovate/trading-day';
 import type {
   TradovateAccount,
@@ -275,13 +281,36 @@ function reader(data: Scene): TradovateReader & { calls: string[] } {
   };
 }
 
-function pull(data: Scene, dayStartMs = DAY_START): Promise<BrokerDayContext> {
-  return loadBrokerDay({
+/**
+ * The day figures alone.
+ *
+ * loadBrokerDay() returns `{ day, counts }` since diag/ref-90-counts; this
+ * unwraps it so every assertion written before that still reads the thing it
+ * was written about. {@link pullCounts} is the other half.
+ */
+async function pull(data: Scene, dayStartMs = DAY_START): Promise<BrokerDayContext> {
+  const { day } = await loadBrokerDay({
     reader: reader(data),
     dayStartMs,
     tradovateUserId: ACCOUNT.userId,
     now: NOW,
   });
+  return day;
+}
+
+/** The diagnostic tally alone, for the counts group. */
+async function pullCounts(
+  data: Scene,
+  tradovateUserId: number | null = ACCOUNT.userId,
+  dayStartMs = DAY_START
+): Promise<DayPullCounts> {
+  const { counts } = await loadBrokerDay({
+    reader: reader(data),
+    dayStartMs,
+    tradovateUserId,
+    now: NOW,
+  });
+  return counts;
 }
 
 async function main() {
@@ -491,13 +520,13 @@ async function main() {
   // ── Nothing to report, which is not a failure ─────────────────────────────
 
   const noPairs = await pull(scene());
-  const noAccount = await loadBrokerDay({
+  const { day: noAccount } = await loadBrokerDay({
     reader: reader(scene()),
     dayStartMs: DAY_START,
     tradovateUserId: 999, // not the account's owner
     now: NOW,
   });
-  const unknownOwner = await loadBrokerDay({
+  const { day: unknownOwner } = await loadBrokerDay({
     reader: reader(scene()),
     dayStartMs: DAY_START,
     tradovateUserId: null,
@@ -607,6 +636,124 @@ async function main() {
     ),
     c('no connection identity means no accounts', selectTradingAccounts(candidates, null).length, 0),
     c('a flag that is absent is not a flag that is false', selectTradingAccounts([ACCOUNT], ACCOUNT.userId).length, 1),
+  ]);
+
+  // ── The counts that tell four zeros apart (diag/ref-90-counts) ────────────
+  //
+  // Each case below is one of loadBrokerDay()'s honest-zero exits. The day
+  // figures are identical in all of them — that is the bug being diagnosed —
+  // so what is asserted is that the COUNTS differ, and differ at the stage
+  // that actually emptied.
+
+  const closedToday1 = roundTrip({
+    side: 'long',
+    openAt: '2026-10-14T05:00:00Z',
+    closeAt: '2026-10-14T06:00:00Z',
+    entry: 5000,
+    exit: 4990,
+  });
+
+  // Exit 1: the account was filtered out. One account came back, none was
+  // this trader's. This is the shape the 13.10 prop-account report would show.
+  const filteredOut = await pullCounts(scene(), 999);
+
+  // The same exit, reached because the connection has no stored identity.
+  const unknownIdentity = await pullCounts(scene(), null);
+
+  // Exit 2: the account counts, but the position belongs to another one — so
+  // the pair has no link to it. `mine` is 1 here, which is what separates this
+  // from the case above.
+  const noPositionOfMine = await pullCounts(
+    withTrips([closedToday1], { positions: [{ ...POSITION, accountId: 8002 }] })
+  );
+
+  // A full day: every stage populated, nothing dropped.
+  const fullDay = await pullCounts(withTrips([closedToday1]));
+
+  group('the counts tell the four zeros apart', [
+    // Exit 1 — and the filter breakdown names the reason.
+    c('filtered-out account: one seen, none mine', [filteredOut.accounts, filteredOut.mine], [1, 0]),
+    c('and the reason is ownership', filteredOut.filter.noOwner, 1),
+    c('counted once, under the first reason only', filteredOut.filter, {
+      total: 1,
+      noOwner: 1,
+      notCustomer: 0,
+      closed: 0,
+      restricted: 0,
+      readonly: 0,
+      futuresDisabled: 0,
+      inactive: 0,
+    }),
+    c(
+      'the stages after it were never reached, so they are zero',
+      [filteredOut.positions, filteredOut.pairs, filteredOut.trades, filteredOut.todays],
+      [0, 0, 0, 0]
+    ),
+
+    // Exit 1 again, by the other route into it: a connection stored before
+    // /auth/me was recorded, so ownership cannot be checked at all. It has to
+    // read as an ownership failure and not as some other flag, because it is
+    // one of the live candidates for the 13.10 report and the log line is what
+    // would name it.
+    c('null identity: ownership is the reason, for every account', [unknownIdentity.mine, unknownIdentity.filter.noOwner], [0, 1]),
+    c('and it is not attributed to any other flag', unknownIdentity.filter.inactive + unknownIdentity.filter.notCustomer, 0),
+
+    // Exit 2 — distinguishable from exit 1 precisely because mine is 1.
+    c('position of another account: mine is 1, minePositions is 0', [noPositionOfMine.mine, noPositionOfMine.minePositions], [1, 0]),
+    c('so the pair stage was never reached', [noPositionOfMine.pairs, noPositionOfMine.minePairs], [0, 0]),
+    c('and no account was dropped', noPositionOfMine.filter.noOwner, 0),
+
+    // A closed pair that did land in the day — the control for all of the above.
+    c('closed pair today: one trade, one of them today', [fullDay.trades, fullDay.todays], [1, 1]),
+    c('every stage populated', [fullDay.accounts, fullDay.mine, fullDay.minePositions, fullDay.minePairs], [1, 1, 1, 1]),
+    c('and it is the same trade the day figures counted', (await pull(withTrips([closedToday1]))).closedCount, fullDay.todays),
+
+    // The whole-partition property, on the mixed bag from the group above.
+    c(
+      'the filter breakdown accounts for every row it was given',
+      (() => {
+        const f = partitionAccounts(candidates, ACCOUNT.userId).counts;
+        const dropped = f.noOwner + f.notCustomer + f.closed + f.restricted + f.readonly + f.futuresDisabled + f.inactive;
+        return dropped + selectTradingAccounts(candidates, ACCOUNT.userId).length === f.total;
+      })(),
+      true
+    ),
+  ]);
+
+  // The log line itself. The route decides whether to emit it and runs it
+  // through redactSecrets(); the text is this, and it is asserted in full
+  // because a format string is wrong silently or not at all.
+  group('the diagnostic line says counts and nothing else', [
+    c(
+      'the exact format, for the filtered-out account',
+      formatDayPullCounts(filteredOut),
+      'accounts=1 mine=0 positions=0 minePositions=0 pairs=0 minePairs=0 trades=0 todays=0' +
+        ' | filter: total=1 noOwner=1 notCustomer=0 closed=0 restricted=0 readonly=0 futuresDisabled=0 inactive=0'
+    ),
+    c(
+      'and for a day that had a trade in it',
+      formatDayPullCounts(fullDay),
+      'accounts=1 mine=1 positions=1 minePositions=1 pairs=1 minePairs=1 trades=1 todays=1' +
+        ' | filter: total=1 noOwner=0 notCustomer=0 closed=0 restricted=0 readonly=0 futuresDisabled=0 inactive=0'
+    ),
+    // The privacy property, asserted rather than reviewed. Every number the
+    // line carries is a count, so nothing that identifies a person or a
+    // position can appear in it — these are the values that WOULD identify
+    // one, drawn from the fixtures the counts were computed from.
+    c(
+      'no account id, contract id, symbol, price or timestamp',
+      [
+        String(ACCOUNT.id),
+        String(ACCOUNT.userId),
+        String(CONTRACT_ID),
+        CONTRACT.name,
+        String(POSITION.id),
+        '5000',
+        '4990',
+        '2026-10-14',
+      ].filter((leak) => formatDayPullCounts(fullDay).includes(leak)),
+      []
+    ),
   ]);
 
   // ── The four provenance states ────────────────────────────────────────────

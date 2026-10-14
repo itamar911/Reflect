@@ -70,7 +70,7 @@
 
 import { TradovateUnpriceableError } from './errors';
 import { closedToday, minutesSince } from './trading-day';
-import { selectTradingAccounts } from './accounts';
+import { partitionAccounts, type AccountFilterCounts } from './accounts';
 import type {
   TradovateAccount,
   TradovateContract,
@@ -124,6 +124,105 @@ export interface BrokerDayContext {
   /** When this was read from Tradovate, ISO 8601. */
   asOf: string;
 }
+
+/**
+ * How many of each entity the pull saw, and how many survived each filter.
+ *
+ * DIAGNOSTIC ONLY (diag/ref-90-counts). No product code reads these, and the
+ * route logs them behind an env flag that is off by default.
+ *
+ *
+ * WHY THEY EXIST
+ * --------------
+ *
+ * loadBrokerDay() has FOUR separate ways to return an honest zero, and from
+ * outside they are one answer:
+ *
+ *   1. no account of this trader's own          (the `accounts.ts` filter)
+ *   2. no position belonging to those accounts  (the only account link)
+ *   3. no fill pair hanging off those positions
+ *   4. pairs exist, none closed inside the day
+ *
+ * All four produce `broker_verified` with zeros — correct, by design, and
+ * documented as "an honest zero, not a failure". But a trader whose only
+ * account is a prop firm's falls into (1) and is shown the sentence for (4):
+ * the closes were read from Tradovate, and there were none. Nothing in the
+ * success path logs anything, so the three live causes cannot be told apart
+ * after the fact. These counts are what tells them apart, in one line, on one
+ * page load.
+ *
+ * Counts, deliberately, and nothing else: no account ids, no contract ids, no
+ * prices, no timestamps. The narrowing they buy is "which stage emptied", which
+ * is the whole question, and it is answerable without a single field that
+ * describes a person or a position.
+ */
+export interface DayPullCounts {
+  /** Rows from /account/list, before the ownership and tradeability filter. */
+  accounts: number;
+  /** Those that are this trader's own and could have been traded. */
+  mine: number;
+  /** Rows from /position/list. Zero when the pull stopped before asking. */
+  positions: number;
+  /** Those belonging to `mine`. The only link a pair has to an account. */
+  minePositions: number;
+  /** Rows from /fillPair/list. Zero when the pull stopped before asking. */
+  pairs: number;
+  /** Those hanging off `minePositions`. */
+  minePairs: number;
+  /** Round trips after grouping pairs that share a fill into one trade. */
+  trades: number;
+  /** Those that finished on or after the day boundary. */
+  todays: number;
+  /** Why each account that fell out of `accounts` did. */
+  filter: AccountFilterCounts;
+}
+
+/** The day, and the diagnostic tally of how it was arrived at. */
+export interface BrokerDayResult {
+  day: BrokerDayContext;
+  counts: DayPullCounts;
+}
+
+/**
+ * The counts as one line, for the route's diagnostic log.
+ *
+ * Here rather than in the route because the shape belongs to the thing being
+ * counted, and because a format string is exactly the kind of code that is
+ * never wrong until it is: a pure function of the counts can be asserted
+ * character for character in scripts/tradovate-today-check.ts, which is what
+ * stops a renamed field from reaching production as a silently misleading log.
+ *
+ * Carries no prefix and no redaction — the route owns both, along with the
+ * decision of whether to log at all.
+ */
+export function formatDayPullCounts(counts: DayPullCounts): string {
+  const f = counts.filter;
+  return (
+    `accounts=${counts.accounts} mine=${counts.mine} ` +
+    `positions=${counts.positions} minePositions=${counts.minePositions} ` +
+    `pairs=${counts.pairs} minePairs=${counts.minePairs} ` +
+    `trades=${counts.trades} todays=${counts.todays}` +
+    ` | filter: total=${f.total} noOwner=${f.noOwner} notCustomer=${f.notCustomer} ` +
+    `closed=${f.closed} restricted=${f.restricted} readonly=${f.readonly} ` +
+    `futuresDisabled=${f.futuresDisabled} inactive=${f.inactive}`
+  );
+}
+
+/**
+ * A fresh zeroed breakdown. A factory, not a shared const: the counts object
+ * below is mutated as the pull narrows, and a module-level literal would be one
+ * careless `counts.filter.noOwner++` away from leaking between requests.
+ */
+const emptyFilter = (): AccountFilterCounts => ({
+  total: 0,
+  noOwner: 0,
+  notCustomer: 0,
+  closed: 0,
+  restricted: 0,
+  readonly: 0,
+  futuresDisabled: 0,
+  inactive: 0,
+});
 
 /**
  * How far back the loss streak looks.
@@ -245,17 +344,36 @@ export interface BrokerDayRequest {
  * TradovateRequestError, TradovatePenaltyError, a network fault — and the route
  * maps those to `broker_unavailable`.
  */
-export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDayContext> {
+export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDayResult> {
   const { reader, dayStartMs, tradovateUserId } = request;
   const now = request.now ?? Date.now();
   const asOf = new Date(now).toISOString();
 
+  // Filled in as each stage narrows. Every early return below carries it as it
+  // stood, so a zero in the line is "this stage was never reached" and not a
+  // missing field — which is the distinction the whole diagnostic turns on.
+  const counts: DayPullCounts = {
+    accounts: 0,
+    mine: 0,
+    positions: 0,
+    minePositions: 0,
+    pairs: 0,
+    minePairs: 0,
+    trades: 0,
+    todays: 0,
+    filter: emptyFilter(),
+  };
+  const nothing = (): BrokerDayResult => ({ day: { ...EMPTY_DAY, asOf }, counts });
+
   const accounts = await reader.get<TradovateAccount[]>('/account/list');
-  const mine = selectTradingAccounts(accounts ?? [], tradovateUserId);
+  const { accepted: mine, counts: filter } = partitionAccounts(accounts ?? [], tradovateUserId);
+  counts.accounts = (accounts ?? []).length;
+  counts.mine = mine.length;
+  counts.filter = filter;
 
   // No account of this trader's own that could have been traded. An honest
   // zero, not a failure: see the closing note in ./accounts.ts.
-  if (mine.length === 0) return { ...EMPTY_DAY, asOf };
+  if (mine.length === 0) return nothing();
 
   const accountIds = new Set(mine.map((account) => account.id));
 
@@ -267,11 +385,15 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
   const myPositionIds = new Set(
     (positions ?? []).filter((p) => accountIds.has(p.accountId)).map((p) => p.id)
   );
-  if (myPositionIds.size === 0) return { ...EMPTY_DAY, asOf };
+  counts.positions = (positions ?? []).length;
+  counts.minePositions = myPositionIds.size;
+  if (myPositionIds.size === 0) return nothing();
 
   const allPairs = await reader.get<TradovateFillPair[]>('/fillPair/list');
   const myPairs = (allPairs ?? []).filter((pair) => myPositionIds.has(pair.positionId));
-  if (myPairs.length === 0) return { ...EMPTY_DAY, asOf };
+  counts.pairs = (allPairs ?? []).length;
+  counts.minePairs = myPairs.length;
+  if (myPairs.length === 0) return nothing();
 
   const fills = await reader.get<TradovateFill[]>('/fill/list');
   const fillById = new Map<number, TradovateFill>();
@@ -286,6 +408,8 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
   // lists in hand by now and pricing all of it would be hundreds of contract
   // lookups for figures nothing reads.
   const todays = trades.filter((t) => closedToday(t.closedAtMs, dayStartMs));
+  counts.trades = trades.length;
+  counts.todays = todays.length;
   const streakWindow = trades.slice(0, STREAK_WINDOW);
   const needed = new Set([...todays, ...streakWindow]);
 
@@ -332,13 +456,16 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
   }
 
   return {
-    closedCount: todays.length,
-    losingCount,
-    net,
-    lost,
-    lossStreak,
-    minutesSinceLastClose,
-    asOf,
+    day: {
+      closedCount: todays.length,
+      losingCount,
+      net,
+      lost,
+      lossStreak,
+      minutesSinceLastClose,
+      asOf,
+    },
+    counts,
   };
 }
 

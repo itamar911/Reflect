@@ -100,9 +100,16 @@ export type {
 // than authenticating. Driven by src/app/api/tradovate/today/route.ts; see
 // src/lib/rules/brokerDayContext.ts for how its answer reaches the rules.
 export { loadBrokerDay } from './fills';
-export type { BrokerDayContext, BrokerDayRequest, TradovateReader } from './fills';
+export type {
+  BrokerDayContext,
+  BrokerDayRequest,
+  BrokerDayResult,
+  DayPullCounts,
+  TradovateReader,
+} from './fills';
 
-export { selectTradingAccounts } from './accounts';
+export { partitionAccounts, selectTradingAccounts } from './accounts';
+export type { AccountFilterCounts } from './accounts';
 
 export { closedToday, minutesSince, parseDayStart, DAY_START_PARAM } from './trading-day';
 export type { DayStartParse } from './trading-day';
