@@ -74,7 +74,7 @@
  * by eye; not worth guessing a fee schedule to correct.
  */
 
-import { TradovateUnpriceableError } from './errors';
+import { TradovateRequestError, TradovateUnpriceableError } from './errors';
 import { closedToday, minutesSince } from './trading-day';
 import { partitionAccounts, permissionsCouldHelp, permittedAccountIds } from './accounts';
 import type { TradovateEnvironment } from './hosts';
@@ -624,6 +624,11 @@ function pricePair(entry: DatedPair, units: Map<number, ContractUnit>): number {
  * problem — it is a figure that cannot go into the total at all.
  *
  * /currency/list is fetched once and only when there is something to price.
+ *
+ * Both lookups fail LOUDLY and on ONE host. A contract that names no usable
+ * `productId`, and a product the fill's own host does not have, are both
+ * TradovateUnpriceableError here — never a retry against the other host, whose
+ * id space nothing documents as shared (REF-90).
  */
 async function loadContractUnits(
   reader: TradovateReader,
@@ -642,12 +647,52 @@ async function loadContractUnits(
   // for a form to open.
   await Promise.all([...contractIds].map(async (contractId) => {
     const contract = await reader.get<TradovateContract>('/contract/item', { id: contractId });
-    const product = await reader.get<TradovateProduct>('/product/item', { id: contract?.productId });
+    const productId = contract?.productId;
+
+    // Validated BETWEEN the two calls rather than threaded into the second one's
+    // query. `TradovateContract` declares `productId` as required, but the
+    // documented /contract/item response schema does not list it at all, so an
+    // absent field is a shape the wire can really have — and buildUrl() drops an
+    // `undefined` query value by design, which turned this into
+    // `GET /product/item` with NO query string and an upstream 404 that named
+    // neither id (REF-90). An id Tradovate would not have honoured is not worth
+    // a round trip, and the 404 it earned was undiagnosable.
+    //
+    // `<= 0` on purpose: 0 is finite, is what a numeric field coerced from an
+    // absent value tends to be, and is not an entity id this API issues. Same
+    // boundary as valuePerPoint below, for the same fail-loud reason.
+    if (typeof productId !== 'number' || !Number.isFinite(productId) || productId <= 0) {
+      throw new TradovateUnpriceableError(
+        `Contract ${contractId} states no usable productId, so its product cannot be ` +
+          'looked up and its trades would have no value per point.',
+        'no_value_per_point'
+      );
+    }
+
+    // A 404 ALONE, and no cross-host retry. If the product genuinely is not on
+    // the host that reported the fill, that is a trade this pull cannot price,
+    // and asking the other host would price it with whatever product carries
+    // that id there — the silent unit bug loadHostTrades' header exists to
+    // prevent. A 401, 429 or 5xx stays a TradovateRequestError so the penalty
+    // and transient handling above this layer keeps working.
+    let product: TradovateProduct;
+    try {
+      product = await reader.get<TradovateProduct>('/product/item', { id: productId });
+    } catch (error) {
+      if (error instanceof TradovateRequestError && error.status === 404) {
+        throw new TradovateUnpriceableError(
+          `Product ${productId} (contract ${contractId}) was not found on the host that ` +
+            'reported the fill, so the trade cannot be priced.',
+          'no_value_per_point'
+        );
+      }
+      throw error;
+    }
 
     const valuePerPoint = product?.valuePerPoint;
     if (typeof valuePerPoint !== 'number' || !Number.isFinite(valuePerPoint) || valuePerPoint <= 0) {
       throw new TradovateUnpriceableError(
-        `Product ${contract?.productId} (contract ${contractId}) states no usable ` +
+        `Product ${productId} (contract ${contractId}) states no usable ` +
           'valuePerPoint, so its trades would be counted in points against a dollar threshold.',
         'no_value_per_point'
       );

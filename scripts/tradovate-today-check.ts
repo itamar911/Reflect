@@ -73,9 +73,11 @@ import type {
 } from '../src/lib/tradovate/types';
 import {
   classifyDayPullFailure,
+  describeDayPullFailure,
   readBrokerDayResponse,
   type BrokerDayPull,
 } from '../src/lib/rules/brokerDayContext';
+import { redactSecrets } from '../src/lib/tradovate/redact';
 import { loadTradeRuleContext, type TradeRuleContext } from '../src/lib/rules/tradeRuleContext';
 import {
   checkActiveViolation,
@@ -1386,6 +1388,163 @@ async function main() {
       ),
       []
     ),
+  ]);
+
+  // ── The product lookup ────────────────────────────────────────────────────
+  //
+  // Production, 14.10, five identical attempts: discovery, positions, pairs and
+  // fills all succeeded, and then
+  // `TradovateRequestError: Tradovate /product/item failed with HTTP 404` —
+  // naming no contract, no product and no host, because it was thrown inside the
+  // HTTP client before any of loadContractUnits' own checks could run.
+  //
+  // The request was ours. `/product/item?id=` was built from
+  // `contract?.productId`, which nothing validated, and buildUrl() drops an
+  // `undefined` query value by documented design — so a contract body without
+  // the field sent `GET /product/item` with NO query string, and a parameterless
+  // item endpoint answers 404. The documented /contract/item response schema
+  // does not list `productId` at all, so that body is not contrived.
+  //
+  // THE CASE THAT CARRIES THE MOST WEIGHT IS (6), THE ONE THAT DOES NOT ASK.
+  // Nothing documents live and demo as sharing reference-data id spaces, so
+  // retrying demo's product id against live could return a DIFFERENT product and
+  // price the trade at the wrong dollars per point — no error, no log line, and
+  // a wrong figure into max_daily_loss. A loud 404 falls back to Reflect's own
+  // data and says so on screen, which is the affordable direction.
+
+  /** A reader answering /contract/item with `body` verbatim, calls recorded. */
+  const contractItemReader = (body: unknown): TradovateReader & { calls: string[] } => {
+    const inner = reader(withTrips([oneTrip]));
+    return {
+      calls: inner.calls,
+      get<T>(path: string, query?: Record<string, string | number | boolean | undefined>): Promise<T> {
+        if (path !== '/contract/item') return inner.get<T>(path, query);
+        inner.calls.push(path);
+        return Promise.resolve(body as T);
+      },
+    };
+  };
+
+  /** One host, that contract body: how it failed, and whether we still asked. */
+  const onContractBody = async (body: unknown): Promise<[string, boolean]> => {
+    const host = contractItemReader(body);
+    const reason = await thrown(() =>
+      loadBrokerDay({
+        readers: { live: host },
+        environment: 'live',
+        dayStartMs: DAY_START,
+        tradovateUserId: ACCOUNT.userId,
+        now: NOW,
+      })
+    );
+    return [reason, host.calls.includes('/product/item')];
+  };
+
+  /** The refusal every one of (1)–(4) must reach, without a second call. */
+  const refusedUnasked: [string, boolean] = ['unpriceable:no_value_per_point', false];
+
+  /** One host whose /product/item fails with `status`, everything else fine. */
+  const productFails = (status: number) =>
+    loadBrokerDay({
+      readers: {
+        live: failingReader(
+          withTrips([oneTrip]),
+          '/product/item',
+          () => new TradovateRequestError('/product/item', status, status === 404 ? '' : '{"errorText":"Denied"}')
+        ),
+      },
+      environment: 'live',
+      dayStartMs: DAY_START,
+      tradovateUserId: ACCOUNT.userId,
+      now: NOW,
+    });
+
+  const errorFrom = async (run: () => Promise<unknown>): Promise<unknown> => {
+    try {
+      await run();
+      return null;
+    } catch (error) {
+      return error;
+    }
+  };
+
+  // (5) A genuine reference-data 404, on a productId that was perfectly usable.
+  const genuine404 = await errorFrom(() => productFails(404));
+  /** The one line today/route.ts logs for it, built exactly as the route does. */
+  const warnLine = redactSecrets(describeDayPullFailure(genuine404));
+
+  // (6) The REF-90 production shape: the mint host holds nothing, the account
+  // and the trade are on demo, and demo cannot resolve the product.
+  const idleLive = reader(scene({ accounts: [] }));
+  const noRetry = await errorFrom(() =>
+    loadBrokerDay({
+      readers: {
+        live: idleLive,
+        demo: failingReader(
+          demoScene,
+          '/product/item',
+          () => new TradovateRequestError('/product/item', 404, '')
+        ),
+      },
+      environment: 'live',
+      dayStartMs: DAY_START,
+      tradovateUserId: ACCOUNT.userId,
+      now: NOW,
+    })
+  );
+
+  // (8) The Q1 regression guard: pricing goes to the host that reported the
+  // fill, and the other host is not asked for reference data at all.
+  const pricedLive = reader(scene({ accounts: [] }));
+  const pricedDemo = reader(demoScene);
+  const pricedDay = await loadBrokerDay({
+    readers: { live: pricedLive, demo: pricedDemo },
+    environment: 'live',
+    dayStartMs: DAY_START,
+    tradovateUserId: ACCOUNT.userId,
+    now: NOW,
+  });
+
+  const itemCalls = (calls: string[]) =>
+    calls.filter((path) => path === '/contract/item' || path === '/product/item');
+
+  group('a product that cannot be looked up fails loudly and on one host', [
+    // (1)–(4) The malformed lookup, never sent. The second element of each
+    // tuple is the whole point of Fix 1: no /product/item call was made.
+    c('(1) a contract body with no productId', await onContractBody({ id: CONTRACT_ID, name: 'ESZ6' }), refusedUnasked),
+    c('(2) a null contract body', await onContractBody(null), refusedUnasked),
+    c('(3) a null productId is not dropped by buildUrl, so no ?id=null goes out', await onContractBody({ ...CONTRACT, productId: null }), refusedUnasked),
+    c('(4) zero is finite and is still not an entity id', await onContractBody({ ...CONTRACT, productId: 0 }), refusedUnasked),
+
+    // (5) Mechanism (c): the product really is not on that host.
+    c('(5) a genuine 404 is the day the user is shown', classifyDayPullFailure(genuine404), 'broker_unavailable'),
+    c(
+      'and it is ours, naming the ids the upstream 404 never did',
+      [
+        genuine404 instanceof TradovateUnpriceableError,
+        warnLine.includes('no_value_per_point'),
+        warnLine.includes(String(PRODUCT_ID)),
+        warnLine.includes(String(CONTRACT_ID)),
+        // Ids are not secrets; a symbol, a price or a hostname would be.
+        ['ESZ6', '5000', '4990', 'tradovate.com'].filter((leak) => warnLine.includes(leak)),
+      ],
+      [true, true, true, true, []]
+    ),
+
+    // (6) The Q3 decision in executable form.
+    c('(6) demo cannot price it and live is never asked to', itemCalls(idleLive.calls), []),
+    c('and the healthy live host paid one call, not none and not seven', idleLive.calls, ['/account/list']),
+    c('and the pull fails whole rather than reporting a partial day', classifyDayPullFailure(noRetry), 'broker_unavailable'),
+
+    // (7) Fix 2's narrowness. A 401 must stay a TradovateRequestError or the
+    // penalty and transient handling above this layer stops seeing it.
+    c('(7) a 401 on the product read is not an unpriceable day', await thrown(() => productFails(401)), 'TradovateRequestError'),
+    c('and neither is a 500', await thrown(() => productFails(500)), 'TradovateRequestError'),
+
+    // (8)
+    c('(8) the host that reported the fill is the host that prices it', itemCalls(pricedDemo.calls), ['/contract/item', '/product/item']),
+    c('and the other host is asked for nothing but its accounts', pricedLive.calls, ['/account/list']),
+    c('and the day is the one that host priced', [pricedDay.closedCount, pricedDay.net], [1, 1000]),
   ]);
 
   // ── The four provenance states ────────────────────────────────────────────
