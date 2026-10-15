@@ -12,10 +12,20 @@ checks it against their rules, and an AI coach reviews their behaviour over time
 - **Claude API** via `@anthropic-ai/sdk` — every AI feature is a route under
   `src/app/api/` (`ai-coach`, `ai-debrief`, `ai-patterns`, `ai-trade-review`, …)
 - **Tailwind v4** + `recharts` for charts, `lucide-react` for icons
-- **Stripe** — planned, not yet integrated. Plan tiers (`free` / `basic` / `pro`)
-  already exist in `src/lib/plans/config.ts` and in the DB as
-  `profiles.subscription_tier`, but no payment processor is wired up yet. Don't
-  assume Stripe code exists; there is currently none in the repo.
+- **PayPlus** (Israeli clearing company) — chosen, not yet integrated. There is
+  no payment code in the repo at all: no provider SDK, no checkout, no webhook,
+  no billing table, and no column for a trial or a subscription period. The only
+  mentions anywhere are the legal pages, in future tense — `terms` §4.2,
+  `privacy` §2.1 and the §6 sub-processor table. Don't assume payment code
+  exists; there is none.
+- **Plan tiers are not a live mechanism.** `profiles.subscription_tier` and the
+  `free` / `basic` / `pro` union in `src/lib/plans/config.ts` are left from a
+  tier split we no longer sell. All three tiers resolve to the same unlimited
+  limits, so every limit check in the app is a no-op that always passes, and the
+  four numeric limits have no readers at all. What used to enforce the caps was
+  three hand-made Postgres triggers, dropped by `022_drop_plan_limit_triggers.sql`
+  — read that file and the header of `config.ts` before treating any of this as
+  working.
 
 ## Database — read this before touching SQL
 
@@ -48,8 +58,10 @@ credentials — `scripts/probe-bucket.mjs`, `scripts/cleanup-orphans.mjs`,
 **enumerated by script name**, not a catch-all: a new script that talks to
 Supabase must be added to that deny list in the same change, or nothing stops it.
 
-`src/lib/plans/config.ts` mirrors a DB `CHECK` constraint. If you change plan tiers
-in one place, the other must change in the same migration.
+`src/lib/plans/config.ts` mirrors a DB `CHECK` constraint. Changing the SET of
+tier names means changing both in the same migration. Changing what a tier
+*means* needs no migration — the column and the union already carry all three
+values, so that is an edit to `PLAN_LIMITS` alone.
 
 ## Language and direction
 
