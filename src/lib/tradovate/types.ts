@@ -374,12 +374,44 @@ export interface TradovateTradingPermission {
 /**
  * A contract. GET /v1/contract/item?id=…
  *
- * Read for `productId`, the step towards a value per point.
+ * READ FOR `name` AND `contractMaturityId`, AND THE ABSENCE OF `productId` IS
+ * THE POINT. The documented response schema lists four fields — `name`,
+ * `contractMaturityId`, `timestamp`, `id` — and both doc mirrors publish the
+ * same four. `productId` is in neither. It is not imaginary: community SDKs
+ * declare it and some hosts return it for some contracts, which is why a
+ * pricing chain built on it shipped and mostly worked. It is simply not
+ * contractual, so a host is free to omit it — and on 15 Oct 2026 one did, and
+ * the trader's day could not be priced (REF-90).
+ *
+ * The product is reached through {@link TradovateContractMaturity} instead, and
+ * this type's silence about `productId` is what makes the compiler refuse the
+ * old route.
  *   https://partner.tradovate.com/api/rest-api-endpoints/contract-library/contract-item
  */
 export interface TradovateContract {
   id: number;
   name: string;
+  contractMaturityId: number;
+}
+
+/**
+ * A contract's maturity. GET /v1/contractMaturity/item?id=…
+ *
+ * The documented hop from a contract to its product, and the reason this entity
+ * is in Reflect at all: `productId` is a REQUIRED field here, reached by
+ * `Contract.contractMaturityId`, which is required there. Two required fields
+ * on two documented entities is as strong as this API gets, against a field
+ * that appears in no schema at all.
+ *
+ * `expirationMonth`, `expirationDate` and `isFront` are documented and required
+ * too, and are deliberately not declared: nothing in this product asks a
+ * contract when it expires, and a type that cannot express it is a type nothing
+ * can start reading by autocomplete. Same discipline as
+ * {@link TradovateTradingPermission}.
+ *   https://partner.tradovate.com/api/rest-api-endpoints/contract-library/contract-maturity-item
+ */
+export interface TradovateContractMaturity {
+  id: number;
   productId: number;
 }
 

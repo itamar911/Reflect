@@ -55,6 +55,7 @@ import {
   TradovateUnpriceableError,
 } from '../src/lib/tradovate/errors';
 import {
+  forgetContractUnits,
   loadBrokerDay,
   type BrokerDayContext,
   type TradovateReader,
@@ -64,6 +65,7 @@ import { closedToday, parseDayStart } from '../src/lib/tradovate/trading-day';
 import type {
   TradovateAccount,
   TradovateContract,
+  TradovateContractMaturity,
   TradovateCurrency,
   TradovateFill,
   TradovateFillPair,
@@ -142,6 +144,15 @@ const DAY_START = Date.parse('2026-10-13T21:00:00.000Z');
 const NOW = Date.parse('2026-10-14T07:00:00.000Z');
 
 const CONTRACT_ID = 2606306;
+/**
+ * The hop between a contract and its product.
+ *
+ * A distinct number from both the contract id and the product id, so that an
+ * assertion about a message naming "the maturity" cannot pass by naming
+ * something else, and so that a chain that read the wrong id would fail rather
+ * than coincide.
+ */
+const MATURITY_ID = 880011;
 const PRODUCT_ID = 42;
 const USD = { id: 1, name: 'USD' };
 
@@ -161,7 +172,19 @@ const POSITION: TradovatePosition = {
   netPos: 0,
 };
 
-const CONTRACT: TradovateContract = { id: CONTRACT_ID, name: 'ESZ6', productId: PRODUCT_ID };
+/**
+ * The contract body as the documentation describes it, which is the fixture
+ * repair this ticket turns on.
+ *
+ * It carries `contractMaturityId` and NO `productId` — the schema lists four
+ * fields and `productId` is in none of them. The old fixture declared
+ * `productId` and so could never have reproduced 15.10's production body, which
+ * is exactly how a chain built on an undocumented field shipped green. Same
+ * fixture gap the previous report recorded for `valuePerPoint`.
+ */
+const CONTRACT: TradovateContract = { id: CONTRACT_ID, name: 'ESZ6', contractMaturityId: MATURITY_ID };
+/** The documented hop: a maturity's `productId` is required. */
+const MATURITY: TradovateContractMaturity = { id: MATURITY_ID, productId: PRODUCT_ID };
 /** ES: $50 a point. */
 const PRODUCT: TradovateProduct = { id: PRODUCT_ID, name: 'ES', currencyId: USD.id, valuePerPoint: 50 };
 
@@ -213,6 +236,8 @@ interface Scene {
   pairs: TradovateFillPair[];
   fills: TradovateFill[];
   contracts: TradovateContract[];
+  /** The documented step from a contract to a product. */
+  maturities: TradovateContractMaturity[];
   products: TradovateProduct[];
   currencies: TradovateCurrency[];
   /**
@@ -233,6 +258,7 @@ function scene(overrides: Partial<Scene> = {}): Scene {
     pairs: [],
     fills: [],
     contracts: [CONTRACT],
+    maturities: [MATURITY],
     products: [PRODUCT],
     currencies: [USD],
     permissions: null,
@@ -310,6 +336,17 @@ function withTrips(trips: { pair: TradovateFillPair; fills: TradovateFill[] }[],
   });
 }
 
+/**
+ * Every path any reader in this file was asked for, in order, for the whole run.
+ *
+ * One list rather than per-reader, because one of the assertions this ticket
+ * adds is about the SUITE and not about a case: `/product/find`,
+ * `/product/list` and `/contract/find` must never be requested anywhere, which
+ * is REF-90 §2's refusal of symbol-root parsing in executable form. A
+ * per-reader log cannot state that.
+ */
+const allCalls: string[] = [];
+
 /** The reader seam, answering from a scene. Records the paths it was asked for. */
 function reader(data: Scene): TradovateReader & { calls: string[] } {
   const calls: string[] = [];
@@ -317,6 +354,7 @@ function reader(data: Scene): TradovateReader & { calls: string[] } {
     calls,
     get<T>(path: string, query?: Record<string, string | number | boolean | undefined>): Promise<T> {
       calls.push(path);
+      allCalls.push(path);
       const id = Number(query?.id);
       switch (path) {
         case '/account/list':
@@ -340,6 +378,8 @@ function reader(data: Scene): TradovateReader & { calls: string[] } {
           return Promise.resolve(data.currencies as T);
         case '/contract/item':
           return Promise.resolve(data.contracts.find((x) => x.id === id) as T);
+        case '/contractMaturity/item':
+          return Promise.resolve(data.maturities.find((x) => x.id === id) as T);
         case '/product/item':
           return Promise.resolve(data.products.find((x) => x.id === id) as T);
         default:
@@ -347,6 +387,26 @@ function reader(data: Scene): TradovateReader & { calls: string[] } {
       }
     },
   };
+}
+
+/**
+ * A day pull with a COLD contract-spec cache, which is what every group in this
+ * file but the cache group wants.
+ *
+ * `unitByContractName` in lib/tradovate/fills.ts lives for the life of the
+ * process and is shared across pulls by design, so without this one group's
+ * warm `ESZ6` would answer the next group's question. That is not a hypothetical
+ * — the unpriceable group varies the PRODUCT behind the same contract name and
+ * asserts a refusal, and a remembered spec would price it instead and the
+ * refusal would never be reached. Several call-count assertions would go the
+ * same way.
+ *
+ * So the default is cold and the cache is exercised deliberately, by the one
+ * group that calls `loadBrokerDay` directly and says why.
+ */
+function coldPull(request: Parameters<typeof loadBrokerDay>[0]): Promise<BrokerDayContext> {
+  forgetContractUnits();
+  return loadBrokerDay(request);
 }
 
 /**
@@ -359,7 +419,7 @@ function reader(data: Scene): TradovateReader & { calls: string[] } {
  * being rewritten.
  */
 function pull(data: Scene, dayStartMs = DAY_START): Promise<BrokerDayContext> {
-  return loadBrokerDay({
+  return coldPull({
     readers: { live: reader(data) },
     environment: 'live',
     dayStartMs,
@@ -380,7 +440,7 @@ function pullHosts(params: {
   if (params.live) readers.live = reader(params.live);
   if (params.demo) readers.demo = reader(params.demo);
 
-  return loadBrokerDay({
+  return coldPull({
     readers,
     environment: params.environment ?? 'live',
     dayStartMs: params.dayStartMs ?? DAY_START,
@@ -394,7 +454,10 @@ function failingReader(data: Scene, failOn: string, error: () => Error): Tradova
   const inner = reader(data);
   return {
     get<T>(path: string, query?: Record<string, string | number | boolean | undefined>): Promise<T> {
-      if (path === failOn) return Promise.reject(error());
+      if (path === failOn) {
+        allCalls.push(path);
+        return Promise.reject(error());
+      }
       return inner.get<T>(path, query);
     },
   };
@@ -638,7 +701,7 @@ async function main() {
   ]);
 
   const cheapReader = reader(scene());
-  await loadBrokerDay({
+  await coldPull({
     readers: { live: cheapReader },
     environment: 'live',
     dayStartMs: DAY_START,
@@ -764,7 +827,7 @@ async function main() {
   // the answer must be the one this suite has always asserted.
   const liveOnlyLive = reader(withTrips([closedToday1]));
   const liveOnlyDemo = reader(scene({ accounts: [] }));
-  const liveOnly = await loadBrokerDay({
+  const liveOnly = await coldPull({
     readers: { live: liveOnlyLive, demo: liveOnlyDemo },
     environment: 'live',
     dayStartMs: DAY_START,
@@ -818,23 +881,30 @@ async function main() {
       },
     ],
   });
+  // The two hosts' contracts now carry DIFFERENT NAMES, which is what makes
+  // this case say what it has always claimed to say. The spec cache is keyed by
+  // contract name (REF-90 §4), so one name on both hosts would be one spec by
+  // definition and the assertion below would be measuring the fixture rather
+  // than the code. Colliding ids, distinct instruments: the realistic shape of
+  // two id spaces that are not documented as shared.
   const collidingScene = (
     accountId: number,
+    name: string,
     valuePerPoint: number,
     trip: { pair: TradovateFillPair; fills: TradovateFill[] }
   ) =>
     withTrips([trip], {
       accounts: [{ ...ACCOUNT, id: accountId }],
       positions: [{ ...POSITION, id: 9001, accountId }],
-      contracts: [{ id: COLLIDING_CONTRACT, name: 'ESZ6', productId: PRODUCT_ID }],
+      contracts: [{ id: COLLIDING_CONTRACT, name, contractMaturityId: MATURITY_ID }],
       products: [{ ...PRODUCT, valuePerPoint }],
     });
 
   const colliding = await pullHosts({
     // +10 points at $50 = +$500
-    live: collidingScene(1, 50, collidingTrip(5000, 5010, '2026-10-14T06:00:00.000Z')),
+    live: collidingScene(1, 'ESZ6', 50, collidingTrip(5000, 5010, '2026-10-14T06:00:00.000Z')),
     // −10 points at $2 = −$20, and NOT −$500
-    demo: collidingScene(2, 2, collidingTrip(4000, 3990, '2026-10-14T05:30:00.000Z')),
+    demo: collidingScene(2, 'MYMZ6', 2, collidingTrip(4000, 3990, '2026-10-14T05:30:00.000Z')),
   });
 
   // (5) The streak runs on the pooled, sorted list, because the streak is about
@@ -857,7 +927,7 @@ async function main() {
   // mint host. Double-counting would block a trader over money they did not
   // lose, which ./accounts.ts names as the worst failure available here.
   const sameAccountDemo = reader(withTrips([closedToday1]));
-  const dedupe = await loadBrokerDay({
+  const dedupe = await coldPull({
     readers: { live: reader(withTrips([closedToday1])), demo: sameAccountDemo },
     environment: 'live',
     dayStartMs: DAY_START,
@@ -867,7 +937,7 @@ async function main() {
 
   // (7) Discovery fails on the non-mint host. An organization with no demo
   // provisioning must not start failing pulls that work today.
-  const demoRefused = await loadBrokerDay({
+  const demoRefused = await coldPull({
     readers: {
       live: reader(withTrips([closedToday1])),
       demo: failingReader(
@@ -894,7 +964,7 @@ async function main() {
   };
 
   const demoHadAccounts = await failureSource(() =>
-    loadBrokerDay({
+    coldPull({
       readers: {
         live: reader(scene({ accounts: [] })),
         demo: failingReader(
@@ -911,7 +981,7 @@ async function main() {
   );
 
   const mintDiscoveryFailed = await failureSource(() =>
-    loadBrokerDay({
+    coldPull({
       readers: {
         live: failingReader(
           scene(),
@@ -1086,7 +1156,7 @@ async function main() {
    * account of ours and is therefore never asked for its list at all.
    */
   const permOtherHostDemo = reader(scene({ accounts: [], permissions: [grant('Approved')] }));
-  const permOtherHost = await loadBrokerDay({
+  const permOtherHost = await coldPull({
     readers: { live: reader(firmScene([])), demo: permOtherHostDemo },
     environment: 'live',
     dayStartMs: DAY_START,
@@ -1097,7 +1167,7 @@ async function main() {
   /** The fail-safe, three ways the list can fail to say anything. */
   const list404 = await firmPull(null);
   const listEmpty = await firmPull([]);
-  const list401 = await loadBrokerDay({
+  const list401 = await coldPull({
     // The grant IS in the scene, and a 401 on the read must still leave the
     // account out: an unreadable join is the owned-only rule, never a guess.
     readers: {
@@ -1130,7 +1200,7 @@ async function main() {
 
   /** What the ordinary trader pays for Stage 2, asserted as calls made. */
   const ownedReader = reader(withTrips([closedToday1]));
-  await loadBrokerDay({
+  await coldPull({
     readers: { live: ownedReader },
     environment: 'live',
     dayStartMs: DAY_START,
@@ -1139,7 +1209,7 @@ async function main() {
   });
 
   const firmReader = reader(firmScene([grant('Approved')]));
-  await loadBrokerDay({
+  await coldPull({
     readers: { live: firmReader },
     environment: 'live',
     dayStartMs: DAY_START,
@@ -1405,6 +1475,14 @@ async function main() {
   // item endpoint answers 404. The documented /contract/item response schema
   // does not list `productId` at all, so that body is not contrived.
   //
+  // WHAT THIS GROUP NO LONGER SAYS. Four of its assertions pinned the refusal
+  // that `Contract.productId` made necessary, and the maturity hop reverses the
+  // first of them: a body with no `productId` is the production case and it must
+  // PRICE. The other three were never about `productId` as such — they were
+  // about the `> 0` boundary on an id read off a JSON body — so they are
+  // repointed at `contractMaturityId`, where the same boundary still decides
+  // whether a request is worth sending. See the group below for the hop itself.
+  //
   // THE CASE THAT CARRIES THE MOST WEIGHT IS (6), THE ONE THAT DOES NOT ASK.
   // Nothing documents live and demo as sharing reference-data id spaces, so
   // retrying demo's product id against live could return a DIFFERENT product and
@@ -1420,16 +1498,25 @@ async function main() {
       get<T>(path: string, query?: Record<string, string | number | boolean | undefined>): Promise<T> {
         if (path !== '/contract/item') return inner.get<T>(path, query);
         inner.calls.push(path);
+        allCalls.push(path);
         return Promise.resolve(body as T);
       },
     };
   };
 
-  /** One host, that contract body: how it failed, and whether we still asked. */
+  /**
+   * One host, that contract body: how it failed, and whether we still asked.
+   *
+   * "Asked" is now the MATURITY call, because that is the request this
+   * validation exists to withhold. `/contractMaturity/item` is the first hop
+   * out of the contract body, so an id the API would not have honoured shows up
+   * here as a call that should not have been made — the same property the old
+   * version of this helper asserted one endpoint further along.
+   */
   const onContractBody = async (body: unknown): Promise<[string, boolean]> => {
     const host = contractItemReader(body);
     const reason = await thrown(() =>
-      loadBrokerDay({
+      coldPull({
         readers: { live: host },
         environment: 'live',
         dayStartMs: DAY_START,
@@ -1437,15 +1524,15 @@ async function main() {
         now: NOW,
       })
     );
-    return [reason, host.calls.includes('/product/item')];
+    return [reason, host.calls.includes('/contractMaturity/item')];
   };
 
-  /** The refusal every one of (1)–(4) must reach, without a second call. */
+  /** The refusal (2)–(4) must reach, without a second call. */
   const refusedUnasked: [string, boolean] = ['unpriceable:no_value_per_point', false];
 
   /** One host whose /product/item fails with `status`, everything else fine. */
   const productFails = (status: number) =>
-    loadBrokerDay({
+    coldPull({
       readers: {
         live: failingReader(
           withTrips([oneTrip]),
@@ -1477,7 +1564,7 @@ async function main() {
   // and the trade are on demo, and demo cannot resolve the product.
   const idleLive = reader(scene({ accounts: [] }));
   const noRetry = await errorFrom(() =>
-    loadBrokerDay({
+    coldPull({
       readers: {
         live: idleLive,
         demo: failingReader(
@@ -1497,7 +1584,7 @@ async function main() {
   // fill, and the other host is not asked for reference data at all.
   const pricedLive = reader(scene({ accounts: [] }));
   const pricedDemo = reader(demoScene);
-  const pricedDay = await loadBrokerDay({
+  const pricedDay = await coldPull({
     readers: { live: pricedLive, demo: pricedDemo },
     environment: 'live',
     dayStartMs: DAY_START,
@@ -1505,16 +1592,30 @@ async function main() {
     now: NOW,
   });
 
+  /** The reference-data reads, in the order they were made. */
   const itemCalls = (calls: string[]) =>
-    calls.filter((path) => path === '/contract/item' || path === '/product/item');
+    calls.filter(
+      (path) =>
+        path === '/contract/item' || path === '/contractMaturity/item' || path === '/product/item'
+    );
 
   group('a product that cannot be looked up fails loudly and on one host', [
-    // (1)–(4) The malformed lookup, never sent. The second element of each
-    // tuple is the whole point of Fix 1: no /product/item call was made.
-    c('(1) a contract body with no productId', await onContractBody({ id: CONTRACT_ID, name: 'ESZ6' }), refusedUnasked),
-    c('(2) a null contract body', await onContractBody(null), refusedUnasked),
-    c('(3) a null productId is not dropped by buildUrl, so no ?id=null goes out', await onContractBody({ ...CONTRACT, productId: null }), refusedUnasked),
-    c('(4) zero is finite and is still not an entity id', await onContractBody({ ...CONTRACT, productId: 0 }), refusedUnasked),
+    // (1) REWRITTEN, and it is the assertion this ticket exists for. This exact
+    // body — the documented four fields, no `productId` — is what production
+    // answered at 11:17 on 15.10, and the old chain refused it. It must now
+    // walk on to the maturity instead of throwing.
+    c(
+      '(1) a contract body with no productId is the production case, and it is not a refusal',
+      await onContractBody({ id: CONTRACT_ID, name: 'ESZ6', contractMaturityId: MATURITY_ID }),
+      ['no throw', true]
+    ),
+
+    // (2)–(4) The malformed lookup, never sent. Still true, and now about the
+    // field the documentation actually promises. The second element of each
+    // tuple is the whole point of Fix 1: no further call was made.
+    c('(2) a null contract body states no contractMaturityId either', await onContractBody(null), refusedUnasked),
+    c('(3) a null contractMaturityId is not dropped by buildUrl, so no ?id=null goes out', await onContractBody({ ...CONTRACT, contractMaturityId: null }), refusedUnasked),
+    c('(4) zero is finite and is still not an entity id', await onContractBody({ ...CONTRACT, contractMaturityId: 0 }), refusedUnasked),
 
     // (5) Mechanism (c): the product really is not on that host.
     c('(5) a genuine 404 is the day the user is shown', classifyDayPullFailure(genuine404), 'broker_unavailable'),
@@ -1542,9 +1643,409 @@ async function main() {
     c('and neither is a 500', await thrown(() => productFails(500)), 'TradovateRequestError'),
 
     // (8)
-    c('(8) the host that reported the fill is the host that prices it', itemCalls(pricedDemo.calls), ['/contract/item', '/product/item']),
+    c('(8) the host that reported the fill is the host that prices it', itemCalls(pricedDemo.calls), ['/contract/item', '/contractMaturity/item', '/product/item']),
     c('and the other host is asked for nothing but its accounts', pricedLive.calls, ['/account/list']),
     c('and the day is the one that host priced', [pricedDay.closedCount, pricedDay.net], [1, 1000]),
+  ]);
+
+  // ── A contract reaches its product the documented way ─────────────────────
+  //
+  // Production, 15.10 11:17, with the fix above shipped: the refusal fired, it
+  // named the contract, and it saved a request that could never have worked —
+  // and it was still the wrong final answer. `/contract/item` had answered with
+  // a body that has no `productId`, which is not a broken host but the
+  // DOCUMENTED shape: the schema lists `name`, `contractMaturityId`,
+  // `timestamp`, `id`, and both doc mirrors publish the same four. Some hosts
+  // return `productId` anyway, which is why a chain built on it shipped.
+  //
+  // `ContractMaturity.productId` is required on a documented entity, reached by
+  // a required field of the contract we already fetch. So the chain gains one
+  // hop and loses its guess:
+  //
+  //   /contract/item → contractMaturityId → /contractMaturity/item
+  //                  → productId          → /product/item
+  //
+  // AND THERE IS NO STRING PARSING ANYWHERE IN IT, which case 9 asserts over
+  // the whole run. A symbol root stripped off `MNQZ6` is derivable and was
+  // rejected on purpose (REF-90 §2): spreads carry two maturities, continuous
+  // contracts carry none, options carry a strike, and the documentation's own
+  // example product name is `ES_Futures` rather than `ES` — so every failure of
+  // such a rule is either a silently wrong product or a 404 on a
+  // well-formed-looking request, which is the exact shape that made this bug
+  // take two days to read.
+
+  /** A reader answering /contractMaturity/item with `body` verbatim. */
+  const maturityItemReader = (body: unknown): TradovateReader & { calls: string[] } => {
+    const inner = reader(withTrips([oneTrip]));
+    return {
+      calls: inner.calls,
+      get<T>(path: string, query?: Record<string, string | number | boolean | undefined>): Promise<T> {
+        if (path !== '/contractMaturity/item') return inner.get<T>(path, query);
+        inner.calls.push(path);
+        allCalls.push(path);
+        return Promise.resolve(body as T);
+      },
+    };
+  };
+
+  /** One host: the refusal it reached, what the message named, and what it read. */
+  const refusalOn = async (host: TradovateReader & { calls: string[] }) => {
+    const error = await errorFrom(() =>
+      coldPull({
+        readers: { live: host },
+        environment: 'live',
+        dayStartMs: DAY_START,
+        tradovateUserId: ACCOUNT.userId,
+        now: NOW,
+      })
+    );
+    const message = error instanceof Error ? error.message : '';
+    return {
+      reason: error instanceof TradovateUnpriceableError ? `unpriceable:${error.reason}` : String(error),
+      namesContract: message.includes(String(CONTRACT_ID)),
+      namesMaturity: message.includes(String(MATURITY_ID)),
+      reads: itemCalls(host.calls),
+    };
+  };
+
+  // (1)–(2) THE PRODUCTION BODY, and the whole ticket in two assertions. The
+  // default fixture IS that body now — `CONTRACT` carries no `productId`,
+  // because the entity does not — so every group above this one has been
+  // pricing the documented shape all along, which is the fixture repair.
+  const documented = reader(withTrips([oneTrip]));
+  const documentedDay = await coldPull({
+    readers: { live: documented },
+    environment: 'live',
+    dayStartMs: DAY_START,
+    tradovateUserId: ACCOUNT.userId,
+    now: NOW,
+  });
+
+  // (3) A host that DOES return `Contract.productId`, pointing at a product
+  // that says a point is worth $7. Reading it would price this trade at −$70;
+  // the maturity's product says $50 and −$500. The one-path decision, in the
+  // only form that can be measured from outside: a number.
+  // The decoy product is in the scene and perfectly resolvable, which is what
+  // makes this case sharp: a chain that read the contract's own copy would not
+  // fail, it would quietly report a different number.
+  const DECOY_PRODUCT_ID = 4242;
+  const decoyHost = ((): TradovateReader & { calls: string[] } => {
+    const inner = reader(
+      withTrips([oneTrip], {
+        products: [PRODUCT, { ...PRODUCT, id: DECOY_PRODUCT_ID, valuePerPoint: 7 }],
+      })
+    );
+    return {
+      calls: inner.calls,
+      get<T>(path: string, query?: Record<string, string | number | boolean | undefined>): Promise<T> {
+        if (path !== '/contract/item') return inner.get<T>(path, query);
+        inner.calls.push(path);
+        allCalls.push(path);
+        return Promise.resolve({ ...CONTRACT, productId: DECOY_PRODUCT_ID } as TradovateContract as T);
+      },
+    };
+  })();
+  const decoyDay = await coldPull({
+    readers: { live: decoyHost },
+    environment: 'live',
+    dayStartMs: DAY_START,
+    tradovateUserId: ACCOUNT.userId,
+    now: NOW,
+  });
+
+  // (4)–(5) The `usableId` boundary, which is now one function serving both ids
+  // and the value per point, so these three cases pin one place instead of
+  // three that could drift.
+  const noMaturityId = await refusalOn(contractItemReader({ id: CONTRACT_ID, name: 'ESZ6' }));
+  const nullMaturityId = await refusalOn(
+    contractItemReader({ ...CONTRACT, contractMaturityId: null })
+  );
+  const zeroMaturityId = await refusalOn(
+    contractItemReader({ ...CONTRACT, contractMaturityId: 0 })
+  );
+
+  // (6) The maturity resolves and names no product. The message has to name
+  // BOTH ends — the maturity it asked about and the contract that sent it there
+  // — because a maturity id alone is not something anyone can look up from a
+  // log line.
+  const noProductId = await refusalOn(maturityItemReader({ id: MATURITY_ID }));
+  const nullProductId = await refusalOn(maturityItemReader({ ...MATURITY, productId: null }));
+  const zeroProductId = await refusalOn(maturityItemReader({ ...MATURITY, productId: 0 }));
+
+  // (7)–(8) The new call's own 404-only catch. This is the hop that has never
+  // run in production, so the one thing that must not happen if a documented
+  // required id does not resolve is a bare upstream 404 naming neither end of
+  // it — and a 401 or a 500 must stay a TradovateRequestError, or the penalty
+  // and transient handling above this layer stops seeing them.
+  const maturityFails = (status: number) =>
+    coldPull({
+      readers: {
+        live: failingReader(
+          withTrips([oneTrip]),
+          '/contractMaturity/item',
+          () =>
+            new TradovateRequestError(
+              '/contractMaturity/item',
+              status,
+              status === 404 ? '' : '{"errorText":"Denied"}'
+            )
+        ),
+      },
+      environment: 'live',
+      dayStartMs: DAY_START,
+      tradovateUserId: ACCOUNT.userId,
+      now: NOW,
+    });
+
+  const maturity404 = await errorFrom(() => maturityFails(404));
+  const maturity404Line = redactSecrets(describeDayPullFailure(maturity404));
+
+  // (10) One name, two hosts, one pull. The hosts run in sequence, so demo's
+  // `ESZ6` meets a warm key and never asks what it is worth — which is sound
+  // for the reason §3 sets out and a `contractId`-keyed cache could not claim:
+  // a name is an exchange fact, not a host-local row.
+  const SHARED_NAME_CONTRACT_ID = 999777;
+  const sharedNameLive = reader(withTrips([oneTrip]));
+  const sharedNameDemo = reader(
+    withTrips(
+      [
+        roundTrip({
+          side: 'long',
+          openAt: '2026-10-14T05:00:00Z',
+          closeAt: '2026-10-14T06:30:00Z',
+          entry: 5000,
+          exit: 5020,
+          contractId: SHARED_NAME_CONTRACT_ID,
+        }),
+      ],
+      {
+        accounts: [DEMO_ACCOUNT],
+        positions: [{ ...POSITION, accountId: DEMO_ACCOUNT.id }],
+        // The same instrument, a different host, therefore a different id and
+        // the same name — and the same $50 a point, because two hosts naming
+        // one instrument cannot disagree about what it is.
+        contracts: [{ id: SHARED_NAME_CONTRACT_ID, name: 'ESZ6', contractMaturityId: 990011 }],
+        maturities: [{ id: 990011, productId: 7777 }],
+        products: [{ ...PRODUCT, id: 7777, valuePerPoint: 50 }],
+      }
+    )
+  );
+  const sharedName = await coldPull({
+    readers: { live: sharedNameLive, demo: sharedNameDemo },
+    environment: 'live',
+    dayStartMs: DAY_START,
+    tradovateUserId: ACCOUNT.userId,
+    now: NOW,
+  });
+  const productCalls = (calls: string[]) => calls.filter((p) => p === '/product/item').length;
+
+  // (11) A SECOND PULL IN THE SAME PROCESS, which is the case the cache exists
+  // for: a pull runs at most every 30 seconds (FRESH_MS) and re-read all three
+  // endpoints every time, for numbers that change when a contract is relisted.
+  // Note what is NOT saved — the name comes out of /contract/item, so that read
+  // still happens once per contract per pull. Three calls become one.
+  //
+  // Driven through loadBrokerDay directly, because coldPull() would defeat it.
+  forgetContractUnits();
+  const firstPullHost = reader(withTrips([oneTrip]));
+  const secondPullHost = reader(withTrips([oneTrip]));
+  const warmRequest = (host: TradovateReader) => ({
+    readers: { live: host },
+    environment: 'live' as const,
+    dayStartMs: DAY_START,
+    tradovateUserId: ACCOUNT.userId,
+    now: NOW,
+  });
+  const firstPull = await loadBrokerDay(warmRequest(firstPullHost));
+  const secondPull = await loadBrokerDay(warmRequest(secondPullHost));
+
+  // (12) Two names that happen to share a product. Each name is a key of its
+  // own, so each resolves on its own — the cache is not a product cache, and
+  // two contracts of one product are two specs as far as it is concerned. They
+  // are also resolved concurrently, so neither can see the other's entry.
+  const SIBLING_CONTRACT_ID = 2606307;
+  const SIBLING_MATURITY_ID = 880012;
+  const siblingHost = reader(
+    withTrips(
+      [
+        roundTrip({ side: 'long', openAt: '2026-10-14T05:00:00Z', closeAt: '2026-10-14T06:00:00Z', entry: 5000, exit: 5010 }),
+        roundTrip({
+          side: 'long',
+          openAt: '2026-10-14T05:00:00Z',
+          closeAt: '2026-10-14T06:30:00Z',
+          entry: 5000,
+          exit: 5020,
+          contractId: SIBLING_CONTRACT_ID,
+        }),
+      ],
+      {
+        contracts: [CONTRACT, { id: SIBLING_CONTRACT_ID, name: 'ESH7', contractMaturityId: SIBLING_MATURITY_ID }],
+        // Two maturities of ONE product: the March contract and the December
+        // one are both ES, and both are worth $50 a point.
+        maturities: [MATURITY, { id: SIBLING_MATURITY_ID, productId: PRODUCT_ID }],
+      }
+    )
+  );
+  const siblings = await coldPull(warmRequest(siblingHost));
+
+  // (13) A failure is not remembered. A delisting that gets resolved, or a host
+  // hiccup, has to be re-asked — otherwise one 404 would refuse this trader's
+  // day for the life of the process.
+  forgetContractUnits();
+  const failedThenFixed = await thrown(() =>
+    loadBrokerDay(
+      warmRequest(
+        failingReader(
+          withTrips([oneTrip]),
+          '/product/item',
+          () => new TradovateRequestError('/product/item', 404, '')
+        )
+      )
+    )
+  );
+  const afterFailure = await loadBrokerDay(warmRequest(reader(withTrips([oneTrip]))));
+
+  group('a contract reaches its product the documented way', [
+    // (1) The production case: the body that refused at 11:17 now prices.
+    c(
+      '(1) a contract with contractMaturityId and no productId prices normally',
+      [documentedDay.closedCount, documentedDay.net, documentedDay.lost],
+      [1, -500, 500]
+    ),
+
+    // (2) And the route it took.
+    c(
+      '(2) the calls are the documented three, in order',
+      itemCalls(documented.calls),
+      ['/contract/item', '/contractMaturity/item', '/product/item']
+    ),
+
+    // (3) The one-path decision, which is the recommendation this fix adopted.
+    // −$70 here would mean the undocumented shortcut was taken.
+    c(
+      "(3) a host's own Contract.productId is not read even when it is there",
+      [decoyDay.net, decoyDay.lost],
+      [-500, 500]
+    ),
+
+    // (4)
+    c(
+      '(4) no contractMaturityId: refused, named, and the maturity never asked for',
+      noMaturityId,
+      {
+        reason: 'unpriceable:no_value_per_point',
+        namesContract: true,
+        namesMaturity: false,
+        reads: ['/contract/item'],
+      }
+    ),
+
+    // (5) The same boundary, one function, three shapes of the same lie.
+    c(
+      '(5) null and 0 are not ids either, and cost no request',
+      [nullMaturityId, zeroMaturityId],
+      [
+        { reason: 'unpriceable:no_value_per_point', namesContract: true, namesMaturity: false, reads: ['/contract/item'] },
+        { reason: 'unpriceable:no_value_per_point', namesContract: true, namesMaturity: false, reads: ['/contract/item'] },
+      ]
+    ),
+
+    // (6) Both ends named, and the product never asked for.
+    c(
+      '(6) a maturity that states no usable productId names the maturity AND the contract',
+      [noProductId, nullProductId, zeroProductId],
+      Array.from({ length: 3 }, () => ({
+        reason: 'unpriceable:no_value_per_point',
+        namesContract: true,
+        namesMaturity: true,
+        reads: ['/contract/item', '/contractMaturity/item'],
+      }))
+    ),
+
+    // (7) The 404-only catch, extended to the new call.
+    c(
+      '(7) a 404 on the maturity is an unpriceable day naming both ids',
+      [
+        maturity404 instanceof TradovateUnpriceableError,
+        classifyDayPullFailure(maturity404),
+        maturity404Line.includes(String(MATURITY_ID)),
+        maturity404Line.includes(String(CONTRACT_ID)),
+        // Same discipline as the product 404: ids are not secrets, a symbol or
+        // a price or a hostname would be.
+        ['ESZ6', '5000', '4990', 'tradovate.com'].filter((leak) => maturity404Line.includes(leak)),
+      ],
+      [true, 'broker_unavailable', true, true, []]
+    ),
+
+    // (8) And the narrowness of it.
+    c('(8) a 401 on the maturity read is not an unpriceable day', await thrown(() => maturityFails(401)), 'TradovateRequestError'),
+    c('and neither is a 500', await thrown(() => maturityFails(500)), 'TradovateRequestError'),
+
+    // (9) REF-90 §2's refusal, over the WHOLE RUN rather than one case. Every
+    // reader in this file logs to `allCalls`, and the groups that drive one all
+    // sit above this line.
+    c(
+      '(9) no symbol parsing: /product/find, /product/list and /contract/find are never called',
+      ['/product/find', '/product/list', '/contract/find'].filter((path) => allCalls.includes(path)),
+      []
+    ),
+
+    // (10) The cache, within one pull, across two hosts.
+    c(
+      '(10) one name on two hosts is one spec: a single /product/item, both trades priced',
+      [
+        productCalls(sharedNameLive.calls) + productCalls(sharedNameDemo.calls),
+        sharedName.closedCount,
+        sharedName.net,
+      ],
+      [1, 2, -500 + 1000]
+    ),
+
+    // (11) The cache, across pulls.
+    c(
+      '(11) a second pull in the same process pays one call, not three',
+      [
+        itemCalls(secondPullHost.calls),
+        secondPull.net,
+        // The first pull paid all three, which is what the second one saved.
+        itemCalls(firstPullHost.calls).length,
+        firstPull.net,
+      ],
+      [['/contract/item'], -500, 3, -500]
+    ),
+
+    // (12) Keyed by name, not by product.
+    c(
+      '(12) two names sharing one product are two keys, each resolved on its own',
+      [siblings.closedCount, siblings.net, productCalls(siblingHost.calls)],
+      [2, 500 + 1000, 2]
+    ),
+
+    // (13) Nothing is remembered on failure.
+    c(
+      '(13) a failed lookup is not remembered, so the next pull prices',
+      [failedThenFixed, afterFailure.net],
+      ['unpriceable:no_value_per_point', -500]
+    ),
+
+    // (14) THE ONE TO WRITE FIRST, and the only way a name-keyed cache could go
+    // wrong is if it were quietly keyed on something else. Restated from the
+    // Stage 1 group rather than re-driven: that is the same `colliding` pull,
+    // whose fixture now gives the two hosts' colliding contractIds DIFFERENT
+    // names, which is what makes it a test of the cache as well as of pooling.
+    c(
+      '(14) nothing crosses hosts by id: colliding contractIds, different names, different values',
+      [colliding.closedCount, colliding.net, colliding.lost],
+      [2, 500 - 20, 20]
+    ),
+
+    // (15) The Q1 guard, restated for three calls. Same two readers as case (8)
+    // of the group above.
+    c(
+      '(15) all three reads go to the host that reported the fill',
+      [itemCalls(pricedDemo.calls), pricedLive.calls],
+      [['/contract/item', '/contractMaturity/item', '/product/item'], ['/account/list']]
+    ),
   ]);
 
   // ── The four provenance states ────────────────────────────────────────────

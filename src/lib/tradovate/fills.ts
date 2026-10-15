@@ -27,16 +27,25 @@
  *                             ownership alone (REF-90 Stage 2, ./accounts.ts)
  *
  * Then, for each contract that actually appears in the trades we are about to
- * count, two more calls plus one shared lookup turn points into dollars:
+ * count, three more calls plus one shared lookup turn points into dollars:
  *
- *   /contract/item   → productId
- *   /product/item    → valuePerPoint, currencyId
- *   /currency/list   → currencyId → 'USD'                     (once per pull)
+ *   /contract/item         → name, contractMaturityId
+ *   /contractMaturity/item → productId
+ *   /product/item          → valuePerPoint, currencyId
+ *   /currency/list         → currencyId → 'USD'               (once per pull)
  *
- * Seven to nine requests for a trader holding one or two contracts, against a
- * documented 5,000 per hour per user. The cost that matters is latency, not
- * quota, which is why the client caches the result briefly rather than pulling
- * once per enforcement path (lib/rules/brokerDayContext.ts).
+ * THE MATURITY HOP IS NOT AN EXTRA STEP, IT IS THE DOCUMENTED ONE. `Contract`
+ * has no `productId` in any published schema; `ContractMaturity` has it as a
+ * required field, reached by a required field of the contract. Reading the
+ * contract's own undocumented copy is what REF-90 shipped and had to take back
+ * when a production host omitted it — see loadContractUnits.
+ *
+ * Eight to ten requests for a trader holding one or two contracts, against a
+ * documented 5,000 per hour per user, and fewer than that in practice: the last
+ * two are cached by contract name, so a warm pull pays one per contract. The
+ * cost that matters is latency, not quota, which is why that cache exists and
+ * why the client also caches the whole result briefly rather than pulling once
+ * per enforcement path (lib/rules/brokerDayContext.ts).
  *
  * The full-list reads are also the scaling limit of this design, and it is
  * worth naming: `/fill/list` and `/fillPair/list` grow with a trader's whole
@@ -81,6 +90,7 @@ import type { TradovateEnvironment } from './hosts';
 import type {
   TradovateAccount,
   TradovateContract,
+  TradovateContractMaturity,
   TradovateCurrency,
   TradovateFill,
   TradovateFillPair,
@@ -251,6 +261,75 @@ interface ContractUnit {
 }
 
 /**
+ * A finite number greater than zero.
+ *
+ * ONE BOUNDARY FOR EVERY NUMBER THE PRICING CHAIN READS OFF THE WIRE: the two
+ * ids it walks to a product, and the value per point it ends at. `0` is what an
+ * absent numeric field tends to coerce to, it is not an entity id this API
+ * issues, and it is not a value per point either — so one test refuses all
+ * three, and extracting it is what stops the three from drifting apart as they
+ * did when only one of them existed (REF-90).
+ *
+ * Takes `unknown` rather than `number | undefined` on purpose: these values
+ * come off a JSON body, where the type that describes them is a claim about the
+ * documentation and not about the wire.
+ */
+function usableId(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
+}
+
+/**
+ * What a contract named `ESZ6` is worth per point, across pulls and traders.
+ *
+ * KEYED ON THE CONTRACT'S NAME, AND THAT IS THE WHOLE REASON THIS IS SAFE TO
+ * SHARE. {@link loadHostTrades}' header forbids pooling anything id-bearing
+ * between hosts, because nothing documents live and demo as sharing id spaces —
+ * a `contractId`-keyed entry really could price one host's contract with the
+ * other's value per point, which is the silent unit bug this module exists to
+ * prevent. A name cannot do that: `ESZ6` is `ESZ6` on any host, because a
+ * contract spec is an exchange fact rather than a host-local row. Both halves
+ * of the value are the same kind of fact — `valuePerPoint` is the spec, and
+ * `currencyName` is already resolved to 'USD' rather than a host-local
+ * `currencyId`.
+ *
+ * NOT KEYED BY USER, DELIBERATELY. The day-pull cache in
+ * lib/rules/brokerDayContext.ts is keyed by `userId` because whose day it is
+ * matters, and signing in as somebody else must not be served the previous
+ * trader's figures. What one point of ES is worth is nobody's data: it is the
+ * same number for every trader, so one process may answer them all from one
+ * entry. Please do not "fix" this to match the other cache.
+ *
+ * It saves the LAST TWO calls, not the first: the key comes out of
+ * /contract/item, so that read still happens once per contract per pull.
+ */
+const unitByContractName = new Map<string, ContractUnit>();
+
+/**
+ * How many contract specs one process keeps.
+ *
+ * The natural TTL is the process lifetime, which on Vercel is short, so there
+ * is no expiry here — a spec changes when a contract is relisted, which is to
+ * say almost never. The cap is what stops a long-lived instance from growing an
+ * entry per contract per trader forever. A trader holds one or two contracts,
+ * so this is already a hundred traders' worth of distinct instruments.
+ */
+const UNIT_CACHE_MAX = 256;
+
+/** Remember a spec, oldest out. A Map iterates in insertion order, so the oldest key is the first. */
+function rememberUnit(name: string, unit: ContractUnit): void {
+  if (!unitByContractName.has(name) && unitByContractName.size >= UNIT_CACHE_MAX) {
+    const oldest = unitByContractName.keys().next();
+    if (!oldest.done) unitByContractName.delete(oldest.value);
+  }
+  unitByContractName.set(name, unit);
+}
+
+/** Forget every contract spec. Test seam, like forgetBrokerDayPull() one layer up. */
+export function forgetContractUnits(): void {
+  unitByContractName.clear();
+}
+
+/**
  * The account ids this host says our trader is permitted to trade (REF-90
  * Stage 2), or null when there is no permission evidence to be had.
  *
@@ -331,10 +410,12 @@ function otherHost(environment: TradovateEnvironment): TradovateEnvironment {
  *   pooled two-host list and two unrelated fills that happen to share an id are
  *   welded into one trade — a trader who scaled out of a demo loser and
  *   separately won on live would be told the two were one decision.
- * - **{@link loadContractUnits}** keys its map on `contractId` alone. Pooled,
- *   one host's `valuePerPoint` can price the other host's contract: a silent
- *   unit bug, which is the exact failure class this module's header exists to
- *   prevent.
+ * - **{@link loadContractUnits}** keys its returned map on `contractId` alone.
+ *   Pooled, one host's `valuePerPoint` can price the other host's contract: a
+ *   silent unit bug, which is the exact failure class this module's header
+ *   exists to prevent. Note that its cache is a different matter and is shared
+ *   across hosts on purpose — see {@link unitByContractName}, which is keyed by
+ *   contract NAME precisely so that it cannot commit this sin.
  *
  * So both run per host, and what leaves is {@link PricedTrade} — dollars and an
  * instant, no ids.
@@ -625,10 +706,32 @@ function pricePair(entry: DatedPair, units: Map<number, ContractUnit>): number {
  *
  * /currency/list is fetched once and only when there is something to price.
  *
- * Both lookups fail LOUDLY and on ONE host. A contract that names no usable
- * `productId`, and a product the fill's own host does not have, are both
- * TradovateUnpriceableError here — never a retry against the other host, whose
- * id space nothing documents as shared (REF-90).
+ * THE ROUTE TO A PRODUCT IS THE DOCUMENTED ONE, AND IT IS THE ONLY ONE TAKEN.
+ * `Contract` carries `contractMaturityId` (required), `ContractMaturity`
+ * carries `productId` (required), and `/product/item` carries `valuePerPoint`
+ * (required). The first version of this function read `Contract.productId`
+ * instead — a field that appears in no published schema, that some hosts do
+ * return, and that one production host omitted on 15 Oct 2026, turning a
+ * perfectly priceable trade into a refused day (REF-90 §4).
+ *
+ * That contract copy is now not read AT ALL, even where a host offers it. As a
+ * call-saver it is tempting and it is the wrong trade: it would make the
+ * documented path the rarely-exercised one, so the branch running for most
+ * contracts would be the undocumented shortcut and the branch that matters
+ * would be cold. One path, always taken, and {@link unitByContractName} buys
+ * the calls back many times over.
+ *
+ * There is also NO NAME PARSING anywhere here — no symbol root stripped off
+ * `MNQZ6`, no `/product/find`, no `/product/list` filtered locally. Spreads,
+ * options and continuous contracts all carry names that such a rule reads
+ * wrongly, and every one of its failures is either a silent wrong product or a
+ * 404 on a well-formed-looking request, which is exactly how hard this bug was
+ * to read the first time (REF-90 §2).
+ *
+ * Every lookup fails LOUDLY and on ONE host. A contract that names no usable
+ * maturity, a maturity that names no usable product, and an entity the fill's
+ * own host does not have are all TradovateUnpriceableError here — never a retry
+ * against the other host, whose id space nothing documents as shared (REF-90).
  */
 async function loadContractUnits(
   reader: TradovateReader,
@@ -641,30 +744,71 @@ async function loadContractUnits(
   const currencyNames = new Map<number, string>();
   for (const currency of currencies ?? []) currencyNames.set(currency.id, currency.name);
 
-  // Contracts in parallel, the two calls within one contract in sequence —
-  // `productId` comes out of the first. A trader holds one or two contracts, so
-  // this is the difference between two round trips and six while someone waits
-  // for a form to open.
+  // Contracts in parallel, the three calls within one contract in sequence —
+  // each id comes out of the call before it. A trader holds one or two
+  // contracts, so this is the difference between three round trips and nine
+  // while someone waits for a form to open.
   await Promise.all([...contractIds].map(async (contractId) => {
     const contract = await reader.get<TradovateContract>('/contract/item', { id: contractId });
-    const productId = contract?.productId;
 
-    // Validated BETWEEN the two calls rather than threaded into the second one's
-    // query. `TradovateContract` declares `productId` as required, but the
-    // documented /contract/item response schema does not list it at all, so an
-    // absent field is a shape the wire can really have — and buildUrl() drops an
-    // `undefined` query value by design, which turned this into
-    // `GET /product/item` with NO query string and an upstream 404 that named
-    // neither id (REF-90). An id Tradovate would not have honoured is not worth
-    // a round trip, and the 404 it earned was undiagnosable.
+    // The cache goes here, between the first read and the two it saves, because
+    // its key is what the first read returns. A body with no usable name is not
+    // a miss to be filled in later: it is a contract there is nothing to key
+    // on, so it takes the long road every pull and is never remembered.
+    const name = typeof contract?.name === 'string' && contract.name.length > 0 ? contract.name : null;
+    const remembered = name === null ? undefined : unitByContractName.get(name);
+    if (remembered) {
+      units.set(contractId, remembered);
+      return;
+    }
+
+    // Validated BETWEEN the calls rather than threaded into the next one's
+    // query. buildUrl() drops an `undefined` query value by design, so an
+    // absent id does not fail — it sends `GET /contractMaturity/item` with NO
+    // query string and earns an upstream 404 that names nothing, which is the
+    // undiagnosable shape REF-90 spent two days reading. An id Tradovate would
+    // not have honoured is not worth a round trip.
     //
-    // `<= 0` on purpose: 0 is finite, is what a numeric field coerced from an
-    // absent value tends to be, and is not an entity id this API issues. Same
-    // boundary as valuePerPoint below, for the same fail-loud reason.
-    if (typeof productId !== 'number' || !Number.isFinite(productId) || productId <= 0) {
+    // A null contract body lands here too, and that is the honest answer for
+    // it: a body with no `contractMaturityId` cannot reach a product, whether
+    // the field is missing or the whole response is.
+    const maturityId = contract?.contractMaturityId;
+    if (!usableId(maturityId)) {
       throw new TradovateUnpriceableError(
-        `Contract ${contractId} states no usable productId, so its product cannot be ` +
-          'looked up and its trades would have no value per point.',
+        `Contract ${contractId} states no usable contractMaturityId, so its product ` +
+          'cannot be reached and its trades would have no value per point.',
+        'no_value_per_point'
+      );
+    }
+
+    // Same 404-only catch as the product read below, and for the same reason:
+    // this is the hop that has never run in production, so if a documented
+    // required id does not resolve, the one thing that must not happen is a
+    // bare 404 naming neither end of it.
+    let maturity: TradovateContractMaturity;
+    try {
+      maturity = await reader.get<TradovateContractMaturity>('/contractMaturity/item', {
+        id: maturityId,
+      });
+    } catch (error) {
+      if (error instanceof TradovateRequestError && error.status === 404) {
+        throw new TradovateUnpriceableError(
+          `Contract maturity ${maturityId} (contract ${contractId}) was not found on the ` +
+            "host that reported the fill, so the contract's product cannot be reached.",
+          'no_value_per_point'
+        );
+      }
+      throw error;
+    }
+
+    // Required on a documented entity, reached by a required field of the
+    // contract. This is the guarantee the old chain did not have.
+    const productId = maturity?.productId;
+    if (!usableId(productId)) {
+      throw new TradovateUnpriceableError(
+        `Contract maturity ${maturityId} (contract ${contractId}) states no usable ` +
+          'productId, so its product cannot be looked up and its trades would have no ' +
+          'value per point.',
         'no_value_per_point'
       );
     }
@@ -689,8 +833,11 @@ async function loadContractUnits(
       throw error;
     }
 
+    // The same boundary as the two ids above, which is why it is the same
+    // function: a value per point of 0 would silently make every trade on this
+    // contract worth nothing.
     const valuePerPoint = product?.valuePerPoint;
-    if (typeof valuePerPoint !== 'number' || !Number.isFinite(valuePerPoint) || valuePerPoint <= 0) {
+    if (!usableId(valuePerPoint)) {
       throw new TradovateUnpriceableError(
         `Product ${productId} (contract ${contractId}) states no usable ` +
           'valuePerPoint, so its trades would be counted in points against a dollar threshold.',
@@ -714,7 +861,13 @@ async function loadContractUnits(
       );
     }
 
-    units.set(contractId, { valuePerPoint, currencyName });
+    // Remembered only HERE, past every refusal above. A contract that could not
+    // be priced, or an entity a host answered with a 404, must be re-asked next
+    // pull: a delisting that gets resolved or a host hiccup would otherwise be
+    // remembered for the life of the process.
+    const unit: ContractUnit = { valuePerPoint, currencyName };
+    if (name !== null) rememberUnit(name, unit);
+    units.set(contractId, unit);
   }));
 
   return units;
