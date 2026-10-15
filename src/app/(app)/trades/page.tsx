@@ -1,6 +1,7 @@
 import { createClient, getCachedUser } from '@/lib/supabase/server';
 import JournalExport from '@/components/journal/JournalExport';
 import JournalClient from '@/components/journal/JournalClient';
+import { visibleTrades } from '@/lib/trades/visible';
 
 export const metadata = { title: 'כל העסקאות — Reflect' };
 
@@ -34,7 +35,10 @@ export default async function TradesPage() {
 
   const violatedIds = new Set((violations ?? []).map((v) => v.trade_plan_id as string));
 
-  const allTrades = (trades ?? []).map((t) => ({
+  // A row the trader deleted is gone from the journal (REF-107 E12). This page
+  // reads select('*'), so the column arrives for free and the filter is the
+  // whole change — see lib/trades/visible.ts on why it is not a DELETE.
+  const allTrades = visibleTrades(trades ?? []).map((t) => ({
     id:               t.id               as string,
     strategy:         t.strategy         as string,
     symbol:           (t.symbol          as string | null) ?? null,
@@ -60,6 +64,16 @@ export default async function TradesPage() {
     actual_pnl:       t.actual_pnl != null ? Number(t.actual_pnl) : null,
     pnl_currency:     (t.pnl_currency as string | null) ?? null,
     has_rule_violation: violatedIds.has(t.id as string),
+    // ── Provenance, from migration 034 (REF-107 Stage 2) ──────────────────
+    //
+    // `?? null` and `=== true` rather than a cast, because `select('*')` above
+    // returns NO KEY AT ALL on a database where 034 has not been run. The row
+    // then reads as a manual, unplanned-false, not-hidden trade, which is
+    // exactly what every row in such a database is.
+    source:           (t.source as string | null) ?? null,
+    unplanned:        t.unplanned === true,
+    broker_host:      (t.broker_host as string | null) ?? null,
+    hidden:           t.hidden === true,
   }));
 
   const exportTrades = allTrades.map((t) => ({

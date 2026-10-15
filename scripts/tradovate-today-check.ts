@@ -2840,6 +2840,10 @@ async function bothPathsAgree() {
     closedAtMs: Date.parse('2026-10-14T06:00:00Z'),
     pnlUsd: 500,
     fillIds: [901, 902],
+    // The route neither reads this nor filters on it; it is the IMPORT's gate
+    // (REF-107 Stage 2, §A3). True here so the fixture is an ordinary finished
+    // trade. scripts/broker-import-check.ts is where both values are exercised.
+    positionFlat: true,
   };
   /** Yesterday evening: in the pull because the streak reaches back, not in today. */
   const ROW_YESTERDAY: BrokerTrade = {
@@ -3003,6 +3007,7 @@ async function bothPathsAgree() {
     'closedAtMs',
     'pnlUsd',
     'fillIds',
+    'positionFlat',
     'trades',
   ];
 

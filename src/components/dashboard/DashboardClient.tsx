@@ -5,7 +5,8 @@ import { Sparkles, TrendingUp, TrendingDown, RefreshCw, CheckCircle, AlertCircle
 import { formatPnlPoints } from '@/lib/utils';
 import { formatMoney } from '@/lib/money';
 import { createClient } from '@/lib/supabase/client';
-import { DASH_TRADE_SELECT, mapDashTrade } from '@/lib/dashboard/trades';
+import { DASH_TRADE_SELECT, mapDashTrade, type RawTradeRow } from '@/lib/dashboard/trades';
+import { visibleTrades, withHidden } from '@/lib/trades/visible';
 import type { DashTrade } from '@/lib/dashboard/trades';
 import { tradeMoneyPnl, hasMoneyPnl, isWinningTrade, tradeDirection, tradePointsPnl } from '@/lib/pnl';
 import { getPlanLimits, type PlanTier } from '@/lib/plans/config';
@@ -1269,6 +1270,7 @@ export default function DashboardClient({
   userId,
   plan,
   canConnectBroker,
+  hiddenColumnExists,
 }: {
   trades: DashTrade[];
   displayName: string;
@@ -1285,6 +1287,21 @@ export default function DashboardClient({
    * redirect, never access.
    */
   canConnectBroker: boolean;
+  /**
+   * Whether `trade_plans.hidden` exists yet (REF-107 Stage 2, E12).
+   *
+   * Passed down for the same reason `canConnectBroker` is: the answer is
+   * `isImportEnabled()`, which reads process.env and is server-only. Here it
+   * governs more than copy — the realtime refetch below must issue the SAME
+   * query as app/(app)/dashboard/page.tsx, and naming a column before migration
+   * 034 has been run is a PostgREST 42703 that would empty the dashboard a
+   * second after it loaded.
+   *
+   * A stale `false` costs a deleted broker row reappearing on the next realtime
+   * event; a stale `true` costs the refetch. Neither can reach another user's
+   * rows.
+   */
+  hiddenColumnExists: boolean;
 }) {
   const limits = getPlanLimits(plan);
   const [trades,   setTrades]   = useState<DashTrade[]>(initialTrades);
@@ -1336,14 +1353,19 @@ export default function DashboardClient({
     // second later, when this replaces the server's rows with its own.
     const { data } = await supabase
       .from('trade_plans')
-      .select(DASH_TRADE_SELECT)
+      // `hidden` only where the column exists. Decided on the SERVER and passed
+      // down — see the prop — because the flag that answers it is server-only.
+      .select(withHidden(DASH_TRADE_SELECT, hiddenColumnExists))
       .eq('user_id', userId)
       .neq('status', 'not_entered')
       .order('submitted_at', { ascending: false })
       .limit(500);
 
-    if (data) setTrades(data.map(mapDashTrade));
-  }, [userId]);
+    // A row the trader deleted must not come back through the realtime
+    // refetch, which is the one path that could reintroduce one after the
+    // server page filtered it out (REF-107 E12).
+    if (data) setTrades(visibleTrades(data as unknown as RawTradeRow[]).map(mapDashTrade));
+  }, [userId, hiddenColumnExists]);
 
   // Subscribe to trade_plans changes so the dashboard stays in sync with edits
   // made elsewhere (journal close/edit/delete, new trade plans, other tabs).

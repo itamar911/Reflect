@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getUserPlan } from '@/lib/plans/getUserPlan';
+import { visibleTrades } from '@/lib/trades/visible';
 import { describeCustomRule, ACTION_LABELS } from '@/lib/validators/RulesetValidator';
 import { formatMoney } from '@/lib/money';
 import type { CustomRule } from '@/lib/types';
@@ -310,7 +311,8 @@ export async function POST(request: Request) {
   ]);
 
   const ctx = buildUserContext({
-    trades: (tradesRes.data ?? []) as Record<string, unknown>[],
+    // A row the trader deleted is not in the chat's context (REF-107 E12).
+    trades: visibleTrades((tradesRes.data ?? []) as unknown as Record<string, unknown>[]),
     presetRules: presetRes.data as Record<string, unknown> | null,
     customRules: (customRes.data ?? []) as CustomRule[],
   });

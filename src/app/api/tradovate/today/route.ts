@@ -38,6 +38,45 @@
  * `source` is always present and is the only thing the client branches on. The
  * four values are `rule_context_source` from lib/types.ts.
  *
+ * ONE FIELD WAS ADDED IN REF-107 STAGE 2 — `isTradeSource`, a boolean. It is
+ * the trader's own declaration that the broker is the source of trades for
+ * their account (E7), read from `tradovate_connections.is_trade_source`, and it
+ * is here because THE RULE ENGINE RUNS IN THE BROWSER AND CANNOT DECIDE IT: the
+ * decision depends on a server-side feature flag as well as a column, and
+ * getting it wrong in either direction either double-counts a trader's day or
+ * ignores half of it. See BrokerDayPull in lib/rules/brokerDayContext.ts.
+ *
+ * It is not a position, not a figure and not a secret — it is the policy the
+ * trader put themselves under — so it does not weaken the claim above.
+ *
+ *
+ * THIS ROUTE NOW WRITES (REF-107 STAGE 2)
+ * ---------------------------------------
+ *
+ * A GET that writes is a bad smell, and it is the right trade here. E9 chose
+ * "on trade-form open" as the first sync trigger for one reason: THE ROWS ARE
+ * ALREADY BUILT. `loadBrokerDay` constructs the whole priced, grouped,
+ * direction-aware list on every pull and REF-90 threw it away; importing it
+ * costs ZERO additional upstream requests. Every other trigger costs a pull.
+ *
+ * What makes it safe rather than merely cheap:
+ *
+ * - **The write runs under the USER'S OWN SESSION**, the client built at the top
+ *   of this handler, so RLS still enforces that a trader writes only their own
+ *   rows. §C12 names a service-role import as the central new risk of REF-107,
+ *   and this is the route that already holds the thing that avoids it.
+ * - **It cannot fail the response.** The import is awaited inside its own
+ *   try/catch and its result is discarded. The figures this route exists to
+ *   return were correct before Stage 2 and are correct whether or not a row
+ *   landed; failing a discipline check because an insert was refused would be
+ *   the worst possible exchange.
+ * - **It is a no-op without the flag.** TRADOVATE_IMPORT_ENABLED must be '1',
+ *   which the owner sets after running migration 034 by hand.
+ *
+ *
+ * STATUS CODES
+ * ------------
+ *
  *
  * STATUS CODES
  * ------------
@@ -62,10 +101,12 @@ import {
 } from '@/lib/rules/brokerDayContext';
 import { isUserAllowed } from '@/lib/tradovate/allowlist';
 import { tradovateGet } from '@/lib/tradovate/client';
-import { getUserTradingApi } from '@/lib/tradovate/connections';
-import { loadBrokerDay, type TradovateReader } from '@/lib/tradovate/fills';
+import { getUserTradingApi, readIsTradeSource } from '@/lib/tradovate/connections';
+import { loadBrokerDay, type BrokerTrade, type TradovateReader } from '@/lib/tradovate/fills';
+import { importBrokerTrades, isImportEnabled } from '@/lib/tradovate/import';
 import { redactSecrets } from '@/lib/tradovate/redact';
 import { DAY_START_PARAM, parseDayStart } from '@/lib/tradovate/trading-day';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -73,8 +114,71 @@ export const dynamic = 'force-dynamic';
 /** No store, at every layer: this is one user's trading day, a minute old. */
 const NO_STORE = { 'Cache-Control': 'no-store, private' };
 
-function answer(pull: BrokerDayPull) {
-  return NextResponse.json(pull, { headers: NO_STORE });
+/**
+ * Answer, stating the trade-source policy alongside the figures.
+ *
+ * `isTradeSource` is omitted rather than sent as `false`, so a deployment
+ * without the flag produces BYTE-IDENTICAL responses to the pre-Stage-2 one.
+ * The client reads absence as false (readBrokerDayResponse), which makes the
+ * two indistinguishable where it matters and distinguishable in a diff.
+ */
+function answer(pull: BrokerDayPull, isTradeSource: boolean) {
+  const body: BrokerDayPull = isTradeSource ? { ...pull, isTradeSource: true } : pull;
+  return NextResponse.json(body, { headers: NO_STORE });
+}
+
+/**
+ * Write the rows the pull already built, and never let that cost the answer.
+ *
+ * Awaited rather than fired and forgotten: a serverless function can be frozen
+ * the moment its response is returned, so a detached promise here is an import
+ * that sometimes happens. The cost is a handful of statements on a request that
+ * has just made seven to nine upstream calls.
+ *
+ * Returns nothing. The counts are logged by the import itself and there is
+ * nothing a rule check should do with them.
+ */
+async function syncQuietly(params: {
+  client: SupabaseClient;
+  userId: string;
+  trades: BrokerTrade[];
+  isTradeSource: boolean;
+}): Promise<void> {
+  try {
+    await importBrokerTrades(params);
+  } catch (error) {
+    // The import catches per row and reports counts, so reaching here is
+    // something structural — a client that cannot build a statement. The NAME
+    // only: a thrown PostgREST error can carry the row, and the row is this
+    // trader's position.
+    const name = error instanceof Error ? error.name : 'non-Error throw';
+    console.warn(redactSecrets(`[tradovate] import after the day pull threw (${name})`));
+  }
+}
+
+/**
+ * The trade-source declaration, and NEVER a reason this route fails.
+ *
+ * `readIsTradeSource` swallows a failed QUERY, but `createAdminClient()` inside
+ * it throws outright on a missing or malformed service-role key — and this call
+ * sits before the try block that classifies a pull failure. Unguarded, a
+ * misconfigured key would turn /today from a 200 carrying `broker_unavailable`
+ * into a 500, and the rule engine treats a non-200 as `broker_unavailable`
+ * anyway (brokerDayContext.ts) — so the 500 buys nothing and costs the day's
+ * figures.
+ *
+ * False on any failure, which is the pre-Stage-2 behaviour: the rules use
+ * Reflect's own rows unfiltered, and nothing is imported.
+ */
+async function declaredTradeSource(userId: string): Promise<boolean> {
+  if (!isImportEnabled()) return false;
+  try {
+    return await readIsTradeSource(userId);
+  } catch (error) {
+    const name = error instanceof Error ? error.name : 'non-Error throw';
+    console.warn(redactSecrets(`[tradovate] could not read the trade-source declaration (${name})`));
+    return false;
+  }
 }
 
 export async function GET(request: Request) {
@@ -93,7 +197,10 @@ export async function GET(request: Request) {
   // failure — the panel says "only trades you recorded in Reflect" and invites
   // nothing. Answered before any read, so a deployment with the integration off
   // does no work here.
-  if (!isUserAllowed(user.id)) return answer(REFLECT_ONLY);
+  // `false` for the policy, and it is the honest value: a user outside the
+  // allowlist has no broker view, so nothing of theirs was ever imported and
+  // there is nothing to de-duplicate against.
+  if (!isUserAllowed(user.id)) return answer(REFLECT_ONLY, false);
 
   const dayStart = parseDayStart(
     new URL(request.url).searchParams.get(DAY_START_PARAM),
@@ -109,6 +216,14 @@ export async function GET(request: Request) {
       { status: 400, headers: NO_STORE }
     );
   }
+
+  // BEFORE the pull and OUTSIDE its try, because it is needed in both outcomes:
+  // the de-duplication policy is what the rule engine applies to its own rows,
+  // and those rows exist whether or not Tradovate answered this minute. Behind
+  // the flag, so a deployment where migration 034 has not been run never names
+  // the column, and behind its own guard so that it cannot fail this route —
+  // see declaredTradeSource.
+  const isTradeSource = await declaredTradeSource(user.id);
 
   try {
     const api = await getUserTradingApi(user.id);
@@ -131,11 +246,12 @@ export async function GET(request: Request) {
         tradovateGet(path, query, { accessToken: api.accessToken, apiUrl }),
     });
 
-    // `trades` is destructured off and dropped, and that is the response
-    // contract rather than an oversight: no `windowStartMs` is passed either, so
-    // this pull prices exactly what it priced before REF-107 and answers with
-    // exactly what it answered before.
-    const { day } = await loadBrokerDay({
+    // `trades` is kept now, and ONLY to be written. It does not enter the
+    // response — the suite asserts that this body carries no trade field — and
+    // no `windowStartMs` is passed either, so this pull prices exactly what it
+    // priced before REF-107. What changed is that the list it always built is
+    // persisted instead of discarded (REF-107 Stage 2, E9).
+    const { day, trades } = await loadBrokerDay({
       readers: {
         live: readerFor(api.hosts.live.url),
         demo: readerFor(api.hosts.demo.url),
@@ -145,7 +261,12 @@ export async function GET(request: Request) {
       tradovateUserId: api.tradovateUserId,
     });
 
-    return answer({ source: 'broker_verified', day });
+    // THE FREE TRIGGER (E9). `supabase` is the user's own session client, built
+    // at the top of this handler and already proven to name this user — so the
+    // write runs under their RLS and no user id is taken from the request.
+    await syncQuietly({ client: supabase, userId: user.id, trades, isTradeSource });
+
+    return answer({ source: 'broker_verified', day }, isTradeSource);
   } catch (error) {
     const source = classifyDayPullFailure(error);
 
@@ -161,6 +282,6 @@ export async function GET(request: Request) {
       )
     );
 
-    return answer(brokerPullFromSource(source));
+    return answer(brokerPullFromSource(source), isTradeSource);
   }
 }

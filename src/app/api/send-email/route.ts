@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { visibleTrades } from '@/lib/trades/visible';
 import { createClient } from '@/lib/supabase/server';
 import {
   EMAIL_COLORS,
@@ -214,7 +215,8 @@ export async function POST(request: Request) {
     .neq('status', 'not_entered')
     .gte('submitted_at', sevenDaysAgo);
 
-  const allTrades = trades ?? [];
+  // A row the trader deleted is not in the weekly email's figures (E12).
+  const allTrades = visibleTrades(trades ?? []);
   const closed = allTrades.filter(t => t.status === 'closed');
   const closedWithExit = closed.filter(t => t.exit_price !== null);
   const wins = closedWithExit.filter(t => Number(t.exit_price) > Number(t.entry_price));

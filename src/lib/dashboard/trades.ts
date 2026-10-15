@@ -36,7 +36,15 @@ export interface DashTrade {
 export const DASH_TRADE_SELECT =
   'id,strategy,symbol,entry_price,exit_price,stop_loss,take_profit,rr_ratio,emotional_state,trade_reason,status,direction,exit_reason,submitted_at,closed_at,quantity,pnl_amount,actual_pnl,pnl_currency,plan_score,followed_plan,strategy_conditions_checked,moved_sl,exited_early,fomo_entry,revenge_trade';
 
-interface RawTradeRow {
+/**
+ * The wire shape of DASH_TRADE_SELECT.
+ *
+ * Exported since REF-107 Stage 2: the two readers now choose their column
+ * list at runtime (`withHidden`), and supabase-js can only infer a row shape
+ * from a select string it can parse at the TYPE level. So both readers assert
+ * this instead, and asserting it needs it to have a name.
+ */
+export interface RawTradeRow {
   id: string;
   strategy: string;
   symbol: string | null;

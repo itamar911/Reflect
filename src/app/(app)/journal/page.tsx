@@ -2,6 +2,7 @@ import { createClient, getCachedUser } from '@/lib/supabase/server';
 import { BookOpen } from 'lucide-react';
 import JournalExport from '@/components/journal/JournalExport';
 import TradeCalendar from '@/components/journal/TradeCalendar';
+import { visibleTrades } from '@/lib/trades/visible';
 
 export const metadata = { title: 'יומן חודשי — Reflect' };
 
@@ -22,7 +23,9 @@ export default async function JournalPage() {
     .order('submitted_at', { ascending: false })
     .limit(1000);
 
-  const allTrades = (trades ?? []).map((t) => ({
+  // A row the trader deleted is off the calendar (REF-107 E12). select('*')
+  // above, so the column arrives for free and the filter is the whole change.
+  const allTrades = visibleTrades(trades ?? []).map((t) => ({
     id:               t.id               as string,
     strategy:         t.strategy         as string,
     entry_price:      Number(t.entry_price),

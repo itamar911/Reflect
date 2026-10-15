@@ -8,6 +8,8 @@ import {
   type TradeRow,
   type WeeklyStats,
 } from '@/lib/weekly/stats';
+import { isImportEnabled } from '@/lib/tradovate/import';
+import { visibleTrades, withHidden } from '@/lib/trades/visible';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -156,7 +158,8 @@ export async function GET(request: Request) {
 
     const { data: trades, error: tradesError } = await supabase
       .from('trade_plans')
-      .select(TRADE_SELECT_FIELDS)
+      // `hidden` only where the column exists (lib/trades/visible.ts).
+      .select(withHidden(TRADE_SELECT_FIELDS, isImportEnabled()))
       .eq('user_id', user.id)
       .eq('status', 'closed')
       .gte('closed_at', `${weekStartStr}T00:00:00.000Z`)
@@ -172,7 +175,7 @@ export async function GET(request: Request) {
         week_start: weekStartStr,
         week_end: weekEndStr,
         summary_text: stored?.summary_text ?? null,
-        stats: computeWeeklyStats((trades ?? []) as TradeRow[], weekStart),
+        stats: computeWeeklyStats(visibleTrades((trades ?? []) as unknown as TradeRow[]), weekStart),
         created_at: stored?.created_at ?? now.toISOString(),
       },
       week_start: weekStartStr,
@@ -250,7 +253,8 @@ export async function POST(request: Request) {
   try {
     const { data: trades, error: tradesError } = await supabase
       .from('trade_plans')
-      .select(TRADE_SELECT_FIELDS)
+      // `hidden` only where the column exists (lib/trades/visible.ts).
+      .select(withHidden(TRADE_SELECT_FIELDS, isImportEnabled()))
       .eq('user_id', user.id)
       .eq('status', 'closed')
       .gte('closed_at', `${weekStartStr}T00:00:00.000Z`)
@@ -262,7 +266,7 @@ export async function POST(request: Request) {
     }
     console.log(`[weekly-summary] POST: loaded ${trades?.length ?? 0} closed trades for the week`);
 
-    const stats = computeWeeklyStats((trades ?? []) as TradeRow[], weekStart);
+    const stats = computeWeeklyStats(visibleTrades((trades ?? []) as unknown as TradeRow[]), weekStart);
 
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
@@ -274,7 +278,9 @@ export async function POST(request: Request) {
     }
     const firstName = profile?.display_name?.split(' ')[0] ?? 'סוחר';
 
-    const insightfulNotes = collectInsightfulNotes(trades ?? []);
+    const insightfulNotes = collectInsightfulNotes(
+      visibleTrades((trades ?? []) as unknown as TradeRow[])
+    );
 
     let summaryText: string;
     try {

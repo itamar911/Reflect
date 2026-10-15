@@ -1,4 +1,6 @@
 import { createClient, getCachedUser } from '@/lib/supabase/server';
+import { isImportEnabled } from '@/lib/tradovate/import';
+import { visibleTrades, withHidden } from '@/lib/trades/visible';
 import StrategiesClient from '@/components/strategies/StrategiesClient';
 import type { PersonalStrategy, TradeSummary } from '@/components/strategies/StrategiesClient';
 
@@ -20,7 +22,8 @@ export default async function StrategiesPage() {
       // read, not guessed: deriving it from take_profit-vs-entry calls every
       // profitable short a loss (REF-107 §0ד), and the shared win test prefers
       // a real P&L figure over price points.
-      .select('id, strategy, symbol, entry_price, exit_price, take_profit, rr_ratio, status, direction, pnl_amount, actual_pnl, submitted_at, closed_at')
+      // `hidden` only where the column exists (lib/trades/visible.ts).
+      .select(withHidden('id, strategy, symbol, entry_price, exit_price, take_profit, rr_ratio, status, direction, pnl_amount, actual_pnl, submitted_at, closed_at', isImportEnabled()))
       .eq('user_id', user.id)
       .neq('status', 'not_entered')
       .order('submitted_at', { ascending: false })
@@ -28,7 +31,9 @@ export default async function StrategiesPage() {
   ]);
 
   const strategies = (strategiesRes.data ?? []) as PersonalStrategy[];
-  const allTrades  = (tradesRes.data ?? []).map(t => ({
+  // Through `unknown`: supabase-js infers the row shape by parsing the select
+  // string at the type level and cannot do that for one chosen at runtime.
+  const allTrades  = visibleTrades((tradesRes.data ?? []) as unknown as Record<string, unknown>[]).map(t => ({
     id:           t.id           as string,
     strategy:     (t.strategy    as string | null) ?? null,
     symbol:       (t.symbol      as string | null) ?? null,

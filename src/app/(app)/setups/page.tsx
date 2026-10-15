@@ -1,5 +1,7 @@
 import { redirect } from 'next/navigation';
 import { createClient, getCachedUser } from '@/lib/supabase/server';
+import { isImportEnabled } from '@/lib/tradovate/import';
+import { visibleTrades, withHidden } from '@/lib/trades/visible';
 import { signSetupImages } from '@/lib/setups/imageUrls';
 import SetupsClient, { type Setup, type LinkedTrade } from '@/components/setups/SetupsClient';
 
@@ -9,6 +11,10 @@ export default async function SetupsPage() {
   const supabase = await createClient();
   const { data: { user } } = await getCachedUser();
   if (!user) redirect('/login');
+
+  // isImportEnabled() is the flag the owner sets AFTER running migration 034,
+  // which is what makes naming the column safe. See lib/trades/visible.ts.
+  const hiddenExists = isImportEnabled();
 
   const [setupsRes, tradesRes] = await Promise.all([
     supabase
@@ -21,7 +27,9 @@ export default async function SetupsPage() {
     // contributing an outcome.
     supabase
       .from('trade_plans')
-      .select('id, strategy, symbol, entry_price, exit_price, status, setup_id, submitted_at, rr_ratio')
+      // `hidden` only where the column exists — this reader names its
+      // columns, so it has to ask (lib/trades/visible.ts).
+      .select(withHidden('id, strategy, symbol, entry_price, exit_price, status, setup_id, submitted_at, rr_ratio', hiddenExists))
       .eq('user_id', user.id)
       .neq('status', 'not_entered')
       .order('submitted_at', { ascending: false }),
@@ -39,7 +47,7 @@ export default async function SetupsPage() {
   return (
     <SetupsClient
       initialSetups={setups}
-      initialTrades={(tradesRes.data ?? []) as LinkedTrade[]}
+      initialTrades={visibleTrades((tradesRes.data ?? []) as unknown as LinkedTrade[])}
       userId={user.id}
     />
   );

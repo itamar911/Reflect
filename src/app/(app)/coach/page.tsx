@@ -1,4 +1,5 @@
 import { createClient, getCachedUser } from '@/lib/supabase/server';
+import { visibleTrades } from '@/lib/trades/visible';
 import { Bot } from 'lucide-react';
 import ChartAnalysis from '@/components/ai/ChartAnalysis';
 import AICoachCard from '@/components/ai/AICoachCard';
@@ -18,7 +19,7 @@ export default async function CoachPage() {
   // never entered would be described to the coach as a trade (REF-82 §5.2) —
   // and it would break the revenge-trade detection, which looks at the gap
   // between one trade and the next.
-  const { data: trades } = await supabase
+  const { data: rawTrades } = await supabase
     .from('trade_plans')
     .select('*')
     .eq('user_id', user.id)
@@ -32,7 +33,9 @@ export default async function CoachPage() {
   // route saw the row, so no care downstream could tell the two apart
   // (REF-107 §0ג). `direction` and the money columns are carried so the routes
   // can read win/loss rather than compare exit to entry (§0ד).
-  const allTrades = (trades ?? []).map((t) => ({
+  //
+  // A row the trader deleted is not described to the coach either (E12).
+  const allTrades = visibleTrades(rawTrades ?? []).map((t) => ({
     strategy: (t.strategy as string | null) ?? null,
     emotional_state: t.emotional_state != null ? Number(t.emotional_state) : null,
     rr_ratio: t.rr_ratio != null ? Number(t.rr_ratio) : null,

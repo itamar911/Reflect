@@ -9,6 +9,7 @@ import BehaviorChips from '@/components/stats/BehaviorChips';
 import RecordsGrid from '@/components/stats/RecordsGrid';
 import { MUTED, TEXT, fmt, Section } from '@/components/stats/shared';
 import type { TradePlan } from '@/lib/types';
+import { visibleTrades } from '@/lib/trades/visible';
 import { tradePointsPnl, tradeMoneyPnl, hasMoneyPnl, isWinningTrade } from '@/lib/pnl';
 import { averageOf, rrValue, intentText } from '@/lib/intent';
 import { TrendingUp, BarChart2, Target, CandlestickChart } from 'lucide-react';
@@ -42,7 +43,10 @@ export default async function StatsPage() {
     .neq('status', 'not_entered')
     .order('submitted_at', { ascending: true });
 
-  const trades  = (raw ?? []) as TradePlan[];
+  // A row the trader deleted is not in their statistics (REF-107 E12). This
+  // page reads select('*'), so the column arrives for free and the filter is
+  // the whole change.
+  const trades  = visibleTrades((raw ?? []) as unknown as TradePlan[]);
   const closed  = trades.filter(t => t.status === 'closed' && t.exit_price != null);
 
   // ── Empty state ─────────────────────────────────────────────────────────────

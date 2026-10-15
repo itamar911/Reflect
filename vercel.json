@@ -103,6 +103,10 @@
     {
       "path": "/api/cron/tradovate-keepalive",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/tradovate-import",
+      "schedule": "30 3 * * *"
     }
   ]
 }

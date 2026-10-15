@@ -1,0 +1,248 @@
+/**
+ * The daily broker import: capture the day that just ended, for every connected
+ * trader (REF-107 Stage 2, E9).
+ *
+ * SERVER ONLY. Driven by /api/cron/tradovate-import once a day, and separate
+ * from that route for the same reason ./keepalive.ts is separate from its own:
+ * the route owns the cron secret and builds the service-role client, and this
+ * owns the loop. That split is what lets the loop be driven against a stubbed
+ * Supabase client without the test fabricating an authenticated request or
+ * holding a real key.
+ *
+ *
+ * WHY A CRON AT ALL, WHEN E9 DID NOT ASK FOR ONE
+ * ----------------------------------------------
+ *
+ * E9 chose "on trade-form open + a Sync button" and left the cron behind E10 —
+ * the unanswered question of which Vercel plan this project is on. E10 was
+ * answered in passing on 15.10 ("now allowed on Pro", recorded on REF-107), and
+ * the same day's reading of a live account supplied the argument for it:
+ *
+ *     A TRADE THE TRADER NEVER OPENS THE APP FOR IS A TRADE WE MAY NEVER SEE.
+ *
+ * Both of E9's triggers need the trader to show up. §A2 is unverified about how
+ * far back `/fill/list` reaches, the one live reading could not settle it, and
+ * the 15.10 note on prop accounts makes it worse: EVAL ACCOUNTS ROTATE. A
+ * breached or reset account is a distinct `accountId`, and a closed account's
+ * fills may stop being visible at all. A day captured while the account is
+ * still live is a day we keep forever; a day we were never asked about may be
+ * gone. That is what the cron buys, and it is why it is in Stage 2 rather than
+ * deferred.
+ *
+ *
+ * THE WINDOW, AND WHY IT IS 48 HOURS AND NOT A DAY
+ * ------------------------------------------------
+ *
+ * {@link IMPORT_LOOKBACK_MS}. The job runs at a fixed UTC hour and the traders
+ * do not: a Tel Aviv trader's day ended at 21:00Z, a Chicago trader's at
+ * 22:00Z the following calendar day, and `profiles.timezone` does not exist
+ * (§C10.5, still unsolved). Two days of reach covers every offset and a missed
+ * run, and it costs nothing in correctness because the import is idempotent by
+ * key — a trade already in the journal is compared and skipped without a write.
+ *
+ * It is not free in LATENCY: §A2 measured that the four list reads cost the same
+ * for any window and that PRICING grows at one contract chain per distinct
+ * contract in it. Two days of a futures trader is one or two contracts. A
+ * full-history window is tens, which is why Stage 5 is a different job with a
+ * persistent contract cache and not this constant with a larger number.
+ *
+ *
+ * WHAT IT REPORTS, AND WHAT IT REFUSES TO
+ * ---------------------------------------
+ *
+ * COUNTS ONLY. No user ids, no symbols, no prices, no fill ids, no account ids
+ * — not in the return value and not in a log line. A nightly job over every
+ * connected trader is exactly the wrong place to start writing identifiers into
+ * Vercel's logs, and a count is all an operator needs to see the mechanism is
+ * alive. Same rule, same words, as ./keepalive.ts.
+ */
+
+import type { SupabaseClient } from '@supabase/supabase-js';
+
+import { isAllowlistConfigured, isUserAllowed } from './allowlist';
+import { listConnectionsForImport } from './connections';
+import { isImportEnabled, type BrokerImportCounts } from './import';
+import { redactSecrets } from './redact';
+import { syncUserTrades } from './sync';
+
+/**
+ * How far back each nightly run reaches. Two days — see the header.
+ *
+ * Deliberately NOT `MAX_SINCE_AGE_MS` (seven days, ./trading-day.ts). That
+ * bound is what a SYNCHRONOUS ROUTE can promise somebody who is waiting; this
+ * is a nightly job whose job is the day that just ended, and seven days of
+ * pricing per user per night would be six days of contract lookups for trades
+ * that were imported six nights ago.
+ */
+export const IMPORT_LOOKBACK_MS = 48 * 60 * 60_000;
+
+/** What one run did. Counts only — see the header. */
+export interface ImportRunCounts {
+  /** Active connections found. */
+  found: number;
+  /** Users whose import was attempted: past the allowlist and the declaration. */
+  attempted: number;
+  /** Rows inserted, totalled across users. */
+  imported: number;
+  /** Existing rows whose execution facts were restated. */
+  updated: number;
+  /** Existing rows already correct. No write was sent for these. */
+  unchanged: number;
+  /** Trades not imported because the position is not known to be flat (§A3). */
+  skippedOpen: number;
+  /** Trades not imported because the row is hidden (E12). */
+  skippedHidden: number;
+  /** Rows the database refused. */
+  failed: number;
+  /**
+   * Users not attempted at all: not on the allowlist, or the connection does
+   * not declare the broker a source of trades (E7). Nothing was sent upstream.
+   */
+  skippedUsers: number;
+  /**
+   * Users whose PULL failed. Nothing was concluded and nothing was written;
+   * tomorrow's run retries, and so does the next form opening.
+   */
+  failedUsers: number;
+}
+
+const EMPTY: ImportRunCounts = Object.freeze({
+  found: 0,
+  attempted: 0,
+  imported: 0,
+  updated: 0,
+  unchanged: 0,
+  skippedOpen: 0,
+  skippedHidden: 0,
+  failed: 0,
+  skippedUsers: 0,
+  failedUsers: 0,
+});
+
+/** Add one user's result into the run's totals. */
+function accumulate(run: ImportRunCounts, counts: BrokerImportCounts): void {
+  run.imported += counts.imported;
+  run.updated += counts.updated;
+  run.unchanged += counts.unchanged;
+  run.skippedOpen += counts.skippedOpen;
+  run.skippedHidden += counts.skippedHidden;
+  run.failed += counts.failed;
+}
+
+/**
+ * Import yesterday and today for every connected trader.
+ *
+ * SEQUENTIAL, AND ONE USER'S FAILURE DOES NOT STOP THE REST. Sequential because
+ * the point is to be gentle with a rate-limited third-party API on behalf of
+ * users who did not ask for this request — there is no deadline here, only a
+ * nightly one — and because the alternative is N × nine concurrent upstream
+ * calls against a documented per-user quota for no gain.
+ *
+ * Every error is caught per user. An exception escaping this loop would abandon
+ * every trader after the one that threw, which over a nightly job is
+ * indistinguishable from the import not existing.
+ */
+export async function runBrokerImport(params: {
+  admin: SupabaseClient;
+  now?: number;
+  lookbackMs?: number;
+  /** Test seam for the allowlist and the flag. Production reads process.env. */
+  env?: NodeJS.ProcessEnv;
+}): Promise<ImportRunCounts> {
+  const { admin, now = Date.now(), lookbackMs = IMPORT_LOOKBACK_MS, env = process.env } = params;
+
+  const run: ImportRunCounts = { ...EMPTY };
+
+  // Before the listing, not after: `is_trade_source` is a column migration 034
+  // adds, so without the flag there is nothing this function may safely SELECT,
+  // let alone write. An empty run rather than a thrown 42703.
+  if (!isImportEnabled(env)) {
+    console.info('[tradovate][import-cron] TRADOVATE_IMPORT_ENABLED is not 1; nothing was read');
+    return run;
+  }
+
+  const connections = await listConnectionsForImport({ admin });
+  run.found = connections.length;
+
+  // The same fail-closed allowlist the user-facing routes enforce, and for the
+  // same reason as the keep-alive's: this feature is not open to all users yet,
+  // and a background job must not quietly write rows for a trader the routes
+  // would refuse to serve. Fail-closed means an unset variable imports for
+  // exactly nobody, so it is worth a log line — otherwise a run that did
+  // nothing looks identical to a run with nothing to do.
+  if (connections.length > 0 && !isAllowlistConfigured(env)) {
+    console.warn(
+      '[tradovate][import-cron] TRADOVATE_OAUTH_ALLOWED_USER_IDS is unset or empty, so every ' +
+        `connection is skipped (${connections.length} were found). Nothing was imported.`
+    );
+  }
+
+  // THE DAY BOUNDARY THIS JOB CANNOT KNOW (§C10.5). A cron has no browser to
+  // ask, and `profiles.timezone` does not exist. UTC midnight is used, and it
+  // is harmless HERE in a way it would not be in the rule engine: the scalars
+  // cut at this instant are discarded by syncUserTrades, every column the
+  // import writes takes its value from the broker's own fill timestamps, and
+  // the window below is what actually decides which trades are reached.
+  const dayStartMs = new Date(now).setUTCHours(0, 0, 0, 0);
+  const windowStartMs = now - lookbackMs;
+
+  const failureKinds: string[] = [];
+
+  for (const connection of connections) {
+    // A user id would be the one identifier worth having in this log and is
+    // exactly what must not be written to it, so a skip is counted and not
+    // narrated — the same choice ./keepalive.ts made.
+    if (!isUserAllowed(connection.user_id, env)) {
+      run.skippedUsers += 1;
+      continue;
+    }
+
+    // E7, read from the row we already have rather than per user. A trader who
+    // has said Tradovate is not the source of trades for their account gets no
+    // pull and no rows — and this is the one place that saves the pull as well
+    // as the write, because the decision is already in hand.
+    if (connection.is_trade_source !== true) {
+      run.skippedUsers += 1;
+      continue;
+    }
+
+    run.attempted += 1;
+
+    try {
+      const { counts } = await syncUserTrades({
+        userId: connection.user_id,
+        // THE ONE PLACE THE WRITE IS NOT UNDER THE USER'S RLS, and the reason
+        // is structural: a nightly job has no session. The service role is used
+        // for the listing above and then for this user's own rows, with the
+        // user id taken from the connection row and never from a request.
+        // lib/tradovate/import.ts' header names the three properties that stand
+        // in for RLS here, and every statement it issues carries the user.
+        client: admin,
+        admin,
+        dayStartMs,
+        windowStartMs,
+        env,
+      });
+      accumulate(run, counts);
+    } catch (error) {
+      run.failedUsers += 1;
+      // The error's NAME, deduplicated at the end. A message from this chain
+      // can name a contract or a product id, and a message from PostgREST can
+      // echo a row.
+      failureKinds.push(error instanceof Error ? error.name : 'non-Error throw');
+    }
+  }
+
+  const line =
+    `[tradovate][import-cron] found=${run.found} attempted=${run.attempted} ` +
+    `imported=${run.imported} updated=${run.updated} unchanged=${run.unchanged} ` +
+    `skippedOpen=${run.skippedOpen} skippedHidden=${run.skippedHidden} ` +
+    `failed=${run.failed} skippedUsers=${run.skippedUsers} ` +
+    `failedUsers=${run.failedUsers}` +
+    (failureKinds.length > 0 ? ` kinds=${[...new Set(failureKinds)].join(',')}` : '');
+
+  if (run.failedUsers > 0 || run.failed > 0) console.warn(redactSecrets(line));
+  else console.info(redactSecrets(line));
+
+  return run;
+}

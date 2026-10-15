@@ -255,6 +255,31 @@ export interface BrokerTrade {
   pnlUsd: number;
   /** Every fill in the group, ascending. The first is what keys the trade. */
   fillIds: number[];
+  /**
+   * Whether every position this group's legs belong to is FLAT — `netPos = 0`
+   * on all of them (REF-107 Stage 2).
+   *
+   * THIS IS THE FIELD THAT MAKES {@link brokerTradeKey} SAFE TO PERSIST, and it
+   * exists because of that field's own caveat. The key is the group's lowest
+   * fill id, and a group can still GROW: while the trader is holding contracts
+   * in a position, a later fill pair can bridge two groups that were separate,
+   * and the merged group's lowest fill id may be the other group's. Write a key
+   * mid-position and the next sync writes a SECOND row for the same trade under
+   * a different key — a duplicate the partial UNIQUE cannot catch, because both
+   * keys are genuinely distinct.
+   *
+   * So a trade is persisted only when this is true. §A3 named the hazard and
+   * Stage 1 pinned it by test; this is the measurement that acts on it, and the
+   * only new read it needs is a field /position/list already returns.
+   *
+   * FALSE WHEN UNKNOWN, not true. A `netPos` that is absent or not a finite
+   * number means we cannot say the position is flat, and the two failure
+   * directions are not symmetric: not importing is a trade missing from the
+   * journal until the next pull, while importing early is a duplicate row in it
+   * that nothing removes. The quiet absence is recoverable; the duplicate is
+   * not.
+   */
+  positionFlat: boolean;
 }
 
 /**
@@ -605,8 +630,19 @@ export async function loadHostTrades(params: {
   // evaluation account with a personal one is a journal nobody can read.
   const positions = await reader.get<TradovatePosition[]>('/position/list');
   const accountByPositionId = new Map<number, number>();
+  // The second answer this same read already carried: whether the trader is
+  // still holding anything in that position. Read here rather than asked for,
+  // and it is what decides whether a trade's key may be persisted — see
+  // BrokerTrade.positionFlat. Only a flat position is recorded as flat; an
+  // absent or unreadable netPos leaves the id out of this set, which reads as
+  // "not known to be flat".
+  const flatPositionIds = new Set<number>();
   for (const position of positions ?? []) {
-    if (accountIds.has(position.accountId)) accountByPositionId.set(position.id, position.accountId);
+    if (!accountIds.has(position.accountId)) continue;
+    accountByPositionId.set(position.id, position.accountId);
+    if (typeof position.netPos === 'number' && Number.isFinite(position.netPos) && position.netPos === 0) {
+      flatPositionIds.add(position.id);
+    }
   }
   if (accountByPositionId.size === 0) return [];
 
@@ -642,7 +678,9 @@ export async function loadHostTrades(params: {
     new Set([...needed].flatMap((t) => t.legs.map((leg) => leg.contractId)))
   );
 
-  return [...needed].map((trade) => describeTrade(trade, host, units, accountByPositionId));
+  return [...needed].map((trade) =>
+    describeTrade(trade, host, units, accountByPositionId, flatPositionIds)
+  );
 }
 
 /**
@@ -673,7 +711,8 @@ function describeTrade(
   trade: Trade,
   host: TradovateEnvironment,
   units: Map<number, ContractUnit>,
-  accountByPositionId: Map<number, number>
+  accountByPositionId: Map<number, number>,
+  flatPositionIds: ReadonlySet<number>
 ): BrokerTrade {
   const legs = legsInOpeningOrder(trade);
   const opener = legs[0];
@@ -713,6 +752,13 @@ function describeTrade(
     closedAtMs: trade.closedAtMs,
     pnlUsd: legs.reduce((total, leg) => total + pricePair(leg, units), 0),
     fillIds,
+    // EVERY leg, not the opener's. A group is connected by shared fills and
+    // cannot straddle two contracts, but it CAN straddle two positions —
+    // /position/list keys a position per contract per trading day, so a trade
+    // entered yesterday and closed today has legs in two of them. One of those
+    // still carrying contracts is exactly the state that can still grow this
+    // group, so `every` is the question and not `opener`.
+    positionFlat: legs.every((leg) => flatPositionIds.has(leg.pair.positionId)),
   };
 }
 

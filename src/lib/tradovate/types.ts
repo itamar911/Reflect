@@ -295,9 +295,21 @@ export interface TradovateFillPair {
 /**
  * A position, per contract per trading day. GET /v1/position/list.
  *
- * Read for one thing: `accountId`. It is the only link from a fill pair to an
- * account, and therefore the only way to answer "is this trade mine" — see
- * ./accounts.ts.
+ * Read for two things, and the first is why the call is made at all:
+ *
+ * - `accountId` — the only link from a fill pair to an account, and therefore
+ *   the only way to answer "is this trade mine" (./accounts.ts).
+ * - `netPos` — whether the trader is still holding contracts here (REF-107
+ *   Stage 2). Zero means flat, which is the one state in which a grouped
+ *   trade's natural key can no longer change, and therefore the only state in
+ *   which that key may be written to a row. See `BrokerTrade.positionFlat` in
+ *   ./fills.ts for why a key written mid-position becomes a duplicate nothing
+ *   can catch.
+ *
+ * `netPos` is typed `number` because the documentation lists it as required. It
+ * is still read through a finiteness check — a type is a claim about the docs,
+ * not about the wire — and that check's failure direction is to NOT import,
+ * never to import early.
  *   https://partner.tradovate.com/api/rest-api-endpoints/positions/position-list
  */
 export interface TradovatePosition {

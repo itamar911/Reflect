@@ -30,6 +30,14 @@ const RED    = '#f87171';
 // ── Shared form field styling (edit modal) ─────────────────────────────────────
 const FIELD_CLASS = 'w-full px-3 py-2 rounded-xl text-sm border outline-none focus:border-tg-primary transition-colors';
 const fieldStyle = { background: SURF2, borderColor: BORDER, color: TEXT };
+/**
+ * A field holding a fact the trader may read and not change (REF-107 E12).
+ *
+ * Dimmed text on the same surface rather than a different one: the value is
+ * real and is worth reading, so it should not look like an empty box. `disabled`
+ * on the input is what actually prevents the edit; this is what says so.
+ */
+const lockedStyle = { background: SURF2, borderColor: BORDER, color: TEXT2, cursor: 'not-allowed' };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 // Every intent column is nullable here (REF-107 stage 4). They are NOT NULL in
@@ -63,6 +71,35 @@ interface Trade {
   actual_pnl: number | null;
   pnl_currency: string | null;
   has_rule_violation?: boolean;
+
+  // ── Provenance (REF-107 Stage 2) ──────────────────────────────────────────
+  //
+  // Optional because the columns arrive with migration 034, which is run by
+  // hand: before it, `select('*')` returns rows without these keys. The page
+  // normalises them, so what reaches here is `null`/`false` on such a database
+  // — which is the truth about every row in it.
+
+  /** 'manual' or 'tradovate'. Null on a database without migration 034. */
+  source?: string | null;
+  /** A trade that reached the journal with no plan behind it (032, E2). */
+  unplanned?: boolean;
+  /** Which Tradovate host reported it. Shown nowhere; carried for the badge's title. */
+  broker_host?: string | null;
+  /** The trader deleted it. Rows that carry `true` never reach this component. */
+  hidden?: boolean;
+}
+
+/**
+ * Whether this row came from a broker rather than from the trade form.
+ *
+ * One predicate, because four things branch on it: the badge, the gross-P&L
+ * note, which fields the edit modal locks, and whether "delete" hides or
+ * deletes. `source === 'tradovate'` rather than `broker_trade_key != null`,
+ * because `source` is the column the product principle is stated in — every
+ * trade records its source — and Stage 6 adds a second broker to it.
+ */
+function isBrokerRow(t: Trade): boolean {
+  return t.source === 'tradovate';
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -184,6 +221,7 @@ function MobileTradeCard({ t, onView, onEdit, onDelete, onClose, onDebrief, hasD
               color={dir === 'long' ? GREEN : RED}>
               {dir === 'long' ? 'לונג' : 'שורט'}
             </Chip>
+            <ProvenanceChips t={t} />
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             <RowStatusChip t={t} />
@@ -211,6 +249,8 @@ function MobileTradeCard({ t, onView, onEdit, onDelete, onClose, onDebrief, hasD
                 <span className="jr-num" style={{ fontSize: 13, color: MUTED, fontWeight: 600 }}>
                   {formatPnlPoints(pnl)}
                 </span>
+                {/* E11, beside the figure it qualifies. See GrossPnlNote. */}
+                {isBrokerRow(t) && <GrossPnlNote />}
               </span>
             ) : (
               <span className="jr-num" style={{ fontSize: 16, fontWeight: 700, color: pnl >= 0 ? GREEN : RED }}>
@@ -339,10 +379,32 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
   }
 
   // ── Delete / edit ─────────────────────────────────────────────────────────
+  /**
+   * Delete a row — or, on a broker row, hide it (REF-107 E12).
+   *
+   * A DELETE DOES NOT STICK ON AN IMPORTED ROW. The import is idempotent by
+   * `broker_trade_key`, so a row the trader deleted is a key the next sync does
+   * not find, and it inserts it again — that evening, or the next morning from
+   * the cron. The partial UNIQUE in migration 034 prevents a DUPLICATE; it has
+   * no memory of a deletion. So the trader's intent is recorded as a flag the
+   * import can read, and it skips a hidden key rather than resurrecting it.
+   *
+   * The UI is identical either way: the row leaves the list, the neighbour takes
+   * focus, every reader filters it (lib/trades/visible.ts). What differs is that
+   * the broker row is still in the table, which is also the only way "delete"
+   * can mean anything here.
+   *
+   * A MANUAL ROW IS STILL A REAL DELETE. There is nothing to protect it from,
+   * the trader created it, and leaving a soft-deleted row behind would be
+   * keeping data they asked us to remove.
+   */
   async function handleDeleteTrade(id: string) {
     setDeleteLoading(true);
     setDeleteError('');
-    const { error } = await supabase.from('trade_plans').delete().eq('id', id);
+    const target = trades.find(t => t.id === id);
+    const { error } = target && isBrokerRow(target)
+      ? await supabase.from('trade_plans').update({ hidden: true }).eq('id', id)
+      : await supabase.from('trade_plans').delete().eq('id', id);
     if (error) {
       setDeleteError('שגיאה במחיקה — נסה שוב');
       setDeleteLoading(false);
@@ -625,13 +687,16 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
                       </button>
                     </TD>
 
-                    {/* Direction */}
+                    {/* Direction, and where the row came from */}
                     <TD>
-                      <Chip
-                        bg={dir === 'long' ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.1)'}
-                        color={dir === 'long' ? GREEN : RED}>
-                        {dir === 'long' ? 'לונג' : 'שורט'}
-                      </Chip>
+                      <span className="flex items-center gap-1.5 flex-wrap">
+                        <Chip
+                          bg={dir === 'long' ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.1)'}
+                          color={dir === 'long' ? GREEN : RED}>
+                          {dir === 'long' ? 'לונג' : 'שורט'}
+                        </Chip>
+                        <ProvenanceChips t={t} />
+                      </span>
                     </TD>
 
                     {/* Open date */}
@@ -650,6 +715,8 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
                             <span className="jr-num" style={{ fontSize: 13, color: MUTED, fontWeight: 600 }}>
                               {formatPnlPoints(pnl)}
                             </span>
+                            {/* E11, beside the figure it qualifies. */}
+                            {isBrokerRow(t) && <GrossPnlNote />}
                           </div>
                         ) : (
                           <span className="jr-num" style={{ fontSize: 16, fontWeight: 700, color: pnl >= 0 ? GREEN : RED }}>
@@ -1029,6 +1096,51 @@ function RowStatusChip({ t }: { t: Trade }) {
   return <Chip bg="rgba(0,210,210,0.1)" color={GOLD}>פתוח</Chip>;
 }
 
+/**
+ * The two chips a broker row carries, and nothing on a manual one.
+ *
+ * SMALL, AND NOT A WARNING. An imported trade is the normal case this product
+ * is moving towards — "manual entry is no longer the source of truth" is the
+ * goal on REF-107 — so the badge is a label, in the turquoise the rest of the
+ * app uses for a fact, and not an amber flag. "לא תוכננה" sits beside it in
+ * muted grey rather than red for the same reason: `unplanned` is a description,
+ * and the trader already knows they did not fill the form.
+ *
+ * Lucide only and no emoji, per CLAUDE.md. There is no icon here at all — a
+ * broker's name is a word, and the two chips next to a direction chip and a
+ * status chip is already the most a row can carry.
+ */
+function ProvenanceChips({ t }: { t: Trade }) {
+  if (!isBrokerRow(t)) return null;
+  return (
+    <>
+      <Chip bg="rgba(0,210,210,0.1)" color={GOLD}>Tradovate</Chip>
+      {t.unplanned && <Chip bg={SURF2} color={MUTED}>לא תוכננה</Chip>}
+    </>
+  );
+}
+
+/**
+ * E11, and it is one line of text that keeps the journal honest.
+ *
+ * The P&L on a broker row is GROSS: `(sell − buy) × qty × valuePerPoint`, with
+ * no commissions and no exchange fees, because the chain this comes from has no
+ * verified source for them (lib/tradovate/fills.ts, §A1). The figure therefore
+ * reads slightly BETTER than the trader's own account statement, always in the
+ * same direction, by a few dollars a round trip.
+ *
+ * In a discipline rule that is tolerable. IN A JOURNAL IT IS NOT, because the
+ * trader compares the row to their broker statement — the 15.10 reading of a
+ * live account is exactly that: our $270 against Lucid's $268. E11 chose to
+ * state the gap rather than guess a fee schedule, and this is where it is
+ * stated: next to the number, not in a help page.
+ */
+function GrossPnlNote() {
+  return (
+    <span style={{ fontSize: 11, color: MUTED, fontWeight: 500 }}>ברוטו, לפני עמלות</span>
+  );
+}
+
 function AssetDot({ symbol }: { symbol: string | null }) {
   const s = (symbol ?? '?').slice(0, 2).toUpperCase();
   return (
@@ -1154,6 +1266,14 @@ function TradeDetailModal({ trade, onClose, debriefResult, onDebrief }: {
   }
 
   const rows: [string, string | number | null][] = [
+    // Where the row came from, FIRST, because it changes how every row under it
+    // should be read: an imported trade's prices are the broker's and its
+    // intent columns are empty because nobody filled a form (REF-107 Stage 2).
+    // Absent entirely on a manual row — a journal that labels hand-entered
+    // trades "ידני" is a journal that treats its own default as a special case.
+    ...(isBrokerRow(trade)
+      ? ([['מקור', trade.unplanned ? 'Tradovate · לא תוכננה' : 'Tradovate']] as [string, string][])
+      : []),
     // An intent column the row does not carry shows "—" — the same answer the
     // trader gets for a missing exit price two rows down — rather than "null",
     // "0.00" or "null/5".
@@ -1187,6 +1307,10 @@ function TradeDetailModal({ trade, onClose, debriefResult, onDebrief }: {
               <span className="text-sm font-bold" style={{ color: tradeMoneyPnl(trade) >= 0 ? '#22c55e' : '#ef4444' }}>
                 {formatMoney(tradeMoneyPnl(trade))}
                 <span className="text-xs font-semibold" style={{ opacity: 0.6 }}> ({formatPnlPoints(pnlPoints)})</span>
+                {/* E11. The detail modal is where the trader has the row open
+                    beside their broker statement, so the note belongs here most
+                    of all. */}
+                {isBrokerRow(trade) && <span className="ms-1.5"><GrossPnlNote /></span>}
               </span>
             ) : (
               <span className="text-sm font-bold" style={{ color: pnlPoints >= 0 ? '#22c55e' : '#ef4444' }}>
@@ -1251,6 +1375,27 @@ function EditTradeModal({ trade, onClose, onSaved }: {
   const supabase = createClient();
   const editTitleId = useId();
   const symbolRef = useRef<HTMLInputElement>(null);
+  /**
+   * E12: intent is editable, FACTS ARE LOCKED.
+   *
+   * On an imported row the symbol, direction, entry price, exit price and
+   * quantity are what the broker executed. Letting them be typed over would be
+   * letting the trader rewrite history — and the next sync would silently
+   * restate them anyway, because those are exactly the columns
+   * `importBrokerTrades` owns (EXECUTION_FACTS in lib/tradovate/import.ts). An
+   * edit that is quietly undone overnight is worse than one that was never
+   * offered.
+   *
+   * What stays editable is the half the broker knows nothing about: strategy,
+   * the stop and target the trader had in mind, the reason, the notes, how they
+   * felt. That is the boundary §B5 drew between intent and execution, and it is
+   * the same boundary in the schema, in the import and here.
+   *
+   * THE LOCKED FIELDS ARE STILL SHOWN, read-only. Hiding them would make the
+   * modal a different form for a broker row; showing them disabled says "this
+   * is a fact, and it is not yours to change", which is the true statement.
+   */
+  const factsLocked = isBrokerRow(trade);
   // `?? ''` on every intent field: `String(null)` is the string "null", which
   // would have appeared in the input box as if the trader had typed it and
   // then been saved back over a genuinely empty column (REF-107 stage 4).
@@ -1317,10 +1462,21 @@ function EditTradeModal({ trade, onClose, onSaved }: {
     setSaving(true);
     setError('');
 
+    // Two column sets, and the locked one is omitted rather than sent
+    // unchanged: an UPDATE that names `entry_price` is an UPDATE that could
+    // write it, and the only thing stopping it would be the disabled attribute
+    // on an input. See `factsLocked`.
+    const facts = factsLocked
+      ? {}
+      : {
+          symbol: symbol.trim() || null,
+          entry_price: entry,
+          quantity: qty,
+        };
+
     const updates = {
-      symbol: symbol.trim() || null,
+      ...facts,
       strategy: strategy.trim() || null,
-      entry_price: entry,
       stop_loss: sl,
       take_profit: tp,
       // Recomputed only when both legs are there. Running calcRR against a
@@ -1358,26 +1514,39 @@ function EditTradeModal({ trade, onClose, onSaved }: {
         <button onClick={onClose} style={{ color: MUTED, fontSize: 18, lineHeight: 1, fontWeight: 600 }}>×</button>
       </div>
 
+      {/* One sentence, once, rather than a lock icon on each of four fields.
+          It also answers the question the disabled inputs raise — why — which an
+          icon cannot (E12). */}
+      {factsLocked && (
+        <p className="text-xs" style={{ color: MUTED }}>
+          נתוני הביצוע הגיעו מ-Tradovate ואינם ניתנים לעריכה. אפשר לערוך את התכנון: אסטרטגיה,
+          SL/TP, סיבת כניסה, הערות ומצב רגשי.
+        </p>
+      )}
+
       <div className="grid grid-cols-2 gap-2">
         <Field label="נכס">
           <input ref={symbolRef} value={symbol} onChange={e => setSymbol(e.target.value.toUpperCase())}
-            className={FIELD_CLASS} style={fieldStyle} />
+            disabled={factsLocked} aria-readonly={factsLocked || undefined}
+            className={FIELD_CLASS} style={factsLocked ? lockedStyle : fieldStyle} />
         </Field>
         <Field label="כיוון">
           <div className="flex rounded-xl overflow-hidden h-[38px]" style={{ border: `1px solid ${BORDER}` }}>
-            <button type="button" onClick={() => toggleDirection('long')}
-              className="flex-1 text-sm font-semibold transition-all"
+            <button type="button" onClick={() => toggleDirection('long')} disabled={factsLocked}
+              className="flex-1 text-sm font-semibold transition-all disabled:cursor-not-allowed"
               style={{
                 background: direction === 'long' ? 'rgba(74,222,128,0.12)' : 'transparent',
                 color: direction === 'long' ? GREEN : TEXT2,
+                opacity: factsLocked && direction !== 'long' ? 0.5 : 1,
               }}>
               לונג
             </button>
-            <button type="button" onClick={() => toggleDirection('short')}
-              className="flex-1 text-sm font-semibold transition-all"
+            <button type="button" onClick={() => toggleDirection('short')} disabled={factsLocked}
+              className="flex-1 text-sm font-semibold transition-all disabled:cursor-not-allowed"
               style={{
                 background: direction === 'short' ? 'rgba(248,113,113,0.12)' : 'transparent',
                 color: direction === 'short' ? RED : TEXT2,
+                opacity: factsLocked && direction !== 'short' ? 0.5 : 1,
               }}>
               שורט
             </button>
@@ -1393,7 +1562,8 @@ function EditTradeModal({ trade, onClose, onSaved }: {
       <div className="grid grid-cols-3 gap-2">
         <Field label="מחיר כניסה">
           <input type="number" step="any" value={entryPrice} onChange={e => setEntryPrice(e.target.value)}
-            className={`${FIELD_CLASS} text-center`} style={fieldStyle} />
+            disabled={factsLocked} aria-readonly={factsLocked || undefined}
+            className={`${FIELD_CLASS} text-center`} style={factsLocked ? lockedStyle : fieldStyle} />
         </Field>
         <Field label="Stop Loss">
           <input type="number" step="any" value={stopLoss} onChange={e => setStopLoss(e.target.value)}
@@ -1410,7 +1580,8 @@ function EditTradeModal({ trade, onClose, onSaved }: {
           control is gone and the field is what it always really was. */}
       <Field label="כמות">
         <input type="number" step="any" value={quantity} onChange={e => setQuantity(e.target.value)}
-          className={`${FIELD_CLASS} text-center`} style={fieldStyle} />
+          disabled={factsLocked} aria-readonly={factsLocked || undefined}
+          className={`${FIELD_CLASS} text-center`} style={factsLocked ? lockedStyle : fieldStyle} />
       </Field>
 
       <Field label="סיבת כניסה">

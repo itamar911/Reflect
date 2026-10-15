@@ -14,7 +14,8 @@
     "test:translation": "node scripts/translation-check.mjs",
     "test:money": "tsx scripts/money-format-check.ts",
     "test:null-safety": "tsx scripts/features-null-safety-check.ts",
-    "test:broker-day": "tsx scripts/tradovate-today-check.ts"
+    "test:broker-day": "tsx scripts/tradovate-today-check.ts",
+    "test:broker-import": "tsx scripts/broker-import-check.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.96.0",

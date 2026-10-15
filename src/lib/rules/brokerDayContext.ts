@@ -85,11 +85,41 @@ export const BROKER_TODAY_PATH = '/api/tradovate/today';
  * CHECK constraint in migration 032). One vocabulary for the provenance, from
  * the route to the panel.
  */
-export type BrokerDayPull =
+export type BrokerDayPull = (
   | { source: 'broker_verified'; day: BrokerDayContext }
   | { source: 'broker_expired' }
   | { source: 'broker_unavailable' }
-  | { source: 'reflect_only' };
+  | { source: 'reflect_only' }
+) & {
+  /**
+   * Whether the connection declares the broker a SOURCE OF TRADES (REF-107 E7,
+   * §C8 option ג) — `tradovate_connections.is_trade_source`.
+   *
+   * ON THE PULL AND NOT IN A QUERY OF ITS OWN, because the rule engine runs in
+   * the browser and the route is the only thing that can answer this. The
+   * column is granted to `authenticated` by migration 034, so the browser
+   * COULD read it — but only after 034 has run, and a browser that named the
+   * column early would fail for every user. The route knows whether the import
+   * is enabled at all (server-side env), so it is the right place to decide
+   * both.
+   *
+   * It is a SECOND, INDEPENDENT AXIS from `source`, which is why it is an
+   * intersection rather than another member of the union. `source` says whether
+   * the broker answered this minute; this says what policy the trader put their
+   * account under, and that is true in all four states — most importantly in
+   * the two failure states, where the engine falls back to Reflect's own rows
+   * and those rows now include the broker's.
+   *
+   * OPTIONAL, AND ABSENCE MEANS FALSE. Three things produce the absence: a
+   * deployment where TRADOVATE_IMPORT_ENABLED is not '1', the three frozen
+   * singletons below, and any client that has not been updated. All three mean
+   * "there are no imported rows to de-duplicate against", and false is the
+   * behaviour this product had before Stage 2 — so the conservative default and
+   * the backward-compatible one are the same value. The same reasoning as the
+   * optional columns in lib/types.ts.
+   */
+  isTradeSource?: boolean;
+};
 
 /** The three stateless outcomes, as singletons: there is nothing to vary. */
 export const BROKER_EXPIRED: BrokerDayPull = Object.freeze({ source: 'broker_expired' });
@@ -263,15 +293,35 @@ async function requestBrokerDay(): Promise<BrokerDayPull> {
  */
 export function readBrokerDayResponse(body: unknown): BrokerDayPull {
   if (typeof body !== 'object' || body === null) return BROKER_UNAVAILABLE;
-  const { source, day } = body as { source?: unknown; day?: unknown };
+  const { source, day, isTradeSource } = body as {
+    source?: unknown;
+    day?: unknown;
+    isTradeSource?: unknown;
+  };
 
-  if (source === 'reflect_only') return REFLECT_ONLY;
-  if (source === 'broker_expired') return BROKER_EXPIRED;
-  if (source === 'broker_unavailable') return BROKER_UNAVAILABLE;
+  // Only the literal `true` turns the de-duplication policy on. A missing
+  // field, the string "true", or anything else is false — see the field's own
+  // note on why absence and the safe answer are the same value here.
+  const tradeSource = isTradeSource === true;
+
+  // The three stateless outcomes keep their FROZEN SINGLETONS when the policy
+  // is off, which is every call before migration 034 and the flag: nothing
+  // about the pre-Stage-2 path changes shape or allocates. When it is on they
+  // get a fresh object, because a shared singleton cannot carry a per-user
+  // value — and a mutation of a frozen one would silently do nothing.
+  const stateless = (pull: BrokerDayPull): BrokerDayPull =>
+    tradeSource ? { ...pull, isTradeSource: true } : pull;
+
+  if (source === 'reflect_only') return stateless(REFLECT_ONLY);
+  if (source === 'broker_expired') return stateless(BROKER_EXPIRED);
+  if (source === 'broker_unavailable') return stateless(BROKER_UNAVAILABLE);
   if (source !== 'broker_verified') return BROKER_UNAVAILABLE;
 
   const parsed = readBrokerDayContext(day);
-  return parsed ? { source: 'broker_verified', day: parsed } : BROKER_UNAVAILABLE;
+  if (!parsed) return BROKER_UNAVAILABLE;
+  return tradeSource
+    ? { source: 'broker_verified', day: parsed, isTradeSource: true }
+    : { source: 'broker_verified', day: parsed };
 }
 
 function readBrokerDayContext(value: unknown): BrokerDayContext | null {

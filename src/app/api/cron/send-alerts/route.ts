@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server';
+import { isImportEnabled } from '@/lib/tradovate/import';
+import { visibleTrades, withHidden } from '@/lib/trades/visible';
 import { createAdminClient } from '@/lib/supabase/admin';
 import {
   dailySummaryEmail,
@@ -69,12 +71,14 @@ async function dispatchAlert(
   // trade they made (REF-82 §5.2).
   const { data: trades } = await supabase
     .from('trade_plans')
-    .select('status, entry_price, exit_price, rr_ratio, emotional_state')
+    // `hidden` only where the column exists (lib/trades/visible.ts).
+    .select(withHidden('status, entry_price, exit_price, rr_ratio, emotional_state', isImportEnabled()))
     .eq('user_id', userId)
     .neq('status', 'not_entered')
     .gte('submitted_at', rangeStart);
 
-  const allTrades = trades ?? [];
+  // A row the trader deleted does not trigger an alert about their day (E12).
+  const allTrades = visibleTrades((trades ?? []) as unknown as Record<string, unknown>[]);
   const closed    = allTrades.filter((t) => t.status === 'closed' && t.exit_price !== null);
   const wins      = closed.filter((t) => Number(t.exit_price) > Number(t.entry_price));
   const winRate   = closed.length > 0 ? Math.round((wins.length / closed.length) * 100) : 0;

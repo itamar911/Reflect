@@ -844,6 +844,61 @@ export async function readConnectionTradingHosts(
 }
 
 /**
+ * Whether this connection declares the broker a SOURCE OF TRADES (REF-107 E7).
+ *
+ * `tradovate_connections.is_trade_source`, from migration 034. The per-broker
+ * declaration §C8 option ג argues for: "Tradovate is the source for this
+ * account." When true, the broker's rows are canonical for closed money, a
+ * manual row for the same trade is a plan waiting to be linked rather than a
+ * second trade, and the import writes rows. When false, nothing is imported —
+ * see lib/tradovate/import.ts for why that is the only coherent reading.
+ *
+ * HERE RATHER THAN IN import.ts BECAUSE THIS MODULE IS THE ONLY ONE THAT READS
+ * `tradovate_connections`. That invariant is stated twice above and is worth
+ * one more function to keep.
+ *
+ * ONLY CALL THIS BEHIND `isImportEnabled()`. The column does not exist until
+ * migration 034 has been run by hand, and naming it before then is a PostgREST
+ * 42703. That gate is the whole of why the deploy order is free, and it lives
+ * at the call sites rather than here so that this function stays a plain read.
+ *
+ * TRUE IS NOT THE FALLBACK. A missing row, a read that failed, or a column that
+ * answered with something other than a boolean all return FALSE, which means
+ * "do not import". A connection we could not ask about must not be treated as
+ * having said yes: the failure direction that writes rows into a trader's
+ * journal on the strength of a read we could not make is the wrong one, and the
+ * next run retries for free.
+ *
+ * READ ONLY: one column on an indexed primary key, no write, no token.
+ */
+export async function readIsTradeSource(
+  userId: string,
+  options: { admin?: SupabaseClient } = {}
+): Promise<boolean> {
+  const admin = options.admin ?? createAdminClient();
+
+  const { data, error } = await admin
+    .from('tradovate_connections')
+    .select('is_trade_source')
+    .eq('user_id', userId)
+    .maybeSingle<{ is_trade_source: boolean | null }>();
+
+  if (error) {
+    // The code, not the message: a PostgREST message on a missing column names
+    // the column and the table, which is harmless, but this is also the line
+    // that would fire if the migration has not been run and it should say so
+    // in one short form an operator can search for.
+    console.warn(
+      `[tradovate] could not read is_trade_source (${error.code ?? 'no code'}); ` +
+        'treating the connection as not a trade source'
+    );
+    return false;
+  }
+
+  return data?.is_trade_source === true;
+}
+
+/**
  * The only HTTP statuses on the renewal endpoint that prove the token was
  * rejected.
  *
@@ -1395,6 +1450,54 @@ export async function listConnectionsDueForRefresh(params: {
 
   if (error) {
     throw new Error(`Failed to list Tradovate connections due for refresh: ${error.message}`);
+  }
+  return data ?? [];
+}
+
+/** One connection, as the daily import loop needs it. Two columns, no secret. */
+export interface ImportCandidate {
+  user_id: string;
+  /** E7's declaration. False means this user's trades are not imported. */
+  is_trade_source: boolean | null;
+}
+
+/**
+ * Every active connection, for the daily import (REF-107 Stage 2).
+ *
+ * Reads the table here rather than in the cron route because this module is the
+ * only one that touches `tradovate_connections` — and the two columns it
+ * returns are deliberately the only two: a user id the loop needs, and the
+ * declaration that decides whether that user's trades are imported at all.
+ * NEITHER TOKEN COLUMN IS SELECTED. The loop never holds a credential; each
+ * per-user import resolves its own through {@link getUserTradingApi}, which
+ * shares the cache and the single-flight and therefore does not open a second
+ * Tradovate session (§C12, and the documented cap of two).
+ *
+ * ONLY CALL THIS BEHIND `isImportEnabled()` — `is_trade_source` is a column
+ * migration 034 adds, and naming it before that file has been run is a
+ * PostgREST 42703. Same contract as {@link readIsTradeSource}.
+ *
+ * `status = 'active'` only, like {@link listConnectionsDueForRefresh}. An
+ * expired or revoked connection has no credential to read with; the trader has
+ * to reconnect, and importing on their behalf is not something a nightly job
+ * can do about it.
+ *
+ * Ordered by `user_id` so a run cut short by the function's time budget covers
+ * a stable prefix rather than an arbitrary slice — which makes a truncated run
+ * diagnosable from the counts alone.
+ */
+export async function listConnectionsForImport(params: {
+  admin: SupabaseClient;
+}): Promise<ImportCandidate[]> {
+  const { data, error } = await params.admin
+    .from('tradovate_connections')
+    .select('user_id, is_trade_source')
+    .eq('status', 'active')
+    .order('user_id', { ascending: true })
+    .returns<ImportCandidate[]>();
+
+  if (error) {
+    throw new Error(`Failed to list Tradovate connections for import: ${error.message}`);
   }
   return data ?? [];
 }

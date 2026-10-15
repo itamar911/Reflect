@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/client';
 import { hasMoneyPnl, tradeMoneyPnl } from '@/lib/pnl';
+import { visibleTrades } from '@/lib/trades/visible';
 import type { RuleContextSource } from '@/lib/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 // Type-only, so there is no runtime import cycle: that module imports
@@ -57,6 +58,20 @@ interface ClosedTradeRow {
   fomo_entry?: boolean | null;
   exited_early?: boolean | null;
   moved_sl?: boolean | null;
+  /**
+   * Which source produced this row (REF-107 Stage 2).
+   *
+   * Selected only when the connection declares the broker a trade source, so
+   * it is `undefined` on every row before migration 034 and the import flag —
+   * which is why {@link fromBroker} tests for the value rather than its
+   * absence.
+   */
+  source?: string | null;
+}
+
+/** Whether a row came from the broker import rather than from the form. */
+function fromBroker(row: { source?: string | null }): boolean {
+  return row.source === 'tradovate';
 }
 
 /**
@@ -104,8 +119,15 @@ export interface TodayClosedSummary {
 
 /** Everything the preset and custom rule checks need from trade history. */
 export interface TradeRuleContext {
-  /** Trades TAKEN today, counted by submitted_at. No close required — but a
-   *  plan the user marked 'not_entered' is not a trade taken, and is excluded. */
+  /**
+   * Trades TAKEN today, counted by submitted_at. No close required — but a plan
+   * the user marked 'not_entered' is not a trade taken, and is excluded.
+   *
+   * ONE TRADE COUNTS ONCE, even when it is in this table twice (REF-107 Stage
+   * 2, E8). Once the broker import writes its own rows, a trade the trader also
+   * planned is two rows, and adding them fires `max_daily_trades` at half the
+   * limit they set. See {@link countDistinctTrades}.
+   */
   todayTradeCount: number;
   /**
    * Money lost today, as a positive number, from trades CLOSED today.
@@ -142,12 +164,12 @@ export interface TradeRuleContext {
    * form cannot disagree about whose day they are looking at, which is the
    * divergence this module exists to have ended (see the header).
    *
-   * STILL NOT WRITTEN TO trade_plans.rule_context_source. Migration 032 adds
-   * that column and is run by hand; until the owner has run it, an insert
-   * naming the column fails and takes the trade plan with it. The value is
-   * live and on screen, and persisting it is a one-line follow-up once 032 is
-   * confirmed applied — see the submit path in
-   * components/trade/TradePlanForm.tsx.
+   * STILL NOT WRITTEN TO trade_plans.rule_context_source BY THE FORM, and that
+   * is now a gap rather than a blocker. Migration 032 IS applied — confirmed in
+   * production by Itamar on 13.10 (REF-107 E1) — so the one-line follow-up in
+   * the submit path of components/trade/TradePlanForm.tsx is unblocked and has
+   * not been done. The broker import does write the column, on the rows it
+   * creates (lib/tradovate/import.ts).
    */
   source: RuleContextSource;
 
@@ -208,6 +230,46 @@ function sumLosses(rows: readonly ClosedTradeRow[]): number {
     if (pnl < 0) total += Math.abs(pnl);
   }
   return total;
+}
+
+/**
+ * How many DISTINCT trades the trader has taken today, when the broker is the
+ * declared source (REF-107 Stage 2, §0ה, E8).
+ *
+ *     max(broker closes today, manual plans taken today)
+ *
+ * NEVER THE SUM, and that is the whole of this function. E8's decision was
+ * "broker trades count, EXACTLY ONCE", and "once" is the operative word: the
+ * same trade can appear twice in `trade_plans` — the plan the trader filled in
+ * at 10:30 and the row the import wrote when it closed at 11:05 — and adding
+ * them blocks a disciplined trader at half the limit they set for themselves.
+ *
+ * `max` is the right shape because the two numbers MEASURE THE SAME SET from
+ * two ends, and neither end sees all of it:
+ *
+ *   - a plan with no broker close yet (still open, or at another broker) is in
+ *     the manual count only;
+ *   - an unplanned broker trade is in the broker count only;
+ *   - a trade that is both is in both, and `max` counts it once.
+ *
+ * THIS IS INTERIM, AND THE GAP IS NAMED RATHER THAN PAPERED OVER. It is only
+ * correct while the two sets OVERLAP. A trader who takes three trades at
+ * Interactive Brokers by hand and two at Tradovate has taken five, and this
+ * returns three — because nothing yet says which manual plan belongs to which
+ * broker trade. STAGE 3 IS WHAT CLOSES IT: once a plan carries a link to the
+ * broker trade it belongs to, the count is "linked pairs + unlinked plans +
+ * unlinked broker rows" and is exact.
+ *
+ * The direction of the interim error is an UNDER-count, which is more permissive
+ * — normally the direction this integration refuses. It is chosen here anyway,
+ * and deliberately: an over-count locks a trader out of a trade they are
+ * entitled to take, with a message that is simply wrong, and §0ה calls that out
+ * as a block "on half the limit they defined". A limit that is occasionally too
+ * generous for a two-broker trader is the lesser failure, and it is visible to
+ * them in the panel rather than silent.
+ */
+function countDistinctTrades(brokerClosesToday: number, manualTakenToday: number): number {
+  return Math.max(brokerClosesToday, manualTakenToday);
 }
 
 /**
@@ -281,6 +343,7 @@ function measureLossStreak(rows: readonly ClosedTradeRow[]): {
  *   marked never entered. The broker reports CLOSES. They are different sets
  *   and `max_daily_trades` is about the former, so taking a closed-trade count
  *   as a trades-taken count would under-report the limit the user set.
+ *   REF-107 STAGE 2 CHANGES THIS — see below.
  * - **the three `*_last_trade` flags.** FOMO, exiting early and moving a stop
  *   are self-reported in CloseTrade.tsx. No broker knows them.
  *
@@ -292,6 +355,53 @@ function measureLossStreak(rows: readonly ClosedTradeRow[]): {
  * number is not a number anyone could explain in the panel. It applies ONLY to
  * `broker_verified`; the three other states fall through to Reflect's figures
  * below, so a broker that is expired or unreachable can never unblock anybody.
+ *
+ *
+ * `isTradeSource` — WHAT BREAKS ONCE BROKER TRADES ARE ROWS (REF-107 Stage 2)
+ * --------------------------------------------------------------------------
+ *
+ * Everything above rests on one assumption: THAT THE BROKER'S TRADES AND
+ * `trade_plans` ARE TWO SEPARATE SETS. REF-107 Stage 2 ends that — the import
+ * writes a broker trade into this very table — and the assumption's failure is
+ * not academic. Two things go wrong the moment the first row lands:
+ *
+ *   1. The closed-today query starts returning the BROKER'S OWN ROWS. On
+ *      `broker_verified` that is harmless, because the broker's live figures
+ *      replace the query's. In the two failure states it is not: a manual row
+ *      the trader also logged for the same trade is counted beside the imported
+ *      one, and `todayLossAmount` reads double. Double-counting a loss blocks a
+ *      trader over money they did not lose, which ./accounts.ts names as the
+ *      worst failure available in this integration.
+ *   2. `todayTradeCount` counts BOTH the imported row and the plan the trader
+ *      filled in for the same trade — §0ה of the investigation — so
+ *      `max_daily_trades` fires at HALF the limit the trader set. That is the
+ *      sharpest consequence REF-107 has on existing behaviour, and the
+ *      investigation is explicit that it cannot be deferred to a later stage
+ *      than the writing itself.
+ *
+ * E7's answer is a PER-BROKER DECLARATION rather than a per-trade match (§C8
+ * option ג): the trader says "Tradovate is the source of trades for this
+ * account", and from there the broker's rows are canonical. That declaration
+ * arrives here as `broker.isTradeSource`, and it does two things:
+ *
+ * - **Closed money and the streak count BROKER ROWS ONLY.** A manual row
+ *   closed the same day stays in the journal, in the stats and in the
+ *   calendar — it is the trader's record and nothing deletes it — but it is
+ *   excluded from `todayLossAmount` and from the loss streak, because under the
+ *   declaration it is either the same trade the broker already reported or a
+ *   plan waiting to be linked to one (Stage 3). Option A is unchanged: on
+ *   `broker_verified` the broker's live figures still replace the query's. What
+ *   the filter fixes is the FALLBACK states, where the query is the answer.
+ * - **`todayTradeCount` becomes `max(broker closes today, manual plans taken
+ *   today)`** — see {@link countDistinctTrades}.
+ *
+ * WHAT THE THREE `*_last_trade` FLAGS DO NOT DO is get filtered. They are read
+ * off the most recent closed row of ANY source, exactly as before. Filtering
+ * them to broker rows would read `false` for every trader until Stage 3
+ * collects those flags on an imported trade — and `false` is the PERMISSIVE
+ * answer for a `fomo_last_trade` custom rule. A flag the trader self-reported
+ * on a row they closed by hand is still the most recent thing they told us
+ * about their own behaviour.
  */
 export async function loadTradeRuleContext(
   userId: string,
@@ -299,6 +409,26 @@ export async function loadTradeRuleContext(
   client: SupabaseClient = createClient()
 ): Promise<TradeRuleContext> {
   const todayStart = startOfTodayIso();
+
+  // E7's declaration, from the route. See the header.
+  //
+  // IT IS ALSO WHAT KEEPS THE DEPLOY ORDER FREE. `source` is a column migration
+  // 034 adds, and naming it in a select before that file has been run is a
+  // PostgREST 42703 that takes the whole rule check down. The route only reports
+  // `true` when TRADOVATE_IMPORT_ENABLED is '1', which the owner sets AFTER
+  // running 034 — so when this is false, every query below is byte-identical to
+  // the one that shipped before Stage 2, and when it is true the columns exist.
+  //
+  // IT ALSO GATES `hidden`, which is a slightly different question and is worth
+  // naming. A row the trader deleted must not count toward a rule (E12), and
+  // the only rows that can be hidden are imported ones — a manual row is still
+  // a real DELETE. So in practice the two gates coincide. THE ONE CASE THEY DO
+  // NOT: a trader who imported rows, hid some, and then turned the declaration
+  // off would have those hidden rows counted again. There is no UI that can do
+  // that yet (migration 034 grants SELECT on the column and no UPDATE policy),
+  // and closing it properly means a second boolean on the pull for "the columns
+  // exist" — which is worth adding the day the toggle ships, and not before.
+  const brokerIsSource = broker.isTradeSource === true;
 
   const [takenRes, closedTodayRes, recentRes] = await Promise.all([
     // Taken today — by submitted_at, so a plan counts the moment it is logged
@@ -311,7 +441,10 @@ export async function loadTradeRuleContext(
     // exclude it by asking for status = 'closed'; this one asked for every row.
     client
       .from('trade_plans')
-      .select('id')
+      // `source` only when there can be imported rows to tell apart. Three
+      // characters, and they are the difference between a query that works on
+      // every database and one that needs migration 034 — see `brokerIsSource`.
+      .select(brokerIsSource ? 'id, source, hidden' : 'id')
       .eq('user_id', userId)
       .neq('status', 'not_entered')
       .gte('submitted_at', todayStart),
@@ -324,30 +457,74 @@ export async function loadTradeRuleContext(
     // threshold still come off this one query (§4.5).
     client
       .from('trade_plans')
-      .select(MONEY_FIELDS)
+      .select(brokerIsSource ? `${MONEY_FIELDS}, source, hidden` : MONEY_FIELDS)
       .eq('user_id', userId)
       .eq('status', 'closed')
       .gte('closed_at', todayStart),
     client
       .from('trade_plans')
-      .select(`${MONEY_FIELDS}, closed_at, fomo_entry, exited_early, moved_sl`)
+      .select(
+        brokerIsSource
+          ? `${MONEY_FIELDS}, closed_at, fomo_entry, exited_early, moved_sl, source, hidden`
+          : `${MONEY_FIELDS}, closed_at, fomo_entry, exited_early, moved_sl`
+      )
       .eq('user_id', userId)
       .eq('status', 'closed')
       .order('closed_at', { ascending: false })
-      .limit(10),
+      // Ten is the streak window, and it is ten TRADES rather than ten rows
+      // once the broker is the source: the filter below drops this user's
+      // manual closes, so a window of ten could leave three broker rows to
+      // measure a streak over. Doubled rather than widened further — a streak
+      // long enough to matter is shorter than ten (the reason the cap is ten at
+      // all), and twenty is enough slack for a day logged in both places. The
+      // filter is applied AFTER the order, so the newest broker close is still
+      // the newest broker close.
+      .limit(brokerIsSource ? 20 : 10),
   ]);
 
-  const closedToday = (closedTodayRes.data ?? []) as ClosedTradeRow[];
-  const recent = (recentRes.data ?? []) as ClosedTradeRow[];
-  const lastTrade = recent[0];
+  // Through `unknown`, and that is the price of the conditional select above.
+  // supabase-js parses a select string AT THE TYPE LEVEL to infer the row
+  // shape, and it cannot do that for a value chosen at runtime — both branches
+  // come back as `ParserError`, so a direct cast is rejected. The shape is
+  // asserted here instead, which is what the previous literal selects were
+  // doing anyway: `ClosedTradeRow` was always a hand-written claim about these
+  // three queries and never inferred from them.
+  const closedTodayAll = visibleTrades((closedTodayRes.data ?? []) as unknown as ClosedTradeRow[]);
+  const recentAll = visibleTrades((recentRes.data ?? []) as unknown as ClosedTradeRow[]);
+
+  // THE DE-DUPLICATION, AND IT IS TWO LINES BECAUSE THE DECISION WAS MADE
+  // PER-BROKER RATHER THAN PER-TRADE (E7). Under the declaration a manual close
+  // on a day the broker also reported is either the same trade or a plan waiting
+  // to be linked to one, so it is not a second close. It keeps its place in the
+  // journal, the stats and the calendar; it leaves the money and the streak.
+  const closedToday = brokerIsSource ? closedTodayAll.filter(fromBroker) : closedTodayAll;
+  const recent = brokerIsSource ? recentAll.filter(fromBroker) : recentAll;
+
+  // NOT FILTERED, on purpose. The three self-reported flags come off the most
+  // recent closed row of any source — see the header. Filtering them would read
+  // `false` until Stage 3 collects them on an imported trade, and `false` is
+  // the permissive answer for a `*_last_trade` rule.
+  const lastTrade = recentAll[0];
 
   const { lossStreak, minutesSinceLastClose } = measureLossStreak(recent);
+
+  // Trades taken today. Without the declaration this is every row the query
+  // returned, exactly as before. With it, the imported rows and the plans are
+  // two views of one set and `countDistinctTrades` reconciles them — the plans
+  // here, the broker's closes from `closedToday` just above, which is the
+  // stored answer and is replaced by the live one in the verified branch below.
+  const taken = visibleTrades((takenRes.data ?? []) as unknown as { source?: string | null }[]);
+  const manualTakenToday = brokerIsSource
+    ? taken.filter((row) => !fromBroker(row)).length
+    : taken.length;
 
   // Reflect's own answer, which is the whole answer in three of the four
   // source states — and the floor under the fourth, for the two figures no
   // broker can produce.
   const context: TradeRuleContext = {
-    todayTradeCount: takenRes.data?.length ?? 0,
+    todayTradeCount: brokerIsSource
+      ? countDistinctTrades(closedToday.length, manualTakenToday)
+      : manualTakenToday,
     todayLossAmount: sumLosses(closedToday),
     lossStreak,
     minutesSinceLastClose,
@@ -362,13 +539,22 @@ export async function loadTradeRuleContext(
   // the figures are Reflect's and `source` says so, which is the failure policy
   // in one line. A broker we could not reach must not be able to lift a block
   // the user's own records put them under, so there is nothing to zero and
-  // nothing to clear — the honest fallback is the data we already have.
+  // nothing to clear — the honest fallback is the data we already have. After
+  // Stage 2 that data INCLUDES the broker's own imported rows, which is why the
+  // filter above matters most on exactly this path.
   if (broker.source !== 'broker_verified') return context;
 
   const day = broker.day;
 
   return {
     ...context,
+    // The live count replaces the stored one on the trades-taken side too: the
+    // broker has just told us how many round trips closed today, which is a
+    // better number than counting the rows the last import happened to write.
+    // `max` against the plans is unchanged — see countDistinctTrades.
+    todayTradeCount: brokerIsSource
+      ? countDistinctTrades(day.closedCount, manualTakenToday)
+      : context.todayTradeCount,
     todayLossAmount: day.lost,
     lossStreak: day.lossStreak,
     minutesSinceLastClose: day.minutesSinceLastClose,
