@@ -81,6 +81,28 @@
  * slightly better than the trader's statement, always in the same direction,
  * by roughly a few dollars per round trip. Worth knowing when comparing the two
  * by eye; not worth guessing a fee schedule to correct.
+ *
+ *
+ * WHAT THIS MODULE RETURNS, AFTER REF-107 STAGE 1
+ * -----------------------------------------------
+ *
+ * Two things from one pull: {@link BrokerDayContext}, the seven scalars the
+ * discipline rules act on, and {@link BrokerTrade}[], the rows a journal is made
+ * of. The second is new, and it reverses a position REF-90 took here — "return
+ * the answer, not the data". The reversal is the whole of REF-107 and it is
+ * deliberate: a rule needs an answer, but A JOURNAL IS THE DATA, and there is
+ * nothing to show a trader about a trade they took that does not include the
+ * trade.
+ *
+ * What has NOT changed is that the rules still read the scalars only, and that
+ * THE SCALARS ARE THE REDUCTION OF THAT LIST rather than a second count of the
+ * same pairs — one list, reduced once, in {@link loadBrokerDay}. Any other
+ * arrangement lets REF-90's figures drift from REF-107's rows while both look
+ * right, which is the one failure neither side would notice.
+ *
+ * The rows do not travel anywhere the scalars already travelled.
+ * /api/tradovate/today still answers with scalars alone; the rows have their own
+ * route and their own privacy note (app/api/tradovate/trades/route.ts).
  */
 
 import { TradovateRequestError, TradovateUnpriceableError } from './errors';
@@ -117,10 +139,13 @@ export interface TradovateReader {
 /**
  * What the rule engine gets from the broker, and nothing else.
  *
- * Deliberately not a list of trades. Nothing downstream needs per-trade rows —
- * the streak is already reduced here — and a route that returned fills would be
- * sending a trader's positions to the browser for no purpose. Same discipline
- * as the connection summary: return the answer, not the data.
+ * STILL SEVEN SCALARS, AND STILL ALL THE RULES GET. REF-90 wrote here that this
+ * was "deliberately not a list of trades", because a route that returned fills
+ * would be sending a trader's positions to the browser for no purpose. REF-107
+ * supplies the purpose — a journal — and so {@link loadBrokerDay} now returns
+ * {@link BrokerTrade}[] BESIDE this, not inside it. The distinction is the whole
+ * design: the rules take the reduction, the journal takes the rows, and the
+ * route that serves the rules keeps sending nothing but this type.
  */
 export interface BrokerDayContext {
   /**
@@ -143,22 +168,105 @@ export interface BrokerDayContext {
 }
 
 /**
- * One finished trade, reduced to the two facts the day needs (REF-90 Stage 1).
+ * One finished trade, as a journal row (REF-107 Stage 1).
  *
- * THIS IS THE ONLY SHAPE THAT CROSSES A HOST BOUNDARY, and that is a
- * correctness requirement rather than tidiness. Every other value in this
- * module is keyed by an integer id — `fill.id`, `contractId`, `accountId` — and
- * nothing documents whether live and demo share those id spaces. Pool the
- * id-bearing values and two unrelated fills that happen to share an id get
- * welded into one trade by {@link groupIntoTrades}, or one host's
- * `valuePerPoint` prices the other host's contract. Dollars and an instant
- * carry no id, so pooling them is safe under either assumption.
+ * This replaces REF-90's `PricedTrade`, which was the same grouping reduced to
+ * an instant and a dollar figure. It is the same list, with the fields that were
+ * built and thrown away kept: §A1 of the REF-107 investigation found three
+ * genuine gaps against a journal row — the contract's NAME, the DIRECTION, and
+ * the ENTRY TIME — and all three come from reads this chain already makes.
+ *
+ * THIS IS STILL THE ONLY SHAPE THAT CROSSES A HOST BOUNDARY, and it now carries
+ * ids, so the rule REF-90 wrote here needs restating rather than deleting.
+ * Nothing documents whether live and demo share id spaces, so what must never
+ * happen is that a POOLED list gets re-keyed on an id: pool before
+ * {@link groupIntoTrades} and two unrelated fills sharing an id are welded into
+ * one trade; pool before {@link loadContractUnits} and one host's
+ * `valuePerPoint` prices the other host's contract. Both of those still run per
+ * host, upstream of here. What crosses is a FINISHED row, and the ids on it are
+ * carried, never joined on again — which is also why {@link host} is a field and
+ * why {@link brokerTradeKey} is qualified by it.
  */
-export interface PricedTrade {
+export interface BrokerTrade {
+  /**
+   * A stable natural key for this trade: `<host>:<lowest fill id in the group>`.
+   *
+   * §A3 of the investigation reached the fill group rather than any single
+   * entity id, and the reasoning is {@link Trade}: the unit a journal means by
+   * "a trade" is a GROUP of fill pairs, and Tradovate does not name it, so it
+   * has no id of its own. The lowest `fill.id` in the group is the one thing
+   * that is both derived from it and fixed — union-find is deterministic on the
+   * same input and fill ids do not move.
+   *
+   * THE HOST PREFIX IS A DEPARTURE FROM §A3, WHICH SAID THE FILL ID ALONE, and
+   * it is here for this module's oldest rule: ids are host-local until something
+   * documents otherwise. Unprefixed, a demo fill 401 and a live fill 401 produce
+   * one key, and the `UNIQUE (user_id, broker_trade_key)` that Stage 2 hangs
+   * idempotent re-imports on would then silently drop one of two real trades.
+   * Prefixing costs a few bytes in a TEXT column and removes the question.
+   *
+   * STABLE ONLY ONCE THE POSITION IS FULLY CLOSED — §A3's own caveat, and it is
+   * pinned by test rather than fixed here. A later pull that sees a NEW fill
+   * pair bridging two groups merges them, and the merged group's lowest fill id
+   * can be one that belonged to the other group. Stage 2 must not treat this as
+   * a key it can write mid-position.
+   */
+  brokerTradeKey: string;
+  /** Which host reported it. Part of {@link brokerTradeKey} for the reason given there. */
+  host: TradovateEnvironment;
+  /** The account that traded it, via the position. Host-local, like every id here. */
+  accountId: number;
+  /**
+   * The contract's name, e.g. `ESZ6` — what `trade_plans.symbol` holds.
+   *
+   * Null when the contract body named nothing usable. That case already exists
+   * and is already priced: {@link loadContractUnits} treats a nameless contract
+   * as one it cannot cache, not one it refuses, and failing a day REF-90 totals
+   * today over a display field would be the REF-90 §4 mistake a second time.
+   * `trade_plans.symbol` is nullable, so null survives the whole way down.
+   */
+  symbol: string | null;
+  /**
+   * Which side opened it, read from WHICH LEG EXECUTED FIRST — buy first is a
+   * long — and never from the prices.
+   *
+   * The same comparison {@link datePair} already made to find the close, used
+   * for its other half instead of discarded. Deriving direction from prices, or
+   * from a `take_profit` above an entry, is the family of bugs
+   * lib/rules/tradeRuleContext.ts' header records having shipped once and §0ד of
+   * the investigation found still live in three readers.
+   */
+  direction: 'long' | 'short';
+  /** Contracts, summed across the group's legs: a scale-out of three is 3. */
+  qty: number;
+  /** Quantity-weighted average entry. See {@link describeTrade} for why weighted. */
+  entryPrice: number;
+  /** Quantity-weighted average exit. */
+  exitPrice: number;
+  /** The moment the trader was first in: the earliest leg's opening fill. */
+  openedAtMs: number;
   /** The moment the trader was finally out. See {@link Trade}. */
   closedAtMs: number;
-  /** Net dollars across the trade's legs. Signed. */
-  pnl: number;
+  /**
+   * Net dollars across the group's legs. Signed. GROSS — no commissions, see
+   * the module header, and §E11 of the investigation recommends saying so in the
+   * journal rather than guessing a fee schedule.
+   */
+  pnlUsd: number;
+  /** Every fill in the group, ascending. The first is what keys the trade. */
+  fillIds: number[];
+}
+
+/**
+ * One pull's two answers (REF-107 Stage 1).
+ *
+ * `day` is byte-for-byte what {@link loadBrokerDay} returned before this stage,
+ * and `trades` is the list it reduced to produce it — not a second pass over the
+ * same pairs. See the module header on why that matters more than the shape.
+ */
+export interface BrokerDay {
+  day: BrokerDayContext;
+  trades: BrokerTrade[];
 }
 
 /**
@@ -187,10 +295,15 @@ const STREAK_WINDOW = 10;
 // either host reaches the same reduction as a full day and that reduction sums
 // nothing. One path to the zero instead of five.
 
-/** A fill pair joined to its instant and its contract, before pricing. */
+/** A fill pair joined to its two instants and its contract, before pricing. */
 interface DatedPair {
   pair: TradovateFillPair;
+  /** The earlier leg: when this slice was entered. */
+  openedAtMs: number;
+  /** The later leg: when it was closed. */
   closedAtMs: number;
+  /** Which side was the earlier leg. See {@link BrokerTrade.direction}. */
+  direction: 'long' | 'short';
   contractId: number;
 }
 
@@ -219,6 +332,23 @@ interface DatedPair {
 interface Trade {
   legs: DatedPair[];
   closedAtMs: number;
+}
+
+/**
+ * The group's legs in the one order every derived field is read from.
+ *
+ * Earliest open first, `pair.id` breaking a tie. Order matters because the
+ * group's direction, its entry instant and its account all come from the leg
+ * that OPENED FIRST, and `/fillPair/list` promises no order at all — so without
+ * a sort of our own, two pulls of the same unchanged day could disagree about
+ * which leg that was. Determinism here is what makes {@link BrokerTrade}
+ * comparable across pulls, which is the property Stage 2's de-duplication rests
+ * on.
+ */
+function legsInOpeningOrder(trade: Trade): DatedPair[] {
+  return [...trade.legs].sort(
+    (a, b) => a.openedAtMs - b.openedAtMs || a.pair.id - b.pair.id
+  );
 }
 
 /** Union-find over fill ids. See {@link Trade} for why. */
@@ -254,10 +384,22 @@ function groupIntoTrades(pairs: readonly DatedPair[]): Trade[] {
   }));
 }
 
-/** What one contract is worth per point, and in what currency. */
+/** What one contract is worth per point, in what currency, and what it is called. */
 interface ContractUnit {
   valuePerPoint: number;
   currencyName: string;
+  /**
+   * The contract's own name, e.g. `ESZ6`, or null when the body named nothing
+   * usable.
+   *
+   * REF-107 §A1: this was already on the `/contract/item` response that the
+   * pricing chain reads for `contractMaturityId`, and was the one journal field
+   * that needed no new request to obtain. It rides on the unit rather than in a
+   * second map so that a contract cannot be priced by one lookup and named by
+   * another. Where the name is non-null it is also this entry's key in
+   * {@link unitByContractName}.
+   */
+  name: string | null;
 }
 
 /**
@@ -417,20 +559,32 @@ function otherHost(environment: TradovateEnvironment): TradovateEnvironment {
  *   across hosts on purpose — see {@link unitByContractName}, which is keyed by
  *   contract NAME precisely so that it cannot commit this sin.
  *
- * So both run per host, and what leaves is {@link PricedTrade} — dollars and an
- * instant, no ids.
+ * So both run per host, and what leaves is {@link BrokerTrade} — a finished row
+ * whose ids are carried and never joined on again.
  *
- * Returns the trades the day could possibly need: today's closes plus this
- * host's own streak window. The pooled top ten is a subset of the union of the
- * per-host top tens, so nothing the streak reaches is left behind here.
+ * Returns the trades the day could possibly need: every close inside the
+ * requested window plus this host's own streak window. The pooled top ten is a
+ * subset of the union of the per-host top tens, so nothing the streak reaches is
+ * left behind here.
  */
 export async function loadHostTrades(params: {
   reader: TradovateReader;
+  /** Which host this reader addresses. Stamped on every row; see {@link BrokerTrade}. */
+  host: TradovateEnvironment;
   /** This host's eligible accounts, from {@link discoverHostAccounts}. */
   accounts: readonly TradovateAccount[];
   dayStartMs: number;
-}): Promise<PricedTrade[]> {
-  const { reader, accounts, dayStartMs } = params;
+  /**
+   * The earliest close this pull has to be able to state, when that is before
+   * the day boundary. See {@link BrokerDayRequest.windowStartMs}.
+   */
+  windowStartMs?: number;
+}): Promise<BrokerTrade[]> {
+  const { reader, host, accounts, dayStartMs } = params;
+
+  // Never later than the day boundary: the day's scalars are not negotiable by a
+  // query parameter, so a window can only widen what gets priced.
+  const windowStartMs = Math.min(dayStartMs, params.windowStartMs ?? dayStartMs);
 
   // No account of this trader's own that could have been traded. An honest
   // zero, not a failure: see the closing note in ./accounts.ts. The caller does
@@ -444,14 +598,20 @@ export async function loadHostTrades(params: {
   // filtered by account and by nothing else. In particular NOT by `tradeDate`,
   // which the §4 note in ./trading-day.ts explains at length: the round trips
   // are dated by their closing fill's instant instead.
+  //
+  // REF-107 keeps the ANSWER to that question rather than just the filter it
+  // fed: a journal row names the account it was traded on, which §E15 of the
+  // investigation argues for on the grounds that a journal mixing a prop
+  // evaluation account with a personal one is a journal nobody can read.
   const positions = await reader.get<TradovatePosition[]>('/position/list');
-  const myPositionIds = new Set(
-    (positions ?? []).filter((p) => accountIds.has(p.accountId)).map((p) => p.id)
-  );
-  if (myPositionIds.size === 0) return [];
+  const accountByPositionId = new Map<number, number>();
+  for (const position of positions ?? []) {
+    if (accountIds.has(position.accountId)) accountByPositionId.set(position.id, position.accountId);
+  }
+  if (accountByPositionId.size === 0) return [];
 
   const allPairs = await reader.get<TradovateFillPair[]>('/fillPair/list');
-  const myPairs = (allPairs ?? []).filter((pair) => myPositionIds.has(pair.positionId));
+  const myPairs = (allPairs ?? []).filter((pair) => accountByPositionId.has(pair.positionId));
   if (myPairs.length === 0) return [];
 
   const fills = await reader.get<TradovateFill[]>('/fill/list');
@@ -462,28 +622,98 @@ export async function loadHostTrades(params: {
     (a, b) => b.closedAtMs - a.closedAtMs
   );
 
-  // Price only what is actually read: today's closes, plus the streak window,
-  // which reaches back past today. A trader with years of history has those
-  // lists in hand by now and pricing all of it would be hundreds of contract
-  // lookups for figures nothing reads.
-  const todays = trades.filter((t) => closedToday(t.closedAtMs, dayStartMs));
+  // Price only what is actually read: the window's closes, plus the streak
+  // window, which reaches back past today. A trader with years of history has
+  // those lists in hand by now and pricing all of it would be hundreds of
+  // contract lookups for figures nothing reads.
+  //
+  // `windowStartMs` is what makes "since I connected" affordable and what bounds
+  // it: §A2 found that the PULL costs the same whatever the window — the lists
+  // are unfiltered — and that only PRICING grows, at one contract lookup per
+  // distinct contract. A week reaches one or two; a full history reaches one per
+  // expiry month the trader ever touched, which is why §A2 puts that behind a
+  // separate job and not behind this parameter.
+  const inWindow = trades.filter((t) => closedToday(t.closedAtMs, windowStartMs));
   const streakWindow = trades.slice(0, STREAK_WINDOW);
-  const needed = new Set([...todays, ...streakWindow]);
+  const needed = new Set([...inWindow, ...streakWindow]);
 
   const units = await loadContractUnits(
     reader,
     new Set([...needed].flatMap((t) => t.legs.map((leg) => leg.contractId)))
   );
 
-  const priced: PricedTrade[] = [];
-  for (const trade of needed) {
-    priced.push({
-      closedAtMs: trade.closedAtMs,
-      pnl: trade.legs.reduce((total, leg) => total + pricePair(leg, units), 0),
-    });
-  }
+  return [...needed].map((trade) => describeTrade(trade, host, units, accountByPositionId));
+}
 
-  return priced;
+/**
+ * One grouped trade as a journal row.
+ *
+ * Everything here is read off the group, and three of the fields are the §A1
+ * gaps closed: `symbol` from the contract body the pricing chain already
+ * fetched, and `direction` and `openedAtMs` from the leg comparison
+ * {@link datePair} already made.
+ *
+ * WHY ENTRY AND EXIT ARE QUANTITY-WEIGHTED, and why that is not a choice of
+ * averaging method: for a group whose legs all share a contract — which they do,
+ * because sharing a fill means sharing that fill's contract — the weighted means
+ * satisfy
+ *
+ *   (avgSell − avgBuy) × totalQty  ≡  Σ (sellᵢ − buyᵢ) × qtyᵢ
+ *
+ * exactly, so the two prices a trader is shown reproduce the P&L they are shown
+ * beside them. An unweighted mean does not, and a journal where entry, exit,
+ * quantity and dollars disagree by a few cents is a journal the trader stops
+ * trusting. For the single-leg trade this reduces to the two real fill prices.
+ *
+ * Direction decides which side is the entry, not the arithmetic: a long's entry
+ * is its buy, a short's entry is its sell. The P&L expression above it still
+ * reads neither — see the module header.
+ */
+function describeTrade(
+  trade: Trade,
+  host: TradovateEnvironment,
+  units: Map<number, ContractUnit>,
+  accountByPositionId: Map<number, number>
+): BrokerTrade {
+  const legs = legsInOpeningOrder(trade);
+  const opener = legs[0];
+
+  const qty = legs.reduce((total, leg) => total + leg.pair.qty, 0);
+  const weighted = (price: (leg: DatedPair) => number) =>
+    legs.reduce((total, leg) => total + price(leg) * leg.pair.qty, 0) / qty;
+  const avgBuy = weighted((leg) => leg.pair.buyPrice);
+  const avgSell = weighted((leg) => leg.pair.sellPrice);
+
+  // Deduplicated: a scale-out shares its entry fill between legs, so the raw
+  // concatenation names it once per leg. Ascending, because the lowest is the
+  // key and a reader should be able to see that at a glance.
+  const fillIds = [
+    ...new Set(legs.flatMap((leg) => [leg.pair.buyFillId, leg.pair.sellFillId])),
+  ].sort((a, b) => a - b);
+
+  return {
+    brokerTradeKey: `${host}:${fillIds[0]}`,
+    host,
+    // The opening leg's account and contract stand for the group's. Both are
+    // properties of the position and of the fill, and a fill cannot be in two
+    // contracts, so a group connected by shared fills cannot straddle either.
+    //
+    // The assertion is sound by construction and not by optimism: every pair
+    // here survived a filter on `accountByPositionId.has(pair.positionId)`. A
+    // `?? 0` instead would put a plausible-looking account id on a row rather
+    // than failing, which is the silent-wrongness direction this module refuses
+    // everywhere else.
+    accountId: accountByPositionId.get(opener.pair.positionId)!,
+    symbol: units.get(opener.contractId)?.name ?? null,
+    direction: opener.direction,
+    qty,
+    entryPrice: opener.direction === 'long' ? avgBuy : avgSell,
+    exitPrice: opener.direction === 'long' ? avgSell : avgBuy,
+    openedAtMs: opener.openedAtMs,
+    closedAtMs: trade.closedAtMs,
+    pnlUsd: legs.reduce((total, leg) => total + pricePair(leg, units), 0),
+    fillIds,
+  };
 }
 
 export interface BrokerDayRequest {
@@ -508,6 +738,17 @@ export interface BrokerDayRequest {
   dayStartMs: number;
   /** `tradovate_connections.tradovate_user_id`, for the ownership filter. */
   tradovateUserId: number | null;
+  /**
+   * The earliest close the returned `trades` have to reach back to, when that is
+   * before `dayStartMs` (REF-107 Stage 1).
+   *
+   * Absent — which is every caller the rules have — means the day boundary, so
+   * /api/tradovate/today behaves exactly as it did. It only ever WIDENS what
+   * gets priced and returned, and it cannot touch `day`: the scalars are
+   * measured from `dayStartMs` whatever this says, because a journal query must
+   * not be able to restate a discipline figure.
+   */
+  windowStartMs?: number;
   /** Injected so the day pull is deterministic under test. */
   now?: number;
 }
@@ -546,8 +787,8 @@ export interface BrokerDayRequest {
  * TradovateRequestError, TradovatePenaltyError, a network fault — and the route
  * maps those to `broker_unavailable`.
  */
-export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDayContext> {
-  const { readers, environment, dayStartMs, tradovateUserId } = request;
+export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDay> {
+  const { readers, environment, dayStartMs, tradovateUserId, windowStartMs } = request;
   const now = request.now ?? Date.now();
   const asOf = new Date(now).toISOString();
 
@@ -557,7 +798,7 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
   const order = ([environment, otherHost(environment)] as const).filter((env) => readers[env]);
 
   const claimed = new Set<number>();
-  const pooled: PricedTrade[] = [];
+  const pooled: BrokerTrade[] = [];
 
   for (const env of order) {
     const reader = readers[env]!;
@@ -586,23 +827,33 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
 
     // Rule 2: no try/catch. This host returned eligible accounts, so a failure
     // from here on is a day that cannot be stated, and the pull fails whole.
-    pooled.push(...(await loadHostTrades({ reader, accounts: fresh, dayStartMs })));
+    pooled.push(
+      ...(await loadHostTrades({ reader, host: env, accounts: fresh, dayStartMs, windowStartMs }))
+    );
   }
 
   // ── Pooled, and from here on there is one trader and one day ──────────────
   //
   // Sorted by close across every host, which is what the streak requires: three
   // hosts' worth of losses interleaved by close time, not two separate streaks.
-  const trades = pooled.sort((a, b) => b.closedAtMs - a.closedAtMs);
+  // The key breaks a tie so that the list a journal receives is in the same order
+  // every time, which `/fillPair/list` gives no grounds for on its own.
+  const trades = pooled.sort(
+    (a, b) => b.closedAtMs - a.closedAtMs || a.brokerTradeKey.localeCompare(b.brokerTradeKey)
+  );
   const todays = trades.filter((t) => closedToday(t.closedAtMs, dayStartMs));
 
+  // THE SCALARS ARE THIS REDUCTION AND NOTHING ELSE — REF-107 Stage 1's one
+  // structural requirement. `trades` is returned beside `day` below, so any
+  // second count of the same pairs would be a number a trader could see
+  // disagreeing with the rows beneath it.
   let net = 0;
   let lost = 0;
   let losingCount = 0;
   for (const trade of todays) {
-    net += trade.pnl;
-    if (trade.pnl < 0) {
-      lost += Math.abs(trade.pnl);
+    net += trade.pnlUsd;
+    if (trade.pnlUsd < 0) {
+      lost += Math.abs(trade.pnlUsd);
       losingCount++;
     }
   }
@@ -619,7 +870,7 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
   let lossStreak = 0;
   let minutesSinceLastClose: number | null = null;
   for (const trade of trades.slice(0, STREAK_WINDOW)) {
-    if (trade.pnl >= 0) break;
+    if (trade.pnlUsd >= 0) break;
     if (minutesSinceLastClose === null) {
       minutesSinceLastClose = minutesSince(trade.closedAtMs, now);
     }
@@ -627,23 +878,34 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
   }
 
   return {
-    closedCount: todays.length,
-    losingCount,
-    net,
-    lost,
-    lossStreak,
-    minutesSinceLastClose,
-    asOf,
+    day: {
+      closedCount: todays.length,
+      losingCount,
+      net,
+      lost,
+      lossStreak,
+      minutesSinceLastClose,
+      asOf,
+    },
+    trades,
   };
 }
 
 /**
- * Join a pair to the instant it closed and the contract it traded.
+ * Join a pair to the instants it opened and closed, the side that opened it, and
+ * the contract it traded.
  *
  * The closing leg is whichever executed LATER — the sell closes a long, the buy
  * closes a short — so this reads the two timestamps rather than the direction.
  * Same reasoning as the P&L expression: there is no direction field to get
  * backwards if nothing consults direction.
+ *
+ * AND THEREFORE THE OPENING LEG IS THE OTHER ONE, which is REF-107 §A1's second
+ * gap closed for free: this function computed both instants and returned only
+ * the later one. A pair whose BUY opened is a long and whose SELL opened is a
+ * short — that is the definition, in this direction only. Equal timestamps read
+ * as a long: it is the convention the field names already imply, and a round
+ * trip whose legs executed in the same millisecond has no earlier leg to find.
  *
  * A pair whose legs are not in /fill/list is refused rather than dropped. Both
  * lists cover the same visible scope, so a missing leg is a truncated response,
@@ -674,7 +936,9 @@ function datePair(pair: TradovateFillPair, fillById: Map<number, TradovateFill>)
 
   return {
     pair,
+    openedAtMs: Math.min(buyAt, sellAt),
     closedAtMs: Math.max(buyAt, sellAt),
+    direction: buyAt <= sellAt ? 'long' : 'short',
     // Both legs are the same contract by construction; the buy leg is read so
     // there is one answer rather than a choice.
     contractId: buy.contractId,
@@ -865,7 +1129,7 @@ async function loadContractUnits(
     // be priced, or an entity a host answered with a 404, must be re-asked next
     // pull: a delisting that gets resolved or a host hiccup would otherwise be
     // remembered for the life of the process.
-    const unit: ContractUnit = { valuePerPoint, currencyName };
+    const unit: ContractUnit = { valuePerPoint, currencyName, name };
     if (name !== null) rememberUnit(name, unit);
     units.set(contractId, unit);
   }));

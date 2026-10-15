@@ -20,9 +20,20 @@
  * - **`api_hosts`.** Migration 030 keeps that column away from the browser
  *   deliberately; a user's hosts are not the user's business and are not needed
  *   to render a sentence about their day.
- * - **the fills themselves.** Nothing downstream needs per-trade rows, so
- *   sending a trader's positions to their browser would be volume and exposure
- *   bought for nothing. The streak is already reduced to an integer here.
+ * - **the fills themselves.** Nothing THIS route's caller needs is per-trade, so
+ *   sending a trader's positions here would be volume and exposure bought for
+ *   nothing. The streak is already reduced to an integer.
+ *
+ * THAT LAST POINT IS NOW A STATEMENT ABOUT THIS ROUTE AND NOT ABOUT THE PRODUCT
+ * (REF-107 Stage 1). `loadBrokerDay` returns the trade rows beside the scalars,
+ * and GET /api/tradovate/trades does send them to the browser, deliberately,
+ * because a journal is the rows — see that route's own header for the privacy
+ * decision and its bounds. What survives here is the narrower and still-true
+ * claim: THE RULE ENGINE'S ROUTE SENDS SCALARS, and a trader whose browser only
+ * ever opens the trade form never receives a position from us. The two routes
+ * are separate for exactly that reason, and the regression suite asserts that
+ * this response carries no trade field — if a later change finds it convenient
+ * to return `trades` from here, it has to delete that assertion on purpose.
  *
  * `source` is always present and is the only thing the client branches on. The
  * four values are `rule_context_source` from lib/types.ts.
@@ -120,7 +131,11 @@ export async function GET(request: Request) {
         tradovateGet(path, query, { accessToken: api.accessToken, apiUrl }),
     });
 
-    const day = await loadBrokerDay({
+    // `trades` is destructured off and dropped, and that is the response
+    // contract rather than an oversight: no `windowStartMs` is passed either, so
+    // this pull prices exactly what it priced before REF-107 and answers with
+    // exactly what it answered before.
+    const { day } = await loadBrokerDay({
       readers: {
         live: readerFor(api.hosts.live.url),
         demo: readerFor(api.hosts.demo.url),

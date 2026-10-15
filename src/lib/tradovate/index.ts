@@ -99,8 +99,19 @@ export type {
 // The day pull (REF-90) — the first thing here that reads trading data rather
 // than authenticating. Driven by src/app/api/tradovate/today/route.ts; see
 // src/lib/rules/brokerDayContext.ts for how its answer reaches the rules.
+//
+// It answers twice over since REF-107 Stage 1: `BrokerDayContext` for the rules,
+// `BrokerTrade[]` for the journal, from one list reduced once. The rows have
+// their own route (src/app/api/tradovate/trades/route.ts) and their own privacy
+// note; /today sends the scalars alone, as it always has.
 export { loadBrokerDay } from './fills';
-export type { BrokerDayContext, BrokerDayRequest, TradovateReader } from './fills';
+export type {
+  BrokerDay,
+  BrokerDayContext,
+  BrokerDayRequest,
+  BrokerTrade,
+  TradovateReader,
+} from './fills';
 
 // Owned OR permitted (REF-90 Stage 2). `permittedAccountIds` is the only thing
 // that reads the TradingPermission entity, and a set of ids is all it returns —
@@ -113,8 +124,16 @@ export {
 } from './accounts';
 export type { AccountFilterCounts } from './accounts';
 
-export { closedToday, minutesSince, parseDayStart, DAY_START_PARAM } from './trading-day';
-export type { DayStartParse } from './trading-day';
+export {
+  closedToday,
+  minutesSince,
+  parseDayStart,
+  parseTradesWindow,
+  DAY_START_PARAM,
+  SINCE_PARAM,
+  MAX_SINCE_AGE_MS,
+} from './trading-day';
+export type { DayStartParse, TradesWindowParse } from './trading-day';
 
 // The keep-alive loop (REF-100). The cron route is its only caller in the app;
 // scripts/tradovate-refresh-check.ts drives it against a stubbed client.

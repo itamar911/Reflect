@@ -57,11 +57,19 @@ import {
 import {
   forgetContractUnits,
   loadBrokerDay,
+  type BrokerDay,
   type BrokerDayContext,
+  type BrokerTrade,
   type TradovateReader,
 } from '../src/lib/tradovate/fills';
 import type { TradovateEnvironment } from '../src/lib/tradovate/hosts';
-import { closedToday, parseDayStart } from '../src/lib/tradovate/trading-day';
+import {
+  closedToday,
+  parseDayStart,
+  parseTradesWindow,
+  MAX_SINCE_AGE_MS,
+} from '../src/lib/tradovate/trading-day';
+import { respondToTradesRequest, type TradesRouteDeps } from '../src/app/api/tradovate/trades/route';
 import type {
   TradovateAccount,
   TradovateContract,
@@ -76,6 +84,7 @@ import type {
 import {
   classifyDayPullFailure,
   describeDayPullFailure,
+  describeDayPullFailureKind,
   readBrokerDayResponse,
   type BrokerDayPull,
 } from '../src/lib/rules/brokerDayContext';
@@ -337,6 +346,64 @@ function withTrips(trips: { pair: TradovateFillPair; fills: TradovateFill[] }[],
 }
 
 /**
+ * A fill with an id THE TEST CHOOSES, for the REF-107 groups.
+ *
+ * `roundTrip()` above allocates ids from a counter, which is right for every
+ * group that only cares about the money — and useless for the groups about
+ * `brokerTradeKey`, which IS a fill id and so has to be written into the
+ * assertion rather than discovered from the fixture. These helpers also let ONE
+ * FILL BE SHARED BETWEEN PAIRS, which is what a scale-out and a position flip
+ * are made of and what the counter-based helper cannot express at all.
+ */
+function handFill(f: {
+  id: number;
+  at: string;
+  action: 'Buy' | 'Sell';
+  qty: number;
+  price: number;
+  contractId?: number;
+}): TradovateFill {
+  return {
+    id: f.id,
+    orderId: f.id,
+    contractId: f.contractId ?? CONTRACT_ID,
+    timestamp: f.at,
+    tradeDate: { year: 2026, month: 10, day: 14 },
+    action: f.action,
+    qty: f.qty,
+    price: f.price,
+  };
+}
+
+/** A pair over two hand-built fills. Prices come off the fills, as the API's do. */
+function handPair(p: {
+  id: number;
+  buy: TradovateFill;
+  sell: TradovateFill;
+  qty: number;
+  positionId?: number;
+}): TradovateFillPair {
+  return {
+    id: p.id,
+    positionId: p.positionId ?? POSITION.id,
+    buyFillId: p.buy.id,
+    sellFillId: p.sell.id,
+    qty: p.qty,
+    buyPrice: p.buy.price,
+    sellPrice: p.sell.price,
+  };
+}
+
+/** A scene built from hand-chosen fills and pairs. */
+function handScene(
+  fills: TradovateFill[],
+  pairs: TradovateFillPair[],
+  overrides: Partial<Scene> = {}
+): Scene {
+  return scene({ fills, pairs, ...overrides });
+}
+
+/**
  * Every path any reader in this file was asked for, in order, for the whole run.
  *
  * One list rather than per-reader, because one of the assertions this ticket
@@ -404,9 +471,24 @@ function reader(data: Scene): TradovateReader & { calls: string[] } {
  * So the default is cold and the cache is exercised deliberately, by the one
  * group that calls `loadBrokerDay` directly and says why.
  */
-function coldPull(request: Parameters<typeof loadBrokerDay>[0]): Promise<BrokerDayContext> {
+function coldPull(request: Parameters<typeof loadBrokerDay>[0]): Promise<BrokerDay> {
   forgetContractUnits();
   return loadBrokerDay(request);
+}
+
+/**
+ * {@link coldPull}, reduced to the scalars.
+ *
+ * Every group written before REF-107 asserts on the seven figures, and that is
+ * still what `loadBrokerDay` computes — it just answers with the rows beside
+ * them now. So the groups below reach for this and read exactly as they did,
+ * which is the property that makes them a regression test of REF-90's numbers
+ * against REF-107's list rather than a rewrite of them.
+ */
+async function coldDay(
+  request: Parameters<typeof loadBrokerDay>[0]
+): Promise<BrokerDayContext> {
+  return (await coldPull(request)).day;
 }
 
 /**
@@ -417,18 +499,34 @@ function coldPull(request: Parameters<typeof loadBrokerDay>[0]): Promise<BrokerD
  * whole suite below has always asserted. Every group above the Stage 1 group is
  * therefore a regression test for the routing change, without a line of it
  * being rewritten.
+ *
+ * Returns the SCALARS, not the pull, which is why REF-107 did not touch a single
+ * assertion written against it: `loadBrokerDay` now answers `{ day, trades }`
+ * and this helper unwraps the half that existed before. The groups that are
+ * about the rows use {@link pullRows} or drive the pull directly.
  */
 function pull(data: Scene, dayStartMs = DAY_START): Promise<BrokerDayContext> {
+  return pullFull(data, dayStartMs).then((result) => result.day);
+}
+
+/** The whole pull from one host: the scalars and the rows (REF-107). */
+function pullFull(data: Scene, dayStartMs = DAY_START, windowStartMs?: number): Promise<BrokerDay> {
   return coldPull({
     readers: { live: reader(data) },
     environment: 'live',
     dayStartMs,
+    windowStartMs,
     tradovateUserId: ACCOUNT.userId,
     now: NOW,
   });
 }
 
-/** Both hosts, for the Stage 1 group. */
+/** Just the rows, newest close first. */
+function pullRows(data: Scene, dayStartMs = DAY_START, windowStartMs?: number): Promise<BrokerTrade[]> {
+  return pullFull(data, dayStartMs, windowStartMs).then((result) => result.trades);
+}
+
+/** Both hosts, for the Stage 1 group. The scalars, like {@link pull}. */
 function pullHosts(params: {
   live?: Scene;
   demo?: Scene;
@@ -436,6 +534,16 @@ function pullHosts(params: {
   tradovateUserId?: number | null;
   dayStartMs?: number;
 }) {
+  return pullHostsFull(params).then((result) => result.day);
+}
+
+function pullHostsFull(params: {
+  live?: Scene;
+  demo?: Scene;
+  environment?: TradovateEnvironment;
+  tradovateUserId?: number | null;
+  dayStartMs?: number;
+}): Promise<BrokerDay> {
   const readers: Partial<Record<TradovateEnvironment, TradovateReader>> = {};
   if (params.live) readers.live = reader(params.live);
   if (params.demo) readers.demo = reader(params.demo);
@@ -827,7 +935,7 @@ async function main() {
   // the answer must be the one this suite has always asserted.
   const liveOnlyLive = reader(withTrips([closedToday1]));
   const liveOnlyDemo = reader(scene({ accounts: [] }));
-  const liveOnly = await coldPull({
+  const liveOnly = await coldDay({
     readers: { live: liveOnlyLive, demo: liveOnlyDemo },
     environment: 'live',
     dayStartMs: DAY_START,
@@ -927,7 +1035,7 @@ async function main() {
   // mint host. Double-counting would block a trader over money they did not
   // lose, which ./accounts.ts names as the worst failure available here.
   const sameAccountDemo = reader(withTrips([closedToday1]));
-  const dedupe = await coldPull({
+  const dedupe = await coldDay({
     readers: { live: reader(withTrips([closedToday1])), demo: sameAccountDemo },
     environment: 'live',
     dayStartMs: DAY_START,
@@ -937,7 +1045,7 @@ async function main() {
 
   // (7) Discovery fails on the non-mint host. An organization with no demo
   // provisioning must not start failing pulls that work today.
-  const demoRefused = await coldPull({
+  const demoRefused = await coldDay({
     readers: {
       live: reader(withTrips([closedToday1])),
       demo: failingReader(
@@ -1156,7 +1264,7 @@ async function main() {
    * account of ours and is therefore never asked for its list at all.
    */
   const permOtherHostDemo = reader(scene({ accounts: [], permissions: [grant('Approved')] }));
-  const permOtherHost = await coldPull({
+  const permOtherHost = await coldDay({
     readers: { live: reader(firmScene([])), demo: permOtherHostDemo },
     environment: 'live',
     dayStartMs: DAY_START,
@@ -1167,7 +1275,7 @@ async function main() {
   /** The fail-safe, three ways the list can fail to say anything. */
   const list404 = await firmPull(null);
   const listEmpty = await firmPull([]);
-  const list401 = await coldPull({
+  const list401 = await coldDay({
     // The grant IS in the scene, and a 401 on the read must still leave the
     // account out: an unreadable join is the owned-only rule, never a guess.
     readers: {
@@ -1200,7 +1308,7 @@ async function main() {
 
   /** What the ordinary trader pays for Stage 2, asserted as calls made. */
   const ownedReader = reader(withTrips([closedToday1]));
-  await coldPull({
+  await coldDay({
     readers: { live: ownedReader },
     environment: 'live',
     dayStartMs: DAY_START,
@@ -1209,7 +1317,7 @@ async function main() {
   });
 
   const firmReader = reader(firmScene([grant('Approved')]));
-  await coldPull({
+  await coldDay({
     readers: { live: firmReader },
     environment: 'live',
     dayStartMs: DAY_START,
@@ -1584,7 +1692,7 @@ async function main() {
   // fill, and the other host is not asked for reference data at all.
   const pricedLive = reader(scene({ accounts: [] }));
   const pricedDemo = reader(demoScene);
-  const pricedDay = await coldPull({
+  const pricedDay = await coldDay({
     readers: { live: pricedLive, demo: pricedDemo },
     environment: 'live',
     dayStartMs: DAY_START,
@@ -1713,7 +1821,7 @@ async function main() {
   // because the entity does not — so every group above this one has been
   // pricing the documented shape all along, which is the fixture repair.
   const documented = reader(withTrips([oneTrip]));
-  const documentedDay = await coldPull({
+  const documentedDay = await coldDay({
     readers: { live: documented },
     environment: 'live',
     dayStartMs: DAY_START,
@@ -1745,7 +1853,7 @@ async function main() {
       },
     };
   })();
-  const decoyDay = await coldPull({
+  const decoyDay = await coldDay({
     readers: { live: decoyHost },
     environment: 'live',
     dayStartMs: DAY_START,
@@ -1830,7 +1938,7 @@ async function main() {
       }
     )
   );
-  const sharedName = await coldPull({
+  const sharedName = await coldDay({
     readers: { live: sharedNameLive, demo: sharedNameDemo },
     environment: 'live',
     dayStartMs: DAY_START,
@@ -1856,8 +1964,8 @@ async function main() {
     tradovateUserId: ACCOUNT.userId,
     now: NOW,
   });
-  const firstPull = await loadBrokerDay(warmRequest(firstPullHost));
-  const secondPull = await loadBrokerDay(warmRequest(secondPullHost));
+  const firstPull = (await loadBrokerDay(warmRequest(firstPullHost))).day;
+  const secondPull = (await loadBrokerDay(warmRequest(secondPullHost))).day;
 
   // (12) Two names that happen to share a product. Each name is a key of its
   // own, so each resolves on its own — the cache is not a product cache, and
@@ -1886,7 +1994,7 @@ async function main() {
       }
     )
   );
-  const siblings = await coldPull(warmRequest(siblingHost));
+  const siblings = await coldDay(warmRequest(siblingHost));
 
   // (13) A failure is not remembered. A delisting that gets resolved, or a host
   // hiccup, has to be re-asked — otherwise one 404 would refuse this trader's
@@ -1903,7 +2011,7 @@ async function main() {
       )
     )
   );
-  const afterFailure = await loadBrokerDay(warmRequest(reader(withTrips([oneTrip]))));
+  const afterFailure = (await loadBrokerDay(warmRequest(reader(withTrips([oneTrip]))))).day;
 
   group('a contract reaches its product the documented way', [
     // (1) The production case: the body that refused at 11:17 now prices.
@@ -2326,6 +2434,596 @@ async function bothPathsAgree() {
   results.push(c('no broker closes means no money line, not a zero', quietCtx.todayClosed.money, null));
 
   group('both enforcement paths, one context', results);
+
+  // ══ REF-107 STAGE 1 — the rows, and the route that serves them ════════════
+  //
+  // Everything above this line is REF-90's: seven scalars, and a suite that
+  // asserts them. Stage 1 returns the LIST those scalars reduce, so these groups
+  // are about three things and in this order: that the three §A1 fields are
+  // right, that the key is stable enough for Stage 2 to hang a UNIQUE on, and
+  // that the two routes send what each of them says it sends and nothing more.
+
+  // ── The journal row ───────────────────────────────────────────────────────
+
+  const ONE_LONG = roundTrip({
+    side: 'long',
+    openAt: '2026-10-14T05:00:00Z',
+    closeAt: '2026-10-14T06:00:00Z',
+    entry: 5000,
+    exit: 5010,
+  });
+  const longRow = (await pullRows(withTrips([ONE_LONG])))[0];
+
+  // A PROFITABLE SHORT, which is the case this codebase has got wrong once
+  // before (lib/rules/tradeRuleContext.ts' header). Sold at 5000, bought back at
+  // 4990: the direction must read 'short' off the leg order, the entry must be
+  // the SELL, and the money must be positive.
+  const shortWinRow = (
+    await pullRows(
+      withTrips([
+        roundTrip({
+          side: 'short',
+          openAt: '2026-10-14T05:00:00Z',
+          closeAt: '2026-10-14T06:00:00Z',
+          entry: 5000,
+          exit: 4990,
+        }),
+      ])
+    )
+  )[0];
+  const shortLossRow = (
+    await pullRows(
+      withTrips([
+        roundTrip({
+          side: 'short',
+          openAt: '2026-10-14T05:00:00Z',
+          closeAt: '2026-10-14T06:00:00Z',
+          entry: 5000,
+          exit: 5010,
+        }),
+      ])
+    )
+  )[0];
+
+  // A contract whose body names nothing usable. It is already priced rather than
+  // refused (loadContractUnits remembers nothing it cannot key, but it does not
+  // reject it), and REF-107 must not change that: failing a day REF-90 totals
+  // today over a DISPLAY field would be REF-90 §4 happening twice.
+  const namelessPull = await pullFull(
+    withTrips([ONE_LONG], { contracts: [{ id: CONTRACT_ID, name: '', contractMaturityId: MATURITY_ID }] })
+  );
+
+  group('a finished trade reads as a journal row (REF-107 §A1)', [
+    c('(1) a long: direction off the leg order, never off the prices', longRow.direction, 'long'),
+    c('(2) a long enters on its buy and exits on its sell', [longRow.entryPrice, longRow.exitPrice], [5000, 5010]),
+    c('(3) a profitable short is a short, and it is a WIN', [shortWinRow.direction, shortWinRow.pnlUsd], ['short', 500]),
+    c('(4) a short enters on its SELL and exits on its buy', [shortWinRow.entryPrice, shortWinRow.exitPrice], [5000, 4990]),
+    c('(5) a losing short is still a short', [shortLossRow.direction, shortLossRow.pnlUsd], ['short', -500]),
+    c(
+      '(6) the entry instant is kept, not just the close (§A1 gap 2)',
+      [longRow.openedAtMs, longRow.closedAtMs],
+      [Date.parse('2026-10-14T05:00:00Z'), Date.parse('2026-10-14T06:00:00Z')]
+    ),
+    c('(7) opened before closed, for a long and a short alike', [
+      longRow.openedAtMs < longRow.closedAtMs,
+      shortWinRow.openedAtMs < shortWinRow.closedAtMs,
+    ], [true, true]),
+    // The product in every fixture is named 'ES' and the contract 'ESZ6', so
+    // this assertion can only pass by reading the contract.
+    c('(8) the symbol is the CONTRACT name, not the product name (§A1 gap 1)', longRow.symbol, 'ESZ6'),
+    c('(9) quantity, account and host ride along', [longRow.qty, longRow.accountId, longRow.host], [1, ACCOUNT.id, 'live']),
+    c('(10) the fills are named, ascending, and the lowest keys the trade', [
+      longRow.fillIds.length,
+      longRow.fillIds[0] < longRow.fillIds[1],
+      longRow.brokerTradeKey,
+    ], [2, true, `live:${longRow.fillIds[0]}`]),
+    c(
+      '(11) a contract that names nothing is priced, with a null symbol — not refused',
+      [namelessPull.trades[0].symbol, namelessPull.day.closedCount, namelessPull.day.net],
+      [null, 1, 500]
+    ),
+  ]);
+
+  // ── The key ───────────────────────────────────────────────────────────────
+
+  // One entry of three, exited in three instalments: three pairs sharing fill
+  // 101. The same decision as a single pair of qty 3, and the key and the money
+  // must not be able to tell the two fixtures apart — that is what makes a
+  // re-pull after a scale-out idempotent in Stage 2 instead of a duplicate.
+  const entry101 = handFill({ id: 101, at: '2026-10-14T05:00:00Z', action: 'Buy', qty: 3, price: 5000 });
+  const scaledOutPairs = [
+    handPair({ id: 1001, buy: entry101, sell: handFill({ id: 102, at: '2026-10-14T06:00:00Z', action: 'Sell', qty: 1, price: 4990 }), qty: 1 }),
+    handPair({ id: 1002, buy: entry101, sell: handFill({ id: 103, at: '2026-10-14T06:30:00Z', action: 'Sell', qty: 1, price: 4980 }), qty: 1 }),
+    handPair({ id: 1003, buy: entry101, sell: handFill({ id: 104, at: '2026-10-14T07:00:00Z', action: 'Sell', qty: 1, price: 4970 }), qty: 1 }),
+  ];
+  const scaledOutFills = [
+    entry101,
+    handFill({ id: 102, at: '2026-10-14T06:00:00Z', action: 'Sell', qty: 1, price: 4990 }),
+    handFill({ id: 103, at: '2026-10-14T06:30:00Z', action: 'Sell', qty: 1, price: 4980 }),
+    handFill({ id: 104, at: '2026-10-14T07:00:00Z', action: 'Sell', qty: 1, price: 4970 }),
+  ];
+  const scaledOut = (await pullRows(handScene(scaledOutFills, scaledOutPairs)))[0];
+
+  // THE SAME PULL WITH THE PAIRS IN THE OPPOSITE ORDER. `/fillPair/list`
+  // documents no ordering, so this is the shape a re-pull can genuinely arrive
+  // in, and nothing a journal keys on may depend on it.
+  const reordered = (await pullRows(handScene([...scaledOutFills].reverse(), [...scaledOutPairs].reverse())))[0];
+
+  const oneBigExit = (
+    await pullRows(
+      handScene(
+        [entry101, handFill({ id: 102, at: '2026-10-14T07:00:00Z', action: 'Sell', qty: 3, price: 4980 })],
+        [
+          handPair({
+            id: 1001,
+            buy: entry101,
+            sell: handFill({ id: 102, at: '2026-10-14T07:00:00Z', action: 'Sell', qty: 3, price: 4980 }),
+            qty: 3,
+          }),
+        ]
+      )
+    )
+  )[0];
+
+  // §A3's CAVEAT, PINNED RATHER THAN FIXED. Two separate trades; then a later
+  // pull sees one more pair that shares a fill with each of them, so union-find
+  // welds all three into one group whose lowest fill id belongs to the earlier
+  // trade. `live:320` stops existing. Stage 2 must not write a key for a
+  // position that is still open, and this is the test that will fail if someone
+  // decides it can.
+  const b310 = handFill({ id: 310, at: '2026-10-14T05:00:00Z', action: 'Buy', qty: 1, price: 5000 });
+  const s311 = handFill({ id: 311, at: '2026-10-14T06:00:00Z', action: 'Sell', qty: 1, price: 5010 });
+  const b320 = handFill({ id: 320, at: '2026-10-14T06:30:00Z', action: 'Buy', qty: 1, price: 5020 });
+  const s321 = handFill({ id: 321, at: '2026-10-14T07:00:00Z', action: 'Sell', qty: 1, price: 5030 });
+  const separatePair = handPair({ id: 1101, buy: b310, sell: s311, qty: 1 });
+  const otherPair = handPair({ id: 1102, buy: b320, sell: s321, qty: 1 });
+  const bridgePair = handPair({ id: 1103, buy: b320, sell: s311, qty: 1 });
+
+  const beforeMerge = await pullRows(handScene([b310, s311, b320, s321], [separatePair, otherPair]));
+  const afterMerge = await pullRows(handScene([b310, s311, b320, s321], [separatePair, otherPair, bridgePair]));
+
+  group("a trade's key is its group's lowest fill id (REF-107 §A3)", [
+    c('(1) the key is host-qualified, because fill ids are host-local', scaledOut.brokerTradeKey, 'live:101'),
+    c('(2) every fill in the group is named, deduplicated and ascending', scaledOut.fillIds, [101, 102, 103, 104]),
+    c('(3) a scale-out is ONE trade, summed, from first entry to last exit', [
+      scaledOut.qty,
+      scaledOut.openedAtMs,
+      scaledOut.closedAtMs,
+      scaledOut.pnlUsd,
+    ], [3, Date.parse('2026-10-14T05:00:00Z'), Date.parse('2026-10-14T07:00:00Z'), -3000]),
+    // The weighted means and the P&L are the same arithmetic seen twice:
+    // (4980 − 5000) × 3 × $50 is −3000, which is the sum of the three legs.
+    c('(4) entry and exit are quantity-weighted, so they reproduce the P&L', [
+      scaledOut.entryPrice,
+      scaledOut.exitPrice,
+      (scaledOut.exitPrice - scaledOut.entryPrice) * scaledOut.qty * 50,
+    ], [5000, 4980, scaledOut.pnlUsd]),
+    c('(5) the pairs arriving in another order change nothing', [
+      reordered.brokerTradeKey,
+      reordered.direction,
+      reordered.openedAtMs,
+      reordered.entryPrice,
+      reordered.pnlUsd,
+    ], [scaledOut.brokerTradeKey, scaledOut.direction, scaledOut.openedAtMs, scaledOut.entryPrice, scaledOut.pnlUsd]),
+    c('(6) THE KEY SURVIVES THE GROUPING SHAPE: one exit of 3 keys the same as three of 1', [
+      oneBigExit.brokerTradeKey,
+      oneBigExit.qty,
+      oneBigExit.pnlUsd,
+    ], [scaledOut.brokerTradeKey, scaledOut.qty, scaledOut.pnlUsd]),
+    c('(7) two trades sharing no fill are two keys', beforeMerge.map((t) => t.brokerTradeKey).sort(), ['live:310', 'live:320']),
+    c(
+      '(8) KNOWN (§A3): a later pair bridging two groups merges them and the higher key is lost',
+      afterMerge.map((t) => t.brokerTradeKey),
+      ['live:310']
+    ),
+  ]);
+
+  // ── The flip ──────────────────────────────────────────────────────────────
+
+  // §A4's one uncovered case, and this group PINS THE PRESENT BEHAVIOUR rather
+  // than claiming it is right. A sell of 2 that closes a long of 1 and opens a
+  // short of 1 is one fill in two pairs, so union-find welds the two into one
+  // trade: the trader took two decisions and the journal will show one row of
+  // qty 2 and $0. §A4 calls this a row the trader will not recognise and makes
+  // it a measurement ticket — IS a flip one Tradovate fill or two? — that this
+  // stage cannot answer without a live demo account.
+  //
+  // So these assertions are a tripwire. If the grouping is ever changed to split
+  // a flip, this group fails and whoever changed it has to say so on purpose.
+  const flipBuy = handFill({ id: 401, at: '2026-10-14T05:00:00Z', action: 'Buy', qty: 1, price: 5000 });
+  const flipOrder = handFill({ id: 402, at: '2026-10-14T06:00:00Z', action: 'Sell', qty: 2, price: 5010 });
+  const flipClose = handFill({ id: 403, at: '2026-10-14T07:00:00Z', action: 'Buy', qty: 1, price: 5020 });
+  const flipPull = await pullFull(
+    handScene(
+      [flipBuy, flipOrder, flipClose],
+      [
+        // The long, closed by the flip order: +$500.
+        handPair({ id: 1201, buy: flipBuy, sell: flipOrder, qty: 1 }),
+        // The short the same order opened, closed later: −$500.
+        handPair({ id: 1202, buy: flipClose, sell: flipOrder, qty: 1 }),
+      ]
+    )
+  );
+  const flipRow = flipPull.trades[0];
+
+  group('a position flip is KNOWN-MERGED into one trade (REF-107 §A4)', [
+    c('(1) two decisions, one row — this is the behaviour, not the ideal', flipPull.trades.length, 1),
+    c('(2) the shared fill is in it once, and the lowest fill still keys it', [flipRow.brokerTradeKey, flipRow.fillIds], ['live:401', [401, 402, 403]]),
+    c('(3) the merged row spans both decisions and nets them to nothing', [
+      flipRow.qty,
+      flipRow.pnlUsd,
+      flipRow.openedAtMs,
+      flipRow.closedAtMs,
+    ], [2, 0, Date.parse('2026-10-14T05:00:00Z'), Date.parse('2026-10-14T07:00:00Z')]),
+    c('(4) the earliest leg decides the direction, so the row reads long', flipRow.direction, 'long'),
+    // The rules see it the same way, and in the SAFE direction for once: netted
+    // to zero it is not a loss, so it neither counts against max_daily_loss nor
+    // extends a cooldown streak. §A4 notes this is conservative-but-distorted
+    // for a rule and simply wrong for a journal.
+    c('(5) netted to zero it is not a loss, for the rules either', [
+      flipPull.day.closedCount,
+      flipPull.day.losingCount,
+      flipPull.day.lossStreak,
+    ], [1, 0, 0]),
+  ]);
+
+  // ── The scalars are the reduction of the rows ─────────────────────────────
+
+  // REF-107's one structural requirement: REF-90's figures cannot drift from
+  // REF-107's rows, because there is one list and it is reduced once. Asserted
+  // twice over — against a reduction written here, which is what "derived from
+  // the same list" means, and against hand-computed literals, so that the pair
+  // of them cannot be jointly wrong.
+  const mixedDay = withTrips([
+    // Yesterday evening, so it is in the LIST (the streak reaches back) but not
+    // in the day's figures. The one case that proves the two are different cuts.
+    roundTrip({ side: 'long', openAt: '2026-10-13T16:00:00Z', closeAt: '2026-10-13T18:00:00Z', entry: 5000, exit: 4990 }),
+    roundTrip({ side: 'long', openAt: '2026-10-14T02:00:00Z', closeAt: '2026-10-14T03:00:00Z', entry: 5000, exit: 5020 }),
+    roundTrip({ side: 'short', openAt: '2026-10-14T03:30:00Z', closeAt: '2026-10-14T04:00:00Z', entry: 5000, exit: 5010 }),
+    roundTrip({ side: 'long', openAt: '2026-10-14T05:00:00Z', closeAt: '2026-10-14T06:00:00Z', entry: 5000, exit: 4980 }),
+  ]);
+  const mixed = await pullFull(mixedDay);
+
+  /** The reduction, written out here, over the rows the pull returned. */
+  function reduceRows(rows: BrokerTrade[]): BrokerDayContext {
+    const todays = rows.filter((r) => r.closedAtMs >= DAY_START);
+    const streak: BrokerTrade[] = [];
+    for (const row of [...rows].sort((a, b) => b.closedAtMs - a.closedAtMs).slice(0, 10)) {
+      if (row.pnlUsd >= 0) break;
+      streak.push(row);
+    }
+    return {
+      closedCount: todays.length,
+      losingCount: todays.filter((r) => r.pnlUsd < 0).length,
+      net: todays.reduce((t, r) => t + r.pnlUsd, 0),
+      lost: todays.filter((r) => r.pnlUsd < 0).reduce((t, r) => t + Math.abs(r.pnlUsd), 0),
+      lossStreak: streak.length,
+      minutesSinceLastClose: streak.length === 0 ? null : (NOW - streak[0].closedAtMs) / 60_000,
+      asOf: mixed.day.asOf,
+    };
+  }
+
+  group('the day figures ARE the reduction of the rows', [
+    c('(1) every scalar, against the reduction of the returned list', mixed.day, reduceRows(mixed.trades)),
+    c('(2) and against the figures worked out by hand', mixed.day, {
+      closedCount: 3,
+      losingCount: 2,
+      net: -500,
+      lost: 1500,
+      lossStreak: 2,
+      minutesSinceLastClose: 60,
+      asOf: new Date(NOW).toISOString(),
+    }),
+    c('(3) the list reaches back past the day, which is why the route must filter', [
+      mixed.trades.length,
+      mixed.trades.filter((r) => r.closedAtMs >= DAY_START).length,
+    ], [4, 3]),
+    c(
+      '(4) newest close first, so a journal can render it as it arrives',
+      mixed.trades.map((r) => r.closedAtMs),
+      [...mixed.trades.map((r) => r.closedAtMs)].sort((a, b) => b - a)
+    ),
+    c('(5) every row opened before it closed', mixed.trades.every((r) => r.openedAtMs < r.closedAtMs), true),
+    c('(6) the day pull still answers the seven scalars and nothing more', Object.keys(mixed.day).sort(), [
+      'asOf',
+      'closedCount',
+      'losingCount',
+      'lossStreak',
+      'lost',
+      'minutesSinceLastClose',
+      'net',
+    ]),
+  ]);
+
+  // ── The window ────────────────────────────────────────────────────────────
+
+  const DAY_START_ISO = new Date(DAY_START).toISOString();
+  const windowOf = (query: Record<string, string>) =>
+    parseTradesWindow(new URLSearchParams(query), NOW);
+
+  const twoDaysBack = Date.parse('2026-10-12T00:00:00.000Z');
+
+  group('the trade window: today by default, a week at most', [
+    c('(1) no `since` is today, and says so', windowOf({ dayStart: DAY_START_ISO }), {
+      ok: true,
+      dayStartMs: DAY_START,
+      windowStartMs: DAY_START,
+      clamped: false,
+    }),
+    c('(2) an empty `since` is the same as none', windowOf({ dayStart: DAY_START_ISO, since: '' }).ok, true),
+    c('(3) `since` inside the week reaches back to it', windowOf({ dayStart: DAY_START_ISO, since: '2026-10-12T00:00:00.000Z' }), {
+      ok: true,
+      dayStartMs: DAY_START,
+      windowStartMs: twoDaysBack,
+      clamped: false,
+    }),
+    c('(4) an instant, not a midnight: `since` carrying seconds is fine', windowOf({ dayStart: DAY_START_ISO, since: '2026-10-12T09:14:37.000Z' }), {
+      ok: true,
+      dayStartMs: DAY_START,
+      windowStartMs: Date.parse('2026-10-12T09:14:37.000Z'),
+      clamped: false,
+    }),
+    c('(5) A MONTH BACK IS CLAMPED TO THE WEEK, AND REPORTED', windowOf({ dayStart: DAY_START_ISO, since: '2026-09-01T00:00:00.000Z' }), {
+      ok: true,
+      dayStartMs: DAY_START,
+      windowStartMs: NOW - MAX_SINCE_AGE_MS,
+      clamped: true,
+    }),
+    c('(6) `since` later than midnight does not narrow the day', windowOf({ dayStart: DAY_START_ISO, since: '2026-10-14T05:00:00.000Z' }), {
+      ok: true,
+      dayStartMs: DAY_START,
+      windowStartMs: DAY_START,
+      clamped: false,
+    }),
+    c('(7) a `since` in the future is a fault in the request', windowOf({ dayStart: DAY_START_ISO, since: '2026-10-15T00:00:00.000Z' }), {
+      ok: false,
+      param: 'since',
+      reason: 'in_future',
+    }),
+    c('(8) an unreadable `since` likewise', windowOf({ dayStart: DAY_START_ISO, since: 'last tuesday' }), {
+      ok: false,
+      param: 'since',
+      reason: 'unparseable',
+    }),
+    c('(9) `dayStart` is still mandatory, and still never defaulted', windowOf({ since: '2026-10-12T00:00:00.000Z' }), {
+      ok: false,
+      param: 'dayStart',
+      reason: 'missing',
+    }),
+    c('(10) and still validated by parseDayStart', windowOf({ dayStart: '2026-10-14T06:59:30.000Z' }), {
+      ok: false,
+      param: 'dayStart',
+      reason: 'not_midnight',
+    }),
+    c('(11) the bound is seven days', MAX_SINCE_AGE_MS, 7 * 24 * 60 * 60_000),
+  ]);
+
+  // A window wider than today has to PRICE more, which is the only cost §A2
+  // found. Twelve trades, eleven of them two days old: without a window the pull
+  // prices today's plus the ten-trade streak window, and with one it prices the
+  // lot. The day's figures are identical either way — a journal query cannot
+  // restate a discipline figure.
+  const twelveTrades = withTrips([
+    roundTrip({ side: 'long', openAt: '2026-10-14T05:00:00Z', closeAt: '2026-10-14T06:00:00Z', entry: 5000, exit: 5010 }),
+    ...Array.from({ length: 11 }, (_, i) =>
+      roundTrip({
+        side: 'long',
+        openAt: '2026-10-12T00:00:00Z',
+        closeAt: `2026-10-12T${String(i).padStart(2, '0')}:30:00Z`,
+        entry: 5000,
+        exit: 5010,
+      })
+    ),
+  ]);
+  const narrow = await pullFull(twelveTrades);
+  const wide = await pullFull(twelveTrades, DAY_START, Date.parse('2026-10-12T00:00:00Z'));
+
+  group('a window reaches back without touching the day', [
+    c('(1) no window: today plus the streak window, and no more', narrow.trades.length, 10),
+    c('(2) a window two days back: every trade in it', wide.trades.length, 12),
+    c('(3) THE DAY IS THE SAME FIGURE EITHER WAY', wide.day, narrow.day),
+    c('(4) and it is today alone', [narrow.day.closedCount, narrow.day.net], [1, 500]),
+  ]);
+
+  // ── The route ─────────────────────────────────────────────────────────────
+
+  const ROW_TODAY: BrokerTrade = {
+    brokerTradeKey: 'live:901',
+    host: 'live',
+    accountId: ACCOUNT.id,
+    symbol: 'ESZ6',
+    direction: 'long',
+    qty: 1,
+    entryPrice: 5000,
+    exitPrice: 5010,
+    openedAtMs: Date.parse('2026-10-14T05:00:00Z'),
+    closedAtMs: Date.parse('2026-10-14T06:00:00Z'),
+    pnlUsd: 500,
+    fillIds: [901, 902],
+  };
+  /** Yesterday evening: in the pull because the streak reaches back, not in today. */
+  const ROW_YESTERDAY: BrokerTrade = {
+    ...ROW_TODAY,
+    brokerTradeKey: 'live:801',
+    openedAtMs: Date.parse('2026-10-13T16:00:00Z'),
+    closedAtMs: Date.parse('2026-10-13T18:00:00Z'),
+    fillIds: [801, 802],
+  };
+  const ROUTE_ASOF = new Date(NOW).toISOString();
+
+  /** What the route was asked to load, so a case can assert it was not. */
+  let loaded: { userId: string; dayStartMs: number; windowStartMs: number } | null = null;
+
+  async function callRoute(
+    query: Record<string, string>,
+    overrides: Partial<TradesRouteDeps> = {}
+  ) {
+    loaded = null;
+    const url = new URL('https://reflect.test/api/tradovate/trades');
+    for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value);
+
+    const res = await respondToTradesRequest(new Request(url), {
+      currentUserId: async () => 'user-1',
+      isAllowed: () => true,
+      now: () => NOW,
+      loadTrades: async (userId, window) => {
+        loaded = { userId, ...window };
+        return { trades: [ROW_TODAY, ROW_YESTERDAY], asOf: ROUTE_ASOF };
+      },
+      ...overrides,
+    });
+
+    return {
+      status: res.status,
+      cache: res.headers.get('cache-control'),
+      body: (await res.json()) as Record<string, unknown>,
+    };
+  }
+
+  /** Run a case whose route logs a warning, and hand back the line it logged. */
+  async function warnedBy(run: () => Promise<unknown>): Promise<string> {
+    const lines: string[] = [];
+    const real = console.warn;
+    console.warn = (line: unknown) => void lines.push(String(line));
+    try {
+      await run();
+    } finally {
+      console.warn = real;
+    }
+    return lines.join('\n');
+  }
+
+  const today = { dayStart: DAY_START_ISO };
+
+  const signedOut = await callRoute(today, { currentUserId: async () => null });
+  const notAllowed = await callRoute(today, { isAllowed: () => false });
+  const notAllowedLoad = loaded;
+  // The allowlist is answered BEFORE the window is parsed, so a user with no
+  // broker view never receives a 400 about a parameter that would not have been
+  // used. Same order as /today.
+  const notAllowedBadDay = await callRoute({ dayStart: 'yesterday' }, { isAllowed: () => false });
+  const noDayStart = await callRoute({});
+  const badSince = await callRoute({ ...today, since: 'last tuesday' });
+  const ok = await callRoute(today);
+  const okLoad = loaded;
+  const sinceOk = await callRoute({ ...today, since: '2026-10-12T00:00:00.000Z' });
+  const sinceClamped = await callRoute({ ...today, since: '2026-09-01T00:00:00.000Z' });
+
+  const throwing = (error: Error) => ({ loadTrades: async () => Promise.reject(error) });
+  const leakyError = new TradovateUnpriceableError(
+    'No value per point for contract 2606306.',
+    'no_value_per_point'
+  );
+  const refused: Record<string, Awaited<ReturnType<typeof callRoute>>> = {};
+  const logged = await warnedBy(async () => {
+    refused.expired = await callRoute(today, throwing(new TradovateNotConnectedError('user-1', 'revoked')));
+    refused.missing = await callRoute(today, throwing(new TradovateNotConnectedError('user-1', 'missing')));
+    refused.transient = await callRoute(today, throwing(new TradovateTransientError('upstream', { reason: 'server' })));
+    refused.unpriceable = await callRoute(today, throwing(leakyError));
+  });
+
+  group('GET /api/tradovate/trades answers only its own trader', [
+    c('(1) no session is a 401, and it is the only error shape', [signedOut.status, signedOut.body], [401, { error: 'Unauthorized' }]),
+    c('(2) outside the allowlist is `reflect_only` at 200, not a 403', [notAllowed.status, notAllowed.body], [200, { source: 'reflect_only' }]),
+    c('(3) and no broker read is attempted for them', notAllowedLoad, null),
+    c('(4) the allowlist is answered before the window is even parsed', [notAllowedBadDay.status, notAllowedBadDay.body], [200, { source: 'reflect_only' }]),
+    c('(5) a missing dayStart is a 400 that names the parameter', [noDayStart.status, noDayStart.body], [400, { error: 'Invalid dayStart: missing' }]),
+    c('(6) a bad `since` is a 400 that names the bound a caller must respect', [badSince.status, badSince.body], [
+      400,
+      { error: 'Invalid since: unparseable (an instant, no older than 7 days)' },
+    ]),
+    c('(7) the happy answer carries the rows, the window and the instant', [ok.status, ok.body], [
+      200,
+      {
+        source: 'broker_verified',
+        trades: [ROW_TODAY],
+        windowStart: DAY_START_ISO,
+        asOf: ROUTE_ASOF,
+      },
+    ]),
+    // The pull hands back the streak window too, so the route cutting the list
+    // to the window it was asked for is what stops yesterday's loss appearing
+    // in today's journal.
+    c("(8) yesterday's row is in the pull and NOT in the answer", okLoad, {
+      userId: 'user-1',
+      dayStartMs: DAY_START,
+      windowStartMs: DAY_START,
+    }),
+    c('(9) `since` widens the window, and both rows come back', [
+      (sinceOk.body.trades as BrokerTrade[]).map((t) => t.brokerTradeKey),
+      sinceOk.body.windowStart,
+    ], [['live:901', 'live:801'], '2026-10-12T00:00:00.000Z']),
+    c('(10) a clamped `since` is visible in `windowStart`, never silent', sinceClamped.body.windowStart, new Date(NOW - MAX_SINCE_AGE_MS).toISOString()),
+    c('(11) a refused credential is `broker_expired`', [refused.expired.status, refused.expired.body], [200, { source: 'broker_expired' }]),
+    c('(12) a connection that never existed is `reflect_only`, not a reconnect prompt', refused.missing.body, { source: 'reflect_only' }),
+    c('(13) anything else degrades to `broker_unavailable`', [refused.transient.body, refused.unpriceable.body], [
+      { source: 'broker_unavailable' },
+      { source: 'broker_unavailable' },
+    ]),
+    c('(14) no-store, private on every answer', [ok.cache, signedOut.cache, noDayStart.cache, notAllowed.cache], [
+      'no-store, private',
+      'no-store, private',
+      'no-store, private',
+      'no-store, private',
+    ]),
+    // THE LOG RULE FOR THIS ROUTE: the kind of failure, and nothing that
+    // identifies a trade. The error carries a contract id in its message and
+    // /today would print it; here it must not appear.
+    c('(15) the log names the failure and nothing else', [
+      logged.includes('TradovateUnpriceableError(no_value_per_point)'),
+      logged.includes('2606306'),
+      logged.includes('user-1'),
+      logged.includes('ESZ6'),
+      logged.includes('5000'),
+    ], [true, false, false, false, false]),
+    c('(16) which is a different describer from /today\'s, and deliberately', [
+      describeDayPullFailure(leakyError).includes('2606306'),
+      describeDayPullFailureKind(leakyError).includes('2606306'),
+    ], [true, false]),
+  ]);
+
+  // ── /today is unchanged ───────────────────────────────────────────────────
+
+  // The privacy split REF-107 rests on: the rule engine's route sends scalars,
+  // the journal's route sends rows, and a trader who only ever opens the trade
+  // form has had no position leave our server. This group asserts the half that
+  // can regress silently — a later change returning `trades` from /today has to
+  // delete these lines on purpose.
+  const todayBody = JSON.stringify({ source: 'broker_verified', day: mixed.day });
+  const tradeFields = [
+    'brokerTradeKey',
+    'host',
+    'accountId',
+    'symbol',
+    'direction',
+    'qty',
+    'entryPrice',
+    'exitPrice',
+    'openedAtMs',
+    'closedAtMs',
+    'pnlUsd',
+    'fillIds',
+    'trades',
+  ];
+
+  group('/api/tradovate/today still carries no trade', [
+    c('(1) the response body is the source and the seven scalars', Object.keys(JSON.parse(todayBody)).sort(), ['day', 'source']),
+    c('(2) not one trade field appears anywhere in it', tradeFields.filter((field) => todayBody.includes(field)), []),
+    c('(3) nor a symbol, a price, an account id or a fill id as a VALUE', [
+      todayBody.includes('ESZ6'),
+      todayBody.includes('5000'),
+      todayBody.includes(String(ACCOUNT.id)),
+      todayBody.includes(String(POSITION.id)),
+    ], [false, false, false, false]),
+    // The rows exist on the pull. They are dropped by the route, which is the
+    // only reason the assertions above hold — so this one states where the line
+    // actually is.
+    c('(4) the rows were there to be sent, and this route is what drops them', [
+      Array.isArray(mixed.trades),
+      mixed.trades.length > 0,
+      'trades' in mixed.day,
+    ], [true, true, false]),
+  ]);
 }
 
 main().catch((error) => {

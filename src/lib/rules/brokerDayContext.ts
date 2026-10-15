@@ -149,6 +149,25 @@ export function classifyDayPullFailure(error: unknown): Exclude<RuleContextSourc
   return 'broker_unavailable';
 }
 
+/**
+ * The error's KIND alone, with no message attached.
+ *
+ * {@link describeDayPullFailure} is the fuller line and the right default, but
+ * the messages it passes through are built by this integration and some of them
+ * name an entity: "No value per point for contract 2606306". On the route that
+ * carries a trader's positions (app/api/tradovate/trades/route.ts) the rule is
+ * that nothing identifying a trade reaches a log at all — not a symbol, not a
+ * price, not an id — so that route needs the classification without the
+ * sentence. Two functions rather than one with a flag, because the choice is
+ * made once per route and a flag would be read as a verbosity setting.
+ */
+export function describeDayPullFailureKind(error: unknown): string {
+  if (error instanceof TradovateUnpriceableError) return `${error.name}(${error.reason})`;
+  if (error instanceof TradovateNotConnectedError) return `${error.name}(${error.status})`;
+  if (error instanceof Error) return error.name;
+  return 'unknown error';
+}
+
 /** Non-secret one-liner for a log: the error's type and its own message. */
 export function describeDayPullFailure(error: unknown): string {
   if (error instanceof TradovateUnpriceableError) {

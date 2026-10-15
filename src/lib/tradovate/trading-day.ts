@@ -55,6 +55,32 @@
 export const DAY_START_PARAM = 'dayStart';
 
 /**
+ * Query parameter for "everything since I connected" (REF-107 Stage 1).
+ *
+ * An instant, not a midnight: a connection happens at a wall-clock moment and
+ * the journal's question is "what have I traded since then", so there is no
+ * local-day arithmetic in it and none of {@link parseDayStart}'s midnight check
+ * applies.
+ */
+export const SINCE_PARAM = 'since';
+
+/**
+ * How far back {@link SINCE_PARAM} may reach.
+ *
+ * Seven days, and the bound is about COST rather than about privacy or
+ * permission — the trader may have every trade of theirs we can read. §A2 of the
+ * REF-107 investigation measured where the cost actually is: the four list reads
+ * are unfiltered and cost the same for any window, and what grows is PRICING, at
+ * one contract chain per distinct contract in the window. A week of a futures
+ * trader is one or two contracts; a full history is one per expiry month they
+ * ever touched, which is tens of sequential round trips inside a request someone
+ * is waiting on. So a week is what a synchronous route can promise, and the
+ * historical import §A2 recommends is a separate job with a persistent spec
+ * cache — not this parameter with a larger number.
+ */
+export const MAX_SINCE_AGE_MS = 7 * 24 * 60 * 60_000;
+
+/**
  * How far back a plausible local midnight can be.
  *
  * Under 24 hours by construction — a local midnight is the start of the local
@@ -94,6 +120,71 @@ export function parseDayStart(raw: string | null | undefined, now: number): DayS
   if (now - ms > MAX_DAY_START_AGE_MS) return { ok: false, reason: 'out_of_range' };
 
   return { ok: true, dayStartMs: ms };
+}
+
+export type TradesWindowParse =
+  | {
+      ok: true;
+      /** The trader's local midnight, as {@link parseDayStart} validated it. */
+      dayStartMs: number;
+      /** The earliest close to return. Equals `dayStartMs` when no `since` was asked for. */
+      windowStartMs: number;
+      /** Whether {@link MAX_SINCE_AGE_MS} moved `windowStartMs` later than asked. */
+      clamped: boolean;
+    }
+  | { ok: false; param: 'dayStart' | 'since'; reason: string };
+
+/**
+ * Validate the trade-list route's window: a mandatory day, an optional reach
+ * back behind it (REF-107 Stage 1).
+ *
+ * `dayStart` is required even when `since` is given, and that is not redundancy.
+ * It is the one definition of the trader's today (above), the thing no server
+ * can compute, and the boundary the day's own figures are cut at — the window
+ * only ever says how much further back the LIST goes.
+ *
+ * THE CLAMP IS REPORTED, NOT SILENT. A `since` older than
+ * {@link MAX_SINCE_AGE_MS} is answered with the seven days we can price rather
+ * than a 400, because a trader who connected a month ago is asking a reasonable
+ * question and a rejection tells them nothing they can act on. But a quietly
+ * narrowed window is a week of missing trades that looks exactly like a quiet
+ * week, so `clamped` travels with the answer and the route states the window it
+ * actually served. That is the same instinct as {@link parseDayStart}'s refusal
+ * to invent a boundary, applied where refusing would cost more than disclosing.
+ *
+ * A `since` in the future or unreadable IS a 400: neither is a question with a
+ * narrower honest answer.
+ */
+export function parseTradesWindow(
+  params: URLSearchParams,
+  now: number
+): TradesWindowParse {
+  const dayStart = parseDayStart(params.get(DAY_START_PARAM), now);
+  if (!dayStart.ok) return { ok: false, param: 'dayStart', reason: dayStart.reason };
+
+  const raw = params.get(SINCE_PARAM);
+  if (raw === null || raw === '') {
+    return { ok: true, dayStartMs: dayStart.dayStartMs, windowStartMs: dayStart.dayStartMs, clamped: false };
+  }
+
+  const asked = Date.parse(raw);
+  if (!Number.isFinite(asked)) return { ok: false, param: 'since', reason: 'unparseable' };
+  if (asked > now + MAX_DAY_START_SKEW_MS) return { ok: false, param: 'since', reason: 'in_future' };
+
+  const floor = now - MAX_SINCE_AGE_MS;
+  const clamped = asked < floor;
+  const sinceMs = clamped ? floor : asked;
+
+  // A `since` LATER than the day boundary narrows nothing: today's trades are
+  // the point of the route and the day's scalars are measured from midnight
+  // regardless, so the window is the earlier of the two. A client that asks for
+  // "since 14:00" gets today, which is the honest superset.
+  return {
+    ok: true,
+    dayStartMs: dayStart.dayStartMs,
+    windowStartMs: Math.min(dayStart.dayStartMs, sinceMs),
+    clamped,
+  };
 }
 
 /**
