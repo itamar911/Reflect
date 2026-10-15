@@ -82,7 +82,7 @@ export default function PrivacyPage() {
             </li>
             <li>
               <strong className="font-bold">פרטי תשלום</strong>{' '}
-              — עם הפעלת התשלומים בשירות, הם יעובדו ישירות על ידי Stripe.{' '}
+              — עם הפעלת התשלומים בשירות, הם יעובדו ישירות על ידי PayPlus.{' '}
               <strong className="font-bold">
                 איננו מקבלים ואיננו מאחסנים מספרי כרטיס אשראי בשום שלב.
               </strong>
@@ -253,7 +253,7 @@ export default function PrivacyPage() {
                   <td>DNS וניתוב דואר</td>
                 </tr>
                 <tr>
-                  <td>Stripe</td>
+                  <td>PayPlus</td>
                   <td>עיבוד תשלומים — יופעל עם פתיחת השירות לתשלום</td>
                 </tr>
                 <tr>

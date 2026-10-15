@@ -72,8 +72,13 @@
    Only for runs the bidi algorithm actually gets wrong: ones whose edges are
    neutral characters (`support@…app`, `050-225-5903`, `HTTPS/TLS`), or a
    multi-word Latin name sitting against Hebrew punctuation. A bare single word
-   in a Hebrew sentence — Stripe, Supabase, OAuth, GDPR — resolves correctly on
+   in a Hebrew sentence — PayPlus, Supabase, OAuth, GDPR — resolves correctly on
    its own and must be left alone; wrapping every Latin word is noise.
+
+   PayPlus is in that list for the same reason Stripe was: it is one word with
+   no space, and both its edges are strong-LTR letters, so the camel-case
+   capital in the middle changes nothing about how it resolves. It needs no
+   wrapper.
 
    inline-block also keeps an address or a number from breaking across lines. */
 .legal-ltr {
