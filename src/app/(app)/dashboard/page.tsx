@@ -48,6 +48,13 @@ export default async function DashboardPage() {
   // itself, so this only decides whether the banner is a link or a placeholder.
   const canConnectBroker = isUserAllowed(user.id);
 
+  // Whether the sync button is rendered at all (REF-107 Stage 2.5). A stricter
+  // gate than `canConnectBroker` above and a different question: that one asks
+  // whether a connection can be MADE, this asks whether a sync could do
+  // anything if it ran — which also needs the import flag. Server-side because
+  // both halves are, and the same reason the two props above are here.
+  const canSync = canConnectBroker && hiddenColumnExists;
+
   return (
     <DashboardClient
       trades={trades}
@@ -56,6 +63,7 @@ export default async function DashboardPage() {
       plan={plan}
       canConnectBroker={canConnectBroker}
       hiddenColumnExists={hiddenColumnExists}
+      canSync={canSync}
     />
   );
 }

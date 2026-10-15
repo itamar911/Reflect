@@ -62,6 +62,7 @@ import {
   TradovateNotConnectedError,
   TradovateUnpriceableError,
 } from '@/lib/tradovate/errors';
+import { markBrokerPull } from '@/lib/tradovate/syncClock';
 import { DAY_START_PARAM } from '@/lib/tradovate/trading-day';
 import type { BrokerDayContext } from '@/lib/tradovate/fills';
 import type { RuleContextSource } from '@/lib/types';
@@ -255,6 +256,15 @@ export async function loadBrokerDayPull(
   const work = requestBrokerDay().then((pull) => {
     cached = { userId, at: Date.now(), pull };
     inFlight = null;
+
+    // The page-entry sync trigger shares this stamp (REF-107 Stage 2.5). This
+    // pull was a GET THAT IMPORTS — /api/tradovate/today calls syncQuietly with
+    // the rows it just built — so by the time it lands, the work the sync
+    // button would do has already been done, server-side, for free. Without
+    // this line "I opened the trade form, closed it, went to the journal" pays
+    // for a second eight-request pull a second later over rows the first one
+    // already wrote. The window belongs to the trader, hence `userId`.
+    markBrokerPull(userId, Date.now());
     return pull;
   });
 

@@ -2,6 +2,9 @@ import { createClient, getCachedUser } from '@/lib/supabase/server';
 import { BookOpen } from 'lucide-react';
 import JournalExport from '@/components/journal/JournalExport';
 import TradeCalendar from '@/components/journal/TradeCalendar';
+import BrokerSyncButton, { ReflectOnlyNote } from '@/components/tradovate/BrokerSyncButton';
+import { isUserAllowed } from '@/lib/tradovate/allowlist';
+import { isImportEnabled } from '@/lib/tradovate/import';
 import { visibleTrades } from '@/lib/trades/visible';
 
 export const metadata = { title: 'יומן חודשי — Reflect' };
@@ -60,6 +63,10 @@ export default async function JournalPage() {
     debrief_answer:  t.debrief_answer,
   }));
 
+  // Server-only both halves, the same gate /trades and the dashboard evaluate.
+  // See BrokerSyncButton's header on why the page and not the component.
+  const canSync = isUserAllowed(user.id) && isImportEnabled();
+
   return (
     <div dir="rtl" className="px-4 py-5 flex flex-col gap-4 md:max-w-none">
       <div className="flex items-center justify-between">
@@ -70,7 +77,13 @@ export default async function JournalPage() {
             {allTrades.filter((t) => t.status === 'closed').length} סגורות
           </p>
         </div>
-        <JournalExport trades={exportTrades} />
+        <div className="flex items-start gap-2">
+          {/* The cheapest of the three pages to refresh: TradeCalendar derives
+              everything from the prop in useMemo and holds only the viewed
+              month in state, so router.refresh() alone redraws the grid. */}
+          {canSync ? <BrokerSyncButton userId={user.id} refreshOnChange /> : <ReflectOnlyNote />}
+          <JournalExport trades={exportTrades} />
+        </div>
       </div>
       {allTrades.length === 0 ? (
         <div className="text-center py-12 rounded-2xl border border-tg-border"

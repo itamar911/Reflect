@@ -64,8 +64,27 @@ export interface SyncResult {
   counts: BrokerImportCounts;
   /** When this was read from Tradovate, ISO 8601. */
   asOf: string;
-  /** Whether the connection declares the broker a trade source (E7). */
+  /**
+   * Whether the connection declares the broker a trade source (E7).
+   *
+   * NOT ENOUGH ON ITS OWN TO EXPLAIN A RUN THAT DID NOT HAPPEN, and the
+   * regression suite asserts why: this is false whenever the FLAG is off too,
+   * because the column cannot be read before migration 034 has run. So it is
+   * exactly `counts.ran`, and a caller trying to tell "switched off" from "the
+   * trader said no" has to read {@link importEnabled} instead. Kept because it
+   * is the honest name for what the import gate was given.
+   */
   isTradeSource: boolean;
+  /**
+   * Whether TRADOVATE_IMPORT_ENABLED was set for this run (REF-107 Stage 2.5).
+   *
+   * The field that separates the two `ran: false` states. With it false, no
+   * column was read and no declaration was consulted — the deployment has the
+   * import switched off. With it true and `ran` still false, the one remaining
+   * reason is the trader's own declaration, which is a setting they can
+   * change and therefore a different sentence.
+   */
+  importEnabled: boolean;
 }
 
 /**
@@ -94,7 +113,7 @@ export async function syncUserTrades(request: SyncRequest): Promise<SyncResult> 
     // is called anyway, with nothing, so that the "did not run" shape has one
     // definition and lives in the module that owns it.
     const counts = await importBrokerTrades({ client, userId, trades: [], isTradeSource, env });
-    return { counts, asOf: new Date().toISOString(), isTradeSource };
+    return { counts, asOf: new Date().toISOString(), isTradeSource, importEnabled: enabled };
   }
 
   const api = await getUserTradingApi(userId, { admin });
@@ -123,5 +142,5 @@ export async function syncUserTrades(request: SyncRequest): Promise<SyncResult> 
   // and no rule is being evaluated here; the rows are the point.
   const counts = await importBrokerTrades({ client, userId, trades, isTradeSource, env });
 
-  return { counts, asOf: day.asOf, isTradeSource };
+  return { counts, asOf: day.asOf, isTradeSource, importEnabled: enabled };
 }

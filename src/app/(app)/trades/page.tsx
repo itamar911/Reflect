@@ -1,6 +1,9 @@
 import { createClient, getCachedUser } from '@/lib/supabase/server';
 import JournalExport from '@/components/journal/JournalExport';
 import JournalClient from '@/components/journal/JournalClient';
+import BrokerSyncButton, { ReflectOnlyNote } from '@/components/tradovate/BrokerSyncButton';
+import { isUserAllowed } from '@/lib/tradovate/allowlist';
+import { isImportEnabled } from '@/lib/tradovate/import';
 import { visibleTrades } from '@/lib/trades/visible';
 
 export const metadata = { title: 'כל העסקאות — Reflect' };
@@ -89,6 +92,25 @@ export default async function TradesPage() {
     debrief_answer:  t.debrief_answer,
   }));
 
+  // Both halves are server-only — allowlist.ts reads an environment variable
+  // and isImportEnabled() reads the flag — so this is the only place the
+  // decision can be made, and the same precedent dashboard/page.tsx set with
+  // `canConnectBroker`. A trader who fails either gets the E16 sentence where
+  // the button would be, rather than a button that can only tell them no.
+  const canSync = isUserAllowed(user.id) && isImportEnabled();
+
+  // THE LIST DOES NOT TRACK ITS PROP. JournalClient seeds useState(trades) and
+  // never syncs a new one, so router.refresh() after a sync re-renders this
+  // file and changes nothing the trader can see — which is why "רענן נתונים"
+  // in its own menu has been a no-op. Remounting on a `key` is the one-line
+  // fix; the real one (deletions and edits as an overlay over the prop) is a
+  // refactor and a separate ticket.
+  //
+  // DERIVED FROM WHAT THE SERVER SAW, which is the part that matters: a sync
+  // that inserted rows moves both halves, so the list rebuilds. The rows are
+  // ordered submitted_at desc above, so [0] is the newest.
+  const listKey = `${allTrades.length}:${allTrades[0]?.submitted_at ?? 'empty'}`;
+
   return (
     <div dir="rtl" className="px-4 py-5 flex flex-col gap-4 md:max-w-none">
       <div className="flex items-center justify-between">
@@ -99,9 +121,12 @@ export default async function TradesPage() {
             {allTrades.filter((t) => t.status === 'closed').length} סגורות
           </p>
         </div>
-        <JournalExport trades={exportTrades} />
+        <div className="flex items-start gap-2">
+          {canSync ? <BrokerSyncButton userId={user.id} refreshOnChange /> : <ReflectOnlyNote />}
+          <JournalExport trades={exportTrades} />
+        </div>
       </div>
-      <JournalClient trades={allTrades} />
+      <JournalClient key={listKey} trades={allTrades} />
     </div>
   );
 }

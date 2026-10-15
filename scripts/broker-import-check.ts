@@ -58,6 +58,26 @@ import { loadTradeRuleContext } from '../src/lib/rules/tradeRuleContext';
 import type { BrokerDayPull } from '../src/lib/rules/brokerDayContext';
 import { readBrokerDayResponse } from '../src/lib/rules/brokerDayContext';
 import { GET as cronImport } from '../src/app/api/cron/tradovate-import/route';
+import { respondToSyncRequest, type SyncRouteDeps } from '../src/app/api/tradovate/sync/route';
+import { syncUserTrades } from '../src/lib/tradovate/sync';
+import {
+  TradovateNotConnectedError,
+  TradovateTransientError,
+  TradovateUnpriceableError,
+} from '../src/lib/tradovate/errors';
+import {
+  AUTO_SYNC_THROTTLE_MS,
+  forgetBrokerSync,
+  markBrokerPull,
+  shareBrokerSync,
+  shouldAutoSync,
+} from '../src/lib/tradovate/syncClock';
+import {
+  describeSyncOutcome,
+  readSyncResponse,
+  SYNC_UNAVAILABLE,
+  type BrokerSyncOutcome,
+} from '../src/lib/tradovate/sync-response';
 
 // ── Harness ─────────────────────────────────────────────────────────────────
 
@@ -988,6 +1008,419 @@ async function cronSkipGroup() {
   ]);
 }
 
+// ── Stage 2.5: the sync button's half ───────────────────────────────────────
+//
+// Five groups over the route a trader triggers on purpose and the two pure
+// modules the button is built from. Until this stage /api/tradovate/sync had
+// no assertion on it at all — it was the only route in the integration in that
+// position — which is why step 4 of the build plan gave it the same deps seam
+// app/api/tradovate/trades/route.ts has. Nothing here touches the network: the
+// seams are parameters and the pull is a function that returns or throws.
+
+/** A fixed now, so the 25-hour window is measured from something stable. */
+const SYNC_NOW = Date.parse('2026-10-15T14:00:00.000Z');
+/** A plausible local midnight: Israel is UTC+3, so 21:00 the day before. */
+const SYNC_DAY_START = '2026-10-14T21:00:00.000Z';
+
+const syncUrl = (query: string) => `https://example.test/api/tradovate/sync${query}`;
+
+/** The counts a run that imported one trade and left one open would report. */
+const RAN_COUNTS = {
+  ran: true,
+  offered: 3,
+  imported: 1,
+  updated: 0,
+  unchanged: 1,
+  skippedOpen: 1,
+  skippedHidden: 0,
+  failed: 0,
+};
+
+/**
+ * The route's four seams, with the three uninteresting ones defaulted.
+ *
+ * `runSync` is the only one most cases care about, and giving it a default
+ * that THROWS would be wrong — several cases assert the route answers before
+ * it is ever called, and a throw would make those pass for the wrong reason.
+ * It returns a benign run instead, so "the route stopped early" shows up as a
+ * different `source` rather than as an exception.
+ */
+function syncDeps(over: Partial<SyncRouteDeps> = {}): SyncRouteDeps {
+  return {
+    currentUserId: async () => USER,
+    isAllowed: () => true,
+    now: () => SYNC_NOW,
+    runSync: async () => ({
+      counts: RAN_COUNTS,
+      asOf: '2026-10-15T13:59:00.000Z',
+      isTradeSource: true,
+      importEnabled: true,
+    }),
+    ...over,
+  };
+}
+
+async function syncRouteGroup() {
+  const call = async (query: string, over: Partial<SyncRouteDeps> = {}) => {
+    const res = await respondToSyncRequest(new Request(syncUrl(query)), syncDeps(over));
+    return { status: res.status, body: await res.json() };
+  };
+
+  const good = `?dayStart=${encodeURIComponent(SYNC_DAY_START)}`;
+
+  const noSession = await call(good, { currentUserId: async () => null });
+  const noDayStart = await call('');
+  const withSeconds = await call('?dayStart=2026-10-14T21:00:30.000Z');
+  const tooOld = await call('?dayStart=2026-10-14T08:00:00.000Z');
+  const sinceAhead = await call(`${good}&since=2026-10-16T00:00:00.000Z`);
+
+  // The allowlist is answered BEFORE the window is parsed, and this is how
+  // that is proved: a refused user sending an unparseable dayStart gets
+  // `reflect_only` and not the 400. A route that parsed first would leak a
+  // complaint about a parameter it was never going to read.
+  const refusedWithBadWindow = await call('?dayStart=not-a-date', { isAllowed: () => false });
+
+  const ran = await call(good);
+
+  // The three thrown failures, mapped by classifyDayPullFailure. 'missing' is
+  // reflect_only and not broker_expired on purpose: a reconnect button in
+  // front of a connection the trader never made is an instruction they cannot
+  // follow (brokerDayContext.ts).
+  const thrown = async (error: unknown) =>
+    (await call(good, {
+      runSync: async () => {
+        throw error;
+      },
+    })).body.source;
+
+  const { result: expired } = await captureLogs(() =>
+    thrown(new TradovateNotConnectedError(USER, 'expired'))
+  );
+  const { result: missing } = await captureLogs(() =>
+    thrown(new TradovateNotConnectedError(USER, 'missing'))
+  );
+  const { result: transient } = await captureLogs(() =>
+    thrown(new TradovateTransientError('upstream said no', { reason: 'network' }))
+  );
+  const { result: unpriceable } = await captureLogs(() =>
+    thrown(new TradovateUnpriceableError('no value per point', 'no_value_per_point'))
+  );
+
+  group('the sync route answers before it works', [
+    c('(1) no session: 401', [noSession.status, noSession.body.error], [401, 'Unauthorized']),
+    c('(2) a missing dayStart is a 400',
+      [noDayStart.status, noDayStart.body.error], [400, 'Invalid dayStart: missing']),
+    c('(3) a dayStart carrying seconds is not a midnight',
+      [withSeconds.status, withSeconds.body.error], [400, 'Invalid dayStart: not_midnight']),
+    c('(4) a dayStart 30 hours old is out of range',
+      [tooOld.status, tooOld.body.error], [400, 'Invalid dayStart: out_of_range']),
+    c('(5) a `since` in the future is a 400', sinceAhead.status, 400),
+    c('(6) a refused user gets reflect_only, and the window is never parsed',
+      [refusedWithBadWindow.status, refusedWithBadWindow.body.source], [200, 'reflect_only']),
+    c('(7) a real run answers broker_verified with its counts',
+      [ran.status, ran.body.source, ran.body.ran, ran.body.imported, ran.body.skippedOpen],
+      [200, 'broker_verified', true, 1, 1]),
+    c('(8) the window it served is stated back', ran.body.windowStart, SYNC_DAY_START),
+    c('(9) a refused credential is broker_expired', expired, 'broker_expired'),
+    c('(10) a connection that never existed is reflect_only', missing, 'reflect_only'),
+    c('(11) a transient failure is broker_unavailable', transient, 'broker_unavailable'),
+    c('(12) an unpriceable product is broker_unavailable too', unpriceable, 'broker_unavailable'),
+  ]);
+}
+
+/**
+ * The two states that reach the client as `broker_verified` with ten zeroes.
+ *
+ * Driven through the REAL {@link syncUserTrades} rather than a fake `runSync`,
+ * because the claim being made is about upstream calls that did not happen and
+ * a fake cannot make that claim. The proof is structural: `getUserTradingApi`
+ * is the first thing on the pull path and it would throw against these stub
+ * clients, so a run that RETURNS proves the gate stopped it first.
+ *
+ * THIS GROUP IS WHY THE RESPONSE CARRIES `importEnabled` AND NOT
+ * `isTradeSource`. The Stage 2.5 investigation proposed the latter; this group
+ * was written to its spec, failed, and the failure was correct — sync.ts
+ * forces `isTradeSource` to false whenever the flag is off, because the column
+ * belongs to migration 034 and reading it early is a 42703 for every user. The
+ * field therefore arrives exactly equal to `ran` and splits nothing.
+ * Assertion (2) below is the one that caught it and the one that keeps it
+ * caught.
+ */
+async function syncDisabledGroup() {
+  const connected = () =>
+    new FakeDb([{ user_id: USER, is_trade_source: true }]).client();
+  const declaredNotSource = () =>
+    new FakeDb([{ user_id: USER, is_trade_source: false }]).client();
+
+  const write = new FakeDb();
+
+  const flagOff = await syncUserTrades({
+    userId: USER,
+    client: write.client(),
+    admin: connected(),
+    dayStartMs: Date.parse(SYNC_DAY_START),
+    windowStartMs: Date.parse(SYNC_DAY_START),
+    env: OFF,
+  });
+
+  const notSource = await syncUserTrades({
+    userId: USER,
+    client: write.client(),
+    admin: declaredNotSource(),
+    dayStartMs: Date.parse(SYNC_DAY_START),
+    windowStartMs: Date.parse(SYNC_DAY_START),
+    env: ON,
+  });
+
+  // And through the route, which is where the distinction has to survive.
+  const answerFor = async (result: Awaited<ReturnType<typeof syncUserTrades>>) => {
+    const res = await respondToSyncRequest(
+      new Request(syncUrl(`?dayStart=${encodeURIComponent(SYNC_DAY_START)}`)),
+      syncDeps({ runSync: async () => result })
+    );
+    return res.json();
+  };
+
+  const flagOffBody = await answerFor(flagOff);
+  const notSourceBody = await answerFor(notSource);
+
+  group('a sync that did not run says which kind of not-run it was', [
+    c('(1) flag off: ran=false', flagOff.counts.ran, false),
+    // THE ASSERTION THAT KILLED §D's PROPOSAL. With the flag off the
+    // declaration is never read, so `isTradeSource` is false even though this
+    // connection declares itself a trade source — equal to `ran`, and useless
+    // as a discriminator. `importEnabled` is what carries the distinction.
+    c('(2) flag off: isTradeSource is NOT the discriminator',
+      [flagOff.isTradeSource, flagOff.counts.ran], [false, false]),
+    c('(3) flag off: importEnabled is', flagOffBody.importEnabled, false),
+    c('(4) declaration off: ran=false, but the flag was on',
+      [notSource.counts.ran, notSourceBody.importEnabled], [false, true]),
+    // THE WHOLE POINT OF THE FIELD: identical in every other respect.
+    c('(5) the two are otherwise the same answer',
+      [flagOffBody.source, notSourceBody.source, flagOffBody.ran, notSourceBody.ran],
+      ['broker_verified', 'broker_verified', false, false]),
+    c('(6) and they produce two DIFFERENT sentences',
+      describeSyncOutcome(readSyncResponse(flagOffBody)).text ===
+        describeSyncOutcome(readSyncResponse(notSourceBody)).text,
+      false),
+    // Zero upstream calls: a pull would have gone through getUserTradingApi,
+    // which throws against a stub with no token columns.
+    c('(7) neither spent an upstream call',
+      [flagOff.counts.offered, notSource.counts.offered], [0, 0]),
+    c('(8) and neither wrote a row', write.writes.length, 0),
+  ]);
+}
+
+async function syncResponseGroup() {
+  const verified = {
+    source: 'broker_verified',
+    windowStart: SYNC_DAY_START,
+    asOf: '2026-10-15T13:59:00.000Z',
+    importEnabled: true,
+    ...RAN_COUNTS,
+  };
+
+  const src = (body: unknown) => readSyncResponse(body).source;
+
+  group('the sync reader trusts nothing it is handed', [
+    c('(1) a string body is broker_unavailable', src('broker_verified'), 'broker_unavailable'),
+    c('(2) null is broker_unavailable', src(null), 'broker_unavailable'),
+    c('(3) a body with no source is broker_unavailable', src({ ran: true }), 'broker_unavailable'),
+    c('(4) an unknown source is broker_unavailable', src({ source: 'maybe' }), 'broker_unavailable'),
+    // The dangerous one: every missing count reads as zero, and ten zeroes is
+    // exactly the shape of "הכל מעודכן". A partial body must not get there.
+    c('(5) broker_verified with no counts is broker_unavailable',
+      src({ source: 'broker_verified', windowStart: SYNC_DAY_START, asOf: 'x', ran: true }),
+      'broker_unavailable'),
+    c('(6) one missing count is enough',
+      src({ ...verified, failed: undefined }), 'broker_unavailable'),
+    // `ran` is the field the entire display branches on. A truthy string would
+    // render a switched-off import as a successful sync.
+    c('(7) ran as the string "true" is rejected',
+      src({ ...verified, ran: 'true' }), 'broker_unavailable'),
+    c('(8) a well-formed body survives', src(verified), 'broker_verified'),
+    c('(9) the three stateless sources pass through',
+      [src({ source: 'broker_expired' }), src({ source: 'reflect_only' })],
+      ['broker_expired', 'reflect_only']),
+    // Absence means false — the same rule readBrokerDayResponse applies to its
+    // own optional flag. Against a deployment from before Stage 2.5 the field
+    // is missing and `ran:false` really is ambiguous, so it resolves to the
+    // sentence that blames nobody rather than to one that tells a trader they
+    // set something they may never have touched.
+    c('(10) a missing importEnabled reads as false',
+      (readSyncResponse({ ...verified, importEnabled: undefined }) as { importEnabled: boolean })
+        .importEnabled,
+      false),
+  ]);
+}
+
+async function syncCopyGroup() {
+  const verified = (over: Partial<typeof RAN_COUNTS> & { importEnabled?: boolean } = {}) =>
+    describeSyncOutcome({
+      source: 'broker_verified',
+      windowStart: SYNC_DAY_START,
+      asOf: '2026-10-15T13:59:00.000Z',
+      importEnabled: true,
+      ran: true,
+      offered: 0,
+      imported: 0,
+      updated: 0,
+      unchanged: 0,
+      skippedOpen: 0,
+      skippedHidden: 0,
+      failed: 0,
+      ...over,
+    } as BrokerSyncOutcome);
+
+  const three = verified({ imported: 3 });
+  const one = verified({ imported: 1 });
+  const nothing = verified({});
+  const openLeft = verified({ skippedOpen: 2 });
+  const refused = verified({ failed: 1 });
+  const restated = verified({ updated: 4 });
+  const restatedOne = verified({ updated: 1 });
+  const flagOff = verified({ ran: false, importEnabled: false });
+  const notSource = verified({ ran: false, importEnabled: true });
+  const lapsed = describeSyncOutcome({ source: 'broker_expired' });
+
+  group('the sync copy says what happened, in Hebrew that counts', [
+    c('(1) three imported', three.text, 'נוספו 3 עסקאות'),
+    // Hebrew counts one and then everything else. "נוספו 1 עסקאות" is the
+    // kind of thing that makes a product look unfinished.
+    c('(2) one imported takes the singular', one.text, 'נוספה עסקה אחת'),
+    c('(3) a quiet run', nothing.text, 'הכל מעודכן'),
+    c('(4) and a quiet run says nothing else', nothing.detail, null),
+    // "הכל מעודכן" on its own would be a small lie here: there IS a trade the
+    // trader took that is not in the journal, and this is why.
+    c('(5) an open position is explained, not swallowed',
+      [openLeft.text, openLeft.detail],
+      ['הכל מעודכן', 'פוזיציה פתוחה נכנסת ליומן רק לאחר סגירתה.']),
+    c('(6) refused rows are NOT "הכל מעודכן"',
+      refused.text, 'חלק מהעסקאות לא נשמרו. נסה שוב בעוד רגע.'),
+    c('(7) restated rows get their own sentence', restated.text, 'עודכנו 4 עסקאות'),
+    c('(8) and the singular of that one too', restatedOne.text, 'עודכנה עסקה אחת'),
+    c('(9) the flag being off is an operator fact',
+      flagOff.text, 'ייבוא עסקאות אינו פעיל בחשבון הזה'),
+    c('(10) the declaration is the trader\'s own setting',
+      notSource.text, 'הגדרת שהברוקר אינו מקור העסקאות שלך'),
+    // The pair §D could not tell apart before this stage.
+    c('(11) and the two did not collapse into one sentence',
+      flagOff.text === notSource.text, false),
+    c('(12) only a lapsed connection offers the reconnect link',
+      [lapsed.reconnect, nothing.reconnect, flagOff.reconnect], [true, false, false]),
+  ]);
+}
+
+async function syncThrottleGroup() {
+  const T = 1_700_000_000_000;
+
+  // ── The window ───────────────────────────────────────────────────────────
+  forgetBrokerSync();
+  const freshTab = shouldAutoSync(USER, T);
+
+  markBrokerPull(USER, T);
+  const insideWindow = shouldAutoSync(USER, T + AUTO_SYNC_THROTTLE_MS - 1);
+  const atTheEdge = shouldAutoSync(USER, T + AUTO_SYNC_THROTTLE_MS);
+  // A pull for somebody else must never silence this trader's first page.
+  const otherTrader = shouldAutoSync(OTHER_USER, T + 1_000);
+
+  // ── The shared promise ───────────────────────────────────────────────────
+  forgetBrokerSync();
+  let starts = 0;
+  let release: ((outcome: BrokerSyncOutcome) => void) | null = null;
+  const pending = new Promise<BrokerSyncOutcome>((resolve) => {
+    release = resolve;
+  });
+  const start = () => {
+    starts += 1;
+    return pending;
+  };
+
+  // Two mounts at the same instant — StrictMode, or /trades and the dashboard
+  // both on screen. They must be one request and one answer.
+  const first = shareBrokerSync(USER, () => T, start);
+  const second = shareBrokerSync(USER, () => T, start);
+
+  // An explicit click lands while that is still in the air. It BYPASSES the
+  // window — shareBrokerSync never consults it — but not the in-flight pull.
+  markBrokerPull(USER, T);
+  const clickedMidFlight = shareBrokerSync(USER, () => T, start);
+
+  release!(SYNC_UNAVAILABLE);
+  await Promise.all([first, second, clickedMidFlight]);
+
+  // Settling stamps the clock, so the next page entry is inside the window.
+  const stampedBySettle = shouldAutoSync(USER, T + 1_000);
+  // ...and releases the slot, so a later sync is a new request.
+  let laterStarts = 0;
+  await shareBrokerSync(USER, () => T, async () => {
+    laterStarts += 1;
+    return SYNC_UNAVAILABLE;
+  });
+
+  forgetBrokerSync();
+
+  group('one clock, so three triggers cannot disagree', [
+    c('(1) a fresh tab syncs', freshTab, true),
+    c('(2) one millisecond before the window closes, it does not',
+      insideWindow, false),
+    c('(3) exactly at the window it does again', atTheEdge, true),
+    c('(4) another trader is never served from this one\'s window', otherTrader, true),
+    c('(5) two mounts at once are ONE request', starts, 1),
+    c('(6) and they hold the same promise', first === second, true),
+    // The property that makes the button and the page-entry trigger safe to
+    // run at the same time: they cannot report different things, because they
+    // are awaiting the same object.
+    c('(7) a click mid-flight joins it rather than starting a second',
+      [starts, clickedMidFlight === first], [1, true]),
+    c('(8) settling stamps the window', stampedBySettle, false),
+    c('(9) and releases the slot for the next one', laterStarts, 1),
+  ]);
+}
+
+async function syncPrivacyGroup() {
+  const res = await respondToSyncRequest(
+    new Request(syncUrl(`?dayStart=${encodeURIComponent(SYNC_DAY_START)}`)),
+    syncDeps()
+  );
+  const body = await res.json();
+  const serialized = JSON.stringify(body);
+
+  // Sorted, so the assertion is about the SET of keys and not the order the
+  // spread happens to produce.
+  const keys = Object.keys(body).sort();
+
+  group('the sync response carries counts and a provenance, and not one trade', [
+    // Spelled out in full and deliberately brittle. A later change that adds a
+    // row, a symbol or an account id to this response has to come here and
+    // delete this line ON PURPOSE — which is the only review step this
+    // repository can enforce on a route that answers with a trader's activity.
+    c('(1) exactly these twelve keys', keys, [
+      'asOf',
+      'failed',
+      // Sorts before 'imported': capital E. Default Array#sort is by code unit.
+      'importEnabled',
+      'imported',
+      'offered',
+      'ran',
+      'skippedHidden',
+      'skippedOpen',
+      'source',
+      'unchanged',
+      'updated',
+      'windowStart',
+    ]),
+    c('(2) no symbol', serialized.includes(SYMBOL), false),
+    c('(3) no price', [serialized.includes(String(ENTRY)), serialized.includes(String(EXIT))],
+      [false, false]),
+    c('(4) no account id', serialized.includes(String(ACCOUNT_ID)), false),
+    c('(5) no host and no user id',
+      [serialized.includes('tradovate.com'), serialized.includes(USER)], [false, false]),
+    c('(6) and it is not cached anywhere',
+      res.headers.get('cache-control'), 'no-store, private'),
+  ]);
+}
+
 // ── Main ────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -1003,6 +1436,14 @@ async function main() {
   await wireGroup();
   await cronGroup();
   await cronSkipGroup();
+
+  // Stage 2.5 — the sync button's half.
+  await syncRouteGroup();
+  await syncDisabledGroup();
+  await syncResponseGroup();
+  await syncCopyGroup();
+  await syncThrottleGroup();
+  await syncPrivacyGroup();
 
   console.log('');
   if (failures.length > 0) {

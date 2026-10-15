@@ -13,6 +13,7 @@ import { getPlanLimits, type PlanTier } from '@/lib/plans/config';
 import { useMediaQuery, useBrowserTranslated } from '@/lib/hooks';
 import { useModalDialog } from '@/lib/a11y/useModalDialog';
 import { renderPlainAiText, segmentByLineMarker, joinLines, CHECK_CHARS, CROSS_CHARS } from '@/lib/ai/textFormatting';
+import BrokerSyncButton, { ReflectOnlyNote } from '@/components/tradovate/BrokerSyncButton';
 
 export type { DashTrade } from '@/lib/dashboard/trades';
 
@@ -1271,6 +1272,7 @@ export default function DashboardClient({
   plan,
   canConnectBroker,
   hiddenColumnExists,
+  canSync,
 }: {
   trades: DashTrade[];
   displayName: string;
@@ -1302,6 +1304,15 @@ export default function DashboardClient({
    * rows.
    */
   hiddenColumnExists: boolean;
+  /**
+   * Whether to render the "סנכרן עכשיו" button (REF-107 Stage 2.5).
+   *
+   * A stricter gate than `canConnectBroker`: the allowlist AND the import
+   * flag, because a sync with the flag off can only report that it did
+   * nothing. Decided in page.tsx, where both halves are readable; false puts
+   * the E16 sentence in the button's place instead.
+   */
+  canSync: boolean;
 }) {
   const limits = getPlanLimits(plan);
   const [trades,   setTrades]   = useState<DashTrade[]>(initialTrades);
@@ -1555,13 +1566,22 @@ export default function DashboardClient({
     <div dir="rtl" className="min-h-screen px-5 py-6 flex flex-col gap-4">
 
       {/* ── Greeting ──────────────────────────────────────────────────────── */}
-      <div style={{ marginBottom: 4 }}>
-        <p style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: MUTED, marginBottom: 4 }}>
-          {dateStr}
-        </p>
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: TEXT, letterSpacing: '-0.02em', lineHeight: 1 }}>
-          {greeting && `${greeting}, `}<span style={{ color: ACCENT }}>{displayName}</span>
-        </h1>
+      <div style={{ marginBottom: 4, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+        <div>
+          <p style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: MUTED, marginBottom: 4 }}>
+            {dateStr}
+          </p>
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: TEXT, letterSpacing: '-0.02em', lineHeight: 1 }}>
+            {greeting && `${greeting}, `}<span style={{ color: ACCENT }}>{displayName}</span>
+          </h1>
+        </div>
+        {/* NO `refreshOnChange` HERE, and that is the point of the prop. The
+            realtime subscription below already refetches on a
+            `postgres_changes` INSERT for this user, which is exactly the event
+            a sync produces — so this page is the one that updates itself for
+            free, and a router.refresh() would re-run the 500-row query to
+            reach the same list. */}
+        {canSync ? <BrokerSyncButton userId={userId} /> : <ReflectOnlyNote />}
       </div>
 
       {/* ── Empty state ───────────────────────────────────────────────────── */}
