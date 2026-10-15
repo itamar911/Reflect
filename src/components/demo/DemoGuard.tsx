@@ -84,7 +84,7 @@ export default function DemoGuard() {
             className="w-full py-2.5 rounded-xl text-sm font-bold transition-opacity hover:opacity-85"
             style={{ background: '#00d2d2', color: '#0a0a0f' }}
           >
-            התחילו 5 ימי ניסיון
+            התחילו ניסיון של 5 ימי מסחר
           </a>
           <button
             ref={dismissRef}

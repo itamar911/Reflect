@@ -62,7 +62,7 @@ export function HeroSection() {
                   href="/signup"
                   className="link-button landing-cta px-9 py-4 rounded-xl text-base md:text-lg font-bold text-black"
                 >
-                  התחל 5 ימי ניסיון — בלי כרטיס אשראי
+                  התחל ניסיון של 5 ימי מסחר — בלי כרטיס אשראי
                 </Link>
                 <span className="text-sm text-tg-muted">פחות מ-2 דקות ואתה בפנים</span>
               </div>

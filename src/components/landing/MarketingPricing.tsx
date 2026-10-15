@@ -172,13 +172,13 @@ export function MarketingPricing() {
               href="/signup"
               className="link-button landing-cta cta-shine w-full py-3.5 rounded-xl text-base font-bold text-center text-black"
             >
-              התחל חמישה ימי ניסיון
+              התחל ניסיון של חמישה ימי מסחר
             </Link>
             {/* Both lines describe what the product actually does. The refund
                 is not new — it has been in the Terms all along and has simply
                 never been said out loud where anyone deciding could see it. */}
             <span className="text-sm" style={{ color: 'rgba(255,255,255,0.5)' }}>
-              חמישה ימי ניסיון, בלי כרטיס אשראי
+              ניסיון של חמישה ימי מסחר, בלי כרטיס אשראי
             </span>
             <span className="text-sm" style={{ color: 'rgba(255,255,255,0.5)' }}>
               החזר מלא תוך 14 יום

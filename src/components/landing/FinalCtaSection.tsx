@@ -41,7 +41,7 @@ export function FinalCtaSection() {
             href="/signup"
             className="link-button landing-cta px-10 py-4.5 rounded-xl text-lg font-bold text-black mt-2 inline-block"
           >
-            התחל 5 ימי ניסיון עכשיו — בלי כרטיס אשראי
+            התחל ניסיון של 5 ימי מסחר עכשיו — בלי כרטיס אשראי
           </Link>
         </ScrollReveal>
       </div>
