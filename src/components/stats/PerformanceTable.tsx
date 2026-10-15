@@ -5,7 +5,9 @@ export interface PerfRow {
   name: string;
   trades: number;
   winRate: number | null;
-  avgRR?: number;
+  /** Null when no row in this bucket carried an R:R — rendered as "—", which
+   *  is a different claim from an average of 1:0.0 (REF-107 stage 4). */
+  avgRR?: number | null;
   pnl: number;
 }
 
@@ -64,7 +66,7 @@ export default function PerformanceTable({ title, icon, unitLabel, rows, showRR 
                 </span></td>
                 {showRR && (
                   <td><span className="stats-num" style={{ fontSize: 12, color: MUTED }}>
-                    {r.avgRR !== undefined ? r.avgRR.toFixed(1) : '—'}
+                    {r.avgRR != null ? r.avgRR.toFixed(1) : '—'}
                   </span></td>
                 )}
                 <td><span className="stats-num" style={{ fontSize: 13, fontWeight: 700, color: r.pnl === 0 ? MUTED : pnlColor(r.pnl) }}>

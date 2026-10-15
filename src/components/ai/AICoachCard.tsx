@@ -10,14 +10,23 @@ interface Insight {
   text: string;
 }
 
+// Intent columns are nullable, and the direction/money columns are carried
+// through: this payload is what /api/ai-coach reasons about, and defaulting a
+// missing self-report to a number here is what made the coach describe a
+// trader it had never measured (REF-107 §0ג, §0ד).
 interface Trade {
   status: string;
-  emotional_state: number;
-  rr_ratio: number;
-  strategy: string;
+  emotional_state: number | null;
+  rr_ratio: number | null;
+  strategy: string | null;
   submitted_at: string;
   entry_price: number;
   exit_price: number | null;
+  take_profit: number | null;
+  direction: 'long' | 'short' | null;
+  pnl_amount: number | null;
+  actual_pnl: number | null;
+  plan_score: number | null;
 }
 
 const TYPE_CONFIG: Record<string, { icon: ReactNode; color: string; label: string }> = {

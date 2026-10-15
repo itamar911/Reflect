@@ -10,8 +10,9 @@ interface Props {
   winRate: number;
   winsCount: number;
   profitFactor: number;
-  avgRR: number;
-  tradesCount: number;
+  /** Null when no trade carries a planned R:R — shows "—". A broker row has
+   *  no planned ratio, and 1:0.0 would read as one the trader chose. */
+  avgRR: number | null;
   disciplineScore: number | null;
   avgWin: number;
   avgLoss: number;
@@ -20,7 +21,7 @@ interface Props {
 }
 
 export default function KpiHero({
-  totalPnl, closedCount, winRate, winsCount, profitFactor, avgRR, tradesCount,
+  totalPnl, closedCount, winRate, winsCount, profitFactor, avgRR,
   disciplineScore, avgWin, avgLoss, currentStreak, daily,
 }: Props) {
   // Cumulative equity series for the sparkline
@@ -66,7 +67,7 @@ export default function KpiHero({
           />
           <Kpi
             label="ממוצע R:R"
-            value={tradesCount > 0 ? `1:${avgRR.toFixed(1)}` : '—'}
+            value={avgRR != null ? `1:${avgRR.toFixed(1)}` : '—'}
             valueColor={TEXT}
           />
           <Kpi

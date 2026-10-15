@@ -26,15 +26,26 @@ export default async function CoachPage() {
     .order('submitted_at', { ascending: false })
     .limit(100);
 
+  // Nulls are passed through, not defaulted. `Number(x || 3)` and
+  // `Number(x || 0)` turned "the trader recorded nothing" into "the trader
+  // felt exactly neutral" and "the trader planned exactly 1:0" before either
+  // route saw the row, so no care downstream could tell the two apart
+  // (REF-107 §0ג). `direction` and the money columns are carried so the routes
+  // can read win/loss rather than compare exit to entry (§0ד).
   const allTrades = (trades ?? []).map((t) => ({
-    strategy: String(t.strategy || ''),
-    emotional_state: Number(t.emotional_state || 3),
-    rr_ratio: Number(t.rr_ratio || 0),
+    strategy: (t.strategy as string | null) ?? null,
+    emotional_state: t.emotional_state != null ? Number(t.emotional_state) : null,
+    rr_ratio: t.rr_ratio != null ? Number(t.rr_ratio) : null,
     submitted_at: String(t.submitted_at),
     status: String(t.status),
-    entry_price: Number(t.entry_price || 0),
-    exit_price: t.exit_price !== null ? Number(t.exit_price) : null,
-    stop_loss: Number(t.stop_loss || 0),
+    entry_price: Number(t.entry_price ?? 0),
+    exit_price: t.exit_price != null ? Number(t.exit_price) : null,
+    stop_loss: t.stop_loss != null ? Number(t.stop_loss) : null,
+    take_profit: t.take_profit != null ? Number(t.take_profit) : null,
+    direction: (t.direction as 'long' | 'short' | null) ?? null,
+    pnl_amount: t.pnl_amount != null ? Number(t.pnl_amount) : null,
+    actual_pnl: t.actual_pnl != null ? Number(t.actual_pnl) : null,
+    plan_score: t.plan_score != null ? Number(t.plan_score) : null,
   }));
 
   return (

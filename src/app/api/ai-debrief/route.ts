@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { computeTradeScore, type TradeScoreInput, type TradeScoreResult } from '@/lib/scoring/tradeScore';
-import { tradeMoneyPnl, hasMoneyPnl } from '@/lib/pnl';
+import { tradeMoneyPnl, hasMoneyPnl, tradeDirection } from '@/lib/pnl';
 import { PLAIN_HEBREW_PROSE_CLAUSE } from '@/lib/ai/prompts';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -15,11 +15,20 @@ interface Outcome {
 
 function computeOutcome(trade: Record<string, unknown>): Outcome | null {
   const entry = Number(trade.entry_price);
-  const tp = Number(trade.take_profit);
   const exit = trade.exit_price != null ? Number(trade.exit_price) : null;
-  if (exit == null || !Number.isFinite(entry) || !Number.isFinite(tp)) return null;
+  if (exit == null || !Number.isFinite(entry)) return null;
 
-  const direction: 'long' | 'short' = tp >= entry ? 'long' : 'short';
+  // Direction from the column. The tp-vs-entry comparison that stood here read
+  // every profitable short as a loss (REF-107 §0ד), and it also demanded a
+  // take_profit to exist — so a row without one yielded no outcome at all
+  // rather than one the debrief could reason about.
+  const direction = tradeDirection({
+    status: String(trade.status ?? ''),
+    entry_price: entry,
+    exit_price: exit,
+    take_profit: trade.take_profit != null ? Number(trade.take_profit) : null,
+    direction: (trade.direction as 'long' | 'short' | null) ?? null,
+  });
   const points = direction === 'long' ? exit - entry : entry - exit;
 
   const moneyTrade = {
@@ -166,15 +175,15 @@ Address them directly in your analysis — validate or challenge their read of t
   return `You are a professional trading-process coach. The trader just closed a trade and a deterministic score (0-100) has already been computed in code from verified, persisted data. Your ONLY job is to write feedback text about this trade — you do NOT determine, adjust, or restate the score.
 
 Trade data:
-- Strategy: ${trade.strategy}
+- Strategy: ${trade.strategy ?? '—'}
 - Direction: ${trade.direction ?? '—'}
 - Entry: ${trade.entry_price}
-- Stop Loss: ${trade.stop_loss}
-- Take Profit: ${trade.take_profit}
+- Stop Loss: ${trade.stop_loss ?? '—'}
+- Take Profit: ${trade.take_profit ?? '—'}
 - Exit price: ${trade.exit_price ?? '—'}
 - Exit reason: ${trade.exit_reason ?? '—'}
 - R:R ratio: ${trade.rr_ratio ?? '—'}
-- Entry reason (the plan): ${trade.trade_reason}
+- Entry reason (the plan): ${trade.trade_reason ?? '—'}
 - Moved Stop Loss: ${trade.moved_sl === true ? 'כן' : 'לא'}
 - Exited early: ${trade.exited_early === true ? 'כן' : 'לא'}
 - FOMO entry: ${trade.fomo_entry === true ? 'כן' : 'לא'}

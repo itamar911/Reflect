@@ -10,6 +10,7 @@ import RecordsGrid from '@/components/stats/RecordsGrid';
 import { MUTED, TEXT, fmt, Section } from '@/components/stats/shared';
 import type { TradePlan } from '@/lib/types';
 import { tradePointsPnl, tradeMoneyPnl, hasMoneyPnl, isWinningTrade } from '@/lib/pnl';
+import { averageOf, rrValue, intentText } from '@/lib/intent';
 import { TrendingUp, BarChart2, Target, CandlestickChart } from 'lucide-react';
 import '@/components/stats/stats.css';
 
@@ -65,8 +66,11 @@ export default async function StatsPage() {
   const totalPnl     = closed.reduce((s, t) => s + pnlIls(t), 0);
   const wins         = closed.filter(t => isWinningTrade(t));
   const winRate      = closedCount > 0 ? Math.round(wins.length / closedCount * 100) : 0;
-  const avgRR        = trades.length > 0
-    ? trades.reduce((s, t) => s + Number(t.rr_ratio), 0) / trades.length : 0;
+  // Averaged over the rows that carry an R:R, not over every row. The old
+  // denominator was `trades.length`, and `Number(null)` is 0 — so one row
+  // without a planned ratio pulled the headline figure down as if the trader
+  // had planned a 1:0. Null here renders as "—"; it is not 0.
+  const avgRR        = averageOf(trades, t => rrValue(t.rr_ratio));
   // Money aggregates classify by the money value itself, so a trade's win/loss
   // bucket can never disagree with the amount being averaged.
   const moneyClosed  = closed.filter(hasMoneyPnl);
@@ -111,21 +115,29 @@ export default async function StatsPage() {
   const monthly = [...monthlyMap.entries()].sort(sortKeys).map(([, v]) => v);
 
   // ── Strategy breakdown ──────────────────────────────────────────────────────
-  const stratMap = new Map<string, { trades: number; wins: number; closedN: number; pnl: number; rr: number }>();
+  // A row with no strategy gets no bucket at all. It used to be filed under
+  // 'אחר', which is indistinguishable from a strategy the trader actually
+  // named 'אחר' and puts broker rows into a group they were never part of.
+  // `rrN` is the per-bucket count of rows that carry an R:R, for the same
+  // reason the global average has one.
+  const stratMap = new Map<string, { trades: number; wins: number; closedN: number; pnl: number; rr: number; rrN: number }>();
   for (const t of trades) {
-    const s    = String(t.strategy || 'אחר');
-    const prev = stratMap.get(s) ?? { trades: 0, wins: 0, closedN: 0, pnl: 0, rr: 0 };
+    const s = intentText(t.strategy);
+    if (s === null) continue;
+    const prev = stratMap.get(s) ?? { trades: 0, wins: 0, closedN: 0, pnl: 0, rr: 0, rrN: 0 };
     const p    = pnlOf(t);
+    const rr   = rrValue(t.rr_ratio);
     stratMap.set(s, {
       trades:  prev.trades + 1,
       closedN: prev.closedN + (p != null ? 1 : 0),
       wins:    prev.wins + (isWinningTrade(t) ? 1 : 0),
       pnl:     prev.pnl + pnlIls(t),
-      rr:      prev.rr + Number(t.rr_ratio),
+      rr:      prev.rr + (rr ?? 0),
+      rrN:     prev.rrN + (rr !== null ? 1 : 0),
     });
   }
   const strategies = [...stratMap.entries()]
-    .map(([name, v]) => ({ name, ...v, avgRR: v.rr / v.trades }))
+    .map(([name, v]) => ({ name, ...v, avgRR: v.rrN > 0 ? v.rr / v.rrN : null }))
     .sort((a, b) => b.trades - a.trades);
 
   // ── Behavioral / discipline metrics ─────────────────────────────────────────
@@ -225,22 +237,24 @@ export default async function StatsPage() {
     }));
 
   // ── Symbol breakdown ─────────────────────────────────────────────────────────
-  const symbolMap = new Map<string, { trades: number; wins: number; closedN: number; pnl: number; rr: number }>();
+  const symbolMap = new Map<string, { trades: number; wins: number; closedN: number; pnl: number; rr: number; rrN: number }>();
   for (const t of trades) {
     const sym = t.symbol?.trim().toUpperCase();
     if (!sym) continue;
-    const prev = symbolMap.get(sym) ?? { trades: 0, wins: 0, closedN: 0, pnl: 0, rr: 0 };
+    const prev = symbolMap.get(sym) ?? { trades: 0, wins: 0, closedN: 0, pnl: 0, rr: 0, rrN: 0 };
     const p    = pnlOf(t);
+    const rr   = rrValue(t.rr_ratio);
     symbolMap.set(sym, {
       trades:  prev.trades + 1,
       closedN: prev.closedN + (p != null ? 1 : 0),
       wins:    prev.wins + (isWinningTrade(t) ? 1 : 0),
       pnl:     prev.pnl + pnlIls(t),
-      rr:      prev.rr + Number(t.rr_ratio),
+      rr:      prev.rr + (rr ?? 0),
+      rrN:     prev.rrN + (rr !== null ? 1 : 0),
     });
   }
   const symbols = [...symbolMap.entries()]
-    .map(([name, v]) => ({ name, ...v, avgRR: v.rr / v.trades }))
+    .map(([name, v]) => ({ name, ...v, avgRR: v.rrN > 0 ? v.rr / v.rrN : null }))
     .sort((a, b) => b.trades - a.trades);
 
   // ── Streaks ──────────────────────────────────────────────────────────────────
@@ -293,7 +307,6 @@ export default async function StatsPage() {
         winsCount={wins.length}
         profitFactor={profitFactor}
         avgRR={avgRR}
-        tradesCount={trades.length}
         disciplineScore={disciplineScore}
         avgWin={avgWin}
         avgLoss={avgLoss}
@@ -350,8 +363,8 @@ export default async function StatsPage() {
         <RecordsGrid
           maxWinStreak={maxW}
           maxLossStreak={maxL}
-          bestTrade={bestTrade ? { value: fmt(pnlIls(bestTrade)), sub: bestTrade.strategy } : null}
-          worstTrade={worstTrade ? { value: fmt(pnlIls(worstTrade)), sub: worstTrade.strategy } : null}
+          bestTrade={bestTrade ? { value: fmt(pnlIls(bestTrade)), sub: intentText(bestTrade.strategy) ?? undefined } : null}
+          worstTrade={worstTrade ? { value: fmt(pnlIls(worstTrade)), sub: intentText(worstTrade.strategy) ?? undefined } : null}
           bestDay={bestDay && bestDay.pnl > 0 ? { value: fmt(bestDay.pnl), sub: bestDay.label } : null}
           worstDay={worstDay && worstDay.pnl < 0 ? { value: fmt(worstDay.pnl), sub: worstDay.label } : null}
         />

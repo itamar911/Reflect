@@ -7,7 +7,7 @@ import { formatMoney } from '@/lib/money';
 import { createClient } from '@/lib/supabase/client';
 import { DASH_TRADE_SELECT, mapDashTrade } from '@/lib/dashboard/trades';
 import type { DashTrade } from '@/lib/dashboard/trades';
-import { tradeMoneyPnl, hasMoneyPnl, isWinningTrade } from '@/lib/pnl';
+import { tradeMoneyPnl, hasMoneyPnl, isWinningTrade, tradeDirection, tradePointsPnl } from '@/lib/pnl';
 import { getPlanLimits, type PlanTier } from '@/lib/plans/config';
 import { useMediaQuery, useBrowserTranslated } from '@/lib/hooks';
 import { useModalDialog } from '@/lib/a11y/useModalDialog';
@@ -43,13 +43,13 @@ function useMounted(): boolean {
 }
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────
-function tradeDir(t: DashTrade): 'long' | 'short' {
-  return t.take_profit >= t.entry_price ? 'long' : 'short';
-}
-function calcPnl(t: DashTrade): number | null {
-  if (t.status !== 'closed' || t.exit_price == null) return null;
-  return tradeDir(t) === 'long' ? t.exit_price - t.entry_price : t.entry_price - t.exit_price;
-}
+// Direction and points P&L both come from the shared helpers, which read the
+// `direction` column and keep the take_profit-vs-entry comparison only as a
+// fallback for rows written before that column existed. Reading it the other
+// way round — comparison first, column never — is what made a profitable short
+// show on this page as a loss (REF-107 §0ד).
+const tradeDir = tradeDirection;
+const calcPnl = tradePointsPnl;
 // Effective P&L for loss/neutral classification — money when available, points
 // otherwise; the win side of the same rule is the shared isWinningTrade helper.
 function effectivePnl(t: DashTrade): number {

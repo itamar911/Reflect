@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { TrendingUp, Rocket, ArrowLeftRight, RefreshCw, Building2, Activity, Ruler, X } from 'lucide-react';
 import { renderPlainAiText } from '@/lib/ai/textFormatting';
+import { tradePointsPnl, isWinningTrade } from '@/lib/pnl';
+import { averageOf, rrValue } from '@/lib/intent';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const GOLD   = '#00d2d2';
@@ -41,23 +43,26 @@ export interface PersonalStrategy {
 
 export interface TradeSummary {
   id: string;
-  strategy: string;
+  strategy: string | null;
   symbol: string | null;
   entry_price: number;
   exit_price: number | null;
-  take_profit: number;
-  rr_ratio: number;
+  take_profit: number | null;
+  rr_ratio: number | null;
   status: string;
+  direction: 'long' | 'short' | null;
+  pnl_amount: number | null;
+  actual_pnl: number | null;
   submitted_at: string;
   closed_at: string | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function inferDir(t: TradeSummary) { return t.take_profit >= t.entry_price ? 'long' : 'short'; }
-function calcPnl(t: TradeSummary): number | null {
-  if (t.status !== 'closed' || t.exit_price == null) return null;
-  return inferDir(t) === 'long' ? t.exit_price - t.entry_price : t.entry_price - t.exit_price;
-}
+// Points P&L goes through the shared helper, which reads the `direction`
+// column and keeps take_profit-vs-entry only as its pre-`direction` fallback.
+// Reading the comparison first — as this file did — calls every profitable
+// short a loss (REF-107 §0ד).
+const calcPnl = tradePointsPnl;
 function fmtPnl(v: number) { return `${v >= 0 ? '+' : ''}${v.toFixed(2)}`; }
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', year: '2-digit' });
@@ -66,18 +71,22 @@ function fmtDate(iso: string) {
 function computeStats(strategyName: string, trades: TradeSummary[]) {
   const linked  = trades.filter(t => t.strategy === strategyName);
   const closed  = linked.filter(t => t.status === 'closed' && t.exit_price != null);
-  const pnls    = closed.map(t => calcPnl(t)!);
-  const wins    = pnls.filter(p => p > 0);
+  const pnls    = closed.map(t => calcPnl(t) ?? 0);
+  // Win count comes from the canonical test, so a profitable short counts as
+  // the win it is rather than as a loss (REF-107 §0ד).
+  const wins    = closed.filter(t => isWinningTrade(t) === true);
   const totalPnl = pnls.reduce((s, p) => s + p, 0);
+  // Averaged over the rows that carry an R:R. The old denominator was every
+  // linked trade and `Number(null)` is 0, so a row with no planned ratio
+  // dragged the strategy's average toward 1:0.
+  const avgRR = averageOf(linked, t => rrValue(t.rr_ratio));
   return {
     tradeCount:  linked.length,
     closedCount: closed.length,
     winRate:  closed.length > 0 ? Math.round(wins.length / closed.length * 100) : 0,
     totalPnl,
     avgPnl:   closed.length > 0 ? totalPnl / closed.length : 0,
-    avgRR:    linked.length > 0
-      ? Number((linked.reduce((s, t) => s + t.rr_ratio, 0) / linked.length).toFixed(1))
-      : 0,
+    avgRR:    avgRR !== null ? Number(avgRR.toFixed(1)) : null,
   };
 }
 
@@ -414,7 +423,7 @@ export default function StrategiesClient({
                         color={stats.winRate >= 60 ? GREEN : stats.winRate >= 40 ? GOLD : stats.closedCount > 0 ? RED : MUTED} />
                       <StatBox label="ממוצע"   value={stats.closedCount > 0 ? fmtPnl(stats.avgPnl) : '—'}
                         color={stats.avgPnl > 0 ? GREEN : stats.avgPnl < 0 ? RED : MUTED} />
-                      <StatBox label="R:R"      value={stats.tradeCount > 0 ? `1:${stats.avgRR}` : '—'} color={GOLD} />
+                      <StatBox label="R:R"      value={stats.avgRR != null ? `1:${stats.avgRR}` : '—'} color={GOLD} />
                     </div>
 
                     {/* Action buttons */}
@@ -477,7 +486,7 @@ export default function StrategiesClient({
                                     {fmtPnl(pnl)}
                                   </p>
                                 )}
-                                <p className="text-[10px]" style={{ color: MUTED }}>R:R 1:{t.rr_ratio.toFixed(1)}</p>
+                                <p className="text-[10px]" style={{ color: MUTED }}>{t.rr_ratio != null ? `R:R 1:${t.rr_ratio.toFixed(1)}` : 'R:R —'}</p>
                               </div>
                             </div>
                           );
@@ -603,7 +612,7 @@ export default function StrategiesClient({
                   color={stats.winRate >= 60 ? GREEN : stats.winRate >= 40 ? GOLD : stats.closedCount > 0 ? RED : MUTED} />
                 <StatBox label="ממוצע"     value={stats.closedCount > 0 ? fmtPnl(stats.avgPnl) : '—'}
                   color={stats.avgPnl > 0 ? GREEN : stats.avgPnl < 0 ? RED : MUTED} />
-                <StatBox label="R:R"        value={stats.tradeCount > 0 ? `1:${stats.avgRR}` : '—'}
+                <StatBox label="R:R"        value={stats.avgRR != null ? `1:${stats.avgRR}` : '—'}
                   color={GOLD} />
               </div>
 
@@ -678,7 +687,7 @@ export default function StrategiesClient({
                               </p>
                             )}
                             <p className="text-[10px]" style={{ color: MUTED }}>
-                              R:R 1:{t.rr_ratio.toFixed(1)}
+                              {t.rr_ratio != null ? `R:R 1:${t.rr_ratio.toFixed(1)}` : 'R:R —'}
                             </p>
                           </div>
                         </div>

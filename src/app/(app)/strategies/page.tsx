@@ -16,7 +16,11 @@ export default async function StrategiesPage() {
     // — excluded here so StrategiesClient's own counts and its per-trade
     // רווח/הפסד/פתוח labels never have to represent a third state.
     supabase.from('trade_plans')
-      .select('id, strategy, symbol, entry_price, exit_price, take_profit, rr_ratio, status, submitted_at, closed_at')
+      // `direction` and the money columns are selected because win/loss is
+      // read, not guessed: deriving it from take_profit-vs-entry calls every
+      // profitable short a loss (REF-107 §0ד), and the shared win test prefers
+      // a real P&L figure over price points.
+      .select('id, strategy, symbol, entry_price, exit_price, take_profit, rr_ratio, status, direction, pnl_amount, actual_pnl, submitted_at, closed_at')
       .eq('user_id', user.id)
       .neq('status', 'not_entered')
       .order('submitted_at', { ascending: false })
@@ -26,13 +30,16 @@ export default async function StrategiesPage() {
   const strategies = (strategiesRes.data ?? []) as PersonalStrategy[];
   const allTrades  = (tradesRes.data ?? []).map(t => ({
     id:           t.id           as string,
-    strategy:     t.strategy     as string,
+    strategy:     (t.strategy    as string | null) ?? null,
     symbol:       (t.symbol      as string | null) ?? null,
     entry_price:  Number(t.entry_price),
     exit_price:   t.exit_price != null ? Number(t.exit_price) : null,
-    take_profit:  Number(t.take_profit),
-    rr_ratio:     Number(t.rr_ratio),
+    take_profit:  t.take_profit != null ? Number(t.take_profit) : null,
+    rr_ratio:     t.rr_ratio != null ? Number(t.rr_ratio) : null,
     status:       t.status       as string,
+    direction:    (t.direction as 'long' | 'short' | null) ?? null,
+    pnl_amount:   t.pnl_amount != null ? Number(t.pnl_amount) : null,
+    actual_pnl:   t.actual_pnl != null ? Number(t.actual_pnl) : null,
     submitted_at: t.submitted_at as string,
     closed_at:    (t.closed_at   as string | null) ?? null,
   })) as TradeSummary[];

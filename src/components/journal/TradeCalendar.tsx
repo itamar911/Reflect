@@ -3,15 +3,17 @@ import { useState, useMemo } from 'react';
 import { tradeMoneyPnl, hasMoneyPnl } from '@/lib/pnl';
 import { formatMoney } from '@/lib/money';
 
+// Intent columns are nullable — a trade with no plan behind it carries none
+// of them (REF-107 §B6).
 interface Trade {
   id: string;
-  strategy: string;
+  strategy: string | null;
   entry_price: number;
-  stop_loss: number;
-  take_profit: number;
-  rr_ratio: number;
-  emotional_state: number;
-  trade_reason: string;
+  stop_loss: number | null;
+  take_profit: number | null;
+  rr_ratio: number | null;
+  emotional_state: number | null;
+  trade_reason: string | null;
   status: string;
   exit_price: number | null;
   exit_reason: string | null;
@@ -81,8 +83,12 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
       const key  = toDayKey(new Date(t.submitted_at));
       const prev = map.get(key) ?? { pnl: 0, tradeCount: 0, hasViolation: false };
       const pnl  = tradeMoneyPnl(t);
+      // A row with no self-report is not a day flagged for low emotional
+      // state — `null <= 2` is true in JavaScript, which would have put a
+      // warning marker on every day a broker row landed on.
       const violation =
-        t.emotional_state <= 2 || (t.plan_score != null && t.plan_score < 70);
+        (t.emotional_state != null && t.emotional_state <= 2) ||
+        (t.plan_score != null && t.plan_score < 70);
       map.set(key, {
         pnl:          prev.pnl + pnl,
         tradeCount:   prev.tradeCount + 1,

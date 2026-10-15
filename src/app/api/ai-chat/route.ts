@@ -6,6 +6,8 @@ import { describeCustomRule, ACTION_LABELS } from '@/lib/validators/RulesetValid
 import { formatMoney } from '@/lib/money';
 import type { CustomRule } from '@/lib/types';
 import { PLAIN_HEBREW_PROSE_CLAUSE } from '@/lib/ai/prompts';
+import { isWinningTrade, pnlRow } from '@/lib/pnl';
+import { averageOf, scaleValue, rrValue, intentText, type RawValue } from '@/lib/intent';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -161,26 +163,39 @@ function buildUserContext(data: {
 }) {
   const { trades, presetRules, customRules } = data;
 
-  const closed = trades.filter(t => t.status === 'closed');
-  const wins = closed.filter(t => t.exit_price != null && Number(t.exit_price) > Number(t.entry_price));
-  const winRate = closed.length > 0 ? Math.round((wins.length / closed.length) * 100) : 0;
-  const avgRR = trades.length > 0
-    ? (trades.reduce((s, t) => s + Number(t.rr_ratio || 0), 0) / trades.length).toFixed(2)
-    : '0';
-  const avgEmotional = trades.length > 0
-    ? (trades.reduce((s, t) => s + Number(t.emotional_state || 3), 0) / trades.length).toFixed(1)
-    : '3';
+  // Win/loss is the canonical test, not `exit_price > entry_price` — the
+  // comparison this replaces reported every profitable short to the assistant
+  // as a loss (REF-107 §0ד), and the assistant then answered questions about
+  // it. Averages run over the rows that carry a value, not over every row:
+  // `|| 0` and `|| 3` were defaults dressed as data (§0ג).
+  const isWin = (t: Record<string, unknown>) => isWinningTrade(pnlRow(t)) === true;
+  const emoOf = (t: Record<string, unknown>) => scaleValue(t.emotional_state as RawValue);
+  const rrOf = (t: Record<string, unknown>) => rrValue(t.rr_ratio as RawValue);
 
-  // Discipline score
+  const closed = trades.filter(t => t.status === 'closed');
+  const wins = closed.filter(isWin);
+  const winRate = closed.length > 0 ? Math.round((wins.length / closed.length) * 100) : 0;
+  const avgRRNum = averageOf(trades, rrOf);
+  const avgEmotionalNum = averageOf(trades, emoOf);
+  const avgRR = avgRRNum !== null ? avgRRNum.toFixed(2) : 'לא תועד';
+  const avgEmotional = avgEmotionalNum !== null ? avgEmotionalNum.toFixed(1) : 'לא תועד';
+
+  // Discipline score. Each component is scored over its own eligible rows, so
+  // a trade with no self-report neither earns nor forfeits the points — it is
+  // simply not evidence either way.
+  const emoRows = trades.map(emoOf).filter((v): v is number => v !== null);
+  const rrRows = trades.map(rrOf).filter((v): v is number => v !== null);
+  const scoreOf = (num: number, den: number, weight: number) => (den > 0 ? (num / den) * weight : 0);
   const disciplineScore = trades.length === 0 ? 0 : Math.min(100, Math.round(
-    (closed.filter(t => t.plan_score != null).length / Math.max(closed.length, 1)) * 30 +
-    (trades.filter(t => Number(t.emotional_state) >= 3).length / trades.length) * 30 +
-    (trades.filter(t => Number(t.rr_ratio || 0) >= 2).length / trades.length) * 40
+    scoreOf(closed.filter(t => t.plan_score != null).length, closed.length, 30) +
+    scoreOf(emoRows.filter(v => v >= 3).length, emoRows.length, 30) +
+    scoreOf(rrRows.filter(v => v >= 2).length, rrRows.length, 40)
   ));
 
-  // Strategy breakdown
+  // Strategy breakdown. A row with no strategy gets no bucket; it used to be
+  // filed under 'אחר' and quoted back as one the trader chose.
   const stratMap: Record<string, number> = {};
-  trades.forEach(t => { const s = String(t.strategy || 'אחר'); stratMap[s] = (stratMap[s] || 0) + 1; });
+  trades.forEach(t => { const s = intentText(t.strategy as string | null); if (s !== null) stratMap[s] = (stratMap[s] || 0) + 1; });
   const topStrategies = Object.entries(stratMap).sort((a, b) => b[1] - a[1]).slice(0, 3)
     .map(([s, c]) => `${s} (${c})`).join(', ');
 
@@ -189,8 +204,7 @@ function buildUserContext(data: {
   closed.forEach(t => {
     const h = new Date(String(t.submitted_at)).getHours();
     if (!hourWins[h]) hourWins[h] = { w: 0, l: 0 };
-    const win = t.exit_price != null && Number(t.exit_price) > Number(t.entry_price);
-    if (win) hourWins[h].w++; else hourWins[h].l++;
+    if (isWin(t)) hourWins[h].w++; else hourWins[h].l++;
   });
   const hourScores = Object.entries(hourWins)
     .map(([h, v]) => ({ h: Number(h), score: v.w - v.l, total: v.w + v.l }))
@@ -199,14 +213,15 @@ function buildUserContext(data: {
   const worst = hourScores.sort((a, b) => a.score - b.score).slice(0, 2).map(x => `${x.h}:00`).join(', ');
 
   // Emotional patterns
-  const lowEmotional = trades.filter(t => Number(t.emotional_state) <= 2).length;
+  const lowEmotional = trades.filter(t => { const e = emoOf(t); return e !== null && e <= 2; }).length;
   const revengePotential = (() => {
     let r = 0;
     const sorted = [...trades].sort((a, b) => new Date(String(a.submitted_at)).getTime() - new Date(String(b.submitted_at)).getTime());
     for (let i = 1; i < sorted.length; i++) {
       const prev = sorted[i - 1];
       const curr = sorted[i];
-      if (prev.status === 'closed' && Number(prev.exit_price) <= Number(prev.entry_price) && Number(curr.emotional_state) <= 2) r++;
+      const currEmo = emoOf(curr);
+      if (isWinningTrade(pnlRow(prev)) === false && currEmo !== null && currEmo <= 2) r++;
     }
     return r;
   })();
@@ -220,21 +235,24 @@ function buildUserContext(data: {
   let consecutive = 0;
   const sortedTrades = [...trades].sort((a, b) => new Date(String(b.submitted_at)).getTime() - new Date(String(a.submitted_at)).getTime());
   for (const t of sortedTrades) {
-    if (t.status === 'closed' && Number(t.exit_price) <= Number(t.entry_price)) consecutive++;
+    if (isWinningTrade(pnlRow(t)) === false) consecutive++;
     else break;
   }
 
   // Recent trades summary
   const recent = trades.slice(0, 5).map(t => {
-    const r = Number(t.rr_ratio || 0);
+    const r = rrOf(t);
     // Words, not ✓/✗/⏳: symbols in the prompt invite the model to answer in
     // them, and stripFormatting (lib/ai/textFormatting.ts) then has to catch
     // them on the way back out. Cheaper not to teach the habit — and the words
     // carry more meaning than the glyphs did.
-    const status = t.status === 'closed'
-      ? (Number(t.exit_price) > Number(t.entry_price) ? '[רווח]' : '[הפסד]')
-      : '[פתוחה]';
-    const line = `${status} ${t.strategy} R:R ${r.toFixed(1)} מצב-רגשי:${t.emotional_state}`;
+    const win = isWinningTrade(pnlRow(t));
+    const status = win === null ? '[פתוחה]' : win ? '[רווח]' : '[הפסד]';
+    const emo = emoOf(t);
+    // An intent field the row does not carry is named as absent rather than
+    // printed as "null" or "0" for the assistant to quote as the trader's own.
+    const line = `${status} ${intentText(t.strategy as string | null) ?? 'ללא אסטרטגיה'}`
+      + ` R:R ${r !== null ? r.toFixed(1) : '—'} מצב-רגשי:${emo ?? '—'}`;
     // Truncated per trade to protect the token budget of the system prompt.
     const notes = typeof t.post_trade_notes === 'string' ? t.post_trade_notes.trim() : '';
     return notes

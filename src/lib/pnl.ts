@@ -16,12 +16,50 @@ interface PointsPnlTrade {
   status: string;
   entry_price: number | string;
   exit_price: number | string | null;
-  take_profit: number | string;
+  /** Nullable: `take_profit` is an intent column, and a trade that reaches the
+   *  journal with no plan behind it carries none. See `tradeDirection`. */
+  take_profit?: number | string | null;
   direction?: 'long' | 'short' | null;
 }
 
+/**
+ * Which way the trade was taken.
+ *
+ * The `direction` column answers this. The take_profit-vs-entry comparison is
+ * only a fallback for rows written before that column existed — reading it
+ * first, as several features did until REF-107 stage 4, calls every profitable
+ * short a loss.
+ *
+ * A row with neither is direction-unknowable. It resolves to 'long', which
+ * makes `tradePointsPnl` report the raw `exit − entry` move; the alternative,
+ * `Number(null) >= Number(entry)` being false, would silently invert the sign
+ * of every such row.
+ */
 export function tradeDirection(t: PointsPnlTrade): 'long' | 'short' {
-  return t.direction ?? (Number(t.take_profit) >= Number(t.entry_price) ? 'long' : 'short');
+  if (t.direction) return t.direction;
+  if (t.take_profit == null) return 'long';
+  return Number(t.take_profit) >= Number(t.entry_price) ? 'long' : 'short';
+}
+
+/**
+ * Adapts a loosely-typed row — what `select('*')` hands the AI routes — to the
+ * shape the helpers here read.
+ *
+ * Those routes each grew their own `Number(exit_price) > Number(entry_price)`
+ * win test, which is the REF-107 §0ד bug three more times: it calls every
+ * profitable short a loss, and it ignores the real money figure in favour of
+ * price points.
+ */
+export function pnlRow(t: Record<string, unknown>): MoneyPnlTrade & PointsPnlTrade {
+  return {
+    status: String(t.status ?? ''),
+    entry_price: t.entry_price as number | string,
+    exit_price: (t.exit_price ?? null) as number | string | null,
+    take_profit: (t.take_profit ?? null) as number | string | null,
+    direction: (t.direction ?? null) as 'long' | 'short' | null,
+    pnl_amount: (t.pnl_amount ?? null) as number | string | null,
+    actual_pnl: (t.actual_pnl ?? null) as number | string | null,
+  };
 }
 
 /** Direction-aware price-points P&L. Null while the trade is still open. */

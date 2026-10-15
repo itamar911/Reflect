@@ -42,13 +42,13 @@ export interface AIDebriefResult {
 
 interface TradeForDebrief {
   id: string;
-  strategy: string;
+  strategy: string | null;
   entry_price: number;
-  stop_loss: number;
-  take_profit: number;
-  rr_ratio: number;
-  emotional_state: number;
-  trade_reason: string;
+  stop_loss: number | null;
+  take_profit: number | null;
+  rr_ratio: number | null;
+  emotional_state: number | null;
+  trade_reason: string | null;
   exit_price: number;
   exit_reason: string;
   post_trade_notes: string;
@@ -66,12 +66,17 @@ interface TradeForDebrief {
 interface CloseTradeProps {
   tradeId: string;
   entryPrice: number;
-  stopLoss: number;
-  takeProfit: number;
-  rrRatio: number;
-  emotionalState: number;
-  strategy: string;
-  tradeReason: string;
+  // Nullable from REF-107 stage 4: these are intent columns, and a trade that
+  // reaches the journal without a plan behind it carries none of them. This
+  // form is only reachable on an `open` row the trader filled in, so they are
+  // present in practice — but the payload below is typed by what the column
+  // can hold, not by what one call site happens to pass.
+  stopLoss: number | null;
+  takeProfit: number | null;
+  rrRatio: number | null;
+  emotionalState: number | null;
+  strategy: string | null;
+  tradeReason: string | null;
   direction: 'long' | 'short';
   units: number | null;
   pointValue: number | null;

@@ -9,7 +9,7 @@ import EmotionalStateSlider from '@/components/trade/EmotionalStateSlider';
 import { createClient } from '@/lib/supabase/client';
 import { formatPnlPoints, calcRR } from '@/lib/utils';
 import { formatMoney, TRADING_CURRENCY } from '@/lib/money';
-import { tradeMoneyPnl, hasMoneyPnl, isWinningTrade } from '@/lib/pnl';
+import { tradeMoneyPnl, hasMoneyPnl, isWinningTrade, tradeDirection, tradePointsPnl } from '@/lib/pnl';
 import { isTradeTaken, NOT_ENTERED, NOT_ENTERED_LABEL, tradeStatusLabel } from '@/lib/trades/status';
 import { useHydrated } from '@/lib/hooks';
 import { useModalDialog } from '@/lib/a11y/useModalDialog';
@@ -32,16 +32,21 @@ const FIELD_CLASS = 'w-full px-3 py-2 rounded-xl text-sm border outline-none foc
 const fieldStyle = { background: SURF2, borderColor: BORDER, color: TEXT };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
+// Every intent column is nullable here (REF-107 stage 4). They are NOT NULL in
+// the schema today and the form always fills them, so nothing in the app
+// produces such a row yet — but typing them as present is what let `.toFixed()`
+// and `String(...)` be written against values a broker row will not carry, and
+// those are the call sites that have to be found before stage 2, not after.
 interface Trade {
   id: string;
-  strategy: string;
+  strategy: string | null;
   symbol: string | null;
   entry_price: number;
-  stop_loss: number;
-  take_profit: number;
-  rr_ratio: number;
-  emotional_state: number;
-  trade_reason: string;
+  stop_loss: number | null;
+  take_profit: number | null;
+  rr_ratio: number | null;
+  emotional_state: number | null;
+  trade_reason: string | null;
   status: string;
   exit_price: number | null;
   exit_reason: string | null;
@@ -61,15 +66,14 @@ interface Trade {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function inferDirection(t: Trade): 'long' | 'short' {
-  return t.direction ?? (t.take_profit >= t.entry_price ? 'long' : 'short');
-}
+// Direction and points P&L both go through the shared helpers so this page
+// cannot drift from the stats page or the dashboard.
+const inferDirection = tradeDirection;
+const calcPnl = tradePointsPnl;
 
-function calcPnl(t: Trade): number | null {
-  if (t.status !== 'closed' || t.exit_price == null) return null;
-  return inferDirection(t) === 'long'
-    ? t.exit_price - t.entry_price
-    : t.entry_price - t.exit_price;
+/** A price as a fixed-2 string, or "—" when the row does not carry it. */
+function fmtPriceCell(v: number | null): string {
+  return v != null ? v.toFixed(2) : '—';
 }
 
 function fmtDate(iso: string) {
@@ -301,7 +305,7 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       r = r.filter(t =>
-        t.symbol?.toLowerCase().includes(q) || t.strategy.toLowerCase().includes(q)
+        t.symbol?.toLowerCase().includes(q) || !!t.strategy?.toLowerCase().includes(q)
       );
     }
     return [...r].sort((a, b) => {
@@ -1108,10 +1112,11 @@ function TradeDetailModal({ trade, onClose, debriefResult, onDebrief }: {
   const [debriefOpen, setDebriefOpen] = useState(debriefResult != null);
   const titleId = useId();
 
-  const dir = trade.take_profit >= trade.entry_price ? 'long' : 'short';
-  const pnlPoints = trade.status === 'closed' && trade.exit_price != null
-    ? (dir === 'long' ? trade.exit_price - trade.entry_price : trade.entry_price - trade.exit_price)
-    : null;
+  // Direction from the column, not from take_profit-vs-entry — that guess
+  // labelled every profitable short a loss (REF-107 §0ד), including in the
+  // כיוון row this modal shows the trader.
+  const dir = inferDirection(trade);
+  const pnlPoints = calcPnl(trade);
   const result = debriefResult ?? localResult;
 
   // Same toggle pattern as the other AI panels: opening fetches only if
@@ -1149,15 +1154,18 @@ function TradeDetailModal({ trade, onClose, debriefResult, onDebrief }: {
   }
 
   const rows: [string, string | number | null][] = [
-    ['אסטרטגיה', trade.strategy],
+    // An intent column the row does not carry shows "—" — the same answer the
+    // trader gets for a missing exit price two rows down — rather than "null",
+    // "0.00" or "null/5".
+    ['אסטרטגיה', trade.strategy ?? '—'],
     ['נכס', trade.symbol ?? '—'],
     ['כיוון', dir === 'long' ? 'לונג ↑' : 'שורט ↓'],
     ['מחיר כניסה', trade.entry_price.toFixed(2)],
-    ['Stop Loss', trade.stop_loss.toFixed(2)],
-    ['Take Profit', trade.take_profit.toFixed(2)],
-    ['יחס R:R', trade.rr_ratio],
-    ['מצב רגשי', `${trade.emotional_state}/5`],
-    ['סיבת כניסה', trade.trade_reason],
+    ['Stop Loss', fmtPriceCell(trade.stop_loss)],
+    ['Take Profit', fmtPriceCell(trade.take_profit)],
+    ['יחס R:R', trade.rr_ratio ?? '—'],
+    ['מצב רגשי', trade.emotional_state != null ? `${trade.emotional_state}/5` : '—'],
+    ['סיבת כניסה', trade.trade_reason ?? '—'],
     // Three statuses, one label function — the ternary this replaces read
     // 'not_entered' as "סגור", which is the one thing it is not.
     ['סטטוס', tradeStatusLabel(trade.status)],
@@ -1243,16 +1251,23 @@ function EditTradeModal({ trade, onClose, onSaved }: {
   const supabase = createClient();
   const editTitleId = useId();
   const symbolRef = useRef<HTMLInputElement>(null);
+  // `?? ''` on every intent field: `String(null)` is the string "null", which
+  // would have appeared in the input box as if the trader had typed it and
+  // then been saved back over a genuinely empty column (REF-107 stage 4).
   const [symbol, setSymbol] = useState(trade.symbol ?? '');
   const [direction, setDirection] = useState<'long' | 'short'>(inferDirection(trade));
-  const [strategy, setStrategy] = useState(trade.strategy);
+  const [strategy, setStrategy] = useState(trade.strategy ?? '');
   const [entryPrice, setEntryPrice] = useState(String(trade.entry_price));
-  const [stopLoss, setStopLoss] = useState(String(trade.stop_loss));
-  const [takeProfit, setTakeProfit] = useState(String(trade.take_profit));
+  const [stopLoss, setStopLoss] = useState(trade.stop_loss != null ? String(trade.stop_loss) : '');
+  const [takeProfit, setTakeProfit] = useState(trade.take_profit != null ? String(trade.take_profit) : '');
   const [quantity, setQuantity] = useState(trade.quantity != null ? String(trade.quantity) : '');
-  const [tradeReason, setTradeReason] = useState(trade.trade_reason);
+  const [tradeReason, setTradeReason] = useState(trade.trade_reason ?? '');
   const [notes, setNotes] = useState(trade.post_trade_notes ?? '');
-  const [emotionalState, setEmotionalState] = useState(trade.emotional_state);
+  // Null stays null until the trader picks a value. Seeding the slider at 3
+  // and saving it back would stamp "felt neutral" on a row whose defining
+  // property is that nobody reported a feeling (REF-107 §0ג); the slider is
+  // shown at 3 but the column is only written once it is touched.
+  const [emotionalState, setEmotionalState] = useState<number | null>(trade.emotional_state);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -1265,10 +1280,32 @@ function EditTradeModal({ trade, onClose, onSaved }: {
 
   async function handleSave() {
     const entry = parseFloat(entryPrice);
-    const sl = parseFloat(stopLoss);
-    const tp = parseFloat(takeProfit);
-    if (!strategy.trim() || !tradeReason.trim() || isNaN(entry) || isNaN(sl) || isNaN(tp)) {
-      setError('יש למלא אסטרטגיה, סיבת כניסה, מחיר כניסה, SL ו-TP');
+    // Blank means "not recorded" and saves as null; a value that will not
+    // parse is an error. A row that arrived without an SL or a TP can be
+    // edited without being made to invent one.
+    const num = (text: string): number | null | undefined => {
+      if (text.trim() === '') return null;
+      const n = parseFloat(text);
+      return Number.isFinite(n) ? n : undefined;
+    };
+    const sl = num(stopLoss);
+    const tp = num(takeProfit);
+    if (isNaN(entry) || sl === undefined || tp === undefined) {
+      setError('מחיר כניסה חייב להיות מספר, ו-SL/TP חייבים להיות מספר או ריקים');
+      return;
+    }
+    // A field the row already carried may not be emptied — clearing it is
+    // deleting the trader's own record of their intent, and the column is
+    // still NOT NULL in the live schema, so the write would fail anyway with
+    // nothing useful to show. A field that arrived empty is allowed to stay
+    // empty: that is the broker row this stage exists for.
+    const emptied: string[] = [];
+    if (trade.strategy != null && !strategy.trim()) emptied.push('אסטרטגיה');
+    if (trade.trade_reason != null && !tradeReason.trim()) emptied.push('סיבת כניסה');
+    if (trade.stop_loss != null && sl === null) emptied.push('SL');
+    if (trade.take_profit != null && tp === null) emptied.push('TP');
+    if (emptied.length > 0) {
+      setError(`לא ניתן למחוק שדה שכבר מולא: ${emptied.join(', ')}`);
       return;
     }
     const qty = quantity.trim() === '' ? null : parseFloat(quantity);
@@ -1282,17 +1319,21 @@ function EditTradeModal({ trade, onClose, onSaved }: {
 
     const updates = {
       symbol: symbol.trim() || null,
-      strategy: strategy.trim(),
+      strategy: strategy.trim() || null,
       entry_price: entry,
       stop_loss: sl,
       take_profit: tp,
-      rr_ratio: calcRR(entry, sl, tp),
+      // Recomputed only when both legs are there. Running calcRR against a
+      // missing SL or TP would mint a ratio the trader never planned and
+      // attach it to a row whose whole point is that it has no plan — which is
+      // the silent corruption REF-107 §0ג is about. No legs, no ratio.
+      rr_ratio: sl !== null && tp !== null ? calcRR(entry, sl, tp) : null,
       quantity: qty,
       // Rewritten to '$' on every edit rather than preserved: editing a row is
       // the one moment the app is already touching it, and a '₪' label left on
       // a dollar amount is the defect REF-99 closes.
       pnl_currency: TRADING_CURRENCY,
-      trade_reason: tradeReason.trim(),
+      trade_reason: tradeReason.trim() || null,
       post_trade_notes: notes.trim() || null,
       emotional_state: emotionalState,
     };
@@ -1382,7 +1423,7 @@ function EditTradeModal({ trade, onClose, onSaved }: {
           className={`${FIELD_CLASS} resize-none`} style={fieldStyle} />
       </Field>
 
-      <EmotionalStateSlider value={emotionalState} onChange={setEmotionalState} />
+      <EmotionalStateSlider value={emotionalState ?? 3} onChange={setEmotionalState} />
 
       {error && <p className="text-xs" style={{ color: RED }}>{error}</p>}
 

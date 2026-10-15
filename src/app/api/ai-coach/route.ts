@@ -2,6 +2,8 @@ import Anthropic from '@anthropic-ai/sdk';
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { PLAIN_HEBREW_PROSE_CLAUSE } from '@/lib/ai/prompts';
+import { isWinningTrade, tradePointsPnl, pnlRow } from '@/lib/pnl';
+import { averageOf, scaleValue, rrValue, intentText, type RawValue } from '@/lib/intent';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -58,30 +60,46 @@ function buildTradeSummary(trades: Record<string, unknown>[]): string {
   const total = trades.length;
   const closed = trades.filter((t) => t.status === 'closed');
   const closedWithExit = closed.filter((t) => t.exit_price !== null);
-  const wins = closedWithExit.filter((t) => Number(t.exit_price) > Number(t.entry_price));
-  const losses = closedWithExit.filter((t) => Number(t.exit_price) <= Number(t.entry_price));
+
+  // Every figure below used to come from `exit_price > entry_price`, which is
+  // the REF-107 §0ד bug: a profitable short reached the coach as a loss, and
+  // the coach then advised the trader on it. `pl` is direction-aware price
+  // points and `isWinningTrade` is the canonical win test, so what the coach
+  // is told now matches what the trader sees on every page.
+  const pl = (t: Record<string, unknown>) => tradePointsPnl(pnlRow(t)) ?? 0;
+  const isWin = (t: Record<string, unknown>) => isWinningTrade(pnlRow(t)) === true;
+
+  const wins = closedWithExit.filter(isWin);
+  const losses = closedWithExit.filter((t) => !isWin(t));
   const winRate = closedWithExit.length > 0 ? Math.round((wins.length / closedWithExit.length) * 100) : 0;
 
-  const totalPL = closedWithExit.reduce((s, t) => s + (Number(t.exit_price) - Number(t.entry_price)), 0);
-  const winPL = wins.reduce((s, t) => s + (Number(t.exit_price) - Number(t.entry_price)), 0);
-  const lossPL = losses.reduce((s, t) => s + (Number(t.exit_price) - Number(t.entry_price)), 0);
+  const totalPL = closedWithExit.reduce((s, t) => s + pl(t), 0);
+  const winPL = wins.reduce((s, t) => s + pl(t), 0);
+  const lossPL = losses.reduce((s, t) => s + pl(t), 0);
 
-  const avgEmotional = total > 0
-    ? (trades.reduce((s, t) => s + Number(t.emotional_state || 3), 0) / total).toFixed(1) : '3';
-  const avgRR = total > 0
-    ? (trades.reduce((s, t) => s + Number(t.rr_ratio || 0), 0) / total).toFixed(2) : '0';
+  // Averaged over the rows that carry a value. `|| 3` and `|| 0` were defaults
+  // dressed as data — they told the coach a trader with no self-reports felt
+  // exactly neutral and planned exactly 1:0 on every trade (REF-107 §0ג).
+  const avgEmotionalNum = averageOf(trades, (t) => scaleValue(t.emotional_state as RawValue));
+  const avgRRNum = averageOf(trades, (t) => rrValue(t.rr_ratio as RawValue));
+  const avgEmotional = avgEmotionalNum !== null ? avgEmotionalNum.toFixed(1) : 'not recorded';
+  const avgRR = avgRRNum !== null ? avgRRNum.toFixed(2) : 'not recorded';
 
-  // Revenge trades: low emotional state + closed loss
-  const revengeTrades = closedWithExit.filter((t) =>
-    Number(t.emotional_state) <= 2 && Number(t.exit_price) < Number(t.entry_price)
-  );
-  const revengeLoss = revengeTrades.reduce((s, t) => s + (Number(t.entry_price) - Number(t.exit_price)), 0);
+  // Revenge trades: low emotional state + closed loss. A row without a
+  // self-report is unknown, not calm and not panicked, so it qualifies as
+  // neither.
+  const emoOf = (t: Record<string, unknown>) => scaleValue(t.emotional_state as RawValue);
+  const revengeTrades = closedWithExit.filter((t) => {
+    const emo = emoOf(t);
+    return emo !== null && emo <= 2 && !isWin(t);
+  });
+  const revengeLoss = revengeTrades.reduce((s, t) => s - pl(t), 0);
 
   // Quality trades: emotional state >= 4
-  const qualityTrades = closedWithExit.filter((t) => Number(t.emotional_state) >= 4);
-  const qualityPL = qualityTrades.reduce((s, t) => s + (Number(t.exit_price) - Number(t.entry_price)), 0);
+  const qualityTrades = closedWithExit.filter((t) => (emoOf(t) ?? 0) >= 4);
+  const qualityPL = qualityTrades.reduce((s, t) => s + pl(t), 0);
   const qualityWinRate = qualityTrades.length > 0
-    ? Math.round(qualityTrades.filter((t) => Number(t.exit_price) > Number(t.entry_price)).length / qualityTrades.length * 100) : 0;
+    ? Math.round(qualityTrades.filter(isWin).length / qualityTrades.length * 100) : 0;
 
   // By hour with P&L
   const byHour: Record<number, { count: number; wins: number; pl: number }> = {};
@@ -89,23 +107,23 @@ function buildTradeSummary(trades: Record<string, unknown>[]): string {
     const h = new Date(t.submitted_at as string).getHours();
     if (!byHour[h]) byHour[h] = { count: 0, wins: 0, pl: 0 };
     byHour[h].count++;
-    const pl = Number(t.exit_price) - Number(t.entry_price);
-    byHour[h].pl += pl;
-    if (pl > 0) byHour[h].wins++;
+    byHour[h].pl += pl(t);
+    if (isWin(t)) byHour[h].wins++;
   }
 
-  // By strategy with P&L
+  // By strategy with P&L. A row with no strategy gets no bucket — it used to
+  // land in one called 'Unknown' that the coach then discussed as a strategy.
   const strategyPL: Record<string, { count: number; pl: number; wins: number }> = {};
   for (const t of closedWithExit) {
-    const s = String(t.strategy || 'Unknown');
+    const s = intentText(t.strategy as string | null);
+    if (s === null) continue;
     if (!strategyPL[s]) strategyPL[s] = { count: 0, pl: 0, wins: 0 };
     strategyPL[s].count++;
-    const pl = Number(t.exit_price) - Number(t.entry_price);
-    strategyPL[s].pl += pl;
-    if (pl > 0) strategyPL[s].wins++;
+    strategyPL[s].pl += pl(t);
+    if (isWin(t)) strategyPL[s].wins++;
   }
 
-  const lowEmotional = trades.filter((t) => Number(t.emotional_state) <= 2).length;
+  const lowEmotional = trades.filter((t) => { const e = emoOf(t); return e !== null && e <= 2; }).length;
 
   return `Total trades: ${total}
 Closed trades with exit: ${closedWithExit.length}

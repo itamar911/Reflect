@@ -13,6 +13,10 @@ export interface DashTrade {
   emotional_state: number;
   trade_reason: string;
   status: string;
+  // Added by REF-107 stage 4. The dashboard derived direction from
+  // `take_profit >= entry_price`, which reads every profitable short as a
+  // loss; the column that answers the question was simply never selected.
+  direction: 'long' | 'short' | null;
   exit_reason: string | null;
   submitted_at: string;
   closed_at: string | null;
@@ -30,7 +34,7 @@ export interface DashTrade {
 }
 
 export const DASH_TRADE_SELECT =
-  'id,strategy,symbol,entry_price,exit_price,stop_loss,take_profit,rr_ratio,emotional_state,trade_reason,status,exit_reason,submitted_at,closed_at,quantity,pnl_amount,actual_pnl,pnl_currency,plan_score,followed_plan,strategy_conditions_checked,moved_sl,exited_early,fomo_entry,revenge_trade';
+  'id,strategy,symbol,entry_price,exit_price,stop_loss,take_profit,rr_ratio,emotional_state,trade_reason,status,direction,exit_reason,submitted_at,closed_at,quantity,pnl_amount,actual_pnl,pnl_currency,plan_score,followed_plan,strategy_conditions_checked,moved_sl,exited_early,fomo_entry,revenge_trade';
 
 interface RawTradeRow {
   id: string;
@@ -44,6 +48,7 @@ interface RawTradeRow {
   emotional_state: number | string;
   trade_reason: string;
   status: string;
+  direction: 'long' | 'short' | null;
   exit_reason: string | null;
   submitted_at: string;
   closed_at: string | null;
@@ -73,6 +78,7 @@ export function mapDashTrade(t: RawTradeRow): DashTrade {
     emotional_state:  Number(t.emotional_state),
     trade_reason:     t.trade_reason,
     status:           t.status,
+    direction:        t.direction ?? null,
     exit_reason:      t.exit_reason ?? null,
     submitted_at:     t.submitted_at,
     closed_at:        t.closed_at ?? null,

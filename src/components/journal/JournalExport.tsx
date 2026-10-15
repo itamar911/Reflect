@@ -1,45 +1,12 @@
 'use client';
 
-import { tradeStatusLabel } from '@/lib/trades/status';
-
-interface ExportTrade {
-  submitted_at: string;
-  strategy: string;
-  entry_price: number;
-  stop_loss: number;
-  take_profit: number;
-  rr_ratio: number;
-  emotional_state: number;
-  trade_reason: string;
-  status: string;
-  debrief_answer?: string | null;
-}
+import { buildCsv, type ExportTrade } from '@/lib/journal/csv';
 
 export default function JournalExport({ trades }: { trades: ExportTrade[] }) {
   function handleExport() {
-    const headers = ['תאריך', 'שעה', 'אסטרטגיה', 'כניסה', 'Stop Loss', 'Take Profit', 'R:R', 'מצב רגשי', 'סיבת כניסה', 'תחקיר', 'סטטוס'];
-
-    const rows = trades.map((t) => {
-      const d = new Date(t.submitted_at);
-      return [
-        d.toLocaleDateString('he-IL'),
-        d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }),
-        t.strategy ?? '',
-        t.entry_price ?? '',
-        t.stop_loss ?? '',
-        t.take_profit ?? '',
-        typeof t.rr_ratio === 'number' ? t.rr_ratio.toFixed(2) : '',
-        t.emotional_state ?? '',
-        `"${(t.trade_reason ?? '').replace(/"/g, '""')}"`,
-        `"${(t.debrief_answer ?? '').replace(/"/g, '""')}"`,
-        // Via the shared label — this ternary exported a 'not_entered' plan as
-        // "סגור", which is the one thing it is not (REF-82 §5.2). Reached from
-        // All Trades, the one page that loads such rows.
-        tradeStatusLabel(t.status),
-      ];
-    });
-
-    const csv = [headers, ...rows].map((r) => r.join(',')).join('\n');
+    // Row shape lives in lib/journal/csv.ts so it can be asserted without a
+    // browser; this function keeps only what needs one.
+    const csv = buildCsv(trades);
     // BOM for Hebrew support in Excel
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);

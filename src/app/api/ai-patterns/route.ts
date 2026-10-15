@@ -2,6 +2,8 @@ import Anthropic from '@anthropic-ai/sdk';
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { PLAIN_HEBREW_PROSE_CLAUSE } from '@/lib/ai/prompts';
+import { isWinningTrade, pnlRow } from '@/lib/pnl';
+import { scaleValue, intentText, type RawValue } from '@/lib/intent';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -58,28 +60,33 @@ function buildPatternSummary(trades: Record<string, unknown>[]): string {
   for (let i = 1; i < trades.length; i++) {
     const prev = trades[i - 1];
     const curr = trades[i];
-    const prevLoss = prev.status === 'closed' && Number(prev.exit_price) < Number(prev.entry_price);
+    const prevLoss = isWinningTrade(pnlRow(prev)) === false;
     const timeDiff = (new Date(curr.submitted_at as string).getTime() - new Date(prev.submitted_at as string).getTime()) / 60000;
-    if (prevLoss && timeDiff < 30 && Number(curr.emotional_state) <= 2) revengeTrades++;
+    const currEmo = scaleValue(curr.emotional_state as RawValue);
+    if (prevLoss && timeDiff < 30 && currEmo !== null && currEmo <= 2) revengeTrades++;
   }
 
   const lossByHour: Record<number, number> = {};
   const winByHour: Record<number, number> = {};
   for (const t of closed) {
     const h = new Date(t.submitted_at as string).getHours();
-    if (Number(t.exit_price) < Number(t.entry_price)) lossByHour[h] = (lossByHour[h] || 0) + 1;
-    else winByHour[h] = (winByHour[h] || 0) + 1;
+    if (isWinningTrade(pnlRow(t))) winByHour[h] = (winByHour[h] || 0) + 1;
+    else lossByHour[h] = (lossByHour[h] || 0) + 1;
   }
 
-  const lowEmotionalLosses = closed.filter(
-    (t) => Number(t.emotional_state) <= 2 && Number(t.exit_price) < Number(t.entry_price)
-  ).length;
+  // A row with no self-report is not a low-emotional-state row; `scaleValue`
+  // drops it instead of reading `Number(null)` as 0 (REF-107 §0ג).
+  const lowEmotionalLosses = closed.filter((t) => {
+    const emo = scaleValue(t.emotional_state as RawValue);
+    return emo !== null && emo <= 2 && isWinningTrade(pnlRow(t)) === false;
+  }).length;
 
   const strategyResults: Record<string, { wins: number; losses: number }> = {};
   for (const t of closed) {
-    const s = String(t.strategy || 'Unknown');
+    const s = intentText(t.strategy as string | null);
+    if (s === null) continue;
     if (!strategyResults[s]) strategyResults[s] = { wins: 0, losses: 0 };
-    if (Number(t.exit_price) > Number(t.entry_price)) strategyResults[s].wins++;
+    if (isWinningTrade(pnlRow(t))) strategyResults[s].wins++;
     else strategyResults[s].losses++;
   }
 
