@@ -2324,34 +2324,59 @@ async function unlinkGroup() {
 }
 
 async function todayPanelGroup() {
-  // Three closes, as the trades route would answer them.
+  // Three closes, AS THE TRADES ROUTE ACTUALLY ANSWERS THEM: newest first,
+  // because `loadBrokerDay` sorts `b.closedAtMs - a.closedAtMs`. The fixture
+  // is in that order deliberately — one already in chronological order would
+  // let a reader that does not sort at all pass this whole group.
   const body = {
     source: 'broker_verified',
     windowStart: '2026-10-15T00:00:00.000Z',
     asOf: '2026-10-15T14:00:00.000Z',
     trades: [
-      { direction: 'short', symbol: SYMBOL, pnlUsd: 270, brokerTradeKey: 'x', accountId: 1 },
-      { direction: 'long', symbol: 'ESZ6', pnlUsd: -125 },
-      { direction: 'short', symbol: null, pnlUsd: 40 },
+      { direction: 'short', symbol: null, pnlUsd: 40, closedAtMs: Date.parse('2026-10-15T13:30:00Z') },
+      { direction: 'long', symbol: 'ESZ6', pnlUsd: -125, closedAtMs: Date.parse('2026-10-15T11:00:00Z') },
+      { direction: 'short', symbol: SYMBOL, pnlUsd: 270, closedAtMs: Date.parse('2026-10-15T09:41:00Z'),
+        brokerTradeKey: 'x', accountId: 1 },
     ],
   };
   const lines = readTodayTradeLines(body);
 
-  // Twelve closes, to drive the cap.
+  // Twelve closes, to drive the cap. Newest first here too, and the P&L is
+  // the row's CHRONOLOGICAL index: array position 0 is the newest close and
+  // carries 11, position 11 is the oldest and carries 0. So a correctly
+  // sorted list reads 0,1,2… and a list left in route order reads 11,10,9…
   const many = readTodayTradeLines({
     ...body,
     trades: Array.from({ length: 12 }, (_, i) => ({
-      direction: 'long', symbol: 'ESZ6', pnlUsd: i,
+      direction: 'long', symbol: 'ESZ6', pnlUsd: 11 - i,
+      closedAtMs: Date.parse('2026-10-15T09:00:00Z') + (11 - i) * 60_000,
     })),
   });
 
   group('the day panel itemises the broker\'s closes, and says what the net is', [
-    c('(1) three rows, three fields each, and nothing else',
+    // CHRONOLOGICAL, OLDEST CLOSE FIRST — the reverse of the order the route
+    // sent them in. The panel NUMBERS these rows, so "1" against the most
+    // recent trade would tell the trader their last trade was their first,
+    // which is the one thing the numbering exists to say.
+    c('(1) three rows, oldest close first, three fields each and nothing else',
       lines, [
         { direction: 'short', symbol: SYMBOL, pnl: 270 },
         { direction: 'long', symbol: 'ESZ6', pnl: -125 },
         { direction: 'short', symbol: null, pnl: 40 },
       ]),
+    c('(1b) which is NOT the order the route sent, and that is the point',
+      lines?.map((line) => line.pnl), [270, -125, 40]),
+    // Twelve rows whose P&L ascends with the chronology: in route order this
+    // would read 11, 10, 9…
+    c('(1c) twelve rows come back in chronological order too',
+      many?.map((line) => line.pnl), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]),
+    // Position 1 is a claim — "this closed before the others" — and an
+    // unreadable instant is not evidence for it.
+    c('(1d) a row with no readable close instant sorts last, never first',
+      readTodayTradeLines({ ...body, trades: [
+        { direction: 'long', symbol: 'A', pnlUsd: 1 },
+        { direction: 'long', symbol: 'B', pnlUsd: 2, closedAtMs: Date.parse('2026-10-15T10:00:00Z') },
+      ] })?.map((line) => line.symbol), ['B', 'A']),
     // The reader takes three fields and drops the rest on the floor: the key,
     // the account id and the fill ids are not this panel's business even
     // though the route sends them.

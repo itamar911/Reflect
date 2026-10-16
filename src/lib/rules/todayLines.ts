@@ -41,7 +41,14 @@
  * panel, and it is the one the rules used.
  */
 
-/** One closed round trip, as the panel lists it. Three fields, nothing else. */
+/**
+ * One closed round trip, as the panel lists it. Three fields, nothing else.
+ *
+ * `closedAtMs` is read by {@link readTodayTradeLines} to order these and is
+ * deliberately NOT kept: the panel renders no instant, so carrying one would
+ * be a field crossing into the view for nothing. The order is the only thing
+ * the timestamp is needed for, and it is applied before the field is dropped.
+ */
 export interface TodayTradeLine {
   direction: 'long' | 'short';
   /** The contract's name. Null when the contract body named nothing usable. */
@@ -73,6 +80,28 @@ export const TODAY_LINE_CAP = 10;
  * failing the whole read — but see {@link showsLineList}, which then declines
  * to render a list that has lost a row, because a list that silently omits a
  * trade is worse than no list.
+ *
+ *
+ * CHRONOLOGICAL, OLDEST CLOSE FIRST — AND THE ROUTE SENDS THE OPPOSITE
+ * -------------------------------------------------------------------
+ *
+ * `loadBrokerDay` sorts `(a, b) => b.closedAtMs - a.closedAtMs`, newest close
+ * first, which is right for a journal: the thing that just happened belongs at
+ * the top of a list you scroll. It is wrong here. This panel NUMBERS its rows,
+ * and "1" next to the most recent trade tells the trader their last trade was
+ * their first — so the numbering contradicts the only thing it is for.
+ *
+ * The sort happens HERE, where `closedAtMs` is still in hand, and the field is
+ * then dropped: {@link TodayTradeLine} stays at three fields, so the view
+ * carries no instant it does not render. Sorting by a column the line does not
+ * have would have meant either widening the view type or reversing the array
+ * and trusting the route's order to never change — and a silent re-ordering
+ * upstream would then mis-number this list with nothing to catch it.
+ *
+ * A row whose `closedAtMs` cannot be read sorts LAST rather than first.
+ * Position 1 is a claim — "this closed before the others" — and an unreadable
+ * instant is not evidence for it. The sort is stable, so ties keep the order
+ * the route sent them in.
  */
 export function readTodayTradeLines(body: unknown): TodayTradeLine[] | null {
   if (typeof body !== 'object' || body === null) return null;
@@ -80,7 +109,7 @@ export function readTodayTradeLines(body: unknown): TodayTradeLine[] | null {
   if (pull.source !== 'broker_verified') return null;
   if (!Array.isArray(pull.trades)) return null;
 
-  const lines: TodayTradeLine[] = [];
+  const dated: { line: TodayTradeLine; closedAtMs: number }[] = [];
   for (const raw of pull.trades) {
     if (typeof raw !== 'object' || raw === null) continue;
     const trade = raw as Record<string, unknown>;
@@ -91,14 +120,21 @@ export function readTodayTradeLines(body: unknown): TodayTradeLine[] | null {
     const pnl = Number(trade.pnlUsd);
     if (!Number.isFinite(pnl)) continue;
 
-    lines.push({
-      direction,
-      symbol: typeof trade.symbol === 'string' && trade.symbol !== '' ? trade.symbol : null,
-      pnl,
+    const closedAtMs = Number(trade.closedAtMs);
+
+    dated.push({
+      line: {
+        direction,
+        symbol: typeof trade.symbol === 'string' && trade.symbol !== '' ? trade.symbol : null,
+        pnl,
+      },
+      // See the header: unreadable sorts last, not first.
+      closedAtMs: Number.isFinite(closedAtMs) ? closedAtMs : Number.POSITIVE_INFINITY,
     });
   }
 
-  return lines;
+  dated.sort((a, b) => a.closedAtMs - b.closedAtMs);
+  return dated.map((entry) => entry.line);
 }
 
 /**
