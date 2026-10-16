@@ -1,8 +1,17 @@
 'use client';
 
-import { AlertTriangle, CalendarDays } from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowUp, CalendarDays } from 'lucide-react';
 import { formatMoney, formatMoneyAbs } from '@/lib/money';
 import type { TodayClosedSummary } from '@/lib/rules/tradeRuleContext';
+import {
+  LOSS_LIMIT_LABEL,
+  LOSS_LIMIT_NOTE,
+  moreLinesText,
+  NET_LABEL,
+  showsLineList,
+  visibleLines,
+  type TodayTradeLine,
+} from '@/lib/rules/todayLines';
 import type { RuleContextSource } from '@/lib/types';
 
 /**
@@ -189,6 +198,78 @@ function MoneySentence({ closed }: { closed: TodayClosedSummary }) {
   );
 }
 
+/**
+ * Today's closes, one line each, then the net (REF-107).
+ *
+ * WHY A LIST AND NOT A SENTENCE. "נסגרו היום 3 עסקאות, אחת מהן בהפסד" is true
+ * and says nothing a trader can act on: not which instrument, not which side,
+ * not how much. Three lines and a net do, in less vertical space than the two
+ * sentences they replace, and they let a trader reconcile this panel against
+ * their broker screen without opening the journal.
+ *
+ * ONLY BROKER CLOSES APPEAR HERE, and that is not a gap to be filled later.
+ * Every figure this panel reports under `broker_verified` IS the broker's — the
+ * closed count, the net and the loss against the limit all come off the day
+ * pull — so a manually-closed trade is in none of them, and listing it would
+ * put a row above a net that does not include it. The footnote already says
+ * where the closes came from; this list is that same set, itemised.
+ *
+ * The net is the DAY PULL's figure and is deliberately NOT re-summed from the
+ * lines: one source of truth per panel, and `showsLineList` has already
+ * guaranteed that the lines describe the same set (lib/rules/todayLines.ts).
+ */
+function TradeLines({ lines, net }: { lines: readonly TodayTradeLine[]; net: number | null }) {
+  const { shown, more } = visibleLines(lines);
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      {shown.map((line, i) => (
+        // The index is the row's name as a trader says it ("the second one"),
+        // so it is printed rather than left implicit in the order.
+        <div key={i} className="flex items-center gap-2 text-sm leading-relaxed">
+          <Ltr style={{ color: 'var(--color-tg-text-2)', minWidth: '1.25rem' }}>{i + 1}</Ltr>
+          {/* Direction as an arrow AND as a word for a screen reader: the glyph
+              and the colour both carry it visually and neither is available in
+              speech. Lucide only, per CLAUDE.md. */}
+          {line.direction === 'long' ? (
+            <ArrowUp aria-hidden="true" size={13} className="shrink-0" style={{ color: 'var(--today-context-gain)' }} />
+          ) : (
+            <ArrowDown aria-hidden="true" size={13} className="shrink-0" style={{ color: 'var(--today-context-loss)' }} />
+          )}
+          <span className="sr-only">{line.direction === 'long' ? 'לונג' : 'שורט'}</span>
+          {/* A contract name is latin and numeric, so it is ltr like every
+              other figure here. Null when the contract body named nothing
+              usable — a state fills.ts prices a day through rather than
+              failing on. */}
+          <Ltr style={{ color: 'var(--color-tg-text)' }}>{line.symbol ?? '—'}</Ltr>
+          <span className="flex-1" />
+          <Ltr style={{ color: amountColour(line.pnl) }}>{formatMoney(line.pnl)}</Ltr>
+        </div>
+      ))}
+
+      {more > 0 && (
+        <p className="text-xs leading-relaxed" style={{ color: 'var(--color-tg-text-2)' }}>
+          {moreLinesText(more)}
+        </p>
+      )}
+
+      {net !== null && (
+        <>
+          <div
+            role="presentation"
+            className="my-1"
+            style={{ borderTop: '1px solid var(--color-tg-border)' }}
+          />
+          <p className="text-sm leading-relaxed font-semibold" style={{ color: 'var(--color-tg-text)' }}>
+            {NET_LABEL}:{' '}
+            <Ltr style={{ color: amountColour(net) }}>{formatMoney(net)}</Ltr>
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
 export interface TodayContextPanelProps {
   headingId: string;
   /** False until the first load has finished, so zeros are never shown as fact. */
@@ -202,6 +283,17 @@ export interface TodayContextPanelProps {
   maxDailyLoss: number | null;
   /** What the day's figures are based on (REF-82 §6). */
   source: RuleContextSource;
+  /**
+   * Today's closes, one per line, or null when there is no list to show.
+   *
+   * NULL IS THE ORDINARY CASE AND NOT A FAILURE: the form only asks for this
+   * when the day pull reported closes (lib/rules/brokerTradeList.ts explains
+   * why the second request is conditional), so on a quiet day it is null and
+   * the panel reads exactly as it did before. It is also null when the second
+   * read failed, and `showsLineList` drops it when the two reads disagree
+   * about how many closes there were.
+   */
+  lines?: TodayTradeLine[] | null;
 }
 
 export default function TodayContextPanel({
@@ -212,6 +304,7 @@ export default function TodayContextPanel({
   maxDailyTrades,
   maxDailyLoss,
   source,
+  lines = null,
 }: TodayContextPanelProps) {
   const failed = source === 'broker_expired' || source === 'broker_unavailable';
 
@@ -307,12 +400,25 @@ export default function TodayContextPanel({
                     </p>
                   )}
 
-                  {closed.count > 0 && <ClosedSentence closed={closed} />}
-                  <MoneySentence closed={closed} />
+                  {/* THE LIST REPLACES THE TWO SENTENCES, it does not join
+                      them: "נסגרו היום 3 עסקאות, אחת מהן בהפסד" followed by
+                      three itemised rows and a net is the same fact told
+                      twice, and the second telling is the one that says
+                      something. When the list cannot be shown — no second
+                      read, or two reads that saw different days — the
+                      sentences stand exactly as they did. */}
+                  {showsLineList(lines, closed.count) ? (
+                    <TradeLines lines={lines!} net={closed.money?.net ?? null} />
+                  ) : (
+                    <>
+                      {closed.count > 0 && <ClosedSentence closed={closed} />}
+                      <MoneySentence closed={closed} />
+                    </>
+                  )}
 
                   {lossLimit && (
                     <p className="text-sm leading-relaxed" style={{ color: 'var(--color-tg-text)' }}>
-                      סך ההפסדים היום:{' '}
+                      {LOSS_LIMIT_LABEL}:{' '}
                       {/* Red on the amount lost, which is exactly what §7
                           reserves it for. The threshold beside it is not money
                           lost and stays in the ordinary text colour. */}
@@ -326,7 +432,18 @@ export default function TodayContextPanel({
                       >
                         {formatMoneyAbs(lossLimit.lost)}
                       </Ltr>{' '}
-                      מתוך <Ltr>{formatMoneyAbs(lossLimit.limit)}</Ltr> שהגדרת.
+                      מתוך <Ltr>{formatMoneyAbs(lossLimit.limit)}</Ltr>
+                      {' — '}
+                      {/* THE CLAUSE THAT ANSWERS THE QUESTION THE OLD COPY
+                          PROVOKED. A trader who closed +$270 and −$125 read
+                          "סך ההפסדים היום: $125 מתוך $500" directly beneath a
+                          net of +$145 and reasonably concluded one of the two
+                          was wrong. Neither was: `sumLosses` adds the absolute
+                          value of the LOSING rows and ignores the winners,
+                          because a daily loss limit a winning trade could buy
+                          back is not a loss limit. That is the rule the engine
+                          enforces, and this is the first place it is said. */}
+                      <span style={{ color: 'var(--color-tg-text-2)' }}>{LOSS_LIMIT_NOTE}</span>
                     </p>
                   )}
                 </>

@@ -111,6 +111,17 @@ import {
   summarise,
 } from '../src/app/api/cron/send-alerts/route';
 import { alertRangeStart, zonedDayStart } from '../src/lib/email/alertWindow';
+import {
+  LOSS_LIMIT_LABEL,
+  LOSS_LIMIT_NOTE,
+  moreLinesText,
+  NET_LABEL,
+  readTodayTradeLines,
+  showsLineList,
+  TODAY_LINE_CAP,
+  visibleLines,
+} from '../src/lib/rules/todayLines';
+import { formatMoney } from '../src/lib/money';
 
 // ── Harness ─────────────────────────────────────────────────────────────────
 
@@ -2312,6 +2323,103 @@ async function unlinkGroup() {
   ]);
 }
 
+async function todayPanelGroup() {
+  // Three closes, as the trades route would answer them.
+  const body = {
+    source: 'broker_verified',
+    windowStart: '2026-10-15T00:00:00.000Z',
+    asOf: '2026-10-15T14:00:00.000Z',
+    trades: [
+      { direction: 'short', symbol: SYMBOL, pnlUsd: 270, brokerTradeKey: 'x', accountId: 1 },
+      { direction: 'long', symbol: 'ESZ6', pnlUsd: -125 },
+      { direction: 'short', symbol: null, pnlUsd: 40 },
+    ],
+  };
+  const lines = readTodayTradeLines(body);
+
+  // Twelve closes, to drive the cap.
+  const many = readTodayTradeLines({
+    ...body,
+    trades: Array.from({ length: 12 }, (_, i) => ({
+      direction: 'long', symbol: 'ESZ6', pnlUsd: i,
+    })),
+  });
+
+  group('the day panel itemises the broker\'s closes, and says what the net is', [
+    c('(1) three rows, three fields each, and nothing else',
+      lines, [
+        { direction: 'short', symbol: SYMBOL, pnl: 270 },
+        { direction: 'long', symbol: 'ESZ6', pnl: -125 },
+        { direction: 'short', symbol: null, pnl: 40 },
+      ]),
+    // The reader takes three fields and drops the rest on the floor: the key,
+    // the account id and the fill ids are not this panel's business even
+    // though the route sends them.
+    c('(2) the key and the account id are not carried into the view',
+      Object.keys(lines?.[0] ?? {}).sort(), ['direction', 'pnl', 'symbol']),
+
+    // Every non-verified state is "no list", which is a different thing from
+    // "no trades" — and the panel keeps its sentences for it.
+    c('(3) a state that is not a successful pull is no list at all', [
+      readTodayTradeLines({ source: 'broker_unavailable' }),
+      readTodayTradeLines({ source: 'broker_expired' }),
+      readTodayTradeLines({ source: 'reflect_only' }),
+      readTodayTradeLines(null),
+      readTodayTradeLines('trades'),
+    ], [null, null, null, null, null]),
+    c('(4) a verified pull with no trades is an EMPTY list, not a missing one',
+      readTodayTradeLines({ ...body, trades: [] }), []),
+    c('(5) a row with no usable direction or money is dropped',
+      readTodayTradeLines({ ...body, trades: [
+        { direction: 'sideways', symbol: 'ESZ6', pnlUsd: 10 },
+        { direction: 'long', symbol: 'ESZ6', pnlUsd: 'x' },
+        { direction: 'long', symbol: 'ESZ6', pnlUsd: 10 },
+      ] })?.length, 1),
+
+    // THE CONSISTENCY GATE, and it is the whole reason the net is not
+    // re-summed from the lines: two reads, a moment apart, can see different
+    // days, and three rows above a net that accounts for two is a panel
+    // contradicting itself in the trader's own money.
+    c('(6) the list is drawn only when it has as many lines as the day counted',
+      [showsLineList(lines, 3), showsLineList(lines, 2), showsLineList(lines, 4)],
+      [true, false, false]),
+    c('(7) and never when there is no list, or an empty one',
+      [showsLineList(null, 3), showsLineList([], 0)], [false, false]),
+
+    c('(8) ten rows at most, and the rest are counted',
+      [visibleLines(many ?? []).shown.length, visibleLines(many ?? []).more], [TODAY_LINE_CAP, 2]),
+    c('(9) and nothing is held back when there is nothing to hold back',
+      [visibleLines(lines ?? []).shown.length, visibleLines(lines ?? []).more], [3, 0]),
+    c('(10) the overflow says how many', moreLinesText(2), 'ועוד 2'),
+
+    // The net is the DAY PULL's figure. The sum of the lines is asserted to
+    // agree with it here so that a fixture which drifts from the arithmetic
+    // fails rather than passing quietly.
+    c('(11) the net label, and the amount the lines add up to',
+      [NET_LABEL, formatMoney((lines ?? []).reduce((sum, line) => sum + line.pnl, 0))],
+      ['נטו היום', '+$185.00']),
+    c('(12) a losing day carries its own sign', formatMoney(-185), '-$185.00'),
+
+    // THE REWORDED LIMIT LINE. A trader who closed +$270 and −$125 read "סך
+    // ההפסדים היום: $125 מתוך $500" beneath a net of +$145 and reasonably
+    // concluded one of the two was wrong. Neither was.
+    c('(13) the loss limit says that only losses count',
+      [LOSS_LIMIT_LABEL, LOSS_LIMIT_NOTE],
+      ['מגבלת הפסד', 'רק הפסדים נספרים, רווחים לא מקזזים']),
+    // The rule the sentence describes, measured rather than asserted: the
+    // winner does not buy the loss back.
+    c('(14) and that is what the engine actually does', (await loadTradeRuleContext(
+      USER,
+      { source: 'broker_unavailable', isTradeSource: true },
+      ruleDb({
+        taken: [{ ...closedRow(270, 'tradovate'), id: '1' }, { ...closedRow(-125, 'tradovate'), id: '2' }],
+        closedToday: [closedRow(270, 'tradovate'), closedRow(-125, 'tradovate')],
+        recent: [],
+      })
+    )).todayLossAmount, 125),
+  ]);
+}
+
 async function confirmScreenGroup() {
   // A short that went to target: planned at 29830 with a 70-point stop and an
   // 80-point target, entered 4 points away from the plan, exited past the
@@ -2585,6 +2693,7 @@ async function main() {
   await debriefGateGroup();
   await confirmScreenGroup();
   await unlinkGroup();
+  await todayPanelGroup();
 
   console.log('');
   if (failures.length > 0) {

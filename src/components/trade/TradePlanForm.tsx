@@ -24,6 +24,8 @@ import type { PersonalStrategy } from '@/components/strategies/StrategiesClient'
 import { getPlanLimits, type PlanTier } from '@/lib/plans/config';
 import { fetchActiveRuleViolation } from '@/lib/rules/fetchActiveRuleViolation';
 import { loadBrokerDayPull } from '@/lib/rules/brokerDayContext';
+import { loadTodayTradeLines } from '@/lib/rules/brokerTradeList';
+import type { TodayTradeLine } from '@/lib/rules/todayLines';
 import { logRuleViolations, overrideRuleViolations, type RuleViolationLogInput } from '@/lib/rules/logRuleViolation';
 import {
   loadTradeRuleContext,
@@ -312,6 +314,22 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
   const [contextSource, setContextSource] = useState<RuleContextSource>('reflect_only');
   /** False until the first load returns, so the panel never states zeros as fact. */
   const [contextLoaded, setContextLoaded] = useState(false);
+  /**
+   * Today's closes itemised, for the panel's list (REF-107).
+   *
+   * THE ONE THING IN THIS PANEL THAT DOES NOT COME OFF `loadTradeRuleContext`
+   * — and it is not a figure, it is the detail behind one. The rule engine's
+   * route answers with scalars and will not carry rows: api/tradovate/today's
+   * header states that split and the regression suite asserts it. So the list
+   * comes from api/tradovate/trades, the route built to send a trader their
+   * own positions, whose header records the bounds of that decision.
+   *
+   * Fetched AFTER the day pull and only when that pull reported closes — see
+   * lib/rules/brokerTradeList.ts on why the second request is conditional — so
+   * the panel renders its sentences immediately and grows the list a moment
+   * later, and a quiet day costs nothing extra at all.
+   */
+  const [todayLines, setTodayLines] = useState<TodayTradeLine[] | null>(null);
   const todayContextHeadingId = useId();
   const [personalStrategyRows, setPersonalStrategyRows] = useState<PersonalStrategy[]>([]);
   // Session override wins over the saved preference, which wins over the default
@@ -442,6 +460,26 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     setOpenPlans(((openPlansRes.data ?? []) as unknown as OpenPlanRow[]).map(mapOpenPlan));
 
     setLoading(false);
+
+    // ── The panel's itemised list, and ONLY when there is one to draw ───────
+    //
+    // After `setLoading(false)` deliberately: the form is usable and the panel
+    // is already showing the day's figures, so this cannot delay either. And
+    // behind both gates, because `/api/tradovate/trades` makes a full broker
+    // pull — eight to ten upstream reads plus pricing (§A2) — and the day pull
+    // above has just made one. Asking unconditionally would double the
+    // upstream cost of opening the trade form against a rate-limited third
+    // party, on the most-used surface in the product.
+    //
+    // `closedCount === 0` is most form opens, including every one before the
+    // first trade of the day, and there is nothing to itemise then anyway.
+    if (history.source === 'broker_verified' && history.todayClosed.count > 0) {
+      setTodayLines(await loadTodayTradeLines());
+    } else {
+      // A reload after the day moved — the trader closed the last open plan —
+      // must not leave yesterday's list on screen.
+      setTodayLines(null);
+    }
   }, [supabase, userId]);
 
   useEffect(() => {
@@ -1030,6 +1068,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
               maxDailyTrades={presetRules?.max_daily_trades ?? null}
               maxDailyLoss={presetRules?.max_daily_loss ?? null}
               source={contextSource}
+              lines={todayLines}
             />
 
             {/* Step 1 — Asset, direction & strategy */}
