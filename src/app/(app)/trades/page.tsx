@@ -5,6 +5,7 @@ import BrokerSyncButton, { ReflectOnlyNote } from '@/components/tradovate/Broker
 import { isUserAllowed } from '@/lib/tradovate/allowlist';
 import { isImportEnabled } from '@/lib/tradovate/import';
 import { visibleTrades } from '@/lib/trades/visible';
+import { isQueuedBrokerRow } from '@/lib/journal/link';
 
 export const metadata = { title: 'כל העסקאות — Reflect' };
 
@@ -84,6 +85,14 @@ export default async function TradesPage() {
     // which is the truth about every row in such a database.
     debrief_ai:           t.debrief_ai ?? null,
     debrief_generated_at: (t.debrief_generated_at as string | null) ?? null,
+    // ── The link bookkeeping, from migration 035 (REF-107 Stage 3b) ───────
+    //
+    // Same `?? null` rule, third time, same reason. A row from before 035
+    // has neither key, and `link_confirmed_at: null` on a `tradovate` row
+    // with `unplanned: true` reads as "waiting to be assigned" — which is
+    // the truth about every row the import has written since 15.10.
+    link_confirmed_at: (t.link_confirmed_at as string | null) ?? null,
+    link_method:       (t.link_method as string | null) ?? null,
   }));
 
   const exportTrades = allTrades.map((t) => ({
@@ -118,6 +127,18 @@ export default async function TradesPage() {
   // ordered submitted_at desc above, so [0] is the newest.
   const listKey = `${allTrades.length}:${allTrades[0]?.submitted_at ?? 'empty'}`;
 
+  // THE QUEUE, COUNTED ON THE SERVER (REF-107 Stage 3b, §C). The rows are
+  // already here — `select('*')` above — so this is a filter over an array and
+  // not a query, which is what makes the banner free. `visibleTrades` has
+  // already dropped the hidden ones; `isQueuedBrokerRow` checks the predicate
+  // again anyway, because the queue's definition lives in one place and two
+  // readers must not be able to disagree about it.
+  //
+  // It is derived here rather than inside JournalClient so that the count is a
+  // fact about what the server saw, in the same render that produced the list
+  // the banner points at.
+  const queueCount = allTrades.filter(isQueuedBrokerRow).length;
+
   return (
     <div dir="rtl" className="px-4 py-5 flex flex-col gap-4 md:max-w-none">
       <div className="flex items-center justify-between">
@@ -133,7 +154,7 @@ export default async function TradesPage() {
           <JournalExport trades={exportTrades} />
         </div>
       </div>
-      <JournalClient key={listKey} trades={allTrades} />
+      <JournalClient key={listKey} trades={allTrades} queueCount={queueCount} />
     </div>
   );
 }

@@ -83,6 +83,23 @@ import {
   readStoredDebrief,
 } from '../src/lib/journal/debrief';
 import {
+  MATCH_WINDOW_MS,
+  matchBrokerTrade,
+  planCandidates,
+  type CandidatePlan,
+} from '../src/lib/tradovate/match';
+import {
+  confirmLink,
+  declineLink,
+  deleteWarningText,
+  isQueuedBrokerRow,
+  LINK_STATE_COPY,
+  linkState,
+  proposeFlags,
+  queueBannerText,
+  resetLinkGuard,
+} from '../src/lib/journal/link';
+import {
   respondToDebriefRequest,
   type DebriefRouteDeps,
 } from '../src/app/api/ai-debrief/route';
@@ -184,7 +201,7 @@ const SECOND: BrokerTrade = {
 type Row = Record<string, unknown>;
 
 interface Statement {
-  kind: 'select' | 'insert' | 'update' | 'delete';
+  kind: 'select' | 'insert' | 'update' | 'delete' | 'rpc';
   table: string;
   columns?: string;
   filters: [string, string, unknown][];
@@ -241,8 +258,62 @@ class FakeDb {
 
         delete: () => new FakeQuery(this, { kind: 'delete', table, filters: [] }),
       }),
+
+      /**
+       * `link_broker_trade`, migration 035's merge, as the browser reaches it
+       * (REF-107 Stage 3b).
+       *
+       * A HAND-WRITTEN MIRROR OF THE SQL, AND ITS FIDELITY IS THE THING TO
+       * WATCH. What this stub makes testable is the CLIENT's half: that the
+       * right function is called with the right three arguments, that a double
+       * confirm sends one call and not two, and that the flags the trader
+       * agreed to are written to the plan afterwards. The function's own body —
+       * the `FOR UPDATE`, the two ownership checks, the fixed statement order
+       * the partial UNIQUE forces — is asserted by supabase/queries/
+       * security_assertions.sql and by running it, not here. A test cannot
+       * prove a transaction it does not have.
+       *
+       * The merge is mirrored anyway, rather than stubbed as a no-op, because
+       * the row it leaves behind is what the NEXT import reads: the assertion
+       * that a linked plan costs zero statements needs a linked plan to exist.
+       */
+      rpc: (fn: string, args: Row) => {
+        this.statements.push({ kind: 'rpc', table: fn, filters: [], values: args });
+
+        const broker = this.rows.find((row) => row.id === args.broker_row_id);
+        const plan = this.rows.find((row) => row.id === args.plan_id);
+        if (!broker || !plan) {
+          return Promise.resolve({ data: null, error: { code: 'P0002', message: 'not found' } });
+        }
+
+        for (const { column } of EXECUTION_FACTS_FOR_TEST) plan[column] = broker[column];
+        plan.broker_trade_key = broker.broker_trade_key;
+        plan.unplanned = false;
+        plan.link_confirmed_at = '2026-10-16T10:00:00.000Z';
+        plan.link_method = args.method;
+        this.rows = this.rows.filter((row) => row !== broker);
+
+        return Promise.resolve({ data: null, error: null });
+      },
     } as unknown as SupabaseClient;
   }
+}
+
+/**
+ * `gte`/`lte`/`lt` over whatever PostgREST would have compared.
+ *
+ * ISO 8601 UTC strings compare correctly as strings — same length, same
+ * format, fixed-width fields — which is the only kind of range this suite
+ * asks for. A missing value matches nothing rather than everything: a row
+ * without the column cannot be said to be inside a range.
+ */
+function withinRange(stored: unknown, bound: unknown, op: 'gte' | 'lte' | 'lt'): boolean {
+  if (stored == null || bound == null) return false;
+  const a = typeof stored === 'number' ? stored : String(stored);
+  const b = typeof bound === 'number' ? bound : String(bound);
+  if (op === 'gte') return a >= b;
+  if (op === 'lte') return a <= b;
+  return a < b;
 }
 
 class FakeQuery implements PromiseLike<{ data: unknown; error: unknown }> {
@@ -266,6 +337,14 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: unknown }> {
     this.statement.filters.push(['gte', column, value]);
     return this;
   }
+  lte(column: string, value: unknown) {
+    this.statement.filters.push(['lte', column, value]);
+    return this;
+  }
+  lt(column: string, value: unknown) {
+    this.statement.filters.push(['lt', column, value]);
+    return this;
+  }
   order() {
     return this;
   }
@@ -283,6 +362,9 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: unknown }> {
         if (op === 'eq') return row[column] === value;
         if (op === 'in') return (value as unknown[]).includes(row[column]);
         if (op === 'neq') return row[column] !== value;
+        if (op === 'gte' || op === 'lte' || op === 'lt') {
+          return withinRange(row[column], value, op);
+        }
         return true;
       })
     );
@@ -705,8 +787,11 @@ async function privacyGroup() {
     // writing a trader's positions into Vercel's logs.
     c('(2) NOT ONE identifying value appears', leaked.map(([what]) => what), []),
     c('(3) one line per run, not one per row', lines.length, 1),
+    // The two Stage 3b counts are in the same line and in the same style: an
+    // operator reading this wants "the matcher linked none of them and queued
+    // two" from the same glance that tells them two rows were written.
     c('(4) and the counts are in it',
-      /offered=3 imported=2 updated=0 unchanged=0 skippedOpen=1/.test(joined), true),
+      /offered=3 imported=2 linkedAuto=0 queued=2 updated=0 unchanged=0 skippedOpen=1/.test(joined), true),
   ]);
 }
 
@@ -846,13 +931,27 @@ async function countRuleGroup() {
   );
 
   group('one trade counts once (§0ה, E8)', [
-    // Four rows, two trades. The sum would block a trader at half their limit.
-    c('(1) two plans + two imported rows for the same two trades = 2', paired.todayTradeCount, 2),
-    c('(2) NEVER THE SUM', paired.todayTradeCount === 4, false),
-    c('(3) without the declaration, the old count stands', declined.todayTradeCount, 4),
+    // THESE TWO CASES CHANGED ANSWER IN STAGE 3b, ON PURPOSE, and the reason
+    // is that the fixture changed meaning. Four rows for two trades used to be
+    // the NORMAL state — the import wrote a row beside every plan — and
+    // `max()` was what kept the counter honest through it. Stage 3b writes a
+    // matched trade ONTO its plan, so four rows for two trades now means
+    // something narrower: two trades the matcher refused to guess about, each
+    // sitting beside its plan until the trader confirms. There are four rows
+    // in the trader's journal and the counter says four.
+    //
+    // The old expectation is not relaxed, it is relocated: `linkCountGroup`
+    // below is where the counter's policy now lives, including the price of
+    // this window.
+    c('(1) four rows for two unconfirmed pairs = 4', paired.todayTradeCount, 4),
+    c('(2) and the live close count does not override it', paired.todayTradeCount === 2, false),
+    c('(3) without the declaration, the same figure', declined.todayTradeCount, 4),
     c('(4) three unplanned broker trades and no plans = 3', unplannedOnly.todayTradeCount, 3),
     c('(5) two plans the broker has not seen close = 2', openPlans.todayTradeCount, 2),
-    c('(6) in the fallback state the stored broker closes are the count', fallback.todayTradeCount, 2),
+    // The same figure in every source state, which is new and is the point:
+    // how many trades the trader TOOK is a question about their own rows, and
+    // a broker we could not reach cannot change the answer.
+    c('(6) and the same figure when the pull failed', fallback.todayTradeCount, 4),
     c('(7) a hidden row counts toward nothing',
       [withHiddenRow.todayTradeCount, withHiddenRow.todayLossAmount], [0, 0]),
   ]);
@@ -1043,6 +1142,8 @@ const RAN_COUNTS = {
   ran: true,
   offered: 3,
   imported: 1,
+  linkedAuto: 0,
+  queued: 1,
   updated: 0,
   unchanged: 1,
   skippedOpen: 1,
@@ -1409,13 +1510,18 @@ async function syncPrivacyGroup() {
     // row, a symbol or an account id to this response has to come here and
     // delete this line ON PURPOSE — which is the only review step this
     // repository can enforce on a route that answers with a trader's activity.
-    c('(1) exactly these twelve keys', keys, [
+    c('(1) exactly these fourteen keys', keys, [
       'asOf',
       'failed',
       // Sorts before 'imported': capital E. Default Array#sort is by code unit.
       'importEnabled',
       'imported',
+      // Stage 3b. Both are counts, which is the only kind of thing this
+      // response is allowed to carry — a link count says how many trades
+      // found a plan and names neither the trade nor the plan.
+      'linkedAuto',
       'offered',
+      'queued',
       'ran',
       'skippedHidden',
       'skippedOpen',
@@ -1632,6 +1738,552 @@ async function debriefRouteGroup() {
   ]);
 }
 
+// ── Stage 3b — the matcher, the merge, the counter and the debrief gate ─────
+
+/** Noon on the day of {@link TRADE}, which opened at 09:12. */
+const MATCH_NOW = Date.parse('2026-10-15T12:00:00.000Z');
+
+/** A plan the trader submitted before the trade, matching it on every rule. */
+function planRow(over: Partial<CandidatePlan> = {}): CandidatePlan {
+  return {
+    id: 'plan-1',
+    status: 'open',
+    source: 'manual',
+    hidden: false,
+    submitted_at: '2026-10-15T08:30:00.000Z',
+    direction: 'short',
+    symbol: SYMBOL,
+    ...over,
+  };
+}
+
+/** The match for {@link TRADE} against these plans, at {@link MATCH_NOW}. */
+function matchAgainst(plans: CandidatePlan[], trade: BrokerTrade = TRADE) {
+  return matchBrokerTrade({ trade, plans, nowMs: MATCH_NOW });
+}
+
+async function matchRuleGroup() {
+  const EIGHT_HOURS_BEFORE = new Date(OPENED - MATCH_WINDOW_MS).toISOString();
+  const JUST_OUTSIDE = new Date(OPENED - MATCH_WINDOW_MS - 1).toISOString();
+
+  const two = [
+    planRow({ id: 'plan-a', submitted_at: '2026-10-15T08:30:00.000Z' }),
+    planRow({ id: 'plan-b', submitted_at: '2026-10-15T09:00:00.000Z' }),
+  ];
+
+  group('a broker trade finds the plan behind it, or nobody (§B)', [
+    c('(1) one plan in the window, on the right side: a unique match',
+      matchAgainst([planRow()]), { kind: 'unique', planId: 'plan-1' }),
+
+    // THE HEART OF THE RULE, AND THE SABOTAGE CHECK'S TARGET. A plan written
+    // after the entry is a note, not a plan; linking backwards would award a
+    // planning score to somebody who planned nothing.
+    c('(2) a plan submitted AFTER the entry is not a plan at all',
+      matchAgainst([planRow({ submitted_at: '2026-10-15T09:13:00.000Z' })]), { kind: 'none' }),
+
+    c('(3) the window is inclusive at exactly eight hours',
+      matchAgainst([planRow({ submitted_at: EIGHT_HOURS_BEFORE })]),
+      { kind: 'unique', planId: 'plan-1' }),
+    c('(4) and one millisecond past it is outside',
+      matchAgainst([planRow({ submitted_at: JUST_OUTSIDE })]), { kind: 'none' }),
+
+    // Two is not "pick the closer one". §F1 names a wrong automatic link as
+    // the central risk of this stage, and it is silent.
+    c('(5) two plans: ambiguous, and NEVER a tie-break',
+      matchAgainst(two), { kind: 'ambiguous', candidateIds: ['plan-b', 'plan-a'] }),
+    c('(6) the candidates are ordered nearest-in-time first, which is the order the screen lists',
+      planCandidates({ trade: TRADE, plans: two, nowMs: MATCH_NOW }).map((plan) => plan.id),
+      ['plan-b', 'plan-a']),
+
+    c('(7) a plan on the other side is not a candidate',
+      matchAgainst([planRow({ direction: 'long' })]), { kind: 'none' }),
+    // Nullable column. An absent direction is not a disagreement.
+    c('(8) a plan with no direction still matches',
+      matchAgainst([planRow({ direction: null })]), { kind: 'unique', planId: 'plan-1' }),
+
+    c('(9) a contradicting symbol root disqualifies',
+      matchAgainst([planRow({ symbol: 'ESZ6' })]), { kind: 'none' }),
+    c('(10) a root that cannot be read sits the decision out entirely',
+      matchAgainst([planRow({ symbol: 'NQ/ES SPREAD' })]), { kind: 'unique', planId: 'plan-1' }),
+    // §B's own example: the trader typed the root, the broker named the micro.
+    c('(11) a bare root the trader typed matches the contract it is the tail of',
+      matchAgainst([planRow({ symbol: 'NQ' })]), { kind: 'unique', planId: 'plan-1' }),
+    c('(12) and a bare root of a different instrument does not',
+      matchAgainst([planRow({ symbol: 'ES' })]), { kind: 'none' }),
+    c('(13) an empty symbol on either side sits out',
+      [matchAgainst([planRow({ symbol: null })]).kind,
+       matchAgainst([planRow()], { ...TRADE, symbol: null }).kind],
+      ['unique', 'unique']),
+
+    c('(14) a plan that is closed, never entered or deleted is not a candidate',
+      [matchAgainst([planRow({ status: 'closed' })]).kind,
+       matchAgainst([planRow({ status: 'not_entered' })]).kind,
+       matchAgainst([planRow({ hidden: true })]).kind],
+      ['none', 'none', 'none']),
+
+    // Never broker-to-broker: that would merge two real trades into one.
+    c('(15) an imported row is not a link target',
+      matchAgainst([planRow({ source: 'tradovate' })]), { kind: 'none' }),
+    // Before migration 034 `select('*')` returns no `source` key, and every
+    // row in such a database is a hand-written plan.
+    c('(16) a plan with no source column at all reads as manual',
+      matchAgainst([planRow({ source: undefined })]), { kind: 'unique', planId: 'plan-1' }),
+
+    // The clock's one job. A future anchor makes rule 4 vacuous and turns the
+    // window around, so nothing matches rather than everything.
+    c('(17) a trade whose entry instant is in the future matches nothing',
+      matchBrokerTrade({
+        trade: { ...TRADE, openedAtMs: MATCH_NOW + 60_000 },
+        plans: [planRow()],
+        nowMs: MATCH_NOW,
+      }), { kind: 'none' }),
+    c('(18) an unparseable submitted_at is not a candidate',
+      matchAgainst([planRow({ submitted_at: 'not a date' })]), { kind: 'none' }),
+    c('(19) no plans at all', matchAgainst([]), { kind: 'none' }),
+  ]);
+}
+
+/** A manual plan as the database holds it, with intent columns filled in. */
+function storedPlan(over: Row = {}): Row {
+  return {
+    id: 'plan-1',
+    user_id: USER,
+    status: 'open',
+    source: 'manual',
+    hidden: false,
+    submitted_at: '2026-10-15T08:30:00.000Z',
+    direction: 'short',
+    symbol: SYMBOL,
+    // The intent half. Not one of these may move, ever.
+    strategy: 'פריצת טווח',
+    stop_loss: 29900,
+    take_profit: 29700,
+    rr_ratio: 2,
+    trade_reason: 'פריצה של הטווח הלילי',
+    emotional_state: 4,
+    setup_id: 'setup-7',
+    entry_price: 29830,
+    units: 2,
+    rule_context_source: 'reflect_only',
+    ...over,
+  };
+}
+
+async function linkWriteGroup() {
+  // ── The auto-link: a unique match never produces a broker row at all ──────
+  const auto = new FakeDb([storedPlan()]);
+  const autoCounts = await quietImport({
+    client: auto.client(), userId: USER, trades: [TRADE], isTradeSource: true, env: ON,
+  });
+  const linked = auto.rows.find((row) => row.id === 'plan-1') ?? {};
+
+  // The re-import. THE MOST IMPORTANT ASSERTION IN THIS GROUP: the key now
+  // sits on the plan, so the existing read finds it, `restate()` compares the
+  // thirteen facts, finds them identical, and sends nothing.
+  const writesBeforeReimport = auto.writes.length;
+  const reimport = await quietImport({
+    client: auto.client(), userId: USER, trades: [TRADE], isTradeSource: true, env: ON,
+  });
+
+  // ── Two plans: the row is queued and neither plan is touched ──────────────
+  const ambiguous = new FakeDb([
+    storedPlan({ id: 'plan-a' }),
+    storedPlan({ id: 'plan-b', submitted_at: '2026-10-15T09:00:00.000Z' }),
+  ]);
+  const ambiguousCounts = await quietImport({
+    client: ambiguous.client(), userId: USER, trades: [TRADE], isTradeSource: true, env: ON,
+  });
+  const queuedRow = ambiguous.rows.find((row) => row.source === 'tradovate') ?? {};
+
+  // ── Unlinking is the absence of an action (§F1) ───────────────────────────
+  // Clearing the key is the whole of it: the next import does not find it in
+  // the table and inserts an identical broker row, because the key is
+  // deterministic. Nothing was lost in the link.
+  const unlinked = new FakeDb(auto.rows.map((row) => ({ ...row, broker_trade_key: null })));
+  await quietImport({
+    client: unlinked.client(), userId: USER, trades: [TRADE], isTradeSource: true, env: ON,
+  });
+
+  // ── The confirm button, and the guard against pressing it twice ───────────
+  resetLinkGuard();
+  const confirm = new FakeDb([
+    storedPlan(),
+    { id: 'broker-1', user_id: USER, source: 'tradovate', status: 'closed', unplanned: true,
+      broker_trade_key: TRADE.brokerTradeKey, symbol: SYMBOL, direction: 'short',
+      entry_price: ENTRY, exit_price: EXIT, quantity: 2, actual_pnl: 270 },
+  ]);
+  const confirmOutcome = await confirmLink({
+    client: confirm.client(),
+    brokerRowId: 'broker-1',
+    planId: 'plan-1',
+    flags: { proper_size: true, followed_plan: false },
+  });
+  const confirmed = confirm.rows.find((row) => row.id === 'plan-1') ?? {};
+  const rpcCalls = confirm.statements.filter((s) => s.kind === 'rpc');
+
+  // Two presses of the same button, overlapping. THE SABOTAGE CHECK'S SECOND
+  // TARGET: without the guard both reach the function and the loser raises.
+  resetLinkGuard();
+  const doubled = new FakeDb([
+    storedPlan(),
+    { id: 'broker-1', user_id: USER, source: 'tradovate', status: 'closed', unplanned: true,
+      broker_trade_key: TRADE.brokerTradeKey },
+  ]);
+  const client = doubled.client();
+  const both = await Promise.all([
+    confirmLink({ client, brokerRowId: 'broker-1', planId: 'plan-1' }),
+    confirmLink({ client, brokerRowId: 'broker-1', planId: 'plan-1' }),
+  ]);
+  const doubledRpc = doubled.statements.filter((s) => s.kind === 'rpc').length;
+
+  // ── "לא תוכננה": the row stays, and only the bookkeeping moves ────────────
+  resetLinkGuard();
+  const declined = new FakeDb([
+    { id: 'broker-1', user_id: USER, source: 'tradovate', status: 'closed', unplanned: true,
+      broker_trade_key: TRADE.brokerTradeKey, ...Object.fromEntries(
+        EXECUTION_FACTS_FOR_TEST.map(({ column }) => [column, (storedPlan() as Row)[column] ?? null])
+      ) },
+  ]);
+  const declineOutcome = await declineLink({ client: declined.client(), brokerRowId: 'broker-1' });
+  const declinedRow = declined.rows[0] ?? {};
+
+  group('a unique match becomes one row, and the link survives every later sync', [
+    c('(1) no broker row was inserted — the plan IS the trade',
+      [auto.rows.length, autoCounts.imported, autoCounts.linkedAuto], [1, 0, 1]),
+    c('(2) the plan carries the key, so the next import finds it',
+      linked.broker_trade_key, TRADE.brokerTradeKey),
+    c('(3) and the bookkeeping says who linked it and when',
+      [linked.unplanned, linked.link_method, typeof linked.link_confirmed_at],
+      [false, 'auto', 'string']),
+    c('(4) the thirteen execution facts moved',
+      EXECUTION_FACTS_FOR_TEST.filter(({ column }) => linked[column] === undefined), []),
+    c('(5) the broker\'s own figures, on the trader\'s row',
+      [linked.source, linked.entry_price, linked.exit_price, linked.quantity, linked.actual_pnl, linked.status],
+      ['tradovate', ENTRY, EXIT, 2, 270, 'closed']),
+    // The whole reason one row is the right shape.
+    c('(6) NOT ONE intent column moved',
+      [linked.strategy, linked.stop_loss, linked.take_profit, linked.rr_ratio,
+       linked.trade_reason, linked.emotional_state],
+      ['פריצת טווח', 29900, 29700, 2, 'פריצה של הטווח הלילי', 4]),
+    c('(7) setup_id survived, so the strategy comparison keeps the trade', linked.setup_id, 'setup-7'),
+    // Written on insert only, and an auto-link is not an insert.
+    c('(8) rule_context_source is left exactly as the trader\'s own check left it',
+      linked.rule_context_source, 'reflect_only'),
+
+    // THE ASSERTION THIS GROUP EXISTS FOR.
+    c('(9) the next import of a linked trade sends ZERO statements',
+      auto.writes.length - writesBeforeReimport, 0),
+    c('(10) and reports it as unchanged rather than as a new link',
+      [reimport.unchanged, reimport.linkedAuto, reimport.imported], [1, 0, 0]),
+
+    c('(11) two candidates: the row is queued, not linked',
+      [ambiguous.rows.length, ambiguousCounts.queued, ambiguousCounts.linkedAuto,
+       ambiguousCounts.imported], [3, 1, 0, 1]),
+    c('(12) the queued row is the shape the confirm screen looks for',
+      [queuedRow.unplanned, queuedRow.link_confirmed_at ?? null], [true, null]),
+    c('(13) and neither plan was touched',
+      ambiguous.rows.filter((row) => row.source === 'manual')
+        .every((row) => row.broker_trade_key == null && row.status === 'open'), true),
+
+    c('(14) unlinking is the absence of an action: the next import re-inserts an identical row',
+      unlinked.rows.filter((row) => row.broker_trade_key === TRADE.brokerTradeKey).length, 1),
+
+    c('(15) זו העסקה הזו calls the one function that has a transaction',
+      [rpcCalls.length, rpcCalls[0]?.table, rpcCalls[0]?.values?.method],
+      [1, 'link_broker_trade', 'confirmed']),
+    c('(16) with the two ids it was given',
+      [rpcCalls[0]?.values?.plan_id, rpcCalls[0]?.values?.broker_row_id], ['plan-1', 'broker-1']),
+    c('(17) the merged row is one row, carrying the key and the trader\'s strategy',
+      [confirm.rows.length, confirmed.broker_trade_key, confirmed.strategy, confirmed.unplanned],
+      [1, TRADE.brokerTradeKey, 'פריצת טווח', false]),
+    c('(18) the flags the trader agreed to were written to the plan, not to a row that is gone',
+      [confirmOutcome.ok, confirmed.proper_size, confirmed.followed_plan], [true, true, false]),
+
+    // THE DOUBLE-CONFIRM GUARD.
+    c('(19) two overlapping confirms send ONE call', doubledRpc, 1),
+    c('(20) and the second one says why it did nothing',
+      both.filter((outcome) => outcome.ok === false).map((outcome) => outcome.ok === false && outcome.reason),
+      ['busy']),
+
+    c('(21) לא תוכננה leaves the row where it is, with its key',
+      [declined.rows.length, declinedRow.broker_trade_key, declinedRow.unplanned],
+      [1, TRADE.brokerTradeKey, true]),
+    c('(22) and records that we asked and were answered',
+      [declineOutcome.ok, declinedRow.link_method, typeof declinedRow.link_confirmed_at],
+      [true, 'declined', 'string']),
+  ]);
+}
+
+async function linkCountGroup() {
+  // Two linked trades, one broker trade with no plan, one plan still open.
+  // FOUR trades, and the trader can see all four in their journal.
+  const fourTrades = await loadTradeRuleContext(
+    USER,
+    { source: 'broker_unavailable', isTradeSource: true },
+    ruleDb({
+      taken: [
+        { ...closedRow(100, 'tradovate'), id: '1' },
+        { ...closedRow(-50, 'tradovate'), id: '2' },
+        { ...closedRow(20, 'tradovate'), id: '3' },
+        { ...closedRow(0, 'manual'), id: '4', status: 'open' },
+      ],
+      closedToday: [closedRow(100, 'tradovate'), closedRow(-50, 'tradovate'), closedRow(20, 'tradovate')],
+      recent: [],
+    })
+  );
+
+  // THE WAITING WINDOW, and this is the case step 8 changes the answer to.
+  // An ambiguous import leaves two rows for one trade — the plan, still open,
+  // and the queued broker row — until the trader confirms. `max()` used to
+  // read that as one; a plain row count reads it as two.
+  const waiting = await loadTradeRuleContext(
+    USER,
+    { source: 'broker_unavailable', isTradeSource: true },
+    ruleDb({
+      taken: [
+        { ...closedRow(0, 'manual'), id: '1', status: 'open' },
+        { ...closedRow(-50, 'tradovate'), id: '2' },
+      ],
+      closedToday: [closedRow(-50, 'tradovate')],
+      recent: [],
+    })
+  );
+
+  const hiddenOnly = await loadTradeRuleContext(
+    USER,
+    { source: 'broker_unavailable', isTradeSource: true },
+    ruleDb({
+      taken: [{ ...closedRow(-200, 'tradovate'), id: '1', hidden: true }],
+      closedToday: [{ ...closedRow(-200, 'tradovate'), hidden: true }],
+      recent: [],
+    })
+  );
+
+  // The live count no longer enters the figure at all: the broker reports
+  // CLOSES, and a plan the trader took and has not closed is a trade they took.
+  const verifiedPull = await loadTradeRuleContext(
+    USER,
+    verified(9, 0),
+    ruleDb({
+      taken: [{ ...closedRow(10, 'tradovate'), id: '1' }, { ...closedRow(0, 'manual'), id: '2', status: 'open' }],
+      closedToday: [closedRow(10, 'tradovate')],
+      recent: [],
+    })
+  );
+
+  group('one row is one trade, and the counter just counts rows (§E)', [
+    // The formula §E asked for — linked pairs + unlinked plans + unlinked
+    // broker rows — collapses to this, because a linked pair IS one row.
+    c('(1) 2 linked + 1 broker-only + 1 open plan = 4', fourTrades.todayTradeCount, 4),
+    c('(2) and never max(3,1) = 3', fourTrades.todayTradeCount === 3, false),
+
+    // THE PRICE OF DELETING THE CRUTCH, STATED RATHER THAN HIDDEN. During the
+    // window between an ambiguous import and the trader's confirmation the
+    // same trade does occupy two rows, and this now counts two. It is why
+    // step 8 had to be last — before the queue existed, EVERY imported trade
+    // sat in that window — and it is bounded now: only an ambiguous or
+    // unplanned row ever queues, and confirming it collapses the pair.
+    c('(3) an unconfirmed pair counts twice until the trader resolves it',
+      waiting.todayTradeCount, 2),
+
+    c('(4) a row the trader deleted counts toward nothing',
+      [hiddenOnly.todayTradeCount, hiddenOnly.todayLossAmount], [0, 0]),
+
+    c('(5) the broker\'s live close count no longer moves the trades-taken figure',
+      verifiedPull.todayTradeCount, 2),
+    // Unchanged by step 8, and asserted so that the two halves cannot drift:
+    // the money and the streak still come off the broker's own figures.
+    c('(6) while the money and the streak still do',
+      [verifiedPull.todayLossAmount, verifiedPull.todayClosed.count], [0, 9]),
+  ]);
+}
+
+/** A trade row in each of the four link states, for the debrief gate. */
+function linkStateRow(state: 'manual' | 'linked' | 'queued' | 'declined'): Record<string, unknown> {
+  const broker = {
+    source: 'tradovate',
+    broker_trade_key: TRADE.brokerTradeKey,
+    symbol: SYMBOL,
+    quantity: 2,
+  };
+  if (state === 'manual') return debriefRow({ trade_reason: 'פריצה של הטווח הלילי' });
+  if (state === 'linked') {
+    // The intent the broker row could never have carried, which is the whole
+    // argument for running the debrief on a linked pair and not before.
+    return debriefRow({
+      ...broker,
+      trade_reason: 'פריצה של הטווח הלילי',
+      unplanned: false,
+      link_confirmed_at: '2026-10-16T10:00:00.000Z',
+      link_method: 'auto',
+    });
+  }
+  if (state === 'queued') return debriefRow({ ...broker, unplanned: true, link_confirmed_at: null });
+  return debriefRow({
+    ...broker,
+    unplanned: true,
+    link_confirmed_at: '2026-10-16T10:00:00.000Z',
+    link_method: 'declined',
+    // A trade with no plan behind it carries no intent, which is the whole
+    // reason its prompt has to be a different one.
+    strategy: null, stop_loss: null, take_profit: null, rr_ratio: null, trade_reason: null,
+  });
+}
+
+/** Deps that keep the prompt the model was sent, so the branch is assertable. */
+function promptCapturingDeps(row: Record<string, unknown>) {
+  const { deps, state } = debriefDeps(row);
+  const prompts: string[] = [];
+  deps.callModel = async (content) => {
+    state.modelCalls += 1;
+    for (const block of content as { type: string; text?: string }[]) {
+      if (block.type === 'text' && typeof block.text === 'string') prompts.push(block.text);
+    }
+    return { ...MODEL_REPLY };
+  };
+  return { deps, state, prompts };
+}
+
+async function debriefGateGroup() {
+  // (ג) A row nobody has decided about yet. It may be linked in a minute, and
+  // a debrief of "unplanned" that becomes a linked trade is work thrown away.
+  const queued = linkStateRow('queued');
+  const { deps: queuedDeps, state: queuedState } = promptCapturingDeps(queued);
+  const queuedRes = await respondToDebriefRequest(debriefRequest(), queuedDeps);
+  const queuedBody = await queuedRes.json();
+
+  // (א) The linked pair. The trade the debrief was built for — and the first
+  // time it gets a real stop, a real R:R and a real reason beside real fills.
+  const linked = linkStateRow('linked');
+  const { deps: linkedDeps, state: linkedState, prompts: linkedPrompts } =
+    promptCapturingDeps(linked);
+  await respondToDebriefRequest(debriefRequest(), linkedDeps);
+  const linkedPrompt = linkedPrompts[0] ?? '';
+  // The second request is the dedupe gate, which the link path must respect.
+  await respondToDebriefRequest(debriefRequest(), linkedDeps);
+
+  // (ב) Confirmed unplanned. It runs, with a prompt that does not score a
+  // form the trader never claimed to have filled in.
+  const declined = linkStateRow('declined');
+  const { deps: declinedDeps, state: declinedState, prompts: declinedPrompts } =
+    promptCapturingDeps(declined);
+  await respondToDebriefRequest(debriefRequest(), declinedDeps);
+  const declinedPrompt = declinedPrompts[0] ?? '';
+
+  // A hand-entered trade, which is every trade this route has ever been
+  // asked about. Nothing here may change for it.
+  const manual = linkStateRow('manual');
+  const { deps: manualDeps, state: manualState, prompts: manualPrompts } =
+    promptCapturingDeps(manual);
+  await respondToDebriefRequest(debriefRequest(), manualDeps);
+
+  group('the debrief runs on a decided trade and never on a waiting one (§D)', [
+    // THE ASSERTION THIS GROUP EXISTS FOR: not "returns an error" — spends
+    // nothing.
+    c('(1) a queued row calls the model ZERO times', queuedState.modelCalls, 0),
+    c('(2) and says why, so the UI does not show it as a failure',
+      [queuedRes.status, queuedBody.awaitingLink], [409, true]),
+    c('(3) nothing was written to it either',
+      [queued.debrief_generated_at ?? null, queued.plan_score ?? null], [null, null]),
+
+    c('(4) a linked pair runs', linkedState.modelCalls, 1),
+    c('(5) and the prompt carries the intent the broker row never had',
+      [linkedPrompt.includes('Stop Loss: 95'), linkedPrompt.includes('R:R ratio: 3'),
+       linkedPrompt.includes('Entry reason (the plan): —')],
+      [true, true, false]),
+    c('(6) the planning breakdown is in it', linkedPrompt.includes('תכנון (planning)'), true),
+    c('(7) and a second request after the link still spends nothing', linkedState.modelCalls, 1),
+
+    c('(8) a confirmed-unplanned row runs too', declinedState.modelCalls, 1),
+    // The whole of the branch: no planning score, and the model is told why.
+    c('(9) with NO planning section in the prompt',
+      declinedPrompt.includes('תכנון (planning)'), false),
+    c('(10) and told that there was no plan to measure',
+      declinedPrompt.includes('NO PLAN'), true),
+    c('(11) a manual trade is unaffected',
+      [manualState.modelCalls, (manualPrompts[0] ?? '').includes('תכנון (planning)')], [1, true]),
+  ]);
+}
+
+async function confirmScreenGroup() {
+  // A short that went to target: planned at 29830 with a 70-point stop and an
+  // 80-point target, entered 4 points away from the plan, exited past the
+  // target. Every proposal below is one comparison against these two rows.
+  const brokerFacts = { direction: 'short' as const, entry_price: 29834, exit_price: 29767, quantity: 2 };
+  const plan = { entry_price: 29830, stop_loss: 29900, take_profit: 29780, units: 2, quantity: null };
+
+  const flags = proposeFlags(plan, brokerFacts);
+  const byColumn = Object.fromEntries(flags.map((flag) => [flag.column, flag]));
+
+  // A fill of three against a plan for two.
+  const oversized = proposeFlags(plan, { ...brokerFacts, quantity: 3 });
+  // An exit short of the target, in profit: the exited_early proposal.
+  const early = proposeFlags(plan, { ...brokerFacts, exit_price: 29800 });
+  // Stopped out. A loss is not an early exit.
+  const stopped = proposeFlags(plan, { ...brokerFacts, exit_price: 29905 });
+  // No target on the plan: nothing to say about either judgement flag.
+  const noTarget = proposeFlags({ ...plan, take_profit: null }, brokerFacts);
+
+  group('the confirm screen reads one state and proposes what it can justify', [
+    c('(1) the four states, off three columns', [
+      linkState({ source: 'manual' }),
+      linkState({ source: 'tradovate', unplanned: false, link_confirmed_at: '2026-10-16T10:00:00.000Z' }),
+      linkState({ source: 'tradovate', unplanned: true, link_confirmed_at: null }),
+      linkState({ source: 'tradovate', unplanned: true, link_confirmed_at: '2026-10-16T10:00:00.000Z' }),
+    ], [null, 'linked', 'queued', 'declined']),
+    // Every row the import has written since 15.10 looks like this, and the
+    // queue is where they genuinely belong.
+    c('(2) a row written before migration 035 reads as queued',
+      linkState({ source: 'tradovate', unplanned: true }), 'queued'),
+    c('(3) the מקור row needs three sentences, not two',
+      [LINK_STATE_COPY.linked, LINK_STATE_COPY.queued, LINK_STATE_COPY.declined],
+      ['Tradovate · מקושרת לתוכנית', 'Tradovate · ממתינה לשיוך', 'Tradovate · לא תוכננה']),
+    c('(4) a deleted row is not in the queue',
+      [isQueuedBrokerRow({ source: 'tradovate', unplanned: true, link_confirmed_at: null }),
+       isQueuedBrokerRow({ source: 'tradovate', unplanned: true, link_confirmed_at: null, hidden: true })],
+      [true, false]),
+    c('(5) the banner counts in Hebrew that reads',
+      [queueBannerText(1), queueBannerText(3)],
+      ['עסקה אחת מ-Tradovate ממתינה לשיוך', '3 עסקאות מ-Tradovate ממתינות לשיוך']),
+    // §F4: after the link they are one row, so hiding it hides the plan.
+    c('(6) deleting a linked row warns that the plan goes with it',
+      deleteWarningText({ source: 'tradovate', unplanned: false, link_confirmed_at: 'x' })
+        .includes('מקושרת לתוכנית שכתבת'), true),
+    c('(7) and an ordinary row keeps the ordinary sentence',
+      deleteWarningText({ source: 'manual' }), 'האם אתה בטוח שברצונך למחוק עסקה זו?'),
+
+    c('(8) proper_size is the one unambiguous flag: two numbers, one comparison',
+      [byColumn.proper_size?.value, byColumn.proper_size?.reason], [true, 'כמות תואמת: 2 מול 2']),
+    c('(9) and it says so when they differ',
+      oversized.find((flag) => flag.column === 'proper_size')?.reason, 'כמות שונה מהמתוכנן: 2 מול 3'),
+
+    c('(10) an exit at or beyond the target is not an early exit',
+      byColumn.exited_early?.value, false),
+    c('(11) an exit in profit, short of the target, is',
+      early.find((flag) => flag.column === 'exited_early')?.value, true),
+    c('(12) and a loss is neither', [
+      stopped.find((flag) => flag.column === 'exited_early')?.value,
+      stopped.find((flag) => flag.column === 'exited_early')?.reason,
+    ], [false, 'העסקה נסגרה בהפסד — לא יציאה מוקדמת מרווח']),
+
+    c('(13) followed_plan: entry near the planned price and an exit at the target',
+      byColumn.followed_plan?.value, true),
+    c('(14) and not when the entry is far from it',
+      proposeFlags(plan, { ...brokerFacts, entry_price: 29870 })
+        .find((flag) => flag.column === 'followed_plan')?.value, false),
+
+    // NO "UNKNOWN" CHECKBOX. A flag that cannot be computed is not offered,
+    // because an unchecked box with "we could not tell" invites the trader to
+    // confirm a `false` that means nothing.
+    c('(15) a plan with no target offers only the flag it can justify',
+      noTarget.map((flag) => flag.column), ['proper_size']),
+    c('(16) and a trade with no size on either side offers nothing at all',
+      proposeFlags({}, { direction: 'short' }).map((flag) => flag.column), []),
+    c('(17) every proposal carries its own rationale',
+      flags.filter((flag) => flag.reason.trim() === '').length, 0),
+  ]);
+}
+
 async function alertSummaryGroup() {
   // A SHORT THAT MADE MONEY. entry above exit, `actual_pnl` positive — the
   // test that used to read `exit_price > entry_price` called this a loss.
@@ -1818,6 +2470,13 @@ async function main() {
   await alertSummaryGroup();
   await alertWindowGroup();
   await alertImportGroup();
+
+  // Stage 3b — the matcher, the merge, the counter and the debrief gate.
+  await matchRuleGroup();
+  await linkWriteGroup();
+  await linkCountGroup();
+  await debriefGateGroup();
+  await confirmScreenGroup();
 
   console.log('');
   if (failures.length > 0) {

@@ -69,9 +69,15 @@ export const SYNC_UNAVAILABLE: BrokerSyncOutcome = Object.freeze({ source: 'brok
 export const SYNC_REFLECT_ONLY: BrokerSyncOutcome = Object.freeze({ source: 'reflect_only' });
 
 /**
- * The seven NUMERIC fields of {@link BrokerImportCounts}, in the order it
- * declares them. `ran` is the eighth and is checked on its own, because it is
- * a boolean and because it is the one the display branches on.
+ * The seven NUMERIC fields of {@link BrokerImportCounts} THAT HAVE ALWAYS BEEN
+ * THERE, in the order it declares them. `ran` is checked on its own, because
+ * it is a boolean and because it is the one the display branches on.
+ *
+ * `linkedAuto` and `queued` are deliberately NOT here. A body missing
+ * `imported` is not a body we understand and the whole response is refused;
+ * a body missing the two Stage 3b counts is a deployment from before Stage 3b,
+ * which linked nothing because it could not — so they are read below as
+ * optional with a floor of zero, the same rule `importEnabled` follows.
  */
 const COUNT_FIELDS = [
   'offered',
@@ -125,6 +131,10 @@ export function readSyncResponse(body: unknown): BrokerSyncOutcome {
     ran: b.ran,
     offered: counts.offered,
     imported: counts.imported,
+    // Optional on the wire, zero when absent — see COUNT_FIELDS on why these
+    // two are not treated like the seven above.
+    linkedAuto: typeof b.linkedAuto === 'number' && Number.isFinite(b.linkedAuto) ? b.linkedAuto : 0,
+    queued: typeof b.queued === 'number' && Number.isFinite(b.queued) ? b.queued : 0,
     updated: counts.updated,
     unchanged: counts.unchanged,
     skippedOpen: counts.skippedOpen,
@@ -183,6 +193,20 @@ function addedSentence(n: number): string {
 
 function updatedSentence(n: number): string {
   return n === 1 ? 'עודכנה עסקה אחת' : `עודכנו ${n} עסקאות`;
+}
+
+/**
+ * A trade that found the plan behind it (Stage 3b).
+ *
+ * ITS OWN CLAUSE AND NOT FOLDED INTO `addedSentence`, because what happened is
+ * different and better: nothing was added to the journal — one of the trader's
+ * OWN plans now carries the result of the trade they planned. "נוספה עסקה
+ * אחת" would describe it as a new row, and the row is not new.
+ */
+function linkedSentence(n: number): string {
+  return n === 1
+    ? 'עסקה אחת שויכה לתוכנית שכתבת'
+    : `${n} עסקאות שויכו לתוכניות שכתבת`;
 }
 
 /**
@@ -247,14 +271,23 @@ export function describeSyncOutcome(outcome: BrokerSyncOutcome): SyncMessage {
     };
   }
 
-  const text =
-    outcome.imported > 0
-      ? addedSentence(outcome.imported)
-      : outcome.updated > 0
-        ? updatedSentence(outcome.updated)
-        : 'הכל מעודכן';
+  // The clauses that actually happened, newsworthy first. An update is only
+  // mentioned when it is the ONLY thing that happened, which is the precedence
+  // this function already had — a run that imported and updated reads as an
+  // import. A link is mentioned always, because it is the one outcome the
+  // trader has no other way to notice: no row appeared, one of their plans
+  // quietly grew a result.
+  const clauses: string[] = [];
+  if (outcome.imported > 0) clauses.push(addedSentence(outcome.imported));
+  if (outcome.linkedAuto > 0) clauses.push(linkedSentence(outcome.linkedAuto));
+  if (clauses.length === 0 && outcome.updated > 0) clauses.push(updatedSentence(outcome.updated));
 
-  return { text, detail, reconnect: false, problem: false };
+  return {
+    text: clauses.length > 0 ? clauses.join(' · ') : 'הכל מעודכן',
+    detail,
+    reconnect: false,
+    problem: false,
+  };
 }
 
 /**
@@ -267,5 +300,9 @@ export function describeSyncOutcome(outcome: BrokerSyncOutcome): SyncMessage {
  */
 export function syncChangedRows(outcome: BrokerSyncOutcome): boolean {
   return outcome.source === 'broker_verified' && outcome.ran &&
-    (outcome.imported > 0 || outcome.updated > 0);
+    // `linkedAuto` belongs here for the same reason it gets its own clause in
+    // the copy: it changes a row that is already on screen, from an open plan
+    // to a closed trade with a result. Leaving it out would show the trader
+    // "עסקה אחת שויכה לתוכנית שכתבת" over a list that still says פתוחה.
+    (outcome.imported > 0 || outcome.linkedAuto > 0 || outcome.updated > 0);
 }

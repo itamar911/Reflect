@@ -1,11 +1,19 @@
 'use client';
 
-import { useState, useMemo, useId, useRef, useEffect } from 'react';
+import { Fragment, useState, useMemo, useId, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { AlertTriangle, Bot, Eye, Inbox, MoreHorizontal, Pencil, Trash2, X } from 'lucide-react';
 import CloseTrade, { AIDebriefView, type AIDebriefResult } from '@/components/journal/CloseTrade';
+import LinkConfirm from '@/components/journal/LinkConfirm';
 import { readStoredDebrief } from '@/lib/journal/debrief';
+import {
+  deleteWarningText,
+  isQueuedBrokerRow,
+  LINK_STATE_COPY,
+  linkState,
+  queueBannerText,
+} from '@/lib/journal/link';
 import EmotionalStateSlider from '@/components/trade/EmotionalStateSlider';
 import { createClient } from '@/lib/supabase/client';
 import { formatPnlPoints, calcRR } from '@/lib/utils';
@@ -101,6 +109,18 @@ interface Trade {
   debrief_ai?: unknown;
   /** When they were written. Null means no debrief has ever been generated. */
   debrief_generated_at?: string | null;
+
+  // ── The link bookkeeping (REF-107 Stage 3b) ───────────────────────────────
+  //
+  // Optional for the third time and for the third identical reason: the
+  // columns arrive with migration 035. `linkState` in lib/journal/link.ts
+  // reads an absent `link_confirmed_at` on an unplanned broker row as
+  // "waiting to be assigned", which is what such a row is.
+
+  /** When the trader (or the matcher) decided. Null means the queue. */
+  link_confirmed_at?: string | null;
+  /** 'auto', 'confirmed' or 'declined'. Who decided, for an audit of §F1. */
+  link_method?: string | null;
 }
 
 /**
@@ -165,6 +185,17 @@ function fmtPrice(v: number) {
 }
 
 const PAGE_SIZES = [15, 30, 50, 100];
+
+/**
+ * How many owed debriefs one page load will ask for. See the sweep below.
+ *
+ * Three, because this spends money from a render: at roughly $0.008 a debrief
+ * (§D) the worst load costs two cents, and a fourth row simply waits for the
+ * next one. The number is here rather than inline because it is the knob
+ * somebody will want to turn, and because the reason for its value is the
+ * reason it exists at all.
+ */
+const AUTO_DEBRIEF_PER_LOAD = 3;
 
 /**
  * Accessible name for a row's open-detail control.
@@ -307,7 +338,21 @@ function MobileTradeCard({ t, onView, onEdit, onDelete, onClose, onDebrief, hasD
 }
 
 // ── Root ──────────────────────────────────────────────────────────────────────
-export default function JournalClient({ trades: initialTrades }: { trades: Trade[] }) {
+export default function JournalClient({
+  trades: initialTrades,
+  queueCount = 0,
+}: {
+  trades: Trade[];
+  /**
+   * How many imported trades are waiting to be assigned to a plan.
+   *
+   * Derived on the server (trades/page.tsx) so the number is a fact about the
+   * render that produced the list, not about this component's local state —
+   * which lags by one write after a decline. Defaulted so the prop is additive
+   * for anything that renders this without it.
+   */
+  queueCount?: number;
+}) {
   const [trades,       setTrades]       = useState<Trade[]>(initialTrades);
   const [search,       setSearch]       = useState('');
   const [selected,     setSelected]     = useState<Set<string>>(new Set());
@@ -474,6 +519,118 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
     rowRefs.current[id]?.focus();
   }, [trades]);
 
+  /**
+   * Ask for the debrief of a row that has just been decided about.
+   *
+   * ONLY THE ID IS SENT. The route re-reads the authoritative row for the
+   * score and the prompt — it has done since Stage 3a — so a payload built
+   * here would be ignored for everything except `id`, and sending the
+   * client's idea of the row would be the one way to make the two disagree.
+   *
+   * FIRE AND FORGET, deliberately. The modal is closing and, on a link, the
+   * row's id has changed under it, so there is nothing left on screen to put
+   * the answer into. The route STORES it (Stage 3a), so it is there the next
+   * time the trader opens the row, and the dedupe gate means this request is
+   * the only one that will ever be paid for.
+   */
+  function requestDebrief(tradeId: string) {
+    const body = new FormData();
+    body.append('trade', JSON.stringify({ id: tradeId }));
+    void fetch('/api/ai-debrief', { method: 'POST', body }).catch(() => {
+      // The sweep below picks it up on the next load. A failed coaching note
+      // is not something to interrupt the trader about.
+    });
+  }
+
+  /**
+   * A queued row has been decided about (REF-107 Stage 3b).
+   *
+   * THE TWO OUTCOMES MOVE THE LIST DIFFERENTLY, and both have to be reflected
+   * locally as well as refreshed, because this component seeds `useState` from
+   * its prop and only re-reads it when `trades/page.tsx` changes the `key`:
+   *
+   * - `linked`: the broker row is GONE — the function deleted it and the plan
+   *   now carries the trade. So it leaves the list here, and the row count the
+   *   server renders changes, which remounts this component with the merged
+   *   plan in it.
+   * - `declined`: the row stays exactly where it is and only its bookkeeping
+   *   moved. Nothing the `key` is built from changes, so there is no remount,
+   *   so the two columns are patched in locally — otherwise the `מקור` row
+   *   would go on saying "ממתינה לשיוך" about a question already answered.
+   *
+   * The refresh is what updates the banner's count in both cases.
+   */
+  function handleLinkResolved(
+    rowId: string,
+    outcome: { kind: 'linked'; planId: string } | { kind: 'declined' }
+  ) {
+    if (outcome.kind === 'linked') {
+      setTrades(prev => prev.filter(t => t.id !== rowId));
+    } else {
+      setTrades(prev => prev.map(t => t.id === rowId
+        ? { ...t, link_confirmed_at: new Date().toISOString(), link_method: 'declined' }
+        : t));
+    }
+
+    // §D cases א and ב: the debrief runs the moment the trade has an answer,
+    // and on the row that now holds the trade — the PLAN after a link, the
+    // broker row after a decline. This is the first time the debrief gets a
+    // real stop, a real R:R and a real reason beside real fills, which §D
+    // calls the trade it was built for.
+    requestDebrief(outcome.kind === 'linked' ? outcome.planId : rowId);
+
+    setViewTradeId(null);
+    router.refresh();
+  }
+
+  /**
+   * The debriefs the cron's auto-links are owed (REF-107 Stage 3b, §G step 7).
+   *
+   * THE IMPORT NEVER CALLS CLAUDE, and this effect is why it does not have to.
+   * The nightly job runs over every connected trader with a 60-second budget;
+   * a model call inside its loop would put a third party's latency on the
+   * critical path of a job whose whole purpose is to be finished before
+   * anybody is awake, and a timeout mid-loop would leave some traders
+   * imported and others not.
+   *
+   * SO THE QUEUE IS THE DATA, NOT A TABLE. "A decided trade with no stored
+   * debrief" is already a complete description of the work outstanding — it
+   * needs no column, no job table and nothing to keep in sync — and the next
+   * time the trader opens their journal, this asks for them. The dedupe gate
+   * in the route is what makes that safe to do from a render.
+   *
+   * THREE BOUNDS, because this spends money from a page load:
+   *
+   *   1. **Decided in the last day.** The cron ran at 03:30; a trader opening
+   *      the journal at 09:00 is inside it. A historical backlog — rows
+   *      decided weeks ago, or declined in bulk — is NOT swept, so the cost
+   *      of this is bounded by what actually happened yesterday rather than
+   *      by how long the trader has used the product.
+   *   2. **Three per load.** At roughly $0.008 a debrief (§D), that is two
+   *      cents for the worst load, and a fourth row waits for the next one.
+   *   3. **Once per mount.** The ref, not the state: `trades` changes on
+   *      every edit and delete, and re-running this on each of them would
+   *      re-request the rows the first run has not finished storing yet.
+   */
+  const sweptRef = useRef(false);
+  useEffect(() => {
+    if (sweptRef.current) return;
+    sweptRef.current = true;
+
+    const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+    const owed = trades.filter(t => {
+      const state = linkState(t);
+      if (state !== 'linked' && state !== 'declined') return false;
+      if (t.debrief_generated_at) return false;
+      const decided = Date.parse(String(t.link_confirmed_at ?? ''));
+      return Number.isFinite(decided) && decided >= dayAgo;
+    });
+
+    for (const trade of owed.slice(0, AUTO_DEBRIEF_PER_LOAD)) requestDebrief(trade.id);
+    // Deliberately not depending on `trades`: see bound 3 above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   function handleTradeUpdated(updated: Trade) {
     setTrades(prev => prev.map(t => t.id === updated.id ? updated : t));
     setEditingTradeId(null);
@@ -488,8 +645,35 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
     return Array.from({ length: end - start + 1 }, (_, i) => start + i);
   }, [page, totalPages]);
 
+  /** The first row still waiting, which is what the banner opens. */
+  const firstQueued = useMemo(() => trades.find(isQueuedBrokerRow) ?? null, [trades]);
+
   return (
     <div dir="rtl" className="flex flex-col gap-4">
+      {/* THE BANNER (REF-107 Stage 3b, §C). It exists because a queue nobody
+          sees is a queue that never empties, and it is at the top of the page
+          the trader already visits rather than on a route they would have to
+          remember. It opens the first waiting row, because a banner that only
+          announces work is a banner that gets ignored.
+
+          Hidden at zero: the count comes from the server, so an empty queue
+          renders nothing at all rather than "0 עסקאות ממתינות". */}
+      {queueCount > 0 && firstQueued && (
+        <button
+          type="button"
+          onClick={() => setViewTradeId(firstQueued.id)}
+          aria-haspopup="dialog"
+          className="flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold text-right transition-all hover:opacity-80"
+          style={{
+            background: 'rgba(0,210,210,0.1)',
+            border: '1px solid rgba(0,210,210,0.3)',
+            color: GOLD,
+          }}>
+          <Inbox aria-hidden="true" size={15} />
+          <span>{queueBannerText(queueCount)}</span>
+          <span className="text-xs font-medium" style={{ color: TEXT2 }}>— שייך לתוכנית</span>
+        </button>
+      )}
 
       {/* Summary strip — one slim card, internal dividers */}
       <div className="jr-summary">
@@ -886,7 +1070,9 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
         return (
           <TradeDetailModal
             trade={t}
+            plans={trades}
             onClose={() => setViewTradeId(null)}
+            onLinkResolved={outcome => handleLinkResolved(t.id, outcome)}
             debriefResult={debriefResults[t.id]}
             onDebrief={result => setDebriefResults(prev => ({ ...prev, [t.id]: result }))}
           />
@@ -907,8 +1093,14 @@ export default function JournalClient({ trades: initialTrades }: { trades: Trade
               <button onClick={() => { setDeletingTradeId(null); setDeleteError(''); }}
                 style={{ color: MUTED, fontSize: 18, lineHeight: 1, fontWeight: 600 }}>×</button>
             </div>
+            {/* §F4. On a LINKED row the plan and the broker trade are one
+                row, so hiding it hides the trader's own intent with it — the
+                strategy, the stop, the reason they wrote. A trader who meant
+                to remove a duplicate import would lose the most valuable
+                thing this product asked them for, and this dialog is the only
+                place left to say so. */}
             <p className="text-sm" style={{ color: TEXT2 }}>
-              האם אתה בטוח שברצונך למחוק עסקה זו?
+              {deleteWarningText(t)}
             </p>
             {deleteError && <p className="text-xs" style={{ color: RED }}>{deleteError}</p>}
             <div className="flex gap-2 pt-1">
@@ -1248,9 +1440,13 @@ function Modal({ onClose, labelledBy, initialFocusRef, initialFocus, children }:
   );
 }
 
-function TradeDetailModal({ trade, onClose, debriefResult, onDebrief }: {
+function TradeDetailModal({ trade, plans, onClose, onLinkResolved, debriefResult, onDebrief }: {
   trade: Trade;
+  /** Every row on the page. The panel narrows them to candidates itself. */
+  plans: readonly Trade[];
   onClose: () => void;
+  /** The row left the queue. Null while it is not a queued row at all. */
+  onLinkResolved: (outcome: { kind: 'linked'; planId: string } | { kind: 'declined' }) => void;
   debriefResult?: AIDebriefResult;
   onDebrief?: (result: AIDebriefResult) => void;
 }) {
@@ -1318,8 +1514,13 @@ function TradeDetailModal({ trade, onClose, debriefResult, onDebrief }: {
     // intent columns are empty because nobody filled a form (REF-107 Stage 2).
     // Absent entirely on a manual row — a journal that labels hand-entered
     // trades "ידני" is a journal that treats its own default as a special case.
-    ...(isBrokerRow(trade)
-      ? ([['מקור', trade.unplanned ? 'Tradovate · לא תוכננה' : 'Tradovate']] as [string, string][])
+    // Three states now, not two (REF-107 Stage 3b). The sentence Stage 2
+    // shipped — `Tradovate · לא תוכננה` — was about to be printed over a
+    // LINKED trade the moment the merge cleared `unplanned`, which is "not
+    // planned" written across a trade the trader planned carefully.
+    // lib/journal/link.ts holds the three sentences and the predicate.
+    ...(linkState(trade)
+      ? ([['מקור', LINK_STATE_COPY[linkState(trade)!]]] as [string, string][])
       : []),
     // An intent column the row does not carry shows "—" — the same answer the
     // trader gets for a missing exit price two rows down — rather than "null",
@@ -1371,12 +1572,28 @@ function TradeDetailModal({ trade, onClose, debriefResult, onDebrief }: {
 
       <div className="flex flex-col gap-0">
         {rows.map(([label, value], i) => (
-          <div key={label}
-            className="flex items-start justify-between gap-4 py-2.5"
-            style={{ borderBottom: i < rows.length - 1 ? '1px solid var(--color-tg-border)' : 'none' }}>
-            <span className="text-xs font-semibold shrink-0" style={{ color: 'var(--color-tg-muted)', minWidth: 90 }}>{label}</span>
-            <span className="text-xs text-right" style={{ color: 'var(--color-tg-text)', wordBreak: 'break-word' }}>{String(value ?? '—')}</span>
-          </div>
+          <Fragment key={label}>
+            <div
+              className="flex items-start justify-between gap-4 py-2.5"
+              style={{ borderBottom: i < rows.length - 1 ? '1px solid var(--color-tg-border)' : 'none' }}>
+              <span className="text-xs font-semibold shrink-0" style={{ color: 'var(--color-tg-muted)', minWidth: 90 }}>{label}</span>
+              <span className="text-xs text-right" style={{ color: 'var(--color-tg-text)', wordBreak: 'break-word' }}>{String(value ?? '—')}</span>
+            </div>
+            {/* DIRECTLY UNDER THE מקור ROW, which is §C's whole argument: that
+                row is first in this modal because it changes how every row
+                beneath it reads, and the decision about it belongs with it
+                rather than in a screen of its own. */}
+            {label === 'מקור' && isQueuedBrokerRow(trade) && (
+              <div className="py-2">
+                <LinkConfirm
+                  trade={trade}
+                  plans={plans}
+                  onResolved={onLinkResolved}
+                  onSkip={onClose}
+                />
+              </div>
+            )}
+          </Fragment>
         ))}
       </div>
 

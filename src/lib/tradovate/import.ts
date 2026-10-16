@@ -83,8 +83,29 @@
  * fact list.
  *
  * `unplanned` and `rule_context_source` are written ON INSERT ONLY, for the same
- * reason. Stage 3 links a plan to an imported trade and will clear `unplanned`;
- * a re-import that set it back to true would undo that link on the next pull.
+ * reason. Stage 3b's auto-link clears `unplanned`, and a re-import that set it
+ * back to true would undo that link on the next pull.
+ *
+ *
+ * THE MATCHING PASS, AND WHY A TRADE CAN ARRIVE WITHOUT A ROW OF ITS OWN
+ * ---------------------------------------------------------------------
+ *
+ * Stage 3b (§B) put a question in front of the insert: does this trade belong
+ * to a plan the trader submitted before they entered? {@link decideLinks} asks
+ * it once per run, in one grouped select, with zero upstream calls — and when
+ * the answer is exactly one plan, {@link linkOnto} writes the trade ONTO that
+ * plan and no broker row is created at all.
+ *
+ * SO THE TWO COLUMN SETS NOW HAVE A THIRD CASE, and the counts say which
+ * happened: `imported` is a row that was inserted, `linkedAuto` is a plan that
+ * became the trade, `queued` is a trade the matcher refused to guess about.
+ * `imported + linkedAuto` is how many trades the journal gained.
+ *
+ * ONE ROW PER TRADE, ALWAYS, is the property all of this protects (§0א). Eleven
+ * readers count rows — the journal, the calendar, the dashboard, the stats, the
+ * rule engine, the weekly summary — and none of them knows what a link is. A
+ * design that left two rows for one trade, even for a moment, would have to
+ * teach all eleven; this one does not have to teach any.
  *
  *
  * THE THREE RULES THAT DECIDE WHETHER A TRADE IS IMPORTED
@@ -151,6 +172,12 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 import type { TradovateEnvironment } from './hosts';
 import type { BrokerTrade } from './fills';
+import {
+  MATCH_WINDOW_MS,
+  matchBrokerTrade,
+  type CandidatePlan,
+  type MatchResult,
+} from './match';
 import { redactSecrets } from './redact';
 import { TRADING_CURRENCY } from '@/lib/money';
 import type { TradovateHost } from '@/lib/types';
@@ -186,6 +213,18 @@ export function isImportEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env[IMPORT_FLAG] === '1';
 }
 
+/**
+ * How many plans one grouped read may bring back.
+ *
+ * The read is already narrowed to `status = 'open'`, `source = 'manual'` and an
+ * eight-hour window around the batch, so a trader would have to have submitted
+ * two hundred plans inside one trading day to reach this. It is here because an
+ * unbounded select in a daily job over every connected trader is the kind of
+ * thing that is fine until it is not, and the failure mode if it ever bites is
+ * the queue — which is a screen the trader can work, not a lost trade.
+ */
+const CANDIDATE_LIMIT = 200;
+
 /** What one import did. Counts only — see the header. */
 export interface BrokerImportCounts {
   /**
@@ -198,6 +237,23 @@ export interface BrokerImportCounts {
   offered: number;
   /** Rows inserted. */
   imported: number;
+  /**
+   * Trades that found exactly one plan and were written onto it (Stage 3b).
+   *
+   * These produced NO broker row at all — the plan is the trade. So they are
+   * not in `imported`, and `imported + linkedAuto` is how many trades the
+   * journal gained.
+   */
+  linkedAuto: number;
+  /**
+   * Trades that found no plan, or more than one, and went to the queue.
+   *
+   * A count of DECISIONS, where `imported` is a count of ROWS: they differ
+   * when an insert is refused or loses the unique race. Both are logged so
+   * that "the matcher declined to guess" can be told apart from "the database
+   * declined to write".
+   */
+  queued: number;
   /** Existing rows whose execution facts had moved and were restated. */
   updated: number;
   /** Existing rows already correct. Nothing was written for these. */
@@ -214,6 +270,8 @@ const NOTHING: BrokerImportCounts = Object.freeze({
   ran: false,
   offered: 0,
   imported: 0,
+  linkedAuto: 0,
+  queued: 0,
   updated: 0,
   unchanged: 0,
   skippedOpen: 0,
@@ -389,6 +447,91 @@ export interface ImportRequest {
   isTradeSource: boolean;
   /** Test seam for the flag. Production reads process.env. */
   env?: NodeJS.ProcessEnv;
+  /**
+   * Now, ms since epoch. Test seam; production reads the clock.
+   *
+   * Used for two things and both are in the matcher's hands: the future-anchor
+   * guard ./match.ts documents, and the `link_confirmed_at` an auto-link
+   * stamps. One clock for both, so a run cannot disagree with itself.
+   */
+  nowMs?: number;
+}
+
+/**
+ * Which plan, if any, each new trade belongs to (Stage 3b, §B).
+ *
+ * ONE GROUPED SELECT FOR THE WHOLE BATCH AND ZERO UPSTREAM CALLS, which is
+ * what §B measured and is the reason the matcher runs here rather than in a
+ * pass of its own. The pull has already happened — `importBrokerTrades`
+ * receives rows and never touches the network — so the entire cost of this
+ * feature, on all four triggers, is one more `trade_plans` read per run,
+ * independent of how many trades are in it.
+ *
+ * It runs BEFORE any insert, and that is the point rather than an
+ * optimisation: a pass afterwards would create the two-rows-for-one-trade
+ * window that the single-row data model exists to avoid (§0א). Here, a trade
+ * that finds its plan never has a second row, not even for a moment.
+ *
+ * A PLAN IS CLAIMED ONCE. The loop walks the batch oldest-entry first and
+ * drops each matched plan from the pool, which is what makes a scale-in behave
+ * the way §B describes: one plan, three round trips, the earliest links and
+ * the rest queue. In the database the same thing happens for free — a linked
+ * plan is no longer `open` — but inside one batch nothing has been written
+ * yet, so the pool is the only thing that knows.
+ *
+ * A FAILED READ MEANS "NO MATCH", NOT "NO IMPORT". The trades go to the queue,
+ * which is a screen the trader can work in one click, and the alternative —
+ * skipping the import — is a trade missing from the journal. The cost is that
+ * the auto-link is not retried for those trades later: the broker row carries
+ * the key from then on, so the next run finds it and restates it rather than
+ * matching it again. One transient failure therefore costs a confirmation,
+ * never a duplicate and never a loss.
+ */
+async function decideLinks(
+  client: SupabaseClient,
+  userId: string,
+  trades: readonly BrokerTrade[],
+  nowMs: number
+): Promise<Map<string, MatchResult>> {
+  const decisions = new Map<string, MatchResult>();
+  if (trades.length === 0) return decisions;
+
+  const earliest = Math.min(...trades.map((trade) => trade.openedAtMs));
+  const latest = Math.max(...trades.map((trade) => trade.openedAtMs));
+
+  // The widest window the batch can need, and the same two bounds the matcher
+  // applies per trade. Both predicates are repeated in ./match.ts — the query
+  // is here so the batch reads a handful of rows instead of a year of them,
+  // and the rule itself lives in one place.
+  const { data, error } = await client
+    .from('trade_plans')
+    .select('id, status, source, hidden, submitted_at, direction, symbol')
+    .eq('user_id', userId)
+    .eq('status', 'open')
+    .eq('source', 'manual')
+    .gte('submitted_at', new Date(earliest - MATCH_WINDOW_MS).toISOString())
+    .lte('submitted_at', new Date(latest).toISOString())
+    .limit(CANDIDATE_LIMIT);
+
+  if (error) {
+    // The code, never the message. One line, because every trade in the batch
+    // has the same reason.
+    console.info(redactSecrets(`[tradovate][import] candidates:${error.code ?? 'none'}`));
+    return decisions;
+  }
+
+  const pool = new Map<string, CandidatePlan>();
+  for (const plan of (data ?? []) as unknown as CandidatePlan[]) {
+    if (typeof plan.id === 'string') pool.set(plan.id, plan);
+  }
+
+  for (const trade of [...trades].sort((a, b) => a.openedAtMs - b.openedAtMs)) {
+    const result = matchBrokerTrade({ trade, plans: [...pool.values()], nowMs });
+    decisions.set(trade.brokerTradeKey, result);
+    if (result.kind === 'unique') pool.delete(result.planId);
+  }
+
+  return decisions;
 }
 
 /**
@@ -400,7 +543,7 @@ export interface ImportRequest {
  * and the one thing that must not be tolerated here.
  */
 export async function importBrokerTrades(request: ImportRequest): Promise<BrokerImportCounts> {
-  const { client, userId, trades, isTradeSource, env = process.env } = request;
+  const { client, userId, trades, isTradeSource, env = process.env, nowMs = Date.now() } = request;
 
   // Before anything else, and not an assertion about data: a falsy or
   // non-string user id reaching the cron's service-role client is the one bug
@@ -458,6 +601,13 @@ export async function importBrokerTrades(request: ImportRequest): Promise<Broker
     if (typeof key === 'string') existing.set(key, row);
   }
 
+  // The matching pass — one select, for the trades that are not in the journal
+  // already. A trade whose key is stored has nothing to match: it is either a
+  // queued row the trader will decide about, or a plan that was linked on an
+  // earlier run and already carries the key.
+  const unseen = flat.filter((trade) => !existing.has(trade.brokerTradeKey));
+  const decisions = await decideLinks(client, userId, unseen, nowMs);
+
   // Sequential. The batch is a handful of trades, there is no deadline on any
   // of the three call sites, and a parallel write would multiply the unique-
   // violation race below for nothing.
@@ -472,6 +622,20 @@ export async function importBrokerTrades(request: ImportRequest): Promise<Broker
       }
       await restate(client, userId, String(stored.id), stored, trade, counts, refusals);
       continue;
+    }
+
+    // One plan, unambiguously: the trade is written ONTO it and no broker row
+    // is created. `linkOnto` falls through to the insert below if the database
+    // refuses, so the trade reaches the journal either way.
+    const decision = decisions.get(trade.brokerTradeKey);
+    if (decision?.kind === 'unique') {
+      const written = await linkOnto(client, userId, decision.planId, trade, nowMs, refusals);
+      if (written) {
+        counts.linkedAuto += 1;
+        continue;
+      }
+    } else {
+      counts.queued += 1;
     }
 
     const { error } = await client.from('trade_plans').insert(newRow(userId, trade));
@@ -499,6 +663,59 @@ export async function importBrokerTrades(request: ImportRequest): Promise<Broker
 
   report(counts, refusals);
   return counts;
+}
+
+/**
+ * Write a trade onto the plan it belongs to. The auto-link (Stage 3b, §A).
+ *
+ * ONE STATEMENT, WHICH IS WHY THIS PATH NEEDS NO FUNCTION AND NO TRANSACTION.
+ * The confirmation screen's merge needs `link_broker_trade` because it has two
+ * existing rows to reconcile and the partial UNIQUE forces a fixed order over
+ * three statements (§0ג). Here there is no second row and never was: the key
+ * has not been written to the table yet, so moving it onto the plan is a
+ * single UPDATE that either happens or does not.
+ *
+ * WHAT IT WRITES: the thirteen execution facts, the key, and the three
+ * bookkeeping columns. `unplanned` goes to false because the trade WAS planned
+ * — leaving it true would print "Tradovate · לא תוכננה" over a trade the trader
+ * planned carefully, which is the trap §A found in the existing `מקור` row.
+ *
+ * WHAT IT DOES NOT TOUCH: every intent column, and `rule_context_source`. The
+ * fact list contains no intent column by construction, and the statement names
+ * nothing else. `rule_context_source` on this row records what the trader's own
+ * rule check had in hand when they submitted the plan, which is still true and
+ * is not ours to restate.
+ *
+ * RETURNS FALSE RATHER THAN THROWING, and the caller then inserts a broker row
+ * as if the match had never happened. The interesting failure is `23505`: a
+ * concurrent import inserted the same key between the read and now (§F3), so
+ * the key is taken, the link cannot have it, and falling through means the
+ * insert below fails the same way and is retried as the update it should have
+ * been. Both directions of that race end with one row and no lost trade.
+ */
+async function linkOnto(
+  client: SupabaseClient,
+  userId: string,
+  planId: string,
+  trade: BrokerTrade,
+  nowMs: number,
+  refusals: string[]
+): Promise<boolean> {
+  const { error } = await client
+    .from('trade_plans')
+    .update({
+      ...facts(trade),
+      broker_trade_key: trade.brokerTradeKey,
+      unplanned: false,
+      link_confirmed_at: new Date(nowMs).toISOString(),
+      link_method: 'auto',
+    })
+    .eq('id', planId)
+    .eq('user_id', userId);
+
+  if (!error) return true;
+  refusals.push(`link:${error.code ?? 'none'}`);
+  return false;
 }
 
 /** Restate the facts on a row we have already read. Zero writes when correct. */
@@ -582,6 +799,7 @@ async function restateByKey(
 function report(counts: BrokerImportCounts, refusals: readonly string[]): void {
   const line =
     `[tradovate][import] offered=${counts.offered} imported=${counts.imported} ` +
+    `linkedAuto=${counts.linkedAuto} queued=${counts.queued} ` +
     `updated=${counts.updated} unchanged=${counts.unchanged} ` +
     `skippedOpen=${counts.skippedOpen} skippedHidden=${counts.skippedHidden} ` +
     `failed=${counts.failed}` +
