@@ -2825,6 +2825,88 @@ async function bothPathsAgree() {
     c('(4) and it is today alone', [narrow.day.closedCount, narrow.day.net], [1, 500]),
   ]);
 
+  // ── positionFlat: WHOSE position has to be flat (REF-107 Stage 3b) ────────
+  //
+  // `positionFlat` is the gate the import hangs its whole key-stability
+  // argument on (§A3), and until this group nothing measured HOW fills.ts
+  // decides it — scripts/broker-import-check.ts drives both values of the
+  // boolean, but hands them in ready-made. So "does an unrelated open
+  // position keep an unrelated finished trade out of the journal" had no
+  // answer in the suite, which is the gap this closes.
+  //
+  // It does not, and the reason is the shape of the data rather than a
+  // filter: /position/list keys a position PER CONTRACT PER TRADING DAY,
+  // every fill pair names its own `positionId`, and the predicate is
+  // `legs.every(...)` over the group's OWN legs. A position the trade has no
+  // leg in is never consulted.
+  //
+  // CASE (5) IS THE REAL LIMIT, and it is a different question: a position
+  // row is shared by everything that happens on that contract that day, so a
+  // trader who closes a trade in the morning and is holding the SAME contract
+  // again in the afternoon has one position with a non-zero `netPos` — and
+  // the morning trade, which is genuinely finished, waits for the afternoon
+  // one before it reaches the journal. That is the conservative direction §A3
+  // chose on purpose (an absence corrects itself on the next pull, a
+  // duplicate does not), and pinning it here makes a later change to it a
+  // decision rather than an accident.
+  const OTHER_CONTRACT = 778899;
+  const flatOwn: TradovatePosition = { ...POSITION, netPos: 0 };
+  const openOwn: TradovatePosition = { ...POSITION, netPos: 2 };
+  /** A second contract on the same account, still being held. */
+  const openOther: TradovatePosition = {
+    ...POSITION, id: 9002, contractId: OTHER_CONTRACT, netPos: -3,
+  };
+
+  const closedTrip = () =>
+    roundTrip({
+      side: 'long', openAt: '2026-10-14T05:00:00Z', closeAt: '2026-10-14T06:00:00Z',
+      entry: 5000, exit: 5010,
+    });
+
+  const aloneRows = await pullRows(withTrips([closedTrip()], { positions: [flatOwn] }));
+  const besideOtherRows = await pullRows(withTrips([closedTrip()], { positions: [flatOwn, openOther] }));
+  const ownOpenRows = await pullRows(withTrips([closedTrip()], { positions: [openOwn] }));
+  const missingNetPos = await pullRows(
+    withTrips([closedTrip()], {
+      positions: [{ ...POSITION, netPos: undefined as unknown as number }],
+    })
+  );
+  // The afternoon re-entry: a second pair on the SAME position, and the
+  // position still carrying contracts.
+  const sameContractAgain = await pullRows(
+    withTrips(
+      [
+        closedTrip(),
+        roundTrip({
+          side: 'long', openAt: '2026-10-14T07:00:00Z', closeAt: '2026-10-14T08:00:00Z',
+          entry: 5020, exit: 5030,
+        }),
+      ],
+      { positions: [openOwn] }
+    )
+  );
+
+  group('a trade is flat when ITS OWN contract is flat, and not before (§A3)', [
+    c('(1) a finished trade on a flat position is flat',
+      [aloneRows.length, aloneRows[0]?.positionFlat], [1, true]),
+    // THE CASE THIS GROUP WAS ADDED FOR. An open position on another contract
+    // of the same account must not keep a finished trade out of the journal.
+    c('(2) an open position on ANOTHER contract does not touch it',
+      [besideOtherRows.length, besideOtherRows[0]?.positionFlat], [1, true]),
+    c('(3) the trade\'s own contract still being held is not flat',
+      [ownOpenRows.length, ownOpenRows[0]?.positionFlat], [1, false]),
+    // FALSE WHEN UNKNOWN, never true: a netPos we cannot read means we cannot
+    // say the position is flat, and the two failure directions are not
+    // symmetric.
+    c('(4) a netPos that is not a finite number reads as not flat',
+      [missingNetPos.length, missingNetPos[0]?.positionFlat], [1, false]),
+    // The documented limit. Both trades on the contract wait together.
+    c('(5) a later re-entry on the same contract holds the earlier trade back too',
+      sameContractAgain.map((trade) => trade.positionFlat), [false, false]),
+    c('(6) and the pull still returns them, so the day\'s figures are unaffected',
+      sameContractAgain.length, 2),
+  ]);
+
   // ── The route ─────────────────────────────────────────────────────────────
 
   const ROW_TODAY: BrokerTrade = {
