@@ -457,6 +457,54 @@ ORDER BY 2, 3;
 
 
 -- ===========================================================================
+-- 10. A SECURITY DEFINER function with no pinned search_path.
+--
+-- EXPECTED: zero rows.
+--
+-- A SECURITY DEFINER function runs as its OWNER, not as its caller. If it
+-- resolves an unqualified name like `trade_plans` through the caller's
+-- `search_path`, the caller chooses which table the owner's privileges are
+-- applied to — create `my_schema.trade_plans`, put `my_schema` first on the
+-- path, and the function writes there with the owner's rights. Pinning
+-- `SET search_path` on the function removes the caller's say in it.
+--
+-- This is the standing rule for the whole schema, not a note about one
+-- function. It was added with 035's `link_broker_trade` (REF-107 Stage 3a),
+-- which is the first SECURITY DEFINER function this application wrote on its
+-- own behalf — the merge needs a transaction, and PostgREST does not have one
+-- — and it applies to every one that comes after.
+--
+-- `proconfig` is NULL when nothing is set on the function, so the IS NULL
+-- branch is the common finding; the array check catches a function that sets
+-- something else (a timeout, a role) but not the path.
+--
+-- PUBLIC SCHEMA ONLY, for the same reason as rules 2 and 5: Supabase ships
+-- SECURITY DEFINER functions in `storage` and `auth` that are not ours to
+-- change, and a rule that cannot be acted on trains you to skip the report.
+--
+-- Rule 5 is the other half of the pair and is not redundant with this one:
+-- rule 5 asks WHO may call it, this asks WHAT it resolves against. A function
+-- can fail either independently.
+-- ===========================================================================
+SELECT
+  n.nspname                            AS schema_name,
+  p.oid::regprocedure::text            AS object_name,
+  'function.definer_unpinned_path'     AS rule_broken
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'public'
+  AND p.prosecdef
+  AND (
+    p.proconfig IS NULL
+    OR NOT EXISTS (
+      SELECT 1 FROM unnest(p.proconfig) AS cfg
+       WHERE cfg LIKE 'search_path=%'
+    )
+  )
+ORDER BY 1, 2;
+
+
+-- ===========================================================================
 -- ALL OF THE ABOVE, AS ONE RESULT SET
 --
 -- EXPECTED: the two query-9 rows, and nothing else.
@@ -542,6 +590,15 @@ WITH findings AS (
     AND att.attacl IS NOT NULL AND r.rolname IN ('anon','authenticated')
     AND att.attname ~* '(token|secret|key|password)'
     AND att.attname <> 'token_type'
+
+  -- 10: SECURITY DEFINER with an unpinned search_path.
+  UNION ALL
+  SELECT n.nspname, p.oid::regprocedure::text, 'function.definer_unpinned_path'
+  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+  WHERE n.nspname = 'public' AND p.prosecdef
+    AND (p.proconfig IS NULL
+         OR NOT EXISTS (SELECT 1 FROM unnest(p.proconfig) AS cfg
+                         WHERE cfg LIKE 'search_path=%'))
 
   UNION ALL
   SELECT 'storage', b.id, 'bucket.public' FROM storage.buckets b WHERE b.public IS TRUE

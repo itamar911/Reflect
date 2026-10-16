@@ -1,0 +1,226 @@
+-- REF-107 Stage 3a: the AI debrief stops being thrown away.
+--
+-- Adds two columns to `trade_plans`. Creates no table, drops no column, and
+-- writes no row.
+--
+-- RUN THIS BY HAND in the Supabase SQL Editor. Nothing in the repo applies
+-- migrations.
+--
+-- NUMBERING: 029 is reserved for rule_violations and setup_images_delete
+-- (REF-89) and still has no file; 021 is reserved for the
+-- `ai-usage-accounting` branch. 030-034 are applied, 035 is this change's
+-- sibling. 036 is the next number that is neither taken nor reserved. Do not
+-- reuse 029 or 021.
+--
+--
+-- THIS FIXES A BUG THAT IS LIVE TODAY, AND IT HAS NOTHING TO DO WITH THE BROKER
+-- ----------------------------------------------------------------------------
+--
+-- A trader closes a trade. The app runs an AI debrief, shows four paragraphs,
+-- and persists ONE number: `plan_score` (CloseTrade.tsx). The four paragraphs
+-- are never written anywhere. Refresh the page and they are gone — for a
+-- manual trade, logged by hand, with no broker in the picture at all. The two
+-- manual "analyse" buttons do not even persist the score.
+--
+-- And because nothing is stored, nothing can be de-duplicated: every press of
+-- the button is a fresh paid model call for a trade whose facts have not
+-- changed.
+--
+-- So this migration is worth running on its own, before the rest of Stage 3
+-- exists. It is the schema half of §G step 6 of the Stage 3 investigation,
+-- which the report recommended shipping first for exactly this reason.
+--
+--
+-- DEPLOY ORDER: CODE FIRST, THEN THIS FILE — AND THAT IS ENFORCED IN CODE
+-- ----------------------------------------------------------------------
+--
+-- The application does not name either column until `isImportEnabled()`
+-- returns true, which is the same `TRADOVATE_IMPORT_ENABLED` flag 034's
+-- columns are gated behind and which is ALREADY SET in production. So on this
+-- deployment the gate is open the moment the code ships, and the order that
+-- matters is:
+--
+--   1. run this file, THEN 2. deploy the code.
+--
+-- The other order breaks loudly rather than silently — a PostgREST 42703 on
+-- an undefined column, from the debrief route only — and nothing else in the
+-- app is affected. It is the mirror of 034's note, inverted because the flag
+-- is already on.
+--
+-- Reusing the import flag for a debrief feature is a slight overload and is
+-- deliberate: it is one switch for "this database has had the REF-107
+-- migrations run", and a second environment variable for a two-column change
+-- would be a knob nobody remembers the meaning of. Stated here so the next
+-- reader does not go looking for a `DEBRIEF_STORAGE_ENABLED`.
+--
+--
+-- BEFORE RUNNING IT — SURVEY
+-- --------------------------
+--
+-- supabase/migrations/ does not describe the live database (CLAUDE.md,
+-- supabase/README.md). This file was written WITHOUT database access. Run
+-- these three first.
+--
+--   -- 1. Do the columns already exist? EXPECT zero rows on a first run.
+--   SELECT column_name, data_type, is_nullable, column_default
+--     FROM information_schema.columns
+--    WHERE table_schema = 'public' AND table_name = 'trade_plans'
+--      AND column_name IN ('debrief_ai', 'debrief_generated_at')
+--    ORDER BY column_name;
+--
+--   -- 2. The columns this change sits beside, to confirm the table is the one
+--   --    this file thinks it is. EXPECT three rows.
+--   SELECT column_name, data_type FROM information_schema.columns
+--    WHERE table_schema = 'public' AND table_name = 'trade_plans'
+--      AND column_name IN ('plan_score', 'debrief_answer', 'debrief_submitted_at')
+--    ORDER BY column_name;
+--
+--   -- 3. How many closed trades would be eligible for a stored debrief. Purely
+--   --    informational — nothing is backfilled, see below.
+--   SELECT count(*) AS closed_trades,
+--          count(*) FILTER (WHERE plan_score IS NOT NULL) AS already_scored
+--     FROM trade_plans
+--    WHERE status = 'closed';
+--
+--
+-- WHY EACH CHANGE
+-- ---------------
+--
+-- 1. debrief_ai — JSONB, one column, not four.
+--
+--    The model returns four named strings today (`summary`, `worked`,
+--    `improve`, `lesson`). Four TEXT columns would be the obvious shape and
+--    the wrong one: the set is the AI feature's business and will change —
+--    a fifth field, a list of cited rules, a confidence — and each change
+--    would be another migration against a table that eleven readers select
+--    `*` from. JSONB absorbs that without touching the schema again.
+--
+--    NOT NULL is deliberately NOT set. A debrief that failed mid-call leaves
+--    the row with nothing, and that is a real state: `debrief_generated_at`
+--    being null is what "never ran" means.
+--
+--    No CHECK on the shape, either. Postgres cannot usefully constrain a
+--    free-form object, and the reader in src/app/api/ai-debrief/route.ts
+--    validates each field's type before using it — the same defensive-read
+--    rule lib/tradovate/sync-response.ts applies to the sync route's body.
+--
+-- 2. debrief_generated_at — the dedupe key, and the only thing the route
+--    branches on.
+--
+--    Set means "a debrief exists; serve it". Null means "never ran; call the
+--    model". A separate boolean would say less for the same column, and the
+--    timestamp answers the question a trader actually asks — "when was this
+--    written?" — which matters once a debrief can be months old while the
+--    trade it describes has been edited since.
+--
+--
+-- NOTHING IS BACKFILLED. Rows with a `plan_score` from a past debrief keep it
+-- and get `debrief_generated_at = NULL`, which reads as "never ran" and means
+-- the next press of the button calls the model once and stores the result.
+-- That is correct: the four paragraphs those scores came from were never
+-- saved, so there is nothing to backfill them from. Inventing a timestamp
+-- would mark them as having a stored debrief that cannot be shown.
+--
+--
+-- IDEMPOTENT. Both statements are `IF NOT EXISTS`. Safe to re-run. One
+-- transaction, so a failure leaves the table exactly as it was.
+
+BEGIN;
+
+-- ---------------------------------------------------------------------------
+-- 1. trade_plans.debrief_ai
+--
+-- JSONB and not JSON: JSONB is stored decomposed, so a later `->>'summary'`
+-- in a query does not re-parse the document, and it is the type every other
+-- JSON column in this schema uses.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE trade_plans
+  ADD COLUMN IF NOT EXISTS debrief_ai JSONB;
+
+
+-- ---------------------------------------------------------------------------
+-- 2. trade_plans.debrief_generated_at
+--
+-- TIMESTAMPTZ, like `debrief_submitted_at` beside it, so the two can be
+-- compared without a cast — "did the trader write their own debrief before or
+-- after the AI wrote one" is a question the coach will eventually ask.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE trade_plans
+  ADD COLUMN IF NOT EXISTS debrief_generated_at TIMESTAMPTZ;
+
+
+-- ---------------------------------------------------------------------------
+-- 3. No GRANT belongs here.
+--
+-- `trade_plans` does not use column-level grants — no migration and no part of
+-- supabase/schema.sql issues one against it — so it keeps Supabase's
+-- table-level grants under the table's existing RLS policy ("Users can manage
+-- own trade plans", FOR ALL USING auth.uid() = user_id). Both columns are
+-- readable and writable by their owner as soon as they exist. 034 step 7 says
+-- the same thing at more length; this is the short version of the same fact.
+--
+-- That the owner can WRITE `debrief_ai` from the browser is intended: the
+-- debrief is persisted by the client that requested it, under the trader's own
+-- session, exactly like `debrief_answer` and `plan_score` already are.
+-- ---------------------------------------------------------------------------
+
+COMMIT;
+
+
+-- ===========================================================================
+-- VERIFY (read-only, after COMMIT)
+-- ===========================================================================
+--
+-- 1. Both columns, nullable, no default. EXPECT two rows: debrief_ai jsonb
+--    YES, debrief_generated_at timestamp with time zone YES.
+--
+--      SELECT column_name, data_type, is_nullable, column_default
+--        FROM information_schema.columns
+--       WHERE table_schema = 'public' AND table_name = 'trade_plans'
+--         AND column_name IN ('debrief_ai', 'debrief_generated_at')
+--       ORDER BY column_name;
+--
+-- 2. Nothing was written. EXPECT zero for both.
+--
+--      SELECT count(*) FILTER (WHERE debrief_ai IS NOT NULL)           AS stored,
+--             count(*) FILTER (WHERE debrief_generated_at IS NOT NULL) AS stamped
+--        FROM trade_plans;
+--
+-- 3. Past scores are untouched. EXPECT the same number survey query 3
+--    returned for `already_scored`.
+--
+--      SELECT count(*) AS still_scored FROM trade_plans WHERE plan_score IS NOT NULL;
+--
+-- 4. JSONB round-trips as an object. Rolled back; the point is that it is
+--    accepted and comes back decomposed.
+--
+--      BEGIN;
+--        UPDATE trade_plans
+--           SET debrief_ai = '{"summary":"x"}'::jsonb
+--         WHERE id = (SELECT id FROM trade_plans LIMIT 1);
+--        SELECT debrief_ai ->> 'summary' AS should_be_x
+--          FROM trade_plans WHERE debrief_ai IS NOT NULL;
+--      ROLLBACK;
+--
+--
+-- THEN deploy the Stage 3a code. `TRADOVATE_IMPORT_ENABLED` is already '1' in
+-- production, so the gate opens as soon as the deploy lands and the first
+-- debrief after that is stored.
+--
+--
+-- ROLLBACK
+-- --------
+--
+-- Clean, and loses only stored debriefs — no trade data lives in either
+-- column:
+--
+--   BEGIN;
+--     ALTER TABLE trade_plans
+--       DROP COLUMN IF EXISTS debrief_ai,
+--       DROP COLUMN IF EXISTS debrief_generated_at;
+--   COMMIT;
+--
+-- `plan_score` is NOT in that list and must not be: it predates this file, it
+-- is written by the same code path, and the stats read it.

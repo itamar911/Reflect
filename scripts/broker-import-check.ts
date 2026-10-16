@@ -78,6 +78,20 @@ import {
   SYNC_UNAVAILABLE,
   type BrokerSyncOutcome,
 } from '../src/lib/tradovate/sync-response';
+import {
+  hasStoredDebrief,
+  readStoredDebrief,
+} from '../src/lib/journal/debrief';
+import {
+  respondToDebriefRequest,
+  type DebriefRouteDeps,
+} from '../src/app/api/ai-debrief/route';
+import {
+  chooseAlertJobs,
+  importBeforeSummary,
+  summarise,
+} from '../src/app/api/cron/send-alerts/route';
+import { alertRangeStart, zonedDayStart } from '../src/lib/email/alertWindow';
 
 // ── Harness ─────────────────────────────────────────────────────────────────
 
@@ -1421,6 +1435,358 @@ async function syncPrivacyGroup() {
   ]);
 }
 
+// ── Stage 3a: the debrief's storage, and the alert emails ───────────────────
+//
+// Four groups over the two halves of Stage 3a. Neither half touches the
+// broker's wire: the debrief groups drive `respondToDebriefRequest` through
+// the deps seam step 3 gave it, and the alert groups drive two pure
+// functions. No model is called, by construction — `callModel` is a counter.
+
+/** A row as the debrief route reads it, with the Stage 3a columns present. */
+function debriefRow(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: 'trade-1',
+    user_id: USER,
+    status: 'closed',
+    entry_price: 100,
+    exit_price: 110,
+    stop_loss: 95,
+    take_profit: 115,
+    rr_ratio: 3,
+    direction: 'long',
+    strategy: 'breakout',
+    ...over,
+  };
+}
+
+/** The four paragraphs, as the model would return them. */
+const MODEL_REPLY = {
+  summary: 'סיכום',
+  worked: 'מה עבד',
+  improve: 'מה לשפר',
+  lesson: 'לקח',
+};
+
+/**
+ * Deps over an in-memory row, counting model calls and recording writes.
+ *
+ * `persist` writes back into the same object the next request reads, which is
+ * what makes the dedupe assertion a real round trip rather than two
+ * independent calls that happen to agree.
+ */
+function debriefDeps(row: Record<string, unknown>) {
+  const state = { modelCalls: 0, persisted: 0 };
+
+  const deps: DebriefRouteDeps = {
+    currentUserId: async () => USER,
+    loadTrade: async (_userId, tradeId) => (tradeId === row.id ? row : null),
+    loadRequiredMinRR: async () => null,
+    callModel: async () => {
+      state.modelCalls += 1;
+      return { ...MODEL_REPLY };
+    },
+    persist: async (_tradeId, _userId, feedback, score) => {
+      state.persisted += 1;
+      row.plan_score = score;
+      const stored: Record<string, string> = {};
+      for (const key of ['summary', 'worked', 'improve', 'lesson']) {
+        if (typeof feedback[key] === 'string') stored[key] = feedback[key];
+      }
+      if (Object.keys(stored).length === 0) return null;
+      row.debrief_ai = stored;
+      row.debrief_generated_at = '2026-10-16T09:00:00.000Z';
+      return row.debrief_generated_at as string;
+    },
+  };
+
+  return { deps, state };
+}
+
+function debriefRequest(query = ''): Request {
+  const body = new FormData();
+  body.append('trade', JSON.stringify({ id: 'trade-1' }));
+  return new Request(`https://example.test/api/ai-debrief${query}`, { method: 'POST', body });
+}
+
+async function debriefReaderGroup() {
+  const full = { summary: 'a', worked: 'b', improve: 'c', lesson: 'd' };
+
+  group('a stored debrief is read no further than it can be trusted', [
+    c('(1) a well-formed blob survives', readStoredDebrief(full), full),
+    c('(2) a string body is not a debrief', readStoredDebrief('summary'), null),
+    c('(3) null is not a debrief', readStoredDebrief(null), null),
+    // An array has string keys too, and `{...[]}` would read as `{}` rather
+    // than failing — worth its own branch.
+    c('(4) an array is not a debrief', readStoredDebrief(['a']), null),
+    c('(5) an empty object is not a debrief', readStoredDebrief({}), null),
+    // Whitespace renders as an empty block and tells the trader nothing, so
+    // it must not keep the model from running.
+    c('(6) whitespace-only fields are not a debrief',
+      readStoredDebrief({ summary: '   ', lesson: '\n' }), null),
+    c('(7) a non-string field is dropped, the rest survive',
+      readStoredDebrief({ summary: 'a', worked: 42, lesson: 'd' }), { summary: 'a', lesson: 'd' }),
+    // BOTH HALVES, and this is the dedupe rule: a stamp without a blob would
+    // serve nothing, a blob without a stamp was written by code that did not
+    // record when.
+    c('(8) a blob with no timestamp is not servable',
+      hasStoredDebrief({ debrief_ai: full }), false),
+    c('(9) a timestamp with no blob is not servable',
+      hasStoredDebrief({ debrief_generated_at: '2026-10-16T09:00:00.000Z' }), false),
+    c('(10) both together are',
+      hasStoredDebrief({ debrief_ai: full, debrief_generated_at: '2026-10-16T09:00:00.000Z' }),
+      true),
+    // The pre-036 database: `select('*')` returns neither key.
+    c('(11) a row from before migration 036 is not servable', hasStoredDebrief({}), false),
+  ]);
+}
+
+async function debriefDedupeGroup() {
+  const row = debriefRow();
+  const { deps, state } = debriefDeps(row);
+
+  const first = await respondToDebriefRequest(debriefRequest(), deps);
+  const firstBody = await first.json();
+  const callsAfterFirst = state.modelCalls;
+  // Captured here, not read at assertion time: the forced request below
+  // stores a second time, correctly, and would make this read 2.
+  const persistedAfterFirst = state.persisted;
+
+  // The same row object, now carrying what the first call stored.
+  const second = await respondToDebriefRequest(debriefRequest(), deps);
+  const secondBody = await second.json();
+  const callsAfterSecond = state.modelCalls;
+
+  // `?force=1` is the way past the gate.
+  const forced = await respondToDebriefRequest(debriefRequest('?force=1'), deps);
+  const forcedBody = await forced.json();
+  const callsAfterForce = state.modelCalls;
+
+  // A row that was never stored — the pre-036 state — must call every time.
+  const bare = debriefRow({ id: 'trade-1' });
+  const { deps: bareDeps, state: bareState } = debriefDeps(bare);
+  bareDeps.persist = async () => null; // the flag is off; nothing is written
+  await respondToDebriefRequest(debriefRequest(), bareDeps);
+  await respondToDebriefRequest(debriefRequest(), bareDeps);
+
+  group('a second debrief of the same trade costs nothing', [
+    c('(1) the first request calls the model once', callsAfterFirst, 1),
+    c('(2) and stores what it got', persistedAfterFirst, 1),
+    c('(2b) the served request stores nothing', state.persisted, 2),
+    // THE ASSERTION THIS GROUP EXISTS FOR.
+    c('(3) the second request calls the model ZERO more times', callsAfterSecond, 1),
+    c('(4) and is served from the row', secondBody.stored, true),
+    c('(5) with the same prose', secondBody.summary, MODEL_REPLY.summary),
+    c('(6) the first answer was not marked stored', firstBody.stored, false),
+    c('(7) ?force=1 calls the model again', callsAfterForce, 2),
+    c('(8) and the forced answer is not marked stored', forcedBody.stored, false),
+    // The derived half is recomputed every time, never stored — so a later
+    // fix to the scoring formula reaches debriefs written before it.
+    c('(9) a served debrief still carries a freshly computed score',
+      typeof secondBody.score === 'number' && secondBody.breakdown != null, true),
+    c('(10) a row that was never stored calls the model every time',
+      bareState.modelCalls, 2),
+  ]);
+}
+
+async function debriefRouteGroup() {
+  const row = debriefRow();
+  const { deps } = debriefDeps(row);
+
+  const noSession = await respondToDebriefRequest(debriefRequest(), {
+    ...deps,
+    currentUserId: async () => null,
+  });
+
+  const missing = await respondToDebriefRequest(debriefRequest(), {
+    ...deps,
+    loadTrade: async () => null,
+  });
+
+  const noId = await respondToDebriefRequest(
+    (() => {
+      const body = new FormData();
+      body.append('trade', JSON.stringify({}));
+      return new Request('https://example.test/api/ai-debrief', { method: 'POST', body });
+    })(),
+    deps
+  );
+
+  // A model that answers with nothing usable must not stamp the row: the
+  // next request would then serve four empty paragraphs the trader cannot
+  // refresh.
+  const emptyRow = debriefRow();
+  const { deps: emptyDeps, state: emptyState } = debriefDeps(emptyRow);
+  emptyDeps.callModel = async () => {
+    emptyState.modelCalls += 1;
+    return {};
+  };
+  await respondToDebriefRequest(debriefRequest(), emptyDeps);
+  await respondToDebriefRequest(debriefRequest(), emptyDeps);
+
+  group('the debrief route answers before it spends', [
+    c('(1) no session: 401', noSession.status, 401),
+    c('(2) a trade that is not this user\'s: 404', missing.status, 404),
+    c('(3) no trade id: 400', noId.status, 400),
+    c('(4) an empty model answer is not stored', emptyRow.debrief_generated_at, undefined),
+    c('(5) so the next request tries again', emptyState.modelCalls, 2),
+  ]);
+}
+
+async function alertSummaryGroup() {
+  // A SHORT THAT MADE MONEY. entry above exit, `actual_pnl` positive — the
+  // test that used to read `exit_price > entry_price` called this a loss.
+  const winningShort = {
+    status: 'closed', direction: 'short',
+    entry_price: 110, exit_price: 100, actual_pnl: 500, rr_ratio: 2,
+  };
+  const losingLong = {
+    status: 'closed', direction: 'long',
+    entry_price: 100, exit_price: 90, actual_pnl: -500, rr_ratio: 2,
+  };
+  // An imported row: no plan behind it, so no R:R by design.
+  const brokerRow = {
+    status: 'closed', direction: 'long',
+    entry_price: 100, exit_price: 105, actual_pnl: 250, rr_ratio: null,
+  };
+
+  const shortOnly = summarise([winningShort]);
+  const mixed = summarise([winningShort, losingLong]);
+  const withBroker = summarise([winningShort, brokerRow]);
+  const openPlan = summarise([{ status: 'open', entry_price: 100, exit_price: null, rr_ratio: 4 }]);
+  const empty = summarise([]);
+
+  group('the alert emails count a short the way a trader does', [
+    // THE §0ד BUG, in the one file Stage 4 did not reach.
+    c('(1) a profitable short is a win', shortOnly.winRate, 100),
+    c('(2) and its P&L is positive in points', shortOnly.totalPL, 10),
+    c('(3) one win and one loss is 50%', mixed.winRate, 50),
+    // THE §0ג BUG. 2 and null must average to 2, not to 1.
+    c('(4) a null R:R is excluded from the average, not counted as zero',
+      withBroker.avgRR, 2),
+    c('(5) and the trade still counts as a trade', withBroker.trades, 2),
+    c('(6) a row with no R:R at all leaves the average at zero',
+      summarise([brokerRow]).avgRR, 0),
+    // An open plan is a trade taken but not a closed one.
+    c('(7) an open plan counts in `trades` and not in the win rate',
+      [openPlan.trades, openPlan.winRate], [1, 0]),
+    c('(8) no rows is all zeroes',
+      [empty.trades, empty.winRate, empty.avgRR, empty.totalPL], [0, 0, 0, 0]),
+  ]);
+}
+
+async function alertWindowGroup() {
+  // Israel is UTC+3 in summer and UTC+2 in winter. Both are asserted, because
+  // the bug this replaces was a fixed offset of zero.
+  const summerEvening = new Date('2026-07-15T18:00:00.000Z'); // 21:00 Israel, IDT
+  const winterEvening = new Date('2026-01-15T19:00:00.000Z'); // 21:00 Israel, IST
+
+  // The hour the bug lived in: 01:00 Israel is still the previous UTC day in
+  // winter, and in summer it is 22:00 UTC of the day before.
+  const summerSmallHours = new Date('2026-07-15T22:30:00.000Z'); // 01:30 Israel on the 16th
+
+  group('an alert day starts at the trader\'s midnight, not the server\'s', [
+    c('(1) summer: the day starts at 21:00 UTC the previous evening',
+      zonedDayStart(summerEvening).toISOString(), '2026-07-14T21:00:00.000Z'),
+    c('(2) winter: at 22:00 UTC the previous evening',
+      zonedDayStart(winterEvening).toISOString(), '2026-01-14T22:00:00.000Z'),
+    // THE BUG, STATED AS AN ASSERTION. `setHours(0,0,0,0)` on a UTC server
+    // would answer 2026-07-15T00:00:00Z here, which is 03:00 Israel — three
+    // hours of the trader's own day missing from their summary.
+    c('(3) and it is NOT UTC midnight',
+      zonedDayStart(summerEvening).toISOString() === '2026-07-15T00:00:00.000Z', false),
+    // 01:30 Israel on the 16th belongs to the 16th, not the 15th.
+    c('(4) the small hours belong to the day the trader is in',
+      zonedDayStart(summerSmallHours).toISOString(), '2026-07-15T21:00:00.000Z'),
+    c('(5) end_of_day uses that boundary',
+      alertRangeStart('end_of_day', summerEvening), '2026-07-14T21:00:00.000Z'),
+    c('(6) pre_market uses it too',
+      alertRangeStart('pre_market', summerEvening), '2026-07-14T21:00:00.000Z'),
+    // The weekly summary is a duration and not a calendar week; the product
+    // has never promised Sunday-to-Sunday.
+    c('(7) weekly_summary reaches back seven days from now',
+      alertRangeStart('weekly_summary', summerEvening), '2026-07-08T18:00:00.000Z'),
+  ]);
+}
+
+async function alertImportGroup() {
+  const connected = new Set([USER]);
+
+  const everything = chooseAlertJobs(
+    [
+      {
+        user_id: USER,
+        pre_market_enabled: true,
+        pre_market_time: '21:00',
+        end_of_day_enabled: true,
+        end_of_day_time: '21:00',
+        weekly_summary_enabled: true,
+        weekly_summary_time: '21:00',
+      },
+    ],
+    { ilHour: 21, isSunday: true, importable: connected }
+  );
+
+  const importing = everything.filter((job) => job.importFirst);
+
+  // A second trader, at the same hour, with no connection.
+  const twoUsers = chooseAlertJobs(
+    [
+      { user_id: USER, end_of_day_enabled: true, end_of_day_time: '21:00' },
+      { user_id: OTHER_USER, end_of_day_enabled: true, end_of_day_time: '21:00' },
+    ],
+    { ilHour: 21, isSunday: false, importable: connected }
+  );
+
+  const wrongHour = chooseAlertJobs(
+    [{ user_id: USER, end_of_day_enabled: true, end_of_day_time: '21:00' }],
+    { ilHour: 9, isSunday: false, importable: connected }
+  );
+
+  const disabled = chooseAlertJobs(
+    [{ user_id: USER, end_of_day_enabled: false, end_of_day_time: '21:00' }],
+    { ilHour: 21, isSunday: false, importable: connected }
+  );
+
+  // THE FAILURE PATH. A pull that throws must not reach the caller — the
+  // trader asked for a summary, not for a broker.
+  let threw = false;
+  const { lines } = await captureLogs(async () => {
+    try {
+      await importBeforeSummary(
+        null as never,
+        USER,
+        new Date('2026-07-15T18:00:00.000Z'),
+        async () => {
+          throw new TradovateTransientError('upstream said no', { reason: 'network' });
+        }
+      );
+    } catch {
+      threw = true;
+    }
+  });
+
+  group('the end-of-day summary imports once, and sends even when that fails', [
+    // AT MOST ONE IMPORT PER USER PER RUN, however many emails they get.
+    c('(1) three emails for one trader, one import', importing.length, 1),
+    c('(2) and it is the end-of-day one', importing[0]?.type, 'end_of_day'),
+    c('(3) pre_market never imports',
+      everything.find((j) => j.type === 'pre_market')?.importFirst, false),
+    c('(4) weekly_summary never imports',
+      everything.find((j) => j.type === 'weekly_summary')?.importFirst, false),
+    // A trader with no active, declaring, allowlisted connection is not in
+    // the set, so no pull is attempted for them.
+    c('(5) a trader with no connection gets the email and no import',
+      twoUsers.map((j) => j.importFirst), [true, false]),
+    c('(6) and both still get an email', twoUsers.length, 2),
+    c('(7) a different hour owes nothing', wrongHour.length, 0),
+    c('(8) a disabled summary owes nothing', disabled.length, 0),
+    // The property the §H fix rests on.
+    c('(9) a broker that throws does not reach the caller', threw, false),
+    c('(10) and it is logged as a kind, with no user id',
+      [lines.length, lines.some((l) => l.includes(USER))], [1, false]),
+  ]);
+}
+
 // ── Main ────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -1444,6 +1810,14 @@ async function main() {
   await syncCopyGroup();
   await syncThrottleGroup();
   await syncPrivacyGroup();
+
+  // Stage 3a — the debrief's storage and the alert emails.
+  await debriefReaderGroup();
+  await debriefDedupeGroup();
+  await debriefRouteGroup();
+  await alertSummaryGroup();
+  await alertWindowGroup();
+  await alertImportGroup();
 
   console.log('');
   if (failures.length > 0) {

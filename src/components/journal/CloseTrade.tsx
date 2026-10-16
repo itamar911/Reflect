@@ -38,6 +38,20 @@ export interface AIDebriefResult {
   documented?: boolean;
   correctedFlags?: string[];
   error?: string;
+
+  // ── Persistence (REF-107 Stage 3a) ────────────────────────────────────────
+
+  /** When the four paragraphs were written, ISO 8601. Null when not stored. */
+  generatedAt?: string | null;
+  /**
+   * Whether this answer came out of the row rather than out of the model.
+   *
+   * The UI branches on it for one thing only — whether to offer "נתח מחדש" —
+   * and that is the whole reason it exists: a stored debrief can be months
+   * old while the trade it describes has been edited since, and a fresh one
+   * never needs re-running.
+   */
+  stored?: boolean;
 }
 
 interface TradeForDebrief {
@@ -212,9 +226,11 @@ export default function CloseTrade({
         const data = await res.json();
         setDebriefResult(data);
         onDebrief?.(data);
-        if (typeof data.score === 'number') {
-          await supabase.from('trade_plans').update({ plan_score: data.score }).eq('id', tradeId);
-        }
+        // The score used to be written from here, and the two manual callers
+        // did not write it at all — so the same debrief persisted a score
+        // from one entry point and not from the other two. /api/ai-debrief
+        // persists it now, together with the four paragraphs that nothing
+        // used to persist anywhere (REF-107 Stage 3a).
       }
     } catch {
       // debrief failed silently — trade was still closed

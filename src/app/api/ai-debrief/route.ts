@@ -1,11 +1,52 @@
+/**
+ * POST /api/ai-debrief — the post-trade coaching note.
+ *
+ * STAGE 3a MADE IT PERSISTENT AND DE-DUPLICATED (REF-107 §G step 6), which
+ * fixes a bug that had nothing to do with the broker: the four paragraphs
+ * this route produced were returned to the browser and never written
+ * anywhere. A trader closed a trade, read the debrief, refreshed, and it was
+ * gone. Only `plan_score` survived, and only from one of the three callers.
+ *
+ * Two changes, both here rather than in the three components that call it:
+ *
+ *   1. **The route persists.** It already re-fetches the authoritative row and
+ *      already holds the trader's session client, so it is the one place that
+ *      can write without a fourth copy of the logic. The callers did not need
+ *      to change to gain this.
+ *   2. **A second request serves the stored answer and calls no model.** The
+ *      gate is `debrief_generated_at` plus a readable blob (lib/journal/debrief.ts);
+ *      `?force=1` is how the UI offers "analyse again".
+ *
+ * WHAT IS STORED AND WHAT IS RECOMPUTED is argued in lib/journal/debrief.ts:
+ * the four text fields are stored because only they cost a model call; the
+ * score, the breakdown, the corrected flags, `documented` and `outcome` are
+ * recomputed every time, so a later fix to the scoring formula reaches
+ * debriefs written before it.
+ */
+
 import Anthropic from '@anthropic-ai/sdk';
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { computeTradeScore, type TradeScoreInput, type TradeScoreResult } from '@/lib/scoring/tradeScore';
 import { tradeMoneyPnl, hasMoneyPnl, tradeDirection } from '@/lib/pnl';
 import { PLAIN_HEBREW_PROSE_CLAUSE } from '@/lib/ai/prompts';
+import { hasStoredDebrief, readStoredDebrief, type StoredDebrief } from '@/lib/journal/debrief';
+import { isImportEnabled } from '@/lib/tradovate/import';
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+/**
+ * The Anthropic client, built on first use rather than at module load.
+ *
+ * The constructor throws when `ANTHROPIC_API_KEY` is unset, and at module
+ * scope that throw happened on IMPORT — so the regression suite could not
+ * reach `respondToDebriefRequest` at all without a key in the environment,
+ * for a code path that never calls the model. Lazy, so importing this module
+ * costs nothing and only a real request needs the key.
+ */
+let anthropic: Anthropic | null = null;
+function client(): Anthropic {
+  anthropic ??= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  return anthropic;
+}
 
 interface Outcome {
   points: number;
@@ -45,10 +86,45 @@ function computeOutcome(trade: Record<string, unknown>): Outcome | null {
   };
 }
 
-export async function POST(request: Request) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+/**
+ * What the handler needs from the world, so that the handler itself can be
+ * run by the regression suite.
+ *
+ * The same construction, and the same reason, as `TradesRouteDeps` and
+ * `SyncRouteDeps`: there is no module mocker in this repository, so the only
+ * way for a test to reach the 401, the 404 and — the one that matters here —
+ * the branch that DOES NOT CALL THE MODEL is for the seams to be parameters.
+ *
+ * `callModel` is the seam the dedupe assertion is built on. A fake that
+ * counts its invocations is how "a second request spends nothing" becomes a
+ * number rather than a claim.
+ *
+ * {@link POST} supplies the real four below.
+ */
+export interface DebriefRouteDeps {
+  /** The signed-in user's id, or null. From the session cookie, never the body. */
+  currentUserId: () => Promise<string | null>;
+  /** The authoritative row. Null when it is missing or not this user's. */
+  loadTrade: (userId: string, tradeId: string) => Promise<Record<string, unknown> | null>;
+  /** The R:R floor the score is measured against, from the strategy or the presets. */
+  loadRequiredMinRR: (userId: string, strategy: unknown) => Promise<number | null>;
+  /** One model call. Returns the four fields, or whatever subset it produced. */
+  callModel: (content: Anthropic.MessageParam['content']) => Promise<Record<string, string>>;
+  /** Store the result. Returns the timestamp written, or null if it was not. */
+  persist: (
+    tradeId: string,
+    userId: string,
+    feedback: Record<string, string>,
+    score: number
+  ) => Promise<string | null>;
+}
+
+export async function respondToDebriefRequest(
+  request: Request,
+  deps: DebriefRouteDeps
+): Promise<NextResponse> {
+  const userId = await deps.currentUserId();
+  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const formData = await request.formData();
   const tradeData = formData.get('trade') as string;
@@ -58,48 +134,80 @@ export async function POST(request: Request) {
   const submitted = JSON.parse(tradeData) as { id?: string };
   if (!submitted.id) return NextResponse.json({ error: 'Missing trade id' }, { status: 400 });
 
-  // Re-fetch the authoritative, persisted trade row rather than trusting the client
-  // payload — this is what the deterministic score is computed from.
-  const { data: trade, error: tradeErr } = await supabase
-    .from('trade_plans')
-    .select('*')
-    .eq('id', submitted.id)
-    .eq('user_id', user.id)
-    .single();
+  // The authoritative, persisted row rather than the client payload — this is
+  // what the deterministic score is computed from, and what the stored
+  // debrief is read out of.
+  const trade = await deps.loadTrade(userId, submitted.id);
+  if (!trade) return NextResponse.json({ error: 'Trade not found' }, { status: 404 });
 
-  if (tradeErr || !trade) {
-    return NextResponse.json({ error: 'Trade not found' }, { status: 404 });
-  }
+  const requiredMinRR = await deps.loadRequiredMinRR(userId, trade.strategy);
 
-  const [presetRes, strategyRes] = await Promise.all([
-    supabase.from('preset_rules').select('min_rr_ratio').eq('user_id', user.id).maybeSingle(),
-    trade.strategy
-      ? supabase.from('personal_strategies').select('min_rr').eq('user_id', user.id).eq('name', trade.strategy).maybeSingle()
-      : Promise.resolve({ data: null }),
-  ]);
-
-  const requiredMinRR: number | null = strategyRes.data?.min_rr ?? presetRes.data?.min_rr_ratio ?? null;
+  // Cast at the boundary rather than typing `loadTrade`'s return: the row is
+  // `select('*')` and supabase-js cannot infer a shape for it either, so a
+  // named row type here would be a second, hand-maintained copy of the table
+  // that nothing checks against the real one.
+  const num = (key: string): number | null =>
+    trade[key] != null ? (trade[key] as number) : null;
 
   const scoreInput: TradeScoreInput = {
-    stop_loss: trade.stop_loss ?? null,
-    take_profit: trade.take_profit ?? null,
-    rr_ratio: trade.rr_ratio ?? null,
+    stop_loss: num('stop_loss'),
+    take_profit: num('take_profit'),
+    rr_ratio: num('rr_ratio'),
     required_min_rr: requiredMinRR,
-    strategy_conditions_checked: trade.strategy_conditions_checked ?? null,
+    strategy_conditions_checked:
+      (trade.strategy_conditions_checked as TradeScoreInput['strategy_conditions_checked']) ?? null,
     moved_sl: trade.moved_sl === true,
     exited_early: trade.exited_early === true,
     fomo_entry: trade.fomo_entry === true,
     revenge_trade: trade.revenge_trade === true,
-    exit_price: trade.exit_price ?? null,
-    entry_price: trade.entry_price ?? null,
-    direction: trade.direction ?? null,
+    exit_price: num('exit_price'),
+    entry_price: num('entry_price'),
+    direction: (trade.direction as 'long' | 'short' | null) ?? null,
   };
 
   // The score is computed deterministically in code — Claude never sees a request
   // to produce or adjust it, and any "score" it might still emit is discarded below.
   const scoreResult = computeTradeScore(scoreInput);
 
-  const documented = !!(description || trade.post_trade_notes?.trim() || trade.debrief_answer?.trim());
+  const text = (key: string): string =>
+    typeof trade[key] === 'string' ? (trade[key] as string) : '';
+
+  const documented = !!(description || text('post_trade_notes').trim() || text('debrief_answer').trim());
+  const outcome = computeOutcome(trade);
+
+  // ── The dedupe gate ──────────────────────────────────────────────────────
+  //
+  // Served before the model is reached, and before the image is even read off
+  // the request, because the whole point is to spend nothing. The derived
+  // half of the answer is recomputed above and below; only the prose comes
+  // out of the row.
+  //
+  // `?force=1` is the way past it, and it is a query parameter rather than a
+  // form field so that "analyse again" is a different URL and not a different
+  // body — easier to see in a network log, and impossible to set by accident
+  // from a component that forgot to pass it.
+  //
+  // READING `debrief_ai` NEEDS NO FLAG. `select('*')` above returns no key at
+  // all on a database where migration 036 has not run, and the reader treats
+  // a missing key as "no debrief" — so this branch is simply never taken
+  // there. Only the WRITE names the columns, and that is where the gate is.
+  const force = new URL(request.url).searchParams.get('force') === '1';
+
+  if (!force && hasStoredDebrief(trade)) {
+    const stored = readStoredDebrief(trade.debrief_ai) as StoredDebrief;
+    return NextResponse.json({
+      ...stored,
+      score: scoreResult.total,
+      breakdown: scoreResult.breakdown,
+      correctedFlags: scoreResult.correctedFlags,
+      documented,
+      outcome,
+      // So the UI can say when it was written, and tell a fresh answer from a
+      // stored one without guessing.
+      generatedAt: trade.debrief_generated_at,
+      stored: true,
+    });
+  }
 
   const content: Anthropic.MessageParam['content'] = [];
 
@@ -116,21 +224,19 @@ export async function POST(request: Request) {
   }
   content.push({ type: 'text', text: prompt });
 
-  const outcome = computeOutcome(trade);
-
   let feedback: Record<string, string> = {};
   try {
-    const message = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1000,
-      messages: [{ role: 'user', content }],
-    });
-    const text = message.content[0]?.type === 'text' ? message.content[0].text : '';
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    feedback = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+    feedback = await deps.callModel(content);
   } catch {
     feedback = { summary: 'לא ניתן היה לקבל ניתוח AI כרגע — הציון חושב כרגיל.' };
   }
+
+  const generatedAt = await deps.persist(
+    String(submitted.id),
+    userId,
+    feedback,
+    scoreResult.total
+  );
 
   return NextResponse.json({
     summary: feedback.summary,
@@ -144,7 +250,141 @@ export async function POST(request: Request) {
     correctedFlags: scoreResult.correctedFlags,
     documented,
     outcome,
+    generatedAt,
+    stored: false,
   });
+}
+
+export async function POST(request: Request) {
+  // Built once and shared by all four seams: they must be the same identity
+  // for RLS to mean what it says — the read proves the row is this user's and
+  // the write relies on that proof.
+  const supabase = await createClient();
+
+  return respondToDebriefRequest(request, {
+    currentUserId: async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      return user?.id ?? null;
+    },
+
+    loadTrade: async (userId, tradeId) => {
+      const { data, error } = await supabase
+        .from('trade_plans')
+        .select('*')
+        .eq('id', tradeId)
+        .eq('user_id', userId)
+        .single();
+      return error ? null : (data as Record<string, unknown>);
+    },
+
+    loadRequiredMinRR: async (userId, strategy) => {
+      const [presetRes, strategyRes] = await Promise.all([
+        supabase.from('preset_rules').select('min_rr_ratio').eq('user_id', userId).maybeSingle(),
+        typeof strategy === 'string' && strategy !== ''
+          ? supabase
+              .from('personal_strategies')
+              .select('min_rr')
+              .eq('user_id', userId)
+              .eq('name', strategy)
+              .maybeSingle()
+          : Promise.resolve({ data: null }),
+      ]);
+      return strategyRes.data?.min_rr ?? presetRes.data?.min_rr_ratio ?? null;
+    },
+
+    callModel: async (content) => {
+      const message = await client().messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1000,
+        messages: [{ role: 'user', content }],
+      });
+      const body = message.content[0]?.type === 'text' ? message.content[0].text : '';
+      // The model is asked for bare JSON and usually sends it, but a stray
+      // sentence before the brace has been seen — hence the match rather than
+      // a parse of the whole body.
+      const jsonMatch = body.match(/\{[\s\S]*\}/);
+      return jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+    },
+
+    persist: (tradeId, userId, feedback, score) =>
+      persist(supabase, tradeId, userId, feedback, score),
+  });
+}
+
+/**
+ * Write the debrief to the row it describes, and say when.
+ *
+ * NEVER THROWS. A debrief the trader is looking at must not be withheld
+ * because the row could not be updated — they asked for coaching, the model
+ * answered, and a failed write is our problem rather than theirs. It returns
+ * null on failure, which the UI reads as "not stored", so the next request
+ * calls the model again rather than serving something that was never saved.
+ *
+ * TWO WRITES AND NOT ONE, because the two halves have different
+ * preconditions. `plan_score` has existed for as long as the debrief has and
+ * is on every database; `debrief_ai` and `debrief_generated_at` arrive with
+ * migration 036 and must not be NAMED before it has run — a PostgREST 42703
+ * on an undefined column, which is why `isImportEnabled()` gates the second
+ * write exactly as it gates every column 034 added. See the migration's
+ * header on why the import flag and not a new one.
+ *
+ * THE SCORE IS WRITTEN HERE AND NOT IN THE COMPONENT ANY MORE. CloseTrade.tsx
+ * used to do it after reading the response, and the two manual callers did
+ * not — so the same debrief persisted a score from one entry point and not
+ * from the other two. One write site, all three callers, no change to any of
+ * them.
+ *
+ * Both statements carry `user_id` as well as `id`. The id came from the
+ * request; the read above proved the row is this user's, and these say so
+ * again rather than relying on that proof having happened.
+ */
+async function persist(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  tradeId: string,
+  userId: string,
+  feedback: Record<string, string>,
+  score: number
+): Promise<string | null> {
+  const { error: scoreError } = await supabase
+    .from('trade_plans')
+    .update({ plan_score: score })
+    .eq('id', tradeId)
+    .eq('user_id', userId);
+
+  if (scoreError) {
+    console.warn(`[ai-debrief] could not store plan_score (${scoreError.code ?? 'no code'})`);
+  }
+
+  if (!isImportEnabled()) return null;
+
+  // Only the four the model produced, and only when it produced something. A
+  // blob of four undefineds serialises to `{}`, which `readStoredDebrief`
+  // correctly refuses — but storing it would still stamp the timestamp and
+  // make the next request serve nothing. Checked here so that does not happen.
+  const stored: StoredDebrief = {};
+  if (typeof feedback.summary === 'string') stored.summary = feedback.summary;
+  if (typeof feedback.worked === 'string') stored.worked = feedback.worked;
+  if (typeof feedback.improve === 'string') stored.improve = feedback.improve;
+  if (typeof feedback.lesson === 'string') stored.lesson = feedback.lesson;
+
+  if (readStoredDebrief(stored) === null) return null;
+
+  const generatedAt = new Date().toISOString();
+  const { error } = await supabase
+    .from('trade_plans')
+    .update({ debrief_ai: stored, debrief_generated_at: generatedAt })
+    .eq('id', tradeId)
+    .eq('user_id', userId);
+
+  if (error) {
+    // The CODE, not the message: a PostgREST message can echo the row back.
+    console.warn(`[ai-debrief] could not store debrief (${error.code ?? 'no code'})`);
+    return null;
+  }
+
+  return generatedAt;
 }
 
 function buildDebriefPrompt(

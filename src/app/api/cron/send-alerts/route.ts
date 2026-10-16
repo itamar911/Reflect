@@ -1,7 +1,41 @@
+/**
+ * GET /api/cron/send-alerts — the pre-market, end-of-day and weekly emails.
+ *
+ * STAGE 3a CHANGED FOUR THINGS HERE (REF-107 §H), one of them about the
+ * broker and three of them bugs that predate it:
+ *
+ *   1. **The end-of-day summary imports before it counts.** The import cron
+ *      runs at 03:30 UTC; the default summary goes out at 21:00 Israel the
+ *      evening before. A broker trade closed on day N therefore reached the
+ *      journal nine and a half hours AFTER the summary of day N had been
+ *      sent, so that summary reported zero broker trades — permanently, for
+ *      any trader who did not open the app themselves. Moving the cron cannot
+ *      fix it: `end_of_day_time` is per-user and no single daily job can
+ *      precede everyone. So the import happens here, per user, at the hour
+ *      that user chose, which is the only moment that is right for all of
+ *      them.
+ *   2. **The day window is the trader's midnight, not the server's.**
+ *      `setHours(0,0,0,0)` runs in UTC on Vercel, which is 02:00 or 03:00 in
+ *      Israel — see lib/email/alertWindow.ts.
+ *   3. **A profitable short counts as a win.** The win test was
+ *      `exit_price > entry_price`, the REF-107 §0ד bug, which Stage 4 fixed
+ *      in the identity card, the stats page and the weekly summary and did
+ *      not fix here.
+ *   4. **avgRR averages the rows that have an R:R.** It divided by every row
+ *      with `?? 0`, so each imported trade — which has no `rr_ratio` by
+ *      design — pulled the average toward zero. Latent until (1) landed, and
+ *      guaranteed by it.
+ */
+
 import { NextResponse } from 'next/server';
 import { isImportEnabled } from '@/lib/tradovate/import';
 import { visibleTrades, withHidden } from '@/lib/trades/visible';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { isUserAllowed } from '@/lib/tradovate/allowlist';
+import { listConnectionsForImport } from '@/lib/tradovate/connections';
+import { syncUserTrades } from '@/lib/tradovate/sync';
+import { isWinningTrade, pnlRow, tradeDirection } from '@/lib/pnl';
+import { alertRangeStart, zonedDayStart } from '@/lib/email/alertWindow';
 import {
   dailySummaryEmail,
   preMarketEmail,
@@ -38,10 +72,68 @@ async function sendEmail(to: string, mail: AlertEmail) {
 
 type AlertType = 'pre_market' | 'end_of_day' | 'weekly_summary';
 
+/**
+ * The columns the figures below need.
+ *
+ * `direction`, `take_profit`, `pnl_amount` and `actual_pnl` were added in
+ * Stage 3a and are what the win test now reads: `isWinningTrade` prefers the
+ * money figure and falls back to DIRECTION-AWARE points, where the old
+ * `exit_price > entry_price` could only ever describe a long.
+ */
+const ALERT_TRADE_COLUMNS =
+  'status, entry_price, exit_price, take_profit, direction, ' +
+  'rr_ratio, emotional_state, pnl_amount, actual_pnl';
+
+/**
+ * Pull this user's broker trades into the journal before the day is counted.
+ *
+ * NEVER THROWS. A broker that is down, a token that lapsed, a rate limit —
+ * none of them is a reason to withhold the summary. The trader's own trades
+ * are in the table either way, and an email reporting them without the
+ * broker's is strictly better than no email. So the failure is logged as a
+ * KIND and the caller carries on.
+ *
+ * ONE LINE, AND NOT THE USER ID. `describeDayPullFailureKind` is not reached
+ * from here because the error can also come from the import half; the
+ * error's own name is enough to tell a lapsed token from a timeout, and
+ * anything more specific risks naming a contract or an account. The same rule
+ * the rest of this integration logs under.
+ */
+export async function importBeforeSummary(
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string,
+  now: Date,
+  // The pull, as a parameter, so the suite can assert that a broker which
+  // throws does not cost the trader their email. Production passes the real
+  // one by omission.
+  sync: typeof syncUserTrades = syncUserTrades
+): Promise<void> {
+  try {
+    await sync({
+      userId,
+      // Both the write client and the read client are the service-role one:
+      // a cron has no session. What stands in for RLS is in import.ts' header
+      // — `userId` is never read from a request, and every statement carries
+      // it. The same construction api/cron/tradovate-import uses.
+      client: admin,
+      admin,
+      dayStartMs: zonedDayStart(now).getTime(),
+      // The day only. This runs at the trader's own end of day, so the window
+      // that matters is the one that just finished; a wider one would price
+      // contracts the daily cron has already imported.
+      windowStartMs: zonedDayStart(now).getTime(),
+    });
+  } catch (error) {
+    const kind = error instanceof Error ? error.name : 'unknown error';
+    console.warn(`[send-alerts] import before summary failed (${kind}); sending anyway`);
+  }
+}
+
 async function dispatchAlert(
   supabase: ReturnType<typeof createAdminClient>,
   userId: string,
-  type: AlertType
+  type: AlertType,
+  options: { now: Date; importFirst: boolean }
 ) {
   // Profile
   const { data: profile } = await supabase
@@ -54,17 +146,18 @@ async function dispatchAlert(
   const email = (profile?.email as string | null) ?? '';
   if (!email) return;
 
-  // Fetch trades
-  const now        = new Date();
-  const todayStart = new Date(now);
-  todayStart.setHours(0, 0, 0, 0);
-  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const now = options.now;
 
-  const rangeStart = type === 'pre_market'
-    ? todayStart.toISOString()
-    : type === 'end_of_day'
-    ? todayStart.toISOString()
-    : sevenDaysAgo.toISOString();
+  // BEFORE THE QUERY, and only for the end-of-day summary. `pre_market` reports
+  // on a day that has not happened and `weekly_summary` on one the daily cron
+  // has already covered; neither is worth a pull. The caller decides whether
+  // this user is eligible at all — see `importFirst`.
+  if (options.importFirst) await importBeforeSummary(supabase, userId, now);
+
+  // The trader's own midnight, not the server's. lib/email/alertWindow.ts has
+  // the argument; the short version is that `setHours` is UTC on Vercel and
+  // used to drop every trade logged before 03:00 Israel time.
+  const rangeStart = alertRangeStart(type, now);
 
   // stats.trades and avgRR below are computed over every row, so without this
   // an alert email would report a plan the user never entered back to them as a
@@ -72,27 +165,16 @@ async function dispatchAlert(
   const { data: trades } = await supabase
     .from('trade_plans')
     // `hidden` only where the column exists (lib/trades/visible.ts).
-    .select(withHidden('status, entry_price, exit_price, rr_ratio, emotional_state', isImportEnabled()))
+    .select(withHidden(ALERT_TRADE_COLUMNS, isImportEnabled()))
     .eq('user_id', userId)
     .neq('status', 'not_entered')
     .gte('submitted_at', rangeStart);
 
   // A row the trader deleted does not trigger an alert about their day (E12).
   const allTrades = visibleTrades((trades ?? []) as unknown as Record<string, unknown>[]);
-  const closed    = allTrades.filter((t) => t.status === 'closed' && t.exit_price !== null);
-  const wins      = closed.filter((t) => Number(t.exit_price) > Number(t.entry_price));
-  const winRate   = closed.length > 0 ? Math.round((wins.length / closed.length) * 100) : 0;
-  const avgRR     = allTrades.length > 0
-    ? parseFloat((allTrades.reduce((s: number, t) => s + Number(t.rr_ratio ?? 0), 0) / allTrades.length).toFixed(1))
-    : 0;
-  const totalPL   = closed.reduce(
-    (s: number, t) => s + (Number(t.exit_price) - Number(t.entry_price)),
-    0
-  );
+  const stats = summarise(allTrades);
 
   const dateLabel = now.toLocaleDateString('he-IL', { weekday: 'long', day: 'numeric', month: 'long' });
-
-  const stats = { trades: allTrades.length, winRate, avgRR, totalPL };
 
   if (type === 'pre_market') {
     await sendEmail(email, preMarketEmail(name));
@@ -103,10 +185,122 @@ async function dispatchAlert(
   }
 }
 
+/**
+ * The four figures both summary emails report.
+ *
+ * Exported for the regression suite, which drives it with rows rather than
+ * with a database — the three arithmetic bugs this function now avoids were
+ * all invisible to a test that could only assert an email was sent.
+ *
+ * THE THREE RULES, each of which this used to get wrong:
+ *
+ *   - **A win is `isWinningTrade`**, which reads the money figure when there
+ *     is one and direction-aware points when there is not. `exit_price >
+ *     entry_price` described a long and called every profitable short a loss.
+ *   - **avgRR averages the rows that HAVE an R:R.** Dividing by every row
+ *     with `?? 0` turned each imported trade — which has no `rr_ratio`, by
+ *     design, because nobody filled in a form — into a zero dragging the
+ *     average down. The filter-before-average pattern is the one the stats
+ *     page and the weekly summary already use.
+ *   - **`totalPL` stays in price points** and is direction-aware for the same
+ *     reason as the win test. It is NOT switched to money here: the email's
+ *     label says points, and changing the unit is a copy change rather than
+ *     a bug fix.
+ */
+export function summarise(rows: readonly Record<string, unknown>[]): {
+  trades: number;
+  winRate: number;
+  avgRR: number;
+  totalPL: number;
+} {
+  const closed = rows.filter((t) => t.status === 'closed' && t.exit_price != null);
+
+  const wins = closed.filter((t) => isWinningTrade(pnlRow(t)) === true);
+  const winRate = closed.length > 0 ? Math.round((wins.length / closed.length) * 100) : 0;
+
+  const rated = rows.filter((t) => t.rr_ratio != null && Number.isFinite(Number(t.rr_ratio)));
+  const avgRR =
+    rated.length > 0
+      ? parseFloat(
+          (rated.reduce((sum, t) => sum + Number(t.rr_ratio), 0) / rated.length).toFixed(1)
+        )
+      : 0;
+
+  const totalPL = closed.reduce((sum, t) => {
+    const row = pnlRow(t);
+    const entry = Number(row.entry_price);
+    const exit = Number(row.exit_price);
+    if (!Number.isFinite(entry) || !Number.isFinite(exit)) return sum;
+    // The same direction rule as the win test, so the two cannot disagree
+    // about whether a trade went the trader's way.
+    return sum + (tradeDirection(row) === 'long' ? exit - entry : entry - exit);
+  }, 0);
+
+  return { trades: rows.length, winRate, avgRR, totalPL };
+}
+
 // ── Cron handler ─────────────────────────────────────────────────────────────
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+/**
+ * Sixty seconds, matching the other two Tradovate crons.
+ *
+ * This route used to be a handful of database reads and a fetch per user and
+ * ran well inside the default. Now an end-of-day user can cost a broker pull
+ * — eight to ten upstream requests, two to four seconds measured — and a
+ * batch of them at the same hour would be cut off mid-send without this.
+ * Paired with {@link IMPORT_CONCURRENCY}, which is what keeps the batch
+ * inside the sixty.
+ */
+export const maxDuration = 60;
+
+/**
+ * How many users are dispatched at once.
+ *
+ * Four, and the number is about the upstream rather than about us: each
+ * end-of-day job can hold a broker pull open for seconds, and firing every
+ * user at the same instant would open as many concurrent sessions against a
+ * rate-limited third party as happen to share that hour. Four keeps the
+ * batch moving while leaving the per-user request budget intact.
+ *
+ * `Promise.allSettled` over the whole list — which is what this replaced —
+ * had no bound at all. That was fine when a job was two reads and an email.
+ */
+const IMPORT_CONCURRENCY = 4;
+
+/**
+ * Run `jobs` with at most `limit` in flight, settling every one.
+ *
+ * Returns the same shape `Promise.allSettled` does and in the same order, so
+ * the caller's counting is unchanged. Each worker pulls the next index until
+ * the list is exhausted; a rejection is recorded and does not stop the rest,
+ * which is the property the old code had and must keep — one trader's broken
+ * connection must not cost everyone else their email.
+ */
+async function settleWithLimit<T>(
+  jobs: readonly (() => Promise<T>)[],
+  limit: number
+): Promise<PromiseSettledResult<T>[]> {
+  const results = new Array<PromiseSettledResult<T>>(jobs.length);
+  let next = 0;
+
+  async function worker(): Promise<void> {
+    for (;;) {
+      const index = next++;
+      if (index >= jobs.length) return;
+      try {
+        results[index] = { status: 'fulfilled', value: await jobs[index]() };
+      } catch (reason) {
+        results[index] = { status: 'rejected', reason };
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(limit, jobs.length) }, worker));
+  return results;
+}
 
 // Parses a saved "HH:MM" setting into just the hour, matched against the
 // Israel wall-clock hour of the current cron invocation. Falls back to the
@@ -115,6 +309,65 @@ function parseHour(time: string | null | undefined, fallback: string): number {
   const raw = time || fallback;
   const hour = Number(raw.split(':')[0]);
   return Number.isFinite(hour) ? hour : Number(fallback.split(':')[0]);
+}
+
+/** One row of `alert_settings`, as this route reads it. */
+export interface AlertSetting {
+  user_id: string;
+  pre_market_enabled?: boolean | null;
+  pre_market_time?: string | null;
+  end_of_day_enabled?: boolean | null;
+  end_of_day_time?: string | null;
+  weekly_summary_enabled?: boolean | null;
+  weekly_summary_time?: string | null;
+}
+
+/** An email this run will send, and whether to pull the broker first. */
+export interface PlannedAlert {
+  userId: string;
+  type: AlertType;
+  importFirst: boolean;
+}
+
+/**
+ * Which emails this invocation owes, and which of them import first.
+ *
+ * Pure, and exported for the regression suite — the property worth asserting
+ * is "AT MOST ONE IMPORT PER USER PER RUN, and only for the end-of-day
+ * summary", and that is a statement about this list rather than about what
+ * the network did.
+ *
+ * `importFirst` is false for `pre_market` (it reports on a day that has not
+ * happened) and for `weekly_summary` (the daily cron has already covered
+ * every day in its window). Only the end-of-day summary is the moment a
+ * trader's day has just finished, which is the whole argument of §H.
+ */
+export function chooseAlertJobs(
+  settings: readonly AlertSetting[],
+  context: { ilHour: number; isSunday: boolean; importable: ReadonlySet<string> }
+): PlannedAlert[] {
+  const planned: PlannedAlert[] = [];
+
+  for (const s of settings) {
+    if (s.pre_market_enabled && parseHour(s.pre_market_time, '08:30') === context.ilHour)
+      planned.push({ userId: s.user_id, type: 'pre_market', importFirst: false });
+
+    if (s.end_of_day_enabled && parseHour(s.end_of_day_time, '21:00') === context.ilHour)
+      planned.push({
+        userId: s.user_id,
+        type: 'end_of_day',
+        importFirst: context.importable.has(s.user_id),
+      });
+
+    if (
+      s.weekly_summary_enabled &&
+      context.isSunday &&
+      parseHour(s.weekly_summary_time, '09:00') === context.ilHour
+    )
+      planned.push({ userId: s.user_id, type: 'weekly_summary', importFirst: false });
+  }
+
+  return planned;
 }
 
 export async function GET(request: Request) {
@@ -157,21 +410,45 @@ export async function GET(request: Request) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!settings || settings.length === 0) return NextResponse.json({ sent: 0, ilHour });
 
-  const results = await Promise.allSettled(
-    settings.flatMap((s) => {
-      const jobs: Promise<void>[] = [];
+  // WHO IS ELIGIBLE FOR AN IMPORT BEFORE THEIR SUMMARY. Listed once for the
+  // whole run rather than queried per user, because the alternative is a
+  // round trip per dispatched email to answer a question one `IN` already
+  // covers.
+  //
+  // Three gates, and each is the same one the import cron applies:
+  //
+  //   - the flag, because `is_trade_source` is a column 034 adds and listing
+  //     without it is a 42703 (the listing is skipped entirely, not caught);
+  //   - an ACTIVE connection, which `listConnectionsForImport` filters on;
+  //   - `is_trade_source`, E7's declaration — a trader who said the broker is
+  //     not where their trades come from should not have one pulled;
+  //   - and the fail-closed allowlist, so a background job never writes rows
+  //     for a trader the user-facing routes would refuse to serve.
+  //
+  // A listing failure is not fatal: no user is eligible, every email still
+  // goes out, and the run reports zero imports rather than zero emails.
+  let importable = new Set<string>();
+  if (isImportEnabled()) {
+    try {
+      const connections = await listConnectionsForImport({ admin: supabase });
+      importable = new Set(
+        connections
+          .filter((c) => c.is_trade_source && isUserAllowed(c.user_id))
+          .map((c) => c.user_id)
+      );
+    } catch {
+      // The message would name the table and nothing useful beyond it.
+      console.warn('[send-alerts] could not list connections; sending without an import');
+    }
+  }
 
-      if (s.pre_market_enabled && parseHour(s.pre_market_time, '08:30') === ilHour)
-        jobs.push(dispatchAlert(supabase, s.user_id, 'pre_market'));
+  const planned = chooseAlertJobs(settings as AlertSetting[], { ilHour, isSunday, importable });
 
-      if (s.end_of_day_enabled && parseHour(s.end_of_day_time, '21:00') === ilHour)
-        jobs.push(dispatchAlert(supabase, s.user_id, 'end_of_day'));
-
-      if (s.weekly_summary_enabled && isSunday && parseHour(s.weekly_summary_time, '09:00') === ilHour)
-        jobs.push(dispatchAlert(supabase, s.user_id, 'weekly_summary'));
-
-      return jobs;
-    })
+  const results = await settleWithLimit(
+    planned.map((job) => () =>
+      dispatchAlert(supabase, job.userId, job.type, { now, importFirst: job.importFirst })
+    ),
+    IMPORT_CONCURRENCY
   );
 
   const sent   = results.filter((r) => r.status === 'fulfilled').length;
@@ -179,5 +456,5 @@ export async function GET(request: Request) {
     .filter((r) => r.status === 'rejected')
     .map((r) => (r as PromiseRejectedResult).reason?.message ?? 'unknown');
 
-  return NextResponse.json({ sent, failed, ilHour, isSunday });
+  return NextResponse.json({ sent, failed, ilHour, isSunday, imported: importable.size });
 }

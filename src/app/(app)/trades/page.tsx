@@ -77,6 +77,13 @@ export default async function TradesPage() {
     unplanned:        t.unplanned === true,
     broker_host:      (t.broker_host as string | null) ?? null,
     hidden:           t.hidden === true,
+    // ── The stored AI debrief, from migration 036 (REF-107 Stage 3a) ──────
+    //
+    // Same `?? null` rule and the same reason: `select('*')` returns no key
+    // at all before 036 has been run, and a row without one has no debrief —
+    // which is the truth about every row in such a database.
+    debrief_ai:           t.debrief_ai ?? null,
+    debrief_generated_at: (t.debrief_generated_at as string | null) ?? null,
   }));
 
   const exportTrades = allTrades.map((t) => ({

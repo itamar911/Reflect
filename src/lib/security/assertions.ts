@@ -73,6 +73,13 @@ export const SECURITY_RULES = {
   'policy.using_true': 'מדיניות שתנאי ה-USING שלה הוא true',
   'policy.with_check_true': 'מדיניות שתנאי ה-WITH CHECK שלה הוא true',
   'function.execute_to_public': 'פונקציה עם EXECUTE ל-PUBLIC',
+  // Rule 10, added with migration 035 (REF-107 Stage 3a). THE CRON DOES NOT
+  // REPORT THIS YET: the catalog function created by 031 is what the route
+  // calls, and it returns the rules it was written with. The label is here so
+  // that extending that function is a one-line database change and not also a
+  // code change — until then the rule lives in
+  // supabase/queries/security_assertions.sql and is run by hand.
+  'function.definer_unpinned_path': 'פונקציית SECURITY DEFINER ללא search_path מקובע',
   'grant.table_overrides_column_anon': 'הרשאה ברמת טבלה עוקפת הרשאות עמודה (anon)',
   'grant.table_overrides_column_authenticated':
     'הרשאה ברמת טבלה עוקפת הרשאות עמודה (authenticated)',

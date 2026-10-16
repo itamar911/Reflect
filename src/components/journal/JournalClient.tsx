@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { AlertTriangle, Bot, Eye, Inbox, MoreHorizontal, Pencil, Trash2, X } from 'lucide-react';
 import CloseTrade, { AIDebriefView, type AIDebriefResult } from '@/components/journal/CloseTrade';
+import { readStoredDebrief } from '@/lib/journal/debrief';
 import EmotionalStateSlider from '@/components/trade/EmotionalStateSlider';
 import { createClient } from '@/lib/supabase/client';
 import { formatPnlPoints, calcRR } from '@/lib/utils';
@@ -87,6 +88,19 @@ interface Trade {
   broker_host?: string | null;
   /** The trader deleted it. Rows that carry `true` never reach this component. */
   hidden?: boolean;
+
+  // ── The stored AI debrief (REF-107 Stage 3a) ──────────────────────────────
+  //
+  // Optional for the same reason as the four above: the columns arrive with
+  // migration 036. Before it, `select('*')` returns rows without these keys
+  // and the modal behaves exactly as it did — the debrief is fetched on
+  // demand and lost on refresh, which is the bug Stage 3a fixes rather than
+  // a state this type needs to forbid.
+
+  /** The four paragraphs, as stored. Read through `readStoredDebrief`. */
+  debrief_ai?: unknown;
+  /** When they were written. Null means no debrief has ever been generated. */
+  debrief_generated_at?: string | null;
 }
 
 /**
@@ -100,6 +114,27 @@ interface Trade {
  */
 function isBrokerRow(t: Trade): boolean {
   return t.source === 'tradovate';
+}
+
+/**
+ * The debrief already written for this row, as the view expects it, or null.
+ *
+ * Only the four paragraphs and the score are reconstructed here. The
+ * breakdown and the corrected flags are NOT — they are derived, the route
+ * recomputes them on every request, and inventing empty ones would render a
+ * score with an explanation panel that says nothing. Opening the panel on a
+ * row that has a stored debrief shows the prose and the score immediately;
+ * pressing "נתח מחדש" fetches the full shape.
+ */
+function storedDebriefResult(t: Trade): AIDebriefResult | null {
+  const stored = readStoredDebrief(t.debrief_ai);
+  if (!stored || !t.debrief_generated_at) return null;
+  return {
+    ...stored,
+    score: t.plan_score ?? undefined,
+    generatedAt: t.debrief_generated_at,
+    stored: true,
+  };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1220,7 +1255,12 @@ function TradeDetailModal({ trade, onClose, debriefResult, onDebrief }: {
   onDebrief?: (result: AIDebriefResult) => void;
 }) {
   const [analyzing, setAnalyzing] = useState(false);
-  const [localResult, setLocalResult] = useState<AIDebriefResult | null>(null);
+  // Seeded from the row, so a debrief written in an earlier session is on
+  // screen before anything is fetched (REF-107 Stage 3a). Until migration 036
+  // this is always null and the modal behaves exactly as it did.
+  const [localResult, setLocalResult] = useState<AIDebriefResult | null>(() =>
+    storedDebriefResult(trade)
+  );
   const [debriefOpen, setDebriefOpen] = useState(debriefResult != null);
   const titleId = useId();
 
@@ -1239,7 +1279,11 @@ function TradeDetailModal({ trade, onClose, debriefResult, onDebrief }: {
     if (willOpen && !result && !analyzing) runAnalysis();
   }
 
-  async function runAnalysis() {
+  // `force` is what "נתח מחדש" sends. Without it the route serves whatever
+  // is already stored and calls no model — which is the point, and is also
+  // why the re-analyse button has to say so explicitly rather than reusing
+  // the same request.
+  async function runAnalysis(force = false) {
     setAnalyzing(true);
     try {
       const fd = new FormData();
@@ -1252,7 +1296,10 @@ function TradeDetailModal({ trade, onClose, debriefResult, onDebrief }: {
         post_trade_notes: trade.post_trade_notes,
       }));
       if (trade.post_trade_notes) fd.append('description', trade.post_trade_notes);
-      const res = await fetch('/api/ai-debrief', { method: 'POST', body: fd });
+      const res = await fetch(`/api/ai-debrief${force ? '?force=1' : ''}`, {
+        method: 'POST',
+        body: fd,
+      });
       if (res.ok) {
         const data = await res.json();
         setLocalResult(data);
@@ -1356,7 +1403,22 @@ function TradeDetailModal({ trade, onClose, debriefResult, onDebrief }: {
                     <p className="text-xs text-tg-text-2">מנתח את העסקה עם AI...</p>
                   </div>
                 ) : result ? (
-                  <div className="pt-3"><AIDebriefView result={result} /></div>
+                  <div className="pt-3 flex flex-col gap-2">
+                    <AIDebriefView result={result} />
+                    {/* Only on a debrief that came out of the row. A fresh
+                        one is already current, and offering to re-run it the
+                        second it arrives invites a second paid call for the
+                        same answer. */}
+                    {result.stored && (
+                      <button
+                        onClick={() => runAnalysis(true)}
+                        className="self-start text-xs px-2 py-1 rounded-lg"
+                        style={{ color: 'var(--color-tg-primary)', background: 'var(--color-tg-primary-muted)' }}
+                      >
+                        נתח מחדש
+                      </button>
+                    )}
+                  </div>
                 ) : null}
               </div>
             </div>
