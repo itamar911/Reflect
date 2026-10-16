@@ -505,7 +505,11 @@ async function decideLinks(
   // and the rule itself lives in one place.
   const { data, error } = await client
     .from('trade_plans')
-    .select('id, status, source, hidden, submitted_at, direction, symbol')
+    // `link_confirmed_at` is selected although no SQL predicate below reads
+    // it, and it has to be: it is condition 8 of the matching rule, and a
+    // column the matcher cannot see is a condition that silently never
+    // applies. An unlinked plan would then be re-linked on this very run.
+    .select('id, status, source, hidden, submitted_at, direction, symbol, link_confirmed_at')
     .eq('user_id', userId)
     .eq('status', 'open')
     .eq('source', 'manual')

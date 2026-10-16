@@ -39,6 +39,16 @@
  *   7. the symbol root does not contradict — a NEGATIVE FILTER only, never a
  *      requirement. See {@link rootsConflict}.
  *
+ * And one more that applies to the AUTOMATIC path only:
+ *
+ *   8. **no link decision is already recorded on it** — `link_confirmed_at` is
+ *      null. This is what makes an unlink stick; without it the unlink button
+ *      undoes itself on the next sync. It is applied by
+ *      {@link matchBrokerTrade} and NOT by {@link planCandidates}, because the
+ *      confirmation screen must still offer a plan the trader unlinked — the
+ *      cron may not overrule their decision, they may. See
+ *      {@link decidedAlready}.
+ *
  * **Unique means exactly one.** Zero or two or five all mean the same thing
  * here: the trader decides, and the row goes to the confirmation queue. There
  * is no tie-break and there must not be one — §F1 names a wrong automatic link
@@ -88,6 +98,13 @@ export interface CandidatePlan {
   hidden?: boolean | null;
   /** When the plan was submitted, ISO 8601. The database's `now()`, not a browser's. */
   submitted_at?: string | null;
+  /**
+   * When a link decision was last recorded about this row.
+   *
+   * On a MANUAL plan this is only ever set by an unlink, and it is what makes
+   * the unlink stick — see condition 8.
+   */
+  link_confirmed_at?: string | null;
   /** Nullable on a plan. Absent is not a disagreement — see condition 6. */
   direction?: 'long' | 'short' | null;
   /** Free text the trader typed, uppercased by the form. See {@link rootsConflict}. */
@@ -244,15 +261,46 @@ export function planCandidates(input: MatchInput): CandidatePlan[] {
 }
 
 /**
+ * Whether the automatic matcher may decide about this plan at all.
+ *
+ * CONDITION 8, AND IT APPLIES TO THE AUTOMATIC PATH ONLY — which is the whole
+ * reason it lives here rather than in {@link planCandidates}.
+ *
+ * On a manual plan, `link_confirmed_at` is set by exactly one thing: an
+ * unlink. And an unlinked plan is a PERFECT candidate for the trade it was
+ * just released from — it kept the broker's `submitted_at`, `direction` and
+ * `symbol`, because the link overwrote them and nothing kept the originals —
+ * so equal instants pass the ordering rule, the window is zero, and both the
+ * direction and the symbol agree by construction. A matcher that did not read
+ * this would re-link on the next sync and the unlink button would be a no-op.
+ *
+ * BUT THE CONFIRMATION SCREEN MUST STILL OFFER IT, and that asymmetry is the
+ * point. The trader who unlinked is usually reassigning the trade to a
+ * different plan — but they may have unlinked to fix something and want the
+ * same plan back, and a candidate list that silently omitted the plan they
+ * just unlinked from would be a list that disagrees with what they can see.
+ *
+ * So: the cron and the import may not overrule a decision the trader made;
+ * the trader may. That is the only sense in which "decided" is binding.
+ */
+function decidedAlready(plan: CandidatePlan): boolean {
+  return plan.link_confirmed_at != null && plan.link_confirmed_at !== '';
+}
+
+/**
  * The decision: one plan, several, or none.
  *
  * The import writes onto the plan only for `unique`. Both other shapes mean the
  * same thing to it — insert a broker row and let the trader decide — and they
  * are kept apart because the screen says different things: "we found two plans
  * this could be" is a different sentence from "we found none".
+ *
+ * THIS IS THE AUTOMATIC PATH, so it is narrower than the candidate list the
+ * screen shows: a plan that already carries a link decision is dropped here
+ * and nowhere else. See {@link decidedAlready}.
  */
 export function matchBrokerTrade(input: MatchInput): MatchResult {
-  const candidates = planCandidates(input);
+  const candidates = planCandidates(input).filter((plan) => !decidedAlready(plan));
   if (candidates.length === 1) return { kind: 'unique', planId: candidates[0].id };
   if (candidates.length > 1) {
     return { kind: 'ambiguous', candidateIds: candidates.map((plan) => plan.id) };

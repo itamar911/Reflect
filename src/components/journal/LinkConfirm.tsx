@@ -111,11 +111,35 @@ function distanceLabel(plan: LinkablePlan, openedAtMs: number): string {
     : `${hours} שעות ו-${rest} דקות לפני הכניסה`;
 }
 
-function Row({ label, value, locked }: { label: string; value: string; locked?: boolean }) {
+function Row({ label, value, locked, ltr }: {
+  label: string;
+  value: string;
+  locked?: boolean;
+  /**
+   * Render the value left-to-right inside this right-to-left panel.
+   *
+   * FOR RANGES, AND ONLY FOR RANGES. `09:12 – 09:41` is bidirectional text:
+   * the digits are strong LTR, the en dash is neutral, and the RTL paragraph
+   * direction therefore resolves the neutral run to the right of the first
+   * number — so the browser laid it out as `09:41 – 09:12` and the trade read
+   * as though it had closed before it opened. The same class of problem the
+   * charts solve by setting `dir="ltr"` on their containers (see CLAUDE.md),
+   * and the same fix: scope the direction to the run that is genuinely LTR
+   * rather than reorder the string.
+   *
+   * A single price or quantity needs nothing — one strong run has no
+   * neighbour to be reordered against.
+   */
+  ltr?: boolean;
+}) {
   return (
     <div className="flex items-baseline justify-between gap-2 py-1">
       <span className="text-[11px] font-semibold shrink-0" style={{ color: MUTED }}>{label}</span>
-      <span className="text-[11px] text-right" style={{ color: locked ? TEXT2 : TEXT, wordBreak: 'break-word' }}>
+      <span
+        className="text-[11px] text-right"
+        {...(ltr ? { dir: 'ltr' as const } : {})}
+        style={{ color: locked ? TEXT2 : TEXT, wordBreak: 'break-word' }}
+      >
         {value}
       </span>
     </div>
@@ -259,7 +283,7 @@ export default function LinkConfirm({
           <Row label="כניסה" value={price(trade.entry_price)} locked />
           <Row label="יציאה" value={price(trade.exit_price)} locked />
           <Row label="כמות" value={trade.quantity != null ? String(trade.quantity) : '—'} locked />
-          <Row label="שעות" value={`${timeOf(trade.submitted_at)} – ${timeOf(trade.closed_at)}`} locked />
+          <Row label="שעות" value={`${timeOf(trade.submitted_at)} – ${timeOf(trade.closed_at)}`} locked ltr />
           <Row label="תוצאה" value={money != null ? formatMoney(Number(money)) : '—'} locked />
         </div>
 

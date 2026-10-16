@@ -6,6 +6,7 @@ import { isUserAllowed } from '@/lib/tradovate/allowlist';
 import { isImportEnabled } from '@/lib/tradovate/import';
 import { visibleTrades } from '@/lib/trades/visible';
 import { isQueuedBrokerRow } from '@/lib/journal/link';
+import { intentNumber, intentText, rrValue, scaleValue } from '@/lib/intent';
 
 export const metadata = { title: 'כל העסקאות — Reflect' };
 
@@ -44,14 +45,37 @@ export default async function TradesPage() {
   // whole change — see lib/trades/visible.ts on why it is not a DELETE.
   const allTrades = visibleTrades(trades ?? []).map((t) => ({
     id:               t.id               as string,
-    strategy:         t.strategy         as string,
+    // ── THE INTENT COLUMNS GO THROUGH lib/intent.ts (REF-107 unlink fix) ───
+    //
+    // `Number(null)` IS 0, NOT NaN, and that is the whole bug. These five
+    // read `Number(t.stop_loss)` and friends, so a broker row — which carries
+    // none of them — arrived here as a plan with a stop of 0.00, a target of
+    // 0.00, an R:R of 0 and an emotional state of 0/5. The detail modal then
+    // rendered "Stop Loss 0.00" and "מצב רגשי 0/5": not a missing value, a
+    // STATED one, and a wrong one.
+    //
+    // Every reader downstream was already correct — the modal tests
+    // `!= null`, the edit form tests `!= null`, the CSV writes an empty cell
+    // for null — so this one `.map()` was the only thing manufacturing the
+    // zeroes, and it manufactured them before any of them could tell.
+    //
+    // lib/intent.ts is the module Stage 4 built for exactly this hazard, and
+    // its header names this coercion as the thing it exists to prevent. This
+    // mapping simply never used it. `rrValue` and `scaleValue` also drop a
+    // value outside the column's own CHECK, which `Number()` would have
+    // passed through.
+    //
+    // THE CSV WAS WRONG TOO, and nobody had reported that: `exportTrades`
+    // below is built from these fields, so a broker row exported "0" in the
+    // Stop Loss column where `numberCell(null)` would have written nothing.
+    strategy:         intentText(t.strategy as string | null),
     symbol:           (t.symbol          as string | null) ?? null,
     entry_price:      Number(t.entry_price),
-    stop_loss:        Number(t.stop_loss),
-    take_profit:      Number(t.take_profit),
-    rr_ratio:         Number(t.rr_ratio),
-    emotional_state:  Number(t.emotional_state),
-    trade_reason:     t.trade_reason     as string,
+    stop_loss:        intentNumber(t.stop_loss as number | string | null),
+    take_profit:      intentNumber(t.take_profit as number | string | null),
+    rr_ratio:         rrValue(t.rr_ratio as number | string | null),
+    emotional_state:  scaleValue(t.emotional_state as number | string | null),
+    trade_reason:     intentText(t.trade_reason as string | null),
     status:           t.status           as string,
     exit_price:       t.exit_price != null ? Number(t.exit_price) : null,
     exit_reason:      t.exit_reason      as string | null,

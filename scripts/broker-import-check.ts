@@ -98,6 +98,8 @@ import {
   proposeFlags,
   queueBannerText,
   resetLinkGuard,
+  UNLINK_WARNING,
+  unlinkPlan,
 } from '../src/lib/journal/link';
 import {
   respondToDebriefRequest,
@@ -1829,6 +1831,31 @@ async function matchRuleGroup() {
     c('(16) a plan with no source column at all reads as manual',
       matchAgainst([planRow({ source: undefined })]), { kind: 'unique', planId: 'plan-1' }),
 
+    // Condition 8, and it is the whole reason the unlink button works. An
+    // unlinked plan keeps the broker's submitted_at, direction and symbol, so
+    // it is a PERFECT candidate for the trade it was just released from —
+    // equal instants pass the ordering rule and the window is zero. Without
+    // this the next sync re-links it and the button does nothing.
+    c('(16a) the AUTOMATIC matcher will not touch a plan that carries one',
+      matchAgainst([planRow({ link_confirmed_at: '2026-10-16T11:00:00.000Z' })]), { kind: 'none' }),
+    c('(16b) a plan that never had one is matched as usual',
+      matchAgainst([planRow({ link_confirmed_at: null })]), { kind: 'unique', planId: 'plan-1' }),
+    // THE ASYMMETRY IS THE POINT, and getting it wrong is the bug this case
+    // was added for: the first version put condition 8 in `planCandidates`,
+    // which ALSO hid the unlinked plan from the trader's own candidate list.
+    // The cron may not overrule a decision the trader made; the trader may.
+    c('(16c) but the confirmation screen still OFFERS it, because the trader is choosing',
+      planCandidates({
+        trade: TRADE,
+        plans: [planRow({ link_confirmed_at: '2026-10-16T11:00:00.000Z' })],
+        nowMs: MATCH_NOW,
+      }).map((plan) => plan.id), ['plan-1']),
+    c('(16d) a decided plan does not make an undecided one ambiguous either',
+      matchAgainst([
+        planRow({ id: 'decided', link_confirmed_at: '2026-10-16T11:00:00.000Z' }),
+        planRow({ id: 'fresh' }),
+      ]), { kind: 'unique', planId: 'fresh' }),
+
     // The clock's one job. A future anchor makes rule 4 vacuous and turns the
     // window around, so nothing matches rather than everything.
     c('(17) a trade whose entry instant is in the future matches nothing',
@@ -2205,6 +2232,86 @@ async function debriefGateGroup() {
   ]);
 }
 
+async function unlinkGroup() {
+  // A linked pair, built by the real auto-link so the row under test is the
+  // row production produces — not one assembled by hand to be convenient.
+  const db = new FakeDb([storedPlan()]);
+  await quietImport({
+    client: db.client(), userId: USER, trades: [TRADE], isTradeSource: true, env: ON, nowMs: MATCH_NOW,
+  });
+  const linked = db.rows.find((row) => row.id === 'plan-1') ?? {};
+  const wasLinked = [linked.source, linked.broker_trade_key, linked.status];
+
+  resetLinkGuard();
+  const outcome = await unlinkPlan({ client: db.client(), rowId: 'plan-1' });
+  const plan = db.rows.find((row) => row.id === 'plan-1') ?? {};
+
+  // The next sync. The key is not in the table any more, so the trade is new
+  // to the journal again — and the plan must NOT be matched to it a second
+  // time, or the button undoes itself.
+  const reimport = await quietImport({
+    client: db.client(), userId: USER, trades: [TRADE], isTradeSource: true, env: ON, nowMs: MATCH_NOW,
+  });
+  const queued = db.rows.find((row) => row.source === 'tradovate') ?? {};
+  const planAfter = db.rows.find((row) => row.id === 'plan-1') ?? {};
+
+  // Two presses, overlapping — the same guard as the other two writes.
+  resetLinkGuard();
+  const twice = new FakeDb([{ ...storedPlan(), source: 'tradovate', unplanned: false,
+    broker_trade_key: TRADE.brokerTradeKey, link_confirmed_at: '2026-10-16T10:00:00.000Z' }]);
+  const client = twice.client();
+  const both = await Promise.all([
+    unlinkPlan({ client, rowId: 'plan-1' }),
+    unlinkPlan({ client, rowId: 'plan-1' }),
+  ]);
+
+  group('an unlink gives the plan back and lets the trade return', [
+    c('(0) the fixture really was linked first',
+      wasLinked, ['tradovate', TRADE.brokerTradeKey, 'closed']),
+
+    c('(1) the plan is a plan again', [outcome.ok, plan.source, plan.status], [true, 'manual', 'open']),
+    c('(2) the provenance is gone, so the next sync does not find this trade',
+      [plan.broker_trade_key, plan.broker_account_id, plan.broker_host], [null, null, null]),
+    // The broker's statement about a trade this row no longer claims to be.
+    c('(3) the exit half is dropped',
+      [plan.closed_at, plan.exit_price, plan.actual_pnl, plan.pnl_currency], [null, null, null, null]),
+    c('(4) it is not an unplanned trade — it is a plan, and always was',
+      plan.unplanned, false),
+    c('(5) link_method is cleared: none of its three values is true any more',
+      plan.link_method, null),
+    // THE LINE THAT MAKES THE BUTTON WORK. Clearing this hands the plan
+    // straight back to the matcher — see (9).
+    c('(6) but the decision itself is on record', typeof plan.link_confirmed_at, 'string'),
+
+    // Never the broker's, never touched by the link, and not touched here.
+    c('(7) NOT ONE intent column moved',
+      [plan.strategy, plan.stop_loss, plan.take_profit, plan.rr_ratio,
+       plan.trade_reason, plan.emotional_state, plan.setup_id],
+      ['פריצת טווח', 29900, 29700, 2, 'פריצה של הטווח הלילי', 4, 'setup-7']),
+    // NOT RECOVERABLE, and the dialog says so. EXECUTION_FACTS owns all five
+    // and nothing kept what the trader originally typed.
+    c('(8) the entry half stays as the broker reported it',
+      [plan.symbol, plan.direction, plan.entry_price, plan.quantity], [SYMBOL, 'short', ENTRY, 2]),
+
+    // THE ASSERTION THIS GROUP EXISTS FOR.
+    c('(9) the next import brings the trade back AS A QUEUED ROW, not a re-link',
+      [reimport.imported, reimport.queued, reimport.linkedAuto], [1, 1, 0]),
+    c('(10) with the same key, because the key is deterministic',
+      [queued.broker_trade_key, queued.unplanned, queued.link_confirmed_at ?? null],
+      [TRADE.brokerTradeKey, true, null]),
+    c('(11) and the plan was left alone by that import',
+      [planAfter.source, planAfter.status, planAfter.broker_trade_key],
+      ['manual', 'open', null]),
+    c('(12) so the trader is back to two rows and one decision to make',
+      db.rows.length, 2),
+
+    c('(13) two overlapping unlinks: the second says why it did nothing',
+      both.filter((o) => o.ok === false).map((o) => o.ok === false && o.reason), ['busy']),
+    c('(14) and the dialog states the one thing that cannot be undone',
+      UNLINK_WARNING.includes('פרטי הכניסה נשארים כפי שהברוקר דיווח'), true),
+  ]);
+}
+
 async function confirmScreenGroup() {
   // A short that went to target: planned at 29830 with a 70-point stop and an
   // 80-point target, entered 4 points away from the plan, exited past the
@@ -2477,6 +2584,7 @@ async function main() {
   await linkCountGroup();
   await debriefGateGroup();
   await confirmScreenGroup();
+  await unlinkGroup();
 
   console.log('');
   if (failures.length > 0) {

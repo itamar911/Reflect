@@ -3,7 +3,7 @@
 import { Fragment, useState, useMemo, useId, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, Bot, Eye, Inbox, MoreHorizontal, Pencil, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Bot, Eye, Inbox, MoreHorizontal, Pencil, Trash2, Unlink, X } from 'lucide-react';
 import CloseTrade, { AIDebriefView, type AIDebriefResult } from '@/components/journal/CloseTrade';
 import LinkConfirm from '@/components/journal/LinkConfirm';
 import { readStoredDebrief } from '@/lib/journal/debrief';
@@ -13,7 +13,11 @@ import {
   LINK_STATE_COPY,
   linkState,
   queueBannerText,
+  UNLINK_WARNING,
+  unlinkPlan,
 } from '@/lib/journal/link';
+import { startOfTodayIso } from '@/lib/rules/tradeRuleContext';
+import { DAY_START_PARAM, MAX_SINCE_AGE_MS, SINCE_PARAM } from '@/lib/tradovate/trading-day';
 import EmotionalStateSlider from '@/components/trade/EmotionalStateSlider';
 import { createClient } from '@/lib/supabase/client';
 import { formatPnlPoints, calcRR } from '@/lib/utils';
@@ -198,6 +202,44 @@ const PAGE_SIZES = [15, 30, 50, 100];
 const AUTO_DEBRIEF_PER_LOAD = 3;
 
 /**
+ * Ask the server to re-pull the last week, and ignore the answer.
+ *
+ * ONE CALLER: the unlink. Clearing a trade's key means the next sync imports
+ * it afresh, and "the next sync" would otherwise be the cron at 03:30 — a
+ * trader who presses בטל שיוך needs the trade back in the queue now, so they
+ * can give it to the plan they actually meant.
+ *
+ * THE WEEK-LONG WINDOW, not the day's, and that is the point of not reusing
+ * the automatic trigger's parameters: the trade being released may have closed
+ * days ago, and `dayStart` alone would not reach back far enough to re-import
+ * it. These are the same two parameters BrokerSyncButton sends on the trigger
+ * the trader pressed, for the same reason — §A2 found the pull costs the same
+ * for any window and only PRICING grows, so "bring me everything you can"
+ * belongs on a deliberate action.
+ *
+ * At module scope rather than inside the component, because it reads the
+ * clock: a clock read during a render is what React's purity rule forbids, and
+ * although this only ever runs from a click, the rule cannot see that — and a
+ * suppression comment would be the wrong answer to a rule that is right in
+ * general. BrokerSyncButton's own `requestSync` sits at module scope for the
+ * same reason.
+ *
+ * Never throws. The unlink has already happened by the time this is called.
+ */
+async function requestWideSync(): Promise<void> {
+  const params = new URLSearchParams({
+    [DAY_START_PARAM]: startOfTodayIso(),
+    [SINCE_PARAM]: new Date(Date.now() - MAX_SINCE_AGE_MS).toISOString(),
+  });
+  try {
+    await fetch(`/api/tradovate/sync?${params}`, { method: 'POST', cache: 'no-store' });
+  } catch {
+    // Offline, refused or timed out. The unlink stands either way, and the
+    // trade returns on the next sync — page entry or the cron.
+  }
+}
+
+/**
  * Accessible name for a row's open-detail control.
  *
  * The symbol leads, so the button's visible text is a prefix of its name;
@@ -370,11 +412,19 @@ export default function JournalClient({
   const [deletingTradeId, setDeletingTradeId] = useState<string | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState('');
+  // The unlink confirm, built the same way as the delete one and at the same
+  // level: the dialog lives at the root rather than inside the detail modal,
+  // so both reversible-but-consequential actions get the same shape and the
+  // same focus rule.
+  const [unlinkingTradeId, setUnlinkingTradeId] = useState<string | null>(null);
+  const [unlinkLoading, setUnlinkLoading] = useState(false);
+  const [unlinkError, setUnlinkError] = useState('');
   // Ids for the modal titles below, so each dialog's accessible name comes
   // from the heading the user can already see.
   const uid = useId();
   // Destructive confirm — focus lands on ביטול, never on מחק עסקה.
   const deleteCancelRef = useRef<HTMLButtonElement>(null);
+  const unlinkCancelRef = useRef<HTMLButtonElement>(null);
   // Task-shaped close-trade dialog — focus its first field, the exit price.
   const closeExitPriceRef = useRef<HTMLInputElement>(null);
   // Row open-buttons by trade id, so focus can be placed on a *neighbouring*
@@ -540,6 +590,50 @@ export default function JournalClient({
       // The sweep below picks it up on the next load. A failed coaching note
       // is not something to interrupt the trader about.
     });
+  }
+
+  /**
+   * Undo a link: the plan goes back to being a plan, the trade comes back.
+   *
+   * TWO STEPS, AND THE SECOND ONE IS WHY THIS IS NOT JUST AN UPDATE. Clearing
+   * the key means the next sync does not find the trade in the table and
+   * imports it afresh — but "the next sync" could be the cron, tomorrow at
+   * 03:30. A trader who presses this needs the trade back NOW, in the queue,
+   * so they can assign it to the plan they actually meant. So the write is
+   * followed by a sync request, with the week-long window the explicit sync
+   * button uses: the released trade may have closed days ago, and the narrow
+   * day window would not reach it.
+   *
+   * THE SYNC IS ALLOWED TO FAIL AND THE UNLINK STILL STANDS. The plan is
+   * already back to being a plan, which is the half the trader asked for; the
+   * trade returning is the half the next sync will do anyway, on page entry or
+   * from the cron. Reporting a failure here would say "the unlink did not
+   * work" about an unlink that did.
+   */
+  async function handleUnlinkTrade(id: string) {
+    setUnlinkLoading(true);
+    setUnlinkError('');
+
+    const outcome = await unlinkPlan({ client: supabase, rowId: id });
+
+    if (!outcome.ok) {
+      setUnlinkLoading(false);
+      // A second press while the first is in flight is not an error.
+      if (outcome.reason === 'busy') return;
+      setUnlinkError('לא הצלחנו לבטל את השיוך — נסה שוב');
+      return;
+    }
+
+    // The trade comes back. See the doc comment on why a failure here is not
+    // reported as a failed unlink.
+    await requestWideSync();
+
+    setUnlinkLoading(false);
+    setUnlinkingTradeId(null);
+    setViewTradeId(null);
+    // The row count changed — the plan is still here and a broker row joined
+    // it — so trades/page.tsx rebuilds the list on its own `key`.
+    router.refresh();
   }
 
   /**
@@ -1073,9 +1167,56 @@ export default function JournalClient({
             plans={trades}
             onClose={() => setViewTradeId(null)}
             onLinkResolved={outcome => handleLinkResolved(t.id, outcome)}
+            onUnlink={() => { setUnlinkingTradeId(t.id); setUnlinkError(''); }}
             debriefResult={debriefResults[t.id]}
             onDebrief={result => setDebriefResults(prev => ({ ...prev, [t.id]: result }))}
           />
+        );
+      })()}
+
+      {unlinkingTradeId && (() => {
+        const t = trades.find(tr => tr.id === unlinkingTradeId);
+        if (!t) return null;
+        return (
+          <Modal
+            onClose={() => { setUnlinkingTradeId(null); setUnlinkError(''); }}
+            labelledBy={`${uid}-unlink`}
+            initialFocusRef={unlinkCancelRef}
+          >
+            <div className="flex items-center justify-between mb-1">
+              <p id={`${uid}-unlink`} className="text-base font-bold" style={{ color: TEXT }}>ביטול שיוך</p>
+              <button onClick={() => { setUnlinkingTradeId(null); setUnlinkError(''); }}
+                style={{ color: MUTED, fontSize: 18, lineHeight: 1, fontWeight: 600 }}>×</button>
+            </div>
+            {/* THE LAST SENTENCE IS THE ONE THAT MATTERS, and it is not
+                boilerplate: the link OVERWROTE the plan's entry price, symbol,
+                direction, quantity and submitted_at with the broker's, and
+                nothing kept the originals (EXECUTION_FACTS owns all five). So
+                an unlink restores the plan's STATE and not its figures, and a
+                trader who expects their own typed entry back has to be told
+                here rather than discover it afterwards. */}
+            <p className="text-sm" style={{ color: TEXT2 }}>
+              {UNLINK_WARNING}
+            </p>
+            {unlinkError && <p className="text-xs" style={{ color: RED }}>{unlinkError}</p>}
+            <div className="flex gap-2 pt-1">
+              <button
+                ref={unlinkCancelRef}
+                onClick={() => { setUnlinkingTradeId(null); setUnlinkError(''); }}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all hover:opacity-80"
+                style={{ background: SURF2, color: TEXT2 }}>
+                ביטול
+              </button>
+              <button
+                onClick={() => handleUnlinkTrade(t.id)}
+                disabled={unlinkLoading}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all hover:opacity-80 disabled:opacity-50 flex items-center justify-center gap-1.5"
+                style={{ background: 'rgba(0,210,210,0.18)', color: GOLD, border: '1px solid rgba(0,210,210,0.35)' }}>
+                <Unlink aria-hidden="true" size={13} />
+                {unlinkLoading ? 'מבטל...' : 'בטל שיוך'}
+              </button>
+            </div>
+          </Modal>
         );
       })()}
 
@@ -1440,13 +1581,15 @@ function Modal({ onClose, labelledBy, initialFocusRef, initialFocus, children }:
   );
 }
 
-function TradeDetailModal({ trade, plans, onClose, onLinkResolved, debriefResult, onDebrief }: {
+function TradeDetailModal({ trade, plans, onClose, onLinkResolved, onUnlink, debriefResult, onDebrief }: {
   trade: Trade;
   /** Every row on the page. The panel narrows them to candidates itself. */
   plans: readonly Trade[];
   onClose: () => void;
   /** The row left the queue. Null while it is not a queued row at all. */
   onLinkResolved: (outcome: { kind: 'linked'; planId: string } | { kind: 'declined' }) => void;
+  /** Open the unlink confirmation. Offered on a `linked` row only. */
+  onUnlink: () => void;
   debriefResult?: AIDebriefResult;
   onDebrief?: (result: AIDebriefResult) => void;
 }) {
@@ -1591,6 +1734,23 @@ function TradeDetailModal({ trade, plans, onClose, onLinkResolved, debriefResult
                   onResolved={onLinkResolved}
                   onSkip={onClose}
                 />
+              </div>
+            )}
+            {/* The other half of the same row. §F1's reversibility argument
+                rests on being able to undo a link, and until now there was no
+                way to — a trader who confirmed the wrong plan, or an auto-link
+                that guessed wrong, had no route back. Quiet and text-sized:
+                this is a correction, not a destructive action, and the dialog
+                is where the consequence is spelled out. */}
+            {label === 'מקור' && linkState(trade) === 'linked' && (
+              <div className="pb-2">
+                <button
+                  type="button"
+                  onClick={onUnlink}
+                  className="flex items-center gap-1.5 text-[11px] font-semibold px-2 py-1 rounded-lg transition-all hover:opacity-80"
+                  style={{ color: 'var(--color-tg-muted)', background: 'var(--color-tg-surface-2)' }}>
+                  <Unlink aria-hidden="true" size={12} /> בטל שיוך
+                </button>
               </div>
             )}
           </Fragment>

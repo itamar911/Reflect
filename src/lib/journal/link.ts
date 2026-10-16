@@ -392,3 +392,106 @@ export async function declineLink(params: {
     inFlight.delete(brokerRowId);
   }
 }
+
+/**
+ * Undo a link: the plan goes back to being a plan, and the trade comes back.
+ *
+ * THE GAP STAGE 3b SHIPPED WITH. §F1 rests its whole reversibility argument on
+ * "the undo is the absence of an action" — clear the key, and the next sync
+ * does not find it in the table and imports an identical broker row, because
+ * the key is deterministic. The regression suite proved that worked from the
+ * first commit. There was no button.
+ *
+ *
+ * WHAT COMES BACK, AND WHAT CANNOT
+ * --------------------------------
+ *
+ * The exit half is DROPPED — `closed_at`, `exit_price`, `actual_pnl`,
+ * `pnl_currency` — and the row goes back to `status = 'open'`. That is right:
+ * those four were the broker's statement about a trade this plan is no longer
+ * claimed to be, and leaving them would be a plan carrying somebody else's
+ * result.
+ *
+ * THE ENTRY HALF STAYS, AND IT IS NOT RECOVERABLE. `symbol`, `direction`,
+ * `entry_price`, `quantity` and `submitted_at` were OVERWRITTEN by the link —
+ * `EXECUTION_FACTS` in lib/tradovate/import.ts owns all five — and nothing
+ * anywhere kept what the trader originally typed. So an unlink restores the
+ * plan's STATE but not its original entry figures, and the confirmation dialog
+ * says so in as many words rather than letting the trader discover it.
+ *
+ * Every intent column is untouched, here as everywhere: the strategy, the
+ * stop, the target, the R:R, the reason, the emotional state, `setup_id`. They
+ * were never the broker's and the link never touched them.
+ *
+ *
+ * WHY `link_confirmed_at` SURVIVES AN UNLINK — AND IT IS NOT AN OVERSIGHT
+ * ----------------------------------------------------------------------
+ *
+ * Clearing it would make this button UNDO ITSELF ON THE NEXT SYNC, and the
+ * regression suite is what found that. Follow it through: an unlinked plan is
+ * `status = 'open'`, `source = 'manual'`, and — because the entry half stays —
+ * it carries the broker's own `submitted_at`, `direction` and `symbol`. That
+ * is a PERFECT candidate for the trade that was just released: the ordering
+ * rule passes on equal instants, the window is zero, the direction and the
+ * symbol agree by construction. The matcher would find exactly one candidate
+ * and link it straight back, and the trader would press the button and watch
+ * nothing happen.
+ *
+ * So the plan keeps a timestamp, and lib/tradovate/match.ts refuses a plan
+ * that carries one. Read as English the column already says the right thing:
+ * "a link decision has been recorded about this row". After an unlink the
+ * decision on record is the trader's rejection of the last one, and the
+ * matcher's job is not to overrule it.
+ *
+ * `link_method` IS cleared, because none of its three values is true any more
+ * — the row was not linked automatically, by confirmation, or declined. The
+ * cost is that an audit cannot currently tell "unlinked by hand" from the
+ * timestamp alone, and the fix is a migration adding `'unlinked'` to the
+ * CHECK; the BEHAVIOUR does not depend on it, which is why it is not shipped
+ * here. See the report.
+ */
+export async function unlinkPlan(params: {
+  client: SupabaseClient;
+  /** The linked row. It stays; only its provenance and exit half go. */
+  rowId: string;
+}): Promise<LinkOutcome> {
+  const { client, rowId } = params;
+
+  if (inFlight.has(rowId)) return { ok: false, reason: 'busy' };
+  inFlight.add(rowId);
+
+  try {
+    const { error } = await client
+      .from('trade_plans')
+      .update({
+        // The provenance goes, and with the key gone the next sync does not
+        // find this trade in the table and imports it afresh.
+        broker_trade_key: null,
+        broker_account_id: null,
+        broker_host: null,
+        source: 'manual',
+        // The exit half: the broker's statement about a trade this row no
+        // longer claims to be.
+        status: 'open',
+        closed_at: null,
+        exit_price: null,
+        actual_pnl: null,
+        pnl_currency: null,
+        // Not an unplanned trade — it is a plan again, and it always was one.
+        unplanned: false,
+        // KEPT, deliberately. See the doc comment: clearing it hands the plan
+        // straight back to the matcher.
+        link_confirmed_at: new Date().toISOString(),
+        link_method: null,
+      })
+      .eq('id', rowId);
+
+    return error ? { ok: false, reason: 'rejected', code: error.code } : { ok: true, flagsStored: false };
+  } finally {
+    inFlight.delete(rowId);
+  }
+}
+
+/** The confirmation dialog's copy. One place, so the suite reads what ships. */
+export const UNLINK_WARNING =
+  'השיוך יבוטל. התוכנית שלך תחזור למצב פתוח והעסקה מהברוקר תיובא מחדש בסנכרון הבא. פרטי הכניסה נשארים כפי שהברוקר דיווח.';
