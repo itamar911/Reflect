@@ -256,6 +256,41 @@ export interface BrokerTrade {
   /** Every fill in the group, ascending. The first is what keys the trade. */
   fillIds: number[];
   /**
+   * Every ORDER that produced a fill in this group, ascending (REF-113 Stage 1).
+   *
+   * THE EXACT HALF OF REF-113'S LINKING RULE, AND IT COSTS NOTHING. `fill.orderId`
+   * is documented on the entity (./types.ts) and `/fill/list` is already read on
+   * every pull, so this is a field the chain had in hand and discarded. §B of the
+   * REF-113 investigation turns on it: a trade's own orders are
+   * `{ fill.orderId : fill.id ∈ fillIds }` — no time window, no side test, no
+   * heuristic, which is what the protective-order search is NOT and cannot be.
+   *
+   * ENTRY *AND* EXIT, DESPITE THE NAME. Every order that contributed a fill is
+   * here, which on a normal trade is the entry order and the order that closed
+   * it. The name says "entry" because the entry orders are what §B anchors the
+   * protective-order time window on — a bracket is submitted WITH the entry
+   * order, so a window opened at the entry FILL would miss every OCO placed
+   * behind a resting limit entry. Nothing here distinguishes the two roles; that
+   * needs `orderVersion.orderType`, which this pull does not read.
+   *
+   * ONE CONSEQUENCE WORTH KNOWING NOW: when the stop was the exit, its order is
+   * already in this list, so that case needs no inference at all. It is the
+   * highest-confidence case REF-113 has, and it is reachable from this field
+   * alone.
+   *
+   * An unusable `orderId` is OMITTED rather than carried as `0` — see
+   * {@link usableId}, which is the same boundary the pricing chain puts on every
+   * number it reads off the wire. A `0` in here would be a plausible-looking
+   * order id that joins to nothing, which is the silent-wrongness direction this
+   * module refuses everywhere else. The list can therefore be shorter than
+   * {@link fillIds}, and may be empty.
+   *
+   * NEVER LEAVES THE SERVER. Host-local like every id here, and ids are the one
+   * thing /api/tradovate/today is asserted not to carry — see the leak group in
+   * scripts/tradovate-today-check.ts, which names this field.
+   */
+  entryOrderIds: number[];
+  /**
    * Whether every position this group's legs belong to is FLAT — `netPos = 0`
    * on all of them (REF-107 Stage 2).
    *
@@ -330,6 +365,10 @@ interface DatedPair {
   /** Which side was the earlier leg. See {@link BrokerTrade.direction}. */
   direction: 'long' | 'short';
   contractId: number;
+  /** The order that produced the buy leg's fill. See {@link BrokerTrade.entryOrderIds}. */
+  buyOrderId: number;
+  /** The order that produced the sell leg's fill. */
+  sellOrderId: number;
 }
 
 /**
@@ -730,6 +769,18 @@ function describeTrade(
     ...new Set(legs.flatMap((leg) => [leg.pair.buyFillId, leg.pair.sellFillId])),
   ].sort((a, b) => a - b);
 
+  // Deduplicated for a second reason on top of the one above: a scale-out shares
+  // its entry FILL between legs, and a single order filling in pieces shares its
+  // ORDER between several distinct fills. Both collapse here, which is what makes
+  // "one order, one id" true of a partially-filled entry (REF-113 Stage 1).
+  const entryOrderIds = [
+    ...new Set(
+      legs
+        .flatMap((leg) => [leg.buyOrderId, leg.sellOrderId])
+        .filter((id): id is number => usableId(id))
+    ),
+  ].sort((a, b) => a - b);
+
   return {
     brokerTradeKey: `${host}:${fillIds[0]}`,
     host,
@@ -752,6 +803,7 @@ function describeTrade(
     closedAtMs: trade.closedAtMs,
     pnlUsd: legs.reduce((total, leg) => total + pricePair(leg, units), 0),
     fillIds,
+    entryOrderIds,
     // EVERY leg, not the opener's. A group is connected by shared fills and
     // cannot straddle two contracts, but it CAN straddle two positions —
     // /position/list keys a position per contract per trading day, so a trade
@@ -988,6 +1040,12 @@ function datePair(pair: TradovateFillPair, fillById: Map<number, TradovateFill>)
     // Both legs are the same contract by construction; the buy leg is read so
     // there is one answer rather than a choice.
     contractId: buy.contractId,
+    // REF-113 Stage 1. Lifted here for the same reason `direction` and
+    // `contractId` are: this is the one function that holds the FILLS, and
+    // `describeTrade` below holds only the pairs. A pair names its legs by fill
+    // id, and the order that produced a fill is a property of the fill alone.
+    buyOrderId: buy.orderId,
+    sellOrderId: sell.orderId,
   };
 }
 

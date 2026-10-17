@@ -278,6 +278,22 @@ function scene(overrides: Partial<Scene> = {}): Scene {
 let nextId = 1;
 
 /**
+ * Order ids live in their own id space, and before REF-113 Stage 1 they did not.
+ *
+ * Every fixture in this file used to set `orderId: <the fill's own id>`, which
+ * was harmless while nothing read the field and actively dangerous the moment
+ * something did: a join that read `fill.id` where it meant `fill.orderId` would
+ * have produced exactly the right answer in every test here and the wrong one in
+ * production. So the two spaces are now disjoint by construction, and this offset
+ * is what makes the difference visible in a failure message.
+ *
+ * Large enough that no fill id in this file can reach it, and `usableId` still
+ * accepts every value it produces.
+ */
+const ORDER_ID_OFFSET = 600_000;
+const orderIdFor = (fillId: number) => ORDER_ID_OFFSET + fillId;
+
+/**
  * One round trip, as the four endpoints would report it.
  *
  * `openAt`/`closeAt` are when the two legs executed; `side` says which leg
@@ -304,7 +320,9 @@ function roundTrip(opts: {
   // A long buys to open and sells to close; a short does the reverse.
   const buy = {
     id: buyId,
-    orderId: buyId,
+    // Not `buyId`. See ORDER_ID_OFFSET: a fixture that conflates the two id
+    // spaces cannot fail when the code under test conflates them too.
+    orderId: orderIdFor(buyId),
     contractId,
     timestamp: opts.side === 'long' ? opts.openAt : opts.closeAt,
     tradeDate: { year: 2026, month: 10, day: 14 },
@@ -314,7 +332,7 @@ function roundTrip(opts: {
   };
   const sell = {
     id: sellId,
-    orderId: sellId,
+    orderId: orderIdFor(sellId),
     contractId,
     timestamp: opts.side === 'long' ? opts.closeAt : opts.openAt,
     tradeDate: { year: 2026, month: 10, day: 14 },
@@ -362,10 +380,20 @@ function handFill(f: {
   qty: number;
   price: number;
   contractId?: number;
+  /**
+   * The order that produced this fill (REF-113 Stage 1).
+   *
+   * Defaults to a value derived from the fill id but NOT equal to it, so every
+   * pre-existing fixture exercises the disjoint id spaces for free. The groups
+   * that are ABOUT the join pass it explicitly — sharing one order id between
+   * two fills is what a partially-filled entry is, and the default cannot
+   * express it.
+   */
+  orderId?: number;
 }): TradovateFill {
   return {
     id: f.id,
-    orderId: f.id,
+    orderId: f.orderId ?? orderIdFor(f.id),
     contractId: f.contractId ?? CONTRACT_ID,
     timestamp: f.at,
     tradeDate: { year: 2026, month: 10, day: 14 },
@@ -2618,6 +2646,106 @@ async function bothPathsAgree() {
     ),
   ]);
 
+  // ── The orders behind the fills (REF-113 Stage 1) ─────────────────────────
+
+  // ONE ORDER OF 3 THAT FILLED IN THREE PIECES. This is the fixture the old
+  // `orderId: f.id` default could not express at all, and it is the case §B of
+  // the REF-113 investigation turns on: the trader placed ONE entry, the
+  // exchange filled it in three, and the protective-order window has to be
+  // anchored on that one order's submission.
+  const ENTRY_ORDER = orderIdFor(1);
+  const partialA = handFill({ id: 501, at: '2026-10-14T05:00:00Z', action: 'Buy', qty: 1, price: 5000, orderId: ENTRY_ORDER });
+  const partialB = handFill({ id: 502, at: '2026-10-14T05:00:01Z', action: 'Buy', qty: 1, price: 5001, orderId: ENTRY_ORDER });
+  const partialC = handFill({ id: 503, at: '2026-10-14T05:00:02Z', action: 'Buy', qty: 1, price: 5002, orderId: ENTRY_ORDER });
+
+  // The exit came from a DIFFERENT order — which is what a stop that fired is —
+  // and it is ONE fill of 3 that closes all three entry pieces.
+  //
+  // THE SHARED FILL IS WHAT MAKES THIS ONE TRADE, and the first version of this
+  // fixture got it wrong in an instructive way: three entry pieces each paired
+  // with their OWN exit fill share nothing, so union-find yields THREE trades
+  // from one entry order. Grouping is by shared FILL and never by shared order
+  // (see {@link Trade}), so a single order can legitimately span several
+  // BrokerTrades. §B of REF-113 therefore cannot assume "one order, one trade"
+  // in either direction.
+  const STOP_ORDER = orderIdFor(2);
+  const stopFill = handFill({ id: 511, at: '2026-10-14T06:00:00Z', action: 'Sell', qty: 3, price: 4990, orderId: STOP_ORDER });
+
+  const scaleInPairs = [
+    handPair({ id: 1301, buy: partialA, sell: stopFill, qty: 1 }),
+    handPair({ id: 1302, buy: partialB, sell: stopFill, qty: 1 }),
+    handPair({ id: 1303, buy: partialC, sell: stopFill, qty: 1 }),
+  ];
+  const scaleInRow = (
+    await pullRows(handScene([partialA, partialB, partialC, stopFill], scaleInPairs))
+  )[0];
+
+  // A fill whose orderId is absent or zero. `0` is what an absent numeric field
+  // coerces to and is not an id this API issues, so it must be dropped rather
+  // than carried — a 0 in the list is an order id that joins to nothing.
+  const noOrder = {
+    ...handFill({ id: 521, at: '2026-10-14T05:00:00Z', action: 'Buy', qty: 1, price: 5000 }),
+    orderId: 0,
+  };
+  const goodOrder = handFill({ id: 522, at: '2026-10-14T06:00:00Z', action: 'Sell', qty: 1, price: 5010, orderId: orderIdFor(3) });
+  const unusableRow = (
+    await pullRows(handScene([noOrder, goodOrder], [handPair({ id: 1401, buy: noOrder, sell: goodOrder, qty: 1 })]))
+  )[0];
+
+  // And the plain case, off the counter-based helper: two orders, neither of
+  // them equal to a fill id.
+  const plainRow = (await pullRows(withTrips([ONE_LONG])))[0];
+
+  group('every order behind a trade is carried, and only the orders (REF-113 §B)', [
+    c('(1) one entry order filled in three pieces is ONE order id', [
+      scaleInRow.qty,
+      scaleInRow.entryOrderIds.includes(ENTRY_ORDER),
+      scaleInRow.entryOrderIds.filter((id) => id === ENTRY_ORDER).length,
+    ], [3, true, 1]),
+    // The stop IS the exit here, which §B.3 calls the highest-confidence case in
+    // the whole feature: no window, no tolerance, no inference — the order is
+    // simply in the set.
+    c('(2) the order that closed it is there too, so a stop-exit needs no inference', [
+      scaleInRow.entryOrderIds.includes(STOP_ORDER),
+      scaleInRow.entryOrderIds,
+    ], [true, [ENTRY_ORDER, STOP_ORDER]]),
+    c('(3) ascending, deduplicated, and shorter than the fills it came from', [
+      scaleInRow.fillIds.length,
+      scaleInRow.entryOrderIds.length,
+      scaleInRow.entryOrderIds[0] < scaleInRow.entryOrderIds[1],
+    ], [4, 2, true]),
+    // THE ASSERTION THE OLD FIXTURES COULD NOT MAKE. Read `fill.id` where the
+    // code means `fill.orderId` and this is the line that fails.
+    c('(4) an order id is NOT a fill id', [
+      scaleInRow.entryOrderIds.some((id) => scaleInRow.fillIds.includes(id)),
+      plainRow.entryOrderIds.some((id) => plainRow.fillIds.includes(id)),
+    ], [false, false]),
+    c('(5) the ordinary two-order trade carries two', [
+      plainRow.entryOrderIds.length,
+      plainRow.entryOrderIds.every((id) => id > ORDER_ID_OFFSET),
+    ], [2, true]),
+    // FAIL CLOSED, like every other number this module reads off the wire: an
+    // unusable id is omitted, never carried as a plausible-looking 0.
+    c('(6) an unusable orderId is dropped, not carried as 0', [
+      unusableRow.entryOrderIds,
+      unusableRow.fillIds.length,
+    ], [[orderIdFor(3)], 2]),
+    // The list is derived, so it must not depend on an order /fillPair/list
+    // never promised — the same property assertion (5) of the key group makes.
+    c('(7) the pairs arriving in another order change nothing', (
+      await pullRows(
+        handScene([stopFill, partialC, partialB, partialA], [...scaleInPairs].reverse())
+      )
+    )[0].entryOrderIds, scaleInRow.entryOrderIds),
+    // Zero new requests is the whole point of Stage 1: `fill.orderId` was
+    // already on a response the chain reads. If this ever grows an /order/list,
+    // that is REF-113 Stage 2 and it does not belong in this pull.
+    c('(8) and it cost no new request — no order endpoint was asked for', [
+      allCalls.some((path) => path.startsWith('/order')),
+      allCalls.some((path) => path.startsWith('/command')),
+    ], [false, false]),
+  ]);
+
   // ── The flip ──────────────────────────────────────────────────────────────
 
   // §A4's one uncovered case, and this group PINS THE PRESENT BEHAVIOUR rather
@@ -2922,6 +3050,12 @@ async function bothPathsAgree() {
     closedAtMs: Date.parse('2026-10-14T06:00:00Z'),
     pnlUsd: 500,
     fillIds: [901, 902],
+    // REF-113 Stage 1. Values chosen so that they are NOT the fill ids and NOT
+    // a substring of anything else in the body — the leak group below asserts
+    // that neither reaches the browser, and an id that happened to appear
+    // inside a price or a timestamp would make that assertion pass for the
+    // wrong reason.
+    entryOrderIds: [770901, 770902],
     // The route neither reads this nor filters on it; it is the IMPORT's gate
     // (REF-107 Stage 2, §A3). True here so the fixture is an ordinary finished
     // trade. scripts/broker-import-check.ts is where both values are exercised.
@@ -3089,6 +3223,11 @@ async function bothPathsAgree() {
     'closedAtMs',
     'pnlUsd',
     'fillIds',
+    // REF-113 Stage 1. An order id is an id, and this route's whole claim is
+    // that no id of a trader's position leaves the server through it. Added to
+    // this list in the same change that created the field, because a field added
+    // to BrokerTrade and NOT added here is a leak nothing would catch.
+    'entryOrderIds',
     'positionFlat',
     'trades',
   ];
@@ -3096,12 +3235,14 @@ async function bothPathsAgree() {
   group('/api/tradovate/today still carries no trade', [
     c('(1) the response body is the source and the seven scalars', Object.keys(JSON.parse(todayBody)).sort(), ['day', 'source']),
     c('(2) not one trade field appears anywhere in it', tradeFields.filter((field) => todayBody.includes(field)), []),
-    c('(3) nor a symbol, a price, an account id or a fill id as a VALUE', [
+    c('(3) nor a symbol, a price, an account id, a fill id or an ORDER id as a VALUE', [
       todayBody.includes('ESZ6'),
       todayBody.includes('5000'),
       todayBody.includes(String(ACCOUNT.id)),
       todayBody.includes(String(POSITION.id)),
-    ], [false, false, false, false]),
+      todayBody.includes(String(ROW_TODAY.entryOrderIds[0])),
+      todayBody.includes(String(ROW_TODAY.entryOrderIds[1])),
+    ], [false, false, false, false, false, false]),
     // The rows exist on the pull. They are dropped by the route, which is the
     // only reason the assertions above hold — so this one states where the line
     // actually is.

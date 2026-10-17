@@ -189,6 +189,11 @@ const TRADE: BrokerTrade = {
   closedAtMs: CLOSED,
   pnlUsd: 270,
   fillIds: [88412, 88431],
+  // REF-113 Stage 1. Deliberately NOT the fill ids: an order id and a fill id
+  // are different id spaces, and a fixture that conflated them would hide the
+  // join. The import does not read this yet — REF-113 Stage 3 is what writes
+  // anything derived from it, and `EXECUTION_FACTS` is unchanged here.
+  entryOrderIds: [77412, 77431],
   positionFlat: true,
 };
 
