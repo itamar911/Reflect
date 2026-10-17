@@ -42,6 +42,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import {
+  claimedAccounts,
   partitionAccounts,
   permissionsCouldHelp,
   permittedAccountIds,
@@ -1527,16 +1528,56 @@ async function main() {
       ],
       [1, ['/account/list', '/tradingPermission/list']]
     ),
+    // REF-110 Stage 1 MOVED THIS LINE, deliberately, and this case is where it
+    // moved to. It used to read "an untradeable stranger does not provoke it"
+    // and expected `false` for the closed firm account on the second row.
+    //
+    // Why it had to move: the gate's question was "would a permission change
+    // which fills count today", and a closed account's answer is no. Once the
+    // accounts TABLE exists the question is also "would a permission let us
+    // RECORD this account", and a closed prop evaluation is exactly the row
+    // REF-110 exists to keep. Under the old rule the permission list was never
+    // read for a trader whose only prop account had just been breached, so the
+    // account was never claimed and never recorded — the ticket's whole promise
+    // lost on the one case it was written for.
+    //
+    // THE TYPE TEST STAYS, and that is the half worth protecting: `House` is
+    // what an account IS, not a state it is in, so a permission naming one
+    // still changes nothing and a trader whose visible scope holds a firm's
+    // House accounts still pays nothing.
     c(
-      'the question is "would a permission change this verdict", so an untradeable stranger does not provoke it',
+      'a stranger CUSTOMER account provokes the permission read, closed or not — a House one never does',
       [
         permissionsCouldHelp([FIRM_ACCOUNT], ACCOUNT.userId),
         permissionsCouldHelp([{ ...FIRM_ACCOUNT, closed: true }], ACCOUNT.userId),
+        permissionsCouldHelp([{ ...FIRM_ACCOUNT, restricted: true }], ACCOUNT.userId),
         permissionsCouldHelp([{ ...FIRM_ACCOUNT, accountType: 'House' }], ACCOUNT.userId),
         permissionsCouldHelp([ACCOUNT], ACCOUNT.userId),
         permissionsCouldHelp([FIRM_ACCOUNT], null),
       ],
-      [true, false, false, false, false]
+      [true, true, true, false, false, false]
+    ),
+
+    // And the half the widening must not have cost: the DAY. An account that
+    // becomes `permitted` only under the new gate is one that failed a state
+    // flag — otherwise the old gate would have fired on it — so `untradeable`
+    // drops it either way. Measured against the same fixture the group above
+    // uses, with the permission list readable, which is the arrangement that
+    // could have gone wrong.
+    c(
+      'widening the gate cannot add an account to the day',
+      (() => {
+        const closedStranger = { ...FIRM_ACCOUNT, closed: true };
+        const permitted = new Set([FIRM_ACCOUNT.id, closedStranger.id]);
+        const f = partitionAccounts([ACCOUNT, closedStranger], ACCOUNT.userId, permitted);
+        return [
+          f.accepted.map((a) => a.id),
+          // It is claimed now — the count moved out of noOwner — and still
+          // dropped, which is the whole of the property.
+          [f.counts.noOwner, f.counts.closed],
+        ];
+      })(),
+      [[ACCOUNT.id], [0, 1]]
     ),
 
     // The partition stays a partition, with noPermission in the fixture.
@@ -3251,6 +3292,174 @@ async function bothPathsAgree() {
       mixed.trades.length > 0,
       'trades' in mixed.day,
     ], [true, true, false]),
+  ]);
+
+  // ── REF-110 Stage 1: the accounts a pull CLAIMS ───────────────────────────
+  //
+  // The pull's half of REF-110. What `BrokerDay.accounts` carries is asserted
+  // here; what the database does with it is asserted in
+  // scripts/broker-import-check.ts, which has the Supabase stub. The split is
+  // where the two properties actually live — one is a filter over a list, the
+  // other is a sequence of statements — and both halves of the §A.5 fail-safe
+  // appear on both sides deliberately, because it is the assertion that would
+  // otherwise be found in production.
+
+  /** The trader's own account, breached and closed. The row REF-110 is for. */
+  const MY_CLOSED: TradovateAccount = { ...ACCOUNT, id: 7101, name: 'MYEVAL', closed: true };
+  /** Another trader's, visible because a prop admin's scope is wide. */
+  const THEIRS: TradovateAccount = { ...ACCOUNT, id: 7102, name: 'THEIRS', userId: 4242 };
+  /** The firm's own House account. Not a portfolio, closed or open. */
+  const HOUSE: TradovateAccount = { ...ACCOUNT, id: 7103, name: 'HOUSE', accountType: 'House' };
+
+  const mixedScene = scene({ accounts: [ACCOUNT, MY_CLOSED, THEIRS, HOUSE] });
+  // Driven through an explicit reader so the CALLS can be asserted: "zero new
+  // upstream requests" is the claim this whole stage rests on, and it is only
+  // checkable against a recorded list.
+  const claimedReader = reader(mixedScene);
+  const claimedPull = await coldPull({
+    readers: { live: claimedReader },
+    environment: 'live',
+    dayStartMs: DAY_START,
+    tradovateUserId: ACCOUNT.userId,
+    now: NOW,
+  });
+  const claimedHere = claimedPull.accounts[0]?.claimed ?? [];
+
+  // The §A.5 fail-safe, at the layer that decides it: the demo host's
+  // discovery throws, so demo must be ABSENT from `accounts` entirely. An
+  // empty `claimed` array for demo would be the bug — indistinguishable, from
+  // the sync's side, from a trader who closed every demo account.
+  const demoDown = await coldPull({
+    readers: {
+      live: reader(scene({ accounts: [ACCOUNT] })),
+      demo: failingReader(
+        scene({ accounts: [MY_CLOSED] }),
+        '/account/list',
+        () => new TradovateRequestError('/account/list', 500, '{"errorText":"boom"}')
+      ),
+    },
+    environment: 'live',
+    dayStartMs: DAY_START,
+    tradovateUserId: ACCOUNT.userId,
+    now: NOW,
+  });
+
+  // The other direction: a host that answered with an EMPTY list is present
+  // with no claims, which is what lets the sync close that host's accounts.
+  const demoEmpty = await coldPull({
+    readers: {
+      live: reader(scene({ accounts: [ACCOUNT] })),
+      demo: reader(scene({ accounts: [] })),
+    },
+    environment: 'live',
+    dayStartMs: DAY_START,
+    tradovateUserId: ACCOUNT.userId,
+    now: NOW,
+  });
+
+  const errorBodies: string[] = [];
+  const leakyAccountList = await (async () => {
+    try {
+      await coldPull({
+        readers: {
+          live: failingReader(
+            mixedScene,
+            '/account/list',
+            // A 403 whose body is what /account/list bodies are: the trader's
+            // account names. This is the fixture the reduction exists for.
+            () =>
+              new TradovateRequestError(
+                '/account/list',
+                403,
+                '[{"id":7101,"name":"MYEVAL","userId":555},{"id":7103,"name":"HOUSE"}]'
+              )
+          ),
+        },
+        environment: 'live',
+        dayStartMs: DAY_START,
+        tradovateUserId: ACCOUNT.userId,
+        now: NOW,
+      });
+      return 'no throw';
+    } catch (error) {
+      if (error instanceof TradovateRequestError) {
+        errorBodies.push(error.message, error.body);
+        return `${error.name}:${error.status}`;
+      }
+      return error instanceof Error ? error.name : 'non-error';
+    }
+  })();
+
+  group('REF-110 §A.3: the accounts a pull claims', [
+    // THE FINDING, AS AN ASSERTION. `accepted` would have thrown the closed one
+    // away and kept nothing else; the raw list would have kept all four.
+    c('(1) the claimed set is the trader\'s own — the closed one included',
+      claimedHere.map((entry) => entry.account.id).sort((a, b) => a - b),
+      [ACCOUNT.id, MY_CLOSED.id]),
+    c('(2) and it excludes another trader\'s account and a House account', [
+      claimedHere.some((entry) => entry.account.id === THEIRS.id),
+      claimedHere.some((entry) => entry.account.id === HOUSE.id),
+    ], [false, false]),
+    // A name is the thing that must not leak, so the exclusion is asserted
+    // against the NAME and not only against the id.
+    c('(3) so no stranger\'s account NAME is anywhere in what leaves the pull',
+      [JSON.stringify(claimedPull.accounts).includes(THEIRS.name),
+       JSON.stringify(claimedPull.accounts).includes(HOUSE.name)],
+      [false, false]),
+
+    // The flag the status is derived from. Carried, never used as a filter.
+    c('(4) tradeability is reported, not applied',
+      claimedHere.map((entry) => [entry.account.id, entry.tradeable]),
+      [[ACCOUNT.id, true], [MY_CLOSED.id, false]]),
+    c('(5) every state flag reads as untradeable, and the type is not a state',
+      [
+        claimedAccounts([{ ...ACCOUNT, restricted: true }], ACCOUNT.userId)[0]?.tradeable,
+        claimedAccounts([{ ...ACCOUNT, readonly: true }], ACCOUNT.userId)[0]?.tradeable,
+        claimedAccounts([{ ...ACCOUNT, futuresDisabled: true }], ACCOUNT.userId)[0]?.tradeable,
+        claimedAccounts([{ ...ACCOUNT, active: false }], ACCOUNT.userId)[0]?.tradeable,
+        claimedAccounts([{ ...ACCOUNT, accountType: 'Omnibus' }], ACCOUNT.userId).length,
+      ],
+      [false, false, false, false, 0]),
+    c('(6) how the claim was made is carried too, for the owned and the permitted',
+      [
+        claimedAccounts([ACCOUNT], ACCOUNT.userId)[0]?.claim,
+        claimedAccounts([THEIRS], ACCOUNT.userId, new Set([THEIRS.id]))[0]?.claim,
+        // No permission evidence: a stranger is not claimed at all, which is
+        // the leak this filter exists to prevent.
+        claimedAccounts([THEIRS], ACCOUNT.userId).length,
+      ],
+      ['owned', 'permitted', 0]),
+
+    // ACCEPTED IS UNCHANGED BY ALL OF IT. Every REF-90 assertion in this file
+    // still holds because this is true, so it is stated once, directly.
+    c('(7) the day\'s accepted set and its figures are untouched',
+      [claimedPull.day.closedCount, claimedPull.day.net, claimedPull.trades.length],
+      [0, 0, 0]),
+    // ZERO NEW UPSTREAM REQUESTS, as a list rather than as a promise. The two
+    // paths below are exactly what this scene cost before REF-110: the
+    // permission read is provoked by a stranger that is Customer AND tradeable,
+    // which the OLD gate fired on too, so even the widening is invisible here.
+    c('(8) and the pull asks for nothing it did not ask for before',
+      claimedReader.calls,
+      ['/account/list', '/tradingPermission/list', '/position/list', '/fillPair/list']),
+
+    // ── The §A.5 fail-safe, where it is decided ────────────────────────────
+    c('(9) a host whose discovery FAILED is absent from accounts entirely',
+      demoDown.accounts.map((entry) => entry.host), ['live']),
+    c('(10) and a host that answered with nothing is PRESENT, holding nothing',
+      demoEmpty.accounts.map((entry) => [entry.host, entry.claimed.length]),
+      [['live', 1], ['demo', 0]]),
+
+    // ── §F: the error path that needs code rather than discipline ──────────
+    c('(11) a failed /account/list still fails the pull, with its status intact',
+      leakyAccountList, 'TradovateRequestError:403'),
+    c('(12) and the account names in its body do not survive into the error', [
+      errorBodies.some((text) => text.includes('MYEVAL')),
+      errorBodies.some((text) => text.includes('HOUSE')),
+      errorBodies.some((text) => text.includes('7101')),
+      // The path survives, because that is what makes a 403 diagnosable.
+      errorBodies.some((text) => text.includes('/account/list')),
+    ], [false, false, false, true]),
   ]);
 }
 

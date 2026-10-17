@@ -2,15 +2,27 @@
  * Pull one user's finished trades and write them to the journal (REF-107
  * Stage 2).
  *
- * SERVER ONLY. The one place that joins the two halves of the import — the
- * broker read (./fills.ts) and the database write (./import.ts) — so that the
- * two triggers which have to make a pull of their own do not each assemble it:
- * POST /api/tradovate/sync and the daily /api/cron/tradovate-import.
+ * SERVER ONLY. The one place that joins the halves of the import — the broker
+ * read (./fills.ts), the accounts pass (./account-sync.ts) and the journal
+ * write (./import.ts) — so that the two triggers which have to make a pull of
+ * their own do not each assemble it: POST /api/tradovate/sync and the daily
+ * /api/cron/tradovate-import.
  *
  * /api/tradovate/today deliberately does NOT go through here. That trigger is
  * free precisely because it already has a pull in hand, and routing it through
  * a function that makes one would throw away the only thing that makes it free
  * (E9). It calls `importBrokerTrades` directly with the rows it already built.
+ *
+ * SO /today DOES NOT RECORD ACCOUNTS EITHER, and that is a deliberate scope
+ * line for REF-110 Stages 1-2 rather than an oversight. It would be nearly
+ * free — the pull it already makes now carries `BrokerDay.accounts` — but it
+ * would put four more statements on the critical path of opening the trade
+ * form, for a table nothing renders yet. The cost of leaving it out is bounded
+ * and small: a trader's accounts are recorded on their next Sync or on the
+ * nightly cron, whichever comes first, so the gap closes within a day for
+ * everybody and immediately for anybody who presses the button. The rows
+ * /today imports in the meantime are assigned by the backfill pass on that
+ * same run. Revisit when the screen exists and a trader can notice the delay.
  *
  *
  * WHY THE WRITE CLIENT AND THE READ CLIENT ARE TWO PARAMETERS
@@ -34,6 +46,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+import { syncBrokerAccounts, type AccountSyncCounts } from './account-sync';
 import { tradovateGet } from './client';
 import { getUserTradingApi, readIsTradeSource } from './connections';
 import { loadBrokerDay, type TradovateReader } from './fills';
@@ -62,6 +75,16 @@ export interface SyncRequest {
 /** A pull and the import it fed. `asOf` is the pull's, for the caller to report. */
 export interface SyncResult {
   counts: BrokerImportCounts;
+  /**
+   * What the account pass recorded (REF-110 Stages 1-2).
+   *
+   * Counts only, and nothing upstream branches on them — the sync route does
+   * not send them to the browser and the cron totals the trade counts alone.
+   * They are here so that a caller CAN report them and so the regression suite
+   * has something to assert against; the log line in ./account-sync.ts is what
+   * an operator actually reads.
+   */
+  accounts: AccountSyncCounts;
   /** When this was read from Tradovate, ISO 8601. */
   asOf: string;
   /**
@@ -113,7 +136,19 @@ export async function syncUserTrades(request: SyncRequest): Promise<SyncResult> 
     // is called anyway, with nothing, so that the "did not run" shape has one
     // definition and lives in the module that owns it.
     const counts = await importBrokerTrades({ client, userId, trades: [], isTradeSource, env });
-    return { counts, asOf: new Date().toISOString(), isTradeSource, importEnabled: enabled };
+    // Same reasoning, and the same shape: the account pass is asked with no
+    // hosts so that its "did not run" answer comes from the module that owns
+    // it rather than from a literal written here. It issues no statement —
+    // `isImportEnabled` stops it before the read, and an empty host list has
+    // nothing to close.
+    const { counts: accounts } = await syncBrokerAccounts({ client, userId, hosts: [], env });
+    return {
+      counts,
+      accounts,
+      asOf: new Date().toISOString(),
+      isTradeSource,
+      importEnabled: enabled,
+    };
   }
 
   const api = await getUserTradingApi(userId, { admin });
@@ -127,7 +162,7 @@ export async function syncUserTrades(request: SyncRequest): Promise<SyncResult> 
     get: (path, query) => tradovateGet(path, query, { accessToken: api.accessToken, apiUrl }),
   });
 
-  const { day, trades } = await loadBrokerDay({
+  const { day, trades, accounts: hosts } = await loadBrokerDay({
     readers: {
       live: readerFor(api.hosts.live.url),
       demo: readerFor(api.hosts.demo.url),
@@ -138,9 +173,34 @@ export async function syncUserTrades(request: SyncRequest): Promise<SyncResult> 
     tradovateUserId: api.tradovateUserId,
   });
 
+  // THE ACCOUNTS FIRST, AND THE ORDER IS THE POINT (REF-110 Stages 1-2).
+  //
+  // The import needs `identities` to stamp `account_id` on the rows it writes,
+  // and that map only exists once the accounts have rows of their own. Run the
+  // other way round, every trade in a trader's FIRST sync would land
+  // unassigned and wait for the next run's backfill to find it — correct in the
+  // end, and a day late for no reason.
+  //
+  // `hosts` carries one entry per host that ANSWERED discovery, which is what
+  // scopes the closure rule. It costs ZERO UPSTREAM REQUESTS: every account in
+  // it came out of the `/account/list` the pull above already made.
+  const { counts: accounts, identities } = await syncBrokerAccounts({
+    client,
+    userId,
+    hosts,
+    env,
+  });
+
   // `day` is used for its timestamp alone. The scalars are the rules' business
   // and no rule is being evaluated here; the rows are the point.
-  const counts = await importBrokerTrades({ client, userId, trades, isTradeSource, env });
+  const counts = await importBrokerTrades({
+    client,
+    userId,
+    trades,
+    isTradeSource,
+    env,
+    accountIds: identities,
+  });
 
-  return { counts, asOf: day.asOf, isTradeSource, importEnabled: enabled };
+  return { counts, accounts, asOf: day.asOf, isTradeSource, importEnabled: enabled };
 }

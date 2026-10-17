@@ -73,6 +73,37 @@ export class TradovateRequestError extends TradovateError {
 }
 
 /**
+ * The same failure, with the response body dropped (REF-110 Stage 1).
+ *
+ * WHAT THIS IS FOR. {@link TradovateRequestError} puts `body.slice(0, 300)` in
+ * its message, which is right for almost every endpoint in this integration:
+ * an error body naming a contract id or a malformed parameter is the only thing
+ * that makes a 400 diagnosable. It is wrong for exactly the reads whose body is
+ * the TRADER'S OWN DATA, and `/account/list` is the first of them — its body is
+ * a list of the trader's account names, and a prop firm's name is in them.
+ *
+ * So a caller that knows what a body holds reduces the error AT THE CALL SITE,
+ * before it travels: the status, the path and the type survive, which is
+ * everything the classifiers and the retry logic read, and the 300 characters
+ * of account names do not.
+ *
+ * ONLY `TradovateRequestError` IS REDUCED, and everything else is returned
+ * untouched. A `TradovatePenaltyError` carries no body, a network fault carries
+ * no body, and a programming error must not be laundered into something that
+ * looks like an upstream failure. Returns rather than throws, so the call site
+ * reads `throw withoutResponseBody(error)` and the control flow stays visible
+ * where it is.
+ *
+ * `body` becomes the empty string rather than a placeholder: the field is
+ * declared and readable, and a placeholder would be a value a reader might
+ * try to parse.
+ */
+export function withoutResponseBody(error: unknown): unknown {
+  if (!(error instanceof TradovateRequestError)) return error;
+  return new TradovateRequestError(error.path, error.status, '');
+}
+
+/**
  * The OAuth flow failed in a way that is about the flow itself rather than the
  * transport: a state mismatch, a missing code, or an `error` field in the token
  * response.

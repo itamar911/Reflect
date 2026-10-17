@@ -105,6 +105,26 @@
 
 import type { TradovateAccount, TradovateTradingPermission } from './types';
 
+/**
+ * How an account is named on BOTH sides of the REF-110 join: `<host>:<id>`.
+ *
+ * THE ID ALONE IS NOT ENOUGH, which is 034's finding about `broker_trade_key`
+ * restated for accounts. Tradovate account ids are HOST-LOCAL — nothing
+ * documents live and demo as sharing an id space, and this module's own header
+ * is the record of how expensive a wrong assumption about account identity is.
+ * Unqualified, a demo account 401 and a live account 401 are one portfolio, and
+ * a trade from either would resolve to whichever row was written first.
+ *
+ * Lives HERE, in the module that owns what an account is, rather than in
+ * ./account-sync.ts beside its only two callers: ./import.ts needs it to
+ * resolve a trade's account and ./account-sync.ts needs it to key the map, and
+ * the second already imports the first. A third module owning it is what keeps
+ * that a line rather than a cycle.
+ */
+export function accountIdentity(host: string, brokerAccountId: number): string {
+  return `${host}:${brokerAccountId}`;
+}
+
 /** Account types an end trader's own trading account can have. */
 const TRADEABLE_ACCOUNT_TYPE: TradovateAccount['accountType'] = 'Customer';
 
@@ -273,14 +293,53 @@ export function permittedAccountIds(
 /**
  * Whether reading the permission list could change any verdict here.
  *
- * True when at least one account FAILED ON OWNERSHIP ALONE — it is tradeable in
- * every other respect and only `userId` dropped it. That is the whole condition
- * on the extra request: an ordinary trader whose accounts are their own pays
- * nothing for Stage 2, and neither does one whose visible scope holds other
- * people's closed or `House` accounts, because a permission would not save
- * those either.
+ * True when at least one account FAILED ON OWNERSHIP and is an end trader's own
+ * kind of account. `userId` is not ours, so only a permission can say the
+ * account is this trader's — and `accountType` is `Customer`, so it is an
+ * account worth saying it about.
  *
  * False for a null identity, where no permission can be matched to anyone.
+ *
+ *
+ * THE FIVE STATE FLAGS ARE NO LONGER ASKED ABOUT HERE (REF-110 Stage 1)
+ * ---------------------------------------------------------------------
+ *
+ * The condition used to be "failed on ownership ALONE and is otherwise
+ * tradeable", which folded in `closed`, `restricted`, `readonly`,
+ * `futuresDisabled` and `inactive` on the reasoning that a permission cannot
+ * make a closed account tradeable, so the request would change nothing. That
+ * was true while the only question was which fills count today. It stopped
+ * being true when REF-110 began RECORDING accounts: a closed account is
+ * precisely a row the accounts table wants — with `status: 'closed'` — and
+ * {@link claimedAccounts} cannot claim one it has no permission evidence for.
+ *
+ * The case this fixes is the live one. A trader whose only prop account has
+ * just been breached reaches it through a permission rather than ownership, and
+ * it is now closed. Under the old gate the permission list was not read, the
+ * account answered `noOwner`, and it was never recorded — so the one ticket
+ * whose promise is "an account's history survives it closing" would have lost
+ * the account the first time it closed.
+ *
+ * `accountType` STAYS, and that is the half that is easy to drop by accident. A
+ * type is what an account IS, not a state it is in: a `House` or `Omnibus`
+ * account is never an end trader's portfolio, closed or open, so a permission
+ * naming one would still change nothing. Keeping it preserves the property the
+ * old gate had — a trader whose visible scope holds a firm's `House` accounts
+ * pays nothing — and narrows the new cost to accounts this stage would actually
+ * record.
+ *
+ * WHAT THIS COSTS, EXACTLY. One `/tradingPermission/list` per host per pull, in
+ * one new case: a trader with no owned-and-tradeable gap but with somebody
+ * else's CUSTOMER account in their visible scope. It is the cheapest read in
+ * the chain and its failure is already swallowed ({@link readPermittedAccounts}
+ * in ./fills.ts).
+ *
+ * WHAT IT CANNOT COST: a different day. An account that becomes `permitted`
+ * only now is one that FAILED a state flag — otherwise the old gate would have
+ * fired on it — so {@link untradeable} drops it either way and `accepted` is
+ * unchanged BY CONSTRUCTION, not by luck. What moves is which counter it lands
+ * in: `noOwner` before, its real rejection reason now, which is strictly more
+ * informative. The suite asserts the unchanged half.
  */
 export function permissionsCouldHelp(
   accounts: readonly TradovateAccount[],
@@ -289,7 +348,8 @@ export function permissionsCouldHelp(
   if (tradovateUserId === null) return false;
   return accounts.some(
     (account) =>
-      claimFor(account, tradovateUserId, null) === 'noOwner' && untradeable(account) === null
+      claimFor(account, tradovateUserId, null) === 'noOwner' &&
+      account.accountType === TRADEABLE_ACCOUNT_TYPE
   );
 }
 
@@ -350,6 +410,89 @@ export function partitionAccounts(
   }
 
   return { accepted, counts };
+}
+
+/**
+ * One account this trader has a claim on, and what kind of claim it is.
+ *
+ * `tradeable` is {@link untradeable} inverted — "could this have been traded
+ * today" — carried as a FLAG rather than used as a filter, which is the whole
+ * difference between this and {@link partitionAccounts}.
+ */
+export interface ClaimedAccount {
+  account: TradovateAccount;
+  /** How it is this trader's. Never a rejection: an unclaimed account is absent. */
+  claim: 'owned' | 'permitted';
+  /**
+   * False when a STATE flag is set: closed, restricted, readonly,
+   * futuresDisabled, inactive.
+   *
+   * Never false for `accountType`, because a non-`Customer` account is not in
+   * this list at all — see {@link claimedAccounts}. So this reads as "is this
+   * portfolio currently open for business", which is what a status is derived
+   * from, rather than as the eight-way verdict {@link untradeable} gives.
+   */
+  tradeable: boolean;
+}
+
+/**
+ * Every account that is THIS TRADER'S, tradeable or not (REF-110 Stage 1).
+ *
+ * THE ONE THING THIS MODULE DID NOT ALREADY ANSWER, and the reason it is three
+ * lines rather than a new filter: the two predicates have always been separate
+ * — {@link claimFor} asks whose account it is, {@link untradeable} asks whether
+ * it could have been traded today — and the accounts TABLE wants the first
+ * without the second.
+ *
+ * WHY `accepted` IS THE WRONG INPUT FOR IT, which is the finding that shaped
+ * REF-110 Stage 1. `discoverHostAccounts` returns
+ * `partitionAccounts(...).accepted`: a list with every closed, restricted,
+ * readonly, inactive, non-`Customer` and not-ours account already removed.
+ * Recording from it would NEVER RECORD A CLOSED ACCOUNT — the exact thing the
+ * ticket is about — and would stamp `status: 'active'` on everything, because
+ * nothing else survives to be seen.
+ *
+ * WHY THE RAW LIST IS EQUALLY WRONG, in the other direction and worse. A prop
+ * firm's API admin has OTHER TRADERS' ACCOUNTS in their visible scope (see this
+ * module's header), so recording the raw list would put other people's account
+ * names in our table. {@link claimFor} is the filter that prevents that, and it
+ * keys on the permission's own `userId` — never on "this appeared in the list",
+ * never on the account's name, never on how many rows came back.
+ *
+ * ONE FILTER SURVIVES BESIDE THE CLAIM, AND IT IS NOT A STATE: `accountType`
+ * must be `Customer`. The five state flags are dropped because they describe a
+ * moment — a closed evaluation is a portfolio with a history and belongs on
+ * the screen — while the type describes what the account IS. `Employee`,
+ * `Giveup`, `House`, `Omnibus` and `Wash` are not an end trader's own trading
+ * account and never become one, so recording them would put a card on
+ * "התיקים שלי" that is not a portfolio, with a P&L that is not the trader's.
+ * This is the same line {@link untradeable} tests first, read for a different
+ * question.
+ *
+ * So: claimed, filtered by kind, unfiltered by state, and the state carried
+ * alongside so the caller can derive a status from it. Order is the input's,
+ * which is the host's.
+ *
+ * ZERO UPSTREAM COST. This reads the list `discoverHostAccounts` has already
+ * fetched; it makes no request and cannot.
+ */
+export function claimedAccounts(
+  accounts: readonly TradovateAccount[],
+  tradovateUserId: number | null,
+  permitted: ReadonlySet<number> | null = null
+): ClaimedAccount[] {
+  const claimed: ClaimedAccount[] = [];
+
+  for (const account of accounts) {
+    if (account.accountType !== TRADEABLE_ACCOUNT_TYPE) continue;
+
+    const claim = claimFor(account, tradovateUserId, permitted);
+    if (claim !== 'owned' && claim !== 'permitted') continue;
+
+    claimed.push({ account, claim, tradeable: untradeable(account) === null });
+  }
+
+  return claimed;
 }
 
 /**

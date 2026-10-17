@@ -469,6 +469,19 @@ export async function unlinkPlan(params: {
         broker_trade_key: null,
         broker_account_id: null,
         broker_host: null,
+        // REF-110 Stage 2, and it belongs with the three above it for their
+        // reason: an unlinked row is a PLAN again and claims no account. It is
+        // also the column that would be worst to leave behind — the two ids
+        // above are inert (nothing reads `broker_account_id`), while
+        // `account_id` is what the "התיקים שלי" screen and the journal filter
+        // will group by, so a stale one puts a plan the trader never executed
+        // into a portfolio's trade count and P&L.
+        //
+        // Named unconditionally, like the three above, so it needs 037 to have
+        // run — see that file's "RUN THIS BEFORE DEPLOYING" header. The same
+        // argument covers it: this path is only reachable on a row the import
+        // created, and the import requires the migration.
+        account_id: null,
         source: 'manual',
         // The exit half: the broker's statement about a trade this row no
         // longer claims to be.

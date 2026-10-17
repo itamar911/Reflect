@@ -51,8 +51,15 @@ import {
   importBrokerTrades,
   isImportEnabled,
 } from '../src/lib/tradovate/import';
+import {
+  BROKER_OWNED_FOR_TEST,
+  syncBrokerAccounts,
+} from '../src/lib/tradovate/account-sync';
+import { accountIdentity, claimedAccounts } from '../src/lib/tradovate/accounts';
 import { runBrokerImport } from '../src/lib/tradovate/import-cron';
-import type { BrokerTrade } from '../src/lib/tradovate/fills';
+import type { BrokerTrade, HostAccounts } from '../src/lib/tradovate/fills';
+import type { TradovateEnvironment } from '../src/lib/tradovate/hosts';
+import type { TradovateAccount } from '../src/lib/tradovate/types';
 import { isHiddenTrade, visibleTrades, withHidden } from '../src/lib/trades/visible';
 import { loadTradeRuleContext } from '../src/lib/rules/tradeRuleContext';
 import type { BrokerDayPull } from '../src/lib/rules/brokerDayContext';
@@ -216,7 +223,34 @@ const SECOND: BrokerTrade = {
 
 // ── The Supabase stub ───────────────────────────────────────────────────────
 
-type Row = Record<string, unknown>;
+type Row = Record<string, unknown> & { [TABLE]?: string };
+
+/**
+ * Which table a stubbed row belongs to.
+ *
+ * REF-110 is what forced this: until Stages 1-2 every statement in this file
+ * was against `trade_plans`, so one flat array of rows was a faithful enough
+ * model. It stopped being one the moment a second table existed — the
+ * backfill's `from('trade_plans')` read matched the `accounts` rows sitting
+ * beside it, and an assertion about statements NOT sent passed or failed on a
+ * property of the stub rather than of the code.
+ *
+ * Defaulted rather than required, so every fixture written before this keeps
+ * meaning what it meant. Stamped onto the STORED copy only — the recorded
+ * `values` are what the code actually sent, and a marker in them would make
+ * the privacy and column-membership assertions read a field that does not
+ * exist.
+ */
+const TABLE = Symbol('table');
+
+/** A pre-seeded row in a table other than `trade_plans`. */
+function rowIn(table: string, row: Row): Row {
+  return { ...row, [TABLE]: table };
+}
+
+function tableOf(row: Row): string {
+  return row[TABLE] ?? 'trade_plans';
+}
 
 interface Statement {
   kind: 'select' | 'insert' | 'update' | 'delete' | 'rpc';
@@ -260,15 +294,15 @@ class FakeDb {
 
         insert: (values: Row) => {
           this.statements.push({ kind: 'insert', table, filters: [], values });
-          const stored = { id: `row-${this.rows.length + 1}`, ...values };
+          const stored = { id: `row-${this.rows.length + 1}`, ...values, [TABLE]: table };
           if (this.failNextInsertAsConflict) {
             this.failNextInsertAsConflict = false;
             // The row the race's winner left behind, so the re-read finds it.
             this.rows.push(stored);
-            return Promise.resolve({ data: null, error: UNIQUE_VIOLATION });
+            return new FakeInsert(null, UNIQUE_VIOLATION);
           }
           this.rows.push(stored);
-          return Promise.resolve({ data: null, error: null });
+          return new FakeInsert(stored, null);
         },
 
         update: (values: Row) =>
@@ -318,6 +352,53 @@ class FakeDb {
 }
 
 /**
+ * What `insert()` answers with, so `.select(…).maybeSingle()` can be chained.
+ *
+ * `importBrokerTrades` awaits an insert directly and reads only `error`;
+ * `syncBrokerAccounts` asks for the new row's `id` back, because the identity
+ * map it hands to the import has to name a row that did not exist a moment
+ * ago. Both shapes are real supabase-js and both have to work, so this is
+ * awaitable on its own AND chainable.
+ *
+ * It projects the requested columns rather than returning the whole row: an
+ * assertion that the sync reads `id` and nothing else is only worth making if
+ * the stub could have returned more.
+ */
+class FakeInsert implements PromiseLike<{ data: unknown; error: unknown }> {
+  private columns: string | null = null;
+  private single = false;
+
+  constructor(private readonly stored: Row | null, private readonly error: unknown) {}
+
+  select(columns: string) {
+    this.columns = columns;
+    return this;
+  }
+  maybeSingle() {
+    this.single = true;
+    return this;
+  }
+
+  private resolve(): { data: unknown; error: unknown } {
+    if (this.error !== null) return { data: null, error: this.error };
+    if (this.columns === null || this.stored === null) return { data: null, error: null };
+
+    const projected: Row = {};
+    for (const column of this.columns.split(',').map((name) => name.trim())) {
+      projected[column] = this.stored[column] ?? null;
+    }
+    return { data: this.single ? projected : [projected], error: null };
+  }
+
+  then<R1 = { data: unknown; error: unknown }, R2 = never>(
+    onfulfilled?: ((value: { data: unknown; error: unknown }) => R1 | PromiseLike<R1>) | null,
+    onrejected?: ((reason: unknown) => R2 | PromiseLike<R2>) | null
+  ): PromiseLike<R1 | R2> {
+    return Promise.resolve(this.resolve()).then(onfulfilled, onrejected);
+  }
+}
+
+/**
  * `gte`/`lte`/`lt` over whatever PostgREST would have compared.
  *
  * ISO 8601 UTC strings compare correctly as strings — same length, same
@@ -363,6 +444,23 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: unknown }> {
     this.statement.filters.push(['lt', column, value]);
     return this;
   }
+  /** `IS NULL`, which PostgREST spells `.is(col, null)`. The backfill's filter. */
+  is(column: string, value: unknown) {
+    this.statement.filters.push(['is', column, value]);
+    return this;
+  }
+  /**
+   * `.not(col, 'is', null)`. Only the one operator, because only one is used —
+   * a stub that accepted every operator and implemented one would make a typo
+   * in the production query pass here and fail in Postgres.
+   */
+  not(column: string, operator: string, value: unknown) {
+    if (operator !== 'is' || value !== null) {
+      throw new Error(`FakeQuery.not: only .not(col, 'is', null) is modelled, got ${operator}`);
+    }
+    this.statement.filters.push(['notnull', column, null]);
+    return this;
+  }
   order() {
     return this;
   }
@@ -376,10 +474,18 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: unknown }> {
 
   private matched(): Row[] {
     return this.db.rows.filter((row) =>
+      // The table first. `accounts` and `trade_plans` share this array and a
+      // query against one must not see the other — see TABLE.
+      tableOf(row) === this.statement.table &&
       this.statement.filters.every(([op, column, value]) => {
         if (op === 'eq') return row[column] === value;
         if (op === 'in') return (value as unknown[]).includes(row[column]);
         if (op === 'neq') return row[column] !== value;
+        // `IS NULL` is true for a column the row does not carry at all, which
+        // is what Postgres says about a row written before the column existed
+        // and is exactly the state the backfill looks for.
+        if (op === 'is') return value === null && (row[column] ?? null) === null;
+        if (op === 'notnull') return (row[column] ?? null) !== null;
         if (op === 'gte' || op === 'lte' || op === 'lt') {
           return withinRange(row[column], value, op);
         }
@@ -1170,6 +1276,26 @@ const RAN_COUNTS = {
 };
 
 /**
+ * The account pass's counts for a run that recorded nothing new (REF-110).
+ *
+ * All zeros but `ran`, because the sync ROUTE is what these cases are about
+ * and it does not read this field at all — see the assertion in
+ * syncPrivacyGroup that the response carries counts and no account. It is here
+ * so `runSync`'s stub matches `SyncResult`, and a zero that the route ignores
+ * is the honest stub for that.
+ */
+const NO_ACCOUNT_WORK = {
+  ran: true,
+  accountsSeen: 0,
+  inserted: 0,
+  updated: 0,
+  unchanged: 0,
+  accountsClosed: 0,
+  backfilled: 0,
+  failed: 0,
+};
+
+/**
  * The route's four seams, with the three uninteresting ones defaulted.
  *
  * `runSync` is the only one most cases care about, and giving it a default
@@ -1185,6 +1311,7 @@ function syncDeps(over: Partial<SyncRouteDeps> = {}): SyncRouteDeps {
     now: () => SYNC_NOW,
     runSync: async () => ({
       counts: RAN_COUNTS,
+      accounts: NO_ACCOUNT_WORK,
       asOf: '2026-10-15T13:59:00.000Z',
       isTradeSource: true,
       importEnabled: true,
@@ -1998,8 +2125,20 @@ async function linkWriteGroup() {
     c('(3) and the bookkeeping says who linked it and when',
       [linked.unplanned, linked.link_method, typeof linked.link_confirmed_at],
       [false, 'auto', 'string']),
-    c('(4) the thirteen execution facts moved',
-      EXECUTION_FACTS_FOR_TEST.filter(({ column }) => linked[column] === undefined), []),
+    // REF-110 Stage 2 made this list fourteen, and the fourteenth is the only
+    // one that is CONDITIONAL: `account_id` is written when the pull could
+    // resolve an account and is not named at all when it could not. This call
+    // passed no identity map — the pre-REF-110 arrangement, and still exactly
+    // what /api/tradovate/today does — so its absence here is the property,
+    // not a gap. accountStampGroup() is where the resolved case is asserted,
+    // including the one that matters: that a later run WITHOUT a map does not
+    // clear what an earlier one with a map wrote.
+    c('(4) every unconditional execution fact moved',
+      EXECUTION_FACTS_FOR_TEST
+        .filter(({ column }) => column !== 'account_id')
+        .filter(({ column }) => linked[column] === undefined), []),
+    c('(4b) and account_id was not named, because this pull could not resolve one',
+      'account_id' in linked, false),
     c('(5) the broker\'s own figures, on the trader\'s row',
       [linked.source, linked.entry_price, linked.exit_price, linked.quantity, linked.actual_pnl, linked.status],
       ['tradovate', ENTRY, EXIT, 2, 270, 'closed']),
@@ -2686,6 +2825,484 @@ async function alertImportGroup() {
 
 // ── Main ────────────────────────────────────────────────────────────────────
 
+// ── REF-110 Stages 1-2: accounts become rows, and trades point at them ──────
+//
+// The WRITE half. What a pull claims is asserted in
+// scripts/tradovate-today-check.ts, which has the reader seam; this file has
+// the Supabase stub, so it is where "what statements does that produce" lives.
+// The §A.5 fail-safe is asserted on BOTH sides on purpose — it is the one
+// whose failure mode is a trader's whole portfolio reading as closed after a
+// demo outage, which nothing else in the product would make visible.
+
+/** The Tradovate user the fixtures below belong to. */
+const TRADOVATE_USER_ID = 555;
+
+/** The trader's funded account, on demo, where TRADE was executed. */
+const BROKER_ACCOUNT: TradovateAccount = {
+  id: ACCOUNT_ID,
+  name: 'EVAL-A',
+  userId: TRADOVATE_USER_ID,
+  accountType: 'Customer',
+};
+
+/** A second account of theirs, on the same host. */
+const OTHER_ACCOUNT: TradovateAccount = { ...BROKER_ACCOUNT, id: 1_805_999, name: 'EVAL-B' };
+
+/** The pull's clock, frozen. See `syncTwice` for why that is the whole trick. */
+const ACCOUNT_NOW = Date.parse('2026-10-16T08:00:00.000Z');
+/** An hour later, for the one assertion that needs the clock to have moved. */
+const ACCOUNT_LATER = ACCOUNT_NOW + 3_600_000;
+
+/**
+ * One host's discovery result, built through the REAL claim filter.
+ *
+ * Deliberately not a hand-written `claimed` array: `claimedAccounts` is what
+ * production calls, so a fixture that bypassed it could assert a status
+ * mapping against a `tradeable` flag the real filter would never have
+ * produced. This way the two halves cannot drift.
+ */
+function answered(host: TradovateEnvironment, accounts: TradovateAccount[]): HostAccounts {
+  return { host, claimed: claimedAccounts(accounts, TRADOVATE_USER_ID) };
+}
+
+/** The sync, with the log swallowed. */
+async function quietAccountSync(params: Parameters<typeof syncBrokerAccounts>[0]) {
+  const { result } = await captureLogs(() => syncBrokerAccounts(params));
+  return result;
+}
+
+/** A sync, then the identical sync again, against one database. */
+async function syncTwice(db: FakeDb, hosts: HostAccounts[], nowMs = ACCOUNT_NOW) {
+  const client = db.client();
+  const first = await quietAccountSync({ client, userId: USER, hosts, env: ON, nowMs });
+  const writesAfterFirst = db.writes.length;
+  const second = await quietAccountSync({ client, userId: USER, hosts, env: ON, nowMs });
+  return { first, second, secondRunWrites: db.writes.length - writesAfterFirst };
+}
+
+async function accountRecordGroup() {
+  // ── The first sync: two accounts, one of them already closed ─────────────
+  const fresh = new FakeDb();
+  const hosts = [answered('demo', [BROKER_ACCOUNT, { ...OTHER_ACCOUNT, closed: true }])];
+  const { first, secondRunWrites } = await syncTwice(fresh, hosts);
+
+  const rowFor = (db: FakeDb, account: TradovateAccount) =>
+    db.rows.find((row) => row.broker_account_id === account.id) ?? {};
+  const open = rowFor(fresh, BROKER_ACCOUNT);
+  const shut = rowFor(fresh, OTHER_ACCOUNT);
+
+  // ── The four states that are not `closed: true` ──────────────────────────
+  const statusOf = async (over: Partial<TradovateAccount>) => {
+    const db = new FakeDb();
+    await quietAccountSync({
+      client: db.client(),
+      userId: USER,
+      hosts: [answered('demo', [{ ...BROKER_ACCOUNT, ...over }])],
+      env: ON,
+      nowMs: ACCOUNT_NOW,
+    });
+    return db.rows[0]?.status ?? 'no row';
+  };
+
+  // `archived` is not on TradovateAccount and must not be — ./types.ts forbids
+  // widening from guesswork — so the fixture carries it the same way the
+  // reader reads it: off the body, undeclared. If the spike shows the field
+  // does not exist, this case and the branch it covers go together.
+  const archived = await statusOf({ archived: true } as Partial<TradovateAccount>);
+
+  // ── The flag ─────────────────────────────────────────────────────────────
+  const offDb = new FakeDb();
+  const offRun = await quietAccountSync({
+    client: offDb.client(),
+    userId: USER,
+    hosts,
+    env: OFF,
+    nowMs: ACCOUNT_NOW,
+  });
+
+  // ── A concurrent insert of the same account ──────────────────────────────
+  const raced = new FakeDb();
+  raced.failNextInsertAsConflict = true;
+  const racedRun = await quietAccountSync({
+    client: raced.client(),
+    userId: USER,
+    hosts: [answered('demo', [BROKER_ACCOUNT])],
+    env: ON,
+    nowMs: ACCOUNT_NOW,
+  });
+
+  group('REF-110: a trader\'s accounts become rows', [
+    c('(1) one row per claimed account, whatever its state',
+      [fresh.rows.length, first.counts.accountsSeen, first.counts.inserted],
+      [2, 2, 2]),
+    c('(2) the identity the join needs: broker, id and HOST',
+      [open.broker, open.broker_account_id, open.broker_host],
+      ['tradovate', ACCOUNT_ID, 'demo']),
+    c('(3) display_name is the broker\'s own name for it',
+      [open.display_name, shut.display_name], ['EVAL-A', 'EVAL-B']),
+    c('(4) and a closed account is RECORDED, which is the whole ticket',
+      [open.status, shut.status], ['active', 'closed']),
+
+    // §A.5's first branch, one case per flag, because "closed" is a claim
+    // about five different booleans.
+    c('(5) every state flag reads as closed, and nothing else does', [
+      await statusOf({}),
+      await statusOf({ closed: true }),
+      await statusOf({ restricted: true }),
+      await statusOf({ readonly: true }),
+      await statusOf({ futuresDisabled: true }),
+      await statusOf({ active: false }),
+      archived,
+    ], ['active', 'closed', 'closed', 'closed', 'closed', 'closed', 'archived']),
+
+    c('(6) both timestamps are the pull\'s, so a row cannot be first seen after it was last seen',
+      [open.first_seen_at, open.last_seen_at],
+      [new Date(ACCOUNT_NOW).toISOString(), new Date(ACCOUNT_NOW).toISOString()]),
+
+    // THE ASSERTION THIS GROUP EXISTS FOR, and the frozen clock is what makes
+    // it meaningful: `last_seen_at` moves on every real pull, so what is being
+    // measured is that NO BROKER FACT IS RESTATED NEEDLESSLY — in particular
+    // that a TIMESTAMPTZ returning as `+00:00` where we sent `Z` does not
+    // report every row as changed, which is how idempotence is usually lost.
+    c('(7) a second sync against the same clock writes NOTHING AT ALL',
+      secondRunWrites, 0),
+
+    // The flag, which is what makes the deploy order survivable.
+    c('(8) with the flag off, not one statement is sent',
+      [offRun.counts.ran, offDb.statements.length, offRun.identities.size],
+      [false, 0, 0]),
+
+    // §C12's three properties, on a second table.
+    c('(9) every statement carries the user',
+      fresh.statements.every((s) =>
+        s.kind === 'insert'
+          ? s.values?.user_id === USER
+          : s.filters.some(([op, column, value]) => op === 'eq' && column === 'user_id' && value === USER)
+      ), true),
+    c('(10) and a blank user id throws before any of them',
+      await syncBrokerAccounts({ client: new FakeDb().client(), userId: '', hosts, env: ON })
+        .then(() => 'no throw', (error: unknown) => (error as Error).message.includes('non-empty string')),
+      true),
+
+    // The race. The index did its job; the row exists, so this becomes the
+    // update it would have been — and its id still reaches the map, which is
+    // what the import needs.
+    c('(11) a 23505 from a concurrent insert is absorbed, not counted as a failure',
+      [racedRun.counts.failed, racedRun.counts.inserted, racedRun.counts.unchanged],
+      [0, 0, 1]),
+    c('(12) and the winner\'s row is the one the identity map names',
+      racedRun.identities.get(accountIdentity('demo', ACCOUNT_ID)),
+      raced.rows[0]?.id),
+
+    // The log rule, which this module is the reason for restating: a
+    // display_name is a prop firm's name.
+    c('(13) the log carries counts and not one account name or id', await (async () => {
+      const db = new FakeDb();
+      const { lines } = await captureLogs(() =>
+        syncBrokerAccounts({ client: db.client(), userId: USER, hosts, env: ON, nowMs: ACCOUNT_NOW })
+      );
+      const text = lines.join('\n');
+      return [
+        text.includes('accountsSeen=2'),
+        text.includes('EVAL-A'),
+        text.includes('EVAL-B'),
+        text.includes(String(ACCOUNT_ID)),
+        text.includes(USER),
+      ];
+    })(), [true, false, false, false, false]),
+  ]);
+}
+
+async function accountBoundaryGroup() {
+  // The trader has renamed their evaluation and hidden a dead one. Then the
+  // broker restates both names.
+  const db = new FakeDb([
+    rowIn('accounts', {
+      id: 'acct-1',
+      user_id: USER,
+      broker: 'tradovate',
+      broker_account_id: ACCOUNT_ID,
+      broker_host: 'demo',
+      display_name: 'EVAL-A',
+      nickname: 'התיק של אפריל',
+      hidden: true,
+      status: 'active',
+      first_seen_at: '2026-09-01T00:00:00.000Z',
+      last_seen_at: '2026-10-15T08:00:00.000Z',
+    }),
+  ]);
+
+  const run = await quietAccountSync({
+    client: db.client(),
+    userId: USER,
+    hosts: [answered('demo', [{ ...BROKER_ACCOUNT, name: 'EVAL-A-RENAMED-BY-FIRM' }])],
+    env: ON,
+    nowMs: ACCOUNT_LATER,
+  });
+
+  const row = db.rows[0] ?? {};
+  const updates = db.statements.filter((s) => s.kind === 'update');
+
+  group('REF-110: the broker owns the name, the trader owns the rest', [
+    // The E12 regression, in its second home. Same shape as "a trader-edited
+    // strategy survives a re-import".
+    c('(1) a nickname the trader typed survives a resync that restates the name',
+      [row.display_name, row.nickname],
+      ['EVAL-A-RENAMED-BY-FIRM', 'התיק של אפריל']),
+    c('(2) and so does hidden, which is a screen preference and not a delete',
+      row.hidden, true),
+    c('(3) neither column is NAMED by any statement — not even to its default',
+      updates.every((s) => !('nickname' in (s.values ?? {})) && !('hidden' in (s.values ?? {}))),
+      true),
+
+    // first_seen_at is in neither set, and this is the only place that says so.
+    c('(4) first_seen_at is never restated; last_seen_at is',
+      [row.first_seen_at, row.last_seen_at],
+      ['2026-09-01T00:00:00.000Z', new Date(ACCOUNT_LATER).toISOString()]),
+    c('(5) and no statement names first_seen_at at all',
+      updates.every((s) => !('first_seen_at' in (s.values ?? {}))), true),
+
+    c('(6) the row was restated rather than duplicated',
+      [db.rows.length, run.counts.inserted, run.counts.updated], [1, 0, 1]),
+
+    // THE MEMBERSHIP ASSERTION. This list is a POLICY: adding a column to it
+    // hands it to the broker forever. The three members below are the three
+    // the broker is allowed to restate, and `nickname`/`hidden`/`first_seen_at`
+    // being absent is what cases 1-5 above actually depend on.
+    c('(7) and the broker-owned list is exactly these three',
+      [...BROKER_OWNED_FOR_TEST].sort(),
+      ['display_name', 'last_seen_at', 'status']),
+  ]);
+}
+
+async function accountClosureGroup() {
+  /** Two accounts the trader had last week: one on each host. */
+  const storedPair = (): Row[] => [
+    rowIn('accounts', {
+      id: 'acct-live',
+      user_id: USER,
+      broker: 'tradovate',
+      broker_account_id: ACCOUNT_ID,
+      broker_host: 'live',
+      display_name: 'EVAL-A',
+      status: 'active',
+      first_seen_at: '2026-09-01T00:00:00.000Z',
+      last_seen_at: '2026-10-15T08:00:00.000Z',
+    }),
+    rowIn('accounts', {
+      id: 'acct-demo',
+      user_id: USER,
+      broker: 'tradovate',
+      broker_account_id: OTHER_ACCOUNT.id,
+      broker_host: 'demo',
+      display_name: 'EVAL-B',
+      status: 'active',
+      first_seen_at: '2026-09-01T00:00:00.000Z',
+      last_seen_at: '2026-10-15T08:00:00.000Z',
+    }),
+  ];
+
+  // Both hosts answer; live no longer lists its account.
+  const gone = new FakeDb(storedPair());
+  const goneRun = await quietAccountSync({
+    client: gone.client(),
+    userId: USER,
+    hosts: [answered('live', []), answered('demo', [OTHER_ACCOUNT])],
+    env: ON,
+    nowMs: ACCOUNT_LATER,
+  });
+  const goneLive = gone.rows.find((row) => row.id === 'acct-live') ?? {};
+
+  // THE FAIL-SAFE. Live's discovery FAILED, so live has no entry at all — the
+  // shape `loadBrokerDay` produces when it drops a host. Nothing about live
+  // may be concluded from this pull.
+  const outage = new FakeDb(storedPair());
+  const outageRun = await quietAccountSync({
+    client: outage.client(),
+    userId: USER,
+    hosts: [answered('demo', [OTHER_ACCOUNT])],
+    env: ON,
+    nowMs: ACCOUNT_LATER,
+  });
+  const outageLive = outage.rows.find((row) => row.id === 'acct-live') ?? {};
+
+  // A total outage: no host answered. The pull itself failed, and the sync
+  // must be a no-op rather than a mass closure.
+  const blackout = new FakeDb(storedPair());
+  const blackoutRun = await quietAccountSync({
+    client: blackout.client(),
+    userId: USER,
+    hosts: [],
+    env: ON,
+    nowMs: ACCOUNT_LATER,
+  });
+
+  // An account that is already closed is not re-closed every night.
+  const settled = new FakeDb(
+    storedPair().map((row) => (row.id === 'acct-live' ? { ...row, status: 'closed' } : row))
+  );
+  const settledClient = settled.client();
+  await quietAccountSync({
+    client: settledClient,
+    userId: USER,
+    hosts: [answered('live', []), answered('demo', [OTHER_ACCOUNT])],
+    env: ON,
+    nowMs: ACCOUNT_LATER,
+  });
+
+  group('REF-110 §A.5: an account that stops being listed, and one that was never asked about', [
+    c('(1) a host that ANSWERED and did not list it closes it',
+      [goneLive.status, goneRun.counts.accountsClosed], ['closed', 1]),
+    // The one date the trader wants, and the pull that notices the account is
+    // gone is the last pull that should be allowed to move it.
+    c('(2) and last_seen_at is NOT moved by the pull that noticed',
+      goneLive.last_seen_at, '2026-10-15T08:00:00.000Z'),
+
+    // THE ASSERTION THAT WOULD OTHERWISE BE FOUND IN PRODUCTION.
+    c('(3) a host whose discovery FAILED does not close its accounts',
+      [outageLive.status, outageLive.last_seen_at, outageRun.counts.accountsClosed],
+      ['active', '2026-10-15T08:00:00.000Z', 0]),
+    c('(4) and nothing about that host was written at all',
+      outage.writes.filter((s) =>
+        s.filters.some(([op, column, value]) => op === 'eq' && column === 'id' && value === 'acct-live')
+      ).length, 0),
+    c('(5) a pull where NO host answered closes nothing',
+      [blackoutRun.counts.accountsClosed, blackout.writes.length,
+       blackout.rows.every((row) => row.status === 'active')],
+      [0, 0, true]),
+
+    // Scoped to the closed row on purpose: the DEMO account was listed, so
+    // its `last_seen_at` moves and that is one legitimate write. What must not
+    // happen is a second closure statement against a row that is already
+    // closed, every night, forever.
+    c('(6) an already-closed account is not closed again every night',
+      settled.writes.filter((s) =>
+        s.filters.some(([op, column, value]) => op === 'eq' && column === 'id' && value === 'acct-live')
+      ).length, 0),
+
+    // The other direction, so (3) cannot pass by the rule simply never firing.
+    c('(7) the demo account, which WAS listed, is untouched and current',
+      [(gone.rows.find((row) => row.id === 'acct-demo') ?? {}).status,
+       (gone.rows.find((row) => row.id === 'acct-demo') ?? {}).last_seen_at],
+      ['active', new Date(ACCOUNT_LATER).toISOString()]),
+  ]);
+}
+
+async function accountStampGroup() {
+  /** An already-imported trade, with no account pointed at it yet. */
+  const importedRow = (over: Row = {}): Row => ({
+    id: 'trade-1',
+    user_id: USER,
+    source: 'tradovate',
+    status: 'closed',
+    hidden: false,
+    broker_trade_key: TRADE.brokerTradeKey,
+    broker_account_id: ACCOUNT_ID,
+    broker_host: 'demo',
+    account_id: null,
+    ...over,
+  });
+
+  // ── Stage 2, end to end: record the accounts, then import onto them ──────
+  const db = new FakeDb();
+  const client = db.client();
+  const { identities } = await quietAccountSync({
+    client,
+    userId: USER,
+    hosts: [answered('demo', [BROKER_ACCOUNT])],
+    env: ON,
+    nowMs: ACCOUNT_NOW,
+  });
+  await quietImport({ client, userId: USER, trades: [TRADE], isTradeSource: true, env: ON, accountIds: identities });
+  const written = db.rows.find((row) => row.broker_trade_key === TRADE.brokerTradeKey) ?? {};
+  const accountRow = db.rows.find((row) => row.broker === 'tradovate') ?? {};
+
+  // ── The backfill: rows imported before any account existed ───────────────
+  const old = new FakeDb([
+    importedRow(),
+    importedRow({ id: 'trade-2', broker_trade_key: 'demo:88500' }),
+    // A row on a host this pull did not see. Nothing may be concluded about it.
+    importedRow({ id: 'trade-3', broker_trade_key: 'live:1', broker_host: 'live' }),
+    // A manual plan. It has no broker identity, so the backfill must not
+    // invent one for it — NULL means UNASSIGNED, never "manual".
+    { id: 'plan-1', user_id: USER, source: 'manual', status: 'open', account_id: null },
+  ]);
+  const oldClient = old.client();
+  const backfill = await quietAccountSync({
+    client: oldClient,
+    userId: USER,
+    hosts: [answered('demo', [BROKER_ACCOUNT])],
+    env: ON,
+    nowMs: ACCOUNT_NOW,
+  });
+  const writesAfterBackfill = old.writes.length;
+  // The same pass again. The rows are assigned now, so it has nothing to do.
+  await quietAccountSync({
+    client: oldClient,
+    userId: USER,
+    hosts: [answered('demo', [BROKER_ACCOUNT])],
+    env: ON,
+    nowMs: ACCOUNT_NOW,
+  });
+  const secondBackfillWrites = old.writes.length - writesAfterBackfill;
+  const byId = (id: string) => old.rows.find((row) => row.id === id) ?? {};
+  const assignedAccount = old.rows.find((row) => row.broker === 'tradovate')?.id;
+
+  // ── /api/tradovate/today's arrangement: an import with NO identity map ───
+  const noMap = new FakeDb([importedRow({ account_id: 'acct-already-there' })]);
+  await quietImport({
+    client: noMap.client(), userId: USER, trades: [TRADE], isTradeSource: true, env: ON,
+  });
+
+  // ── The unlink ───────────────────────────────────────────────────────────
+  resetLinkGuard();
+  const unlinked = new FakeDb([importedRow({ account_id: 'acct-1' })]);
+  await unlinkPlan({ client: unlinked.client(), rowId: 'trade-1' });
+
+  group('REF-110 Stage 2: a trade points at the account it was executed on', [
+    c('(1) the import stamps account_id from (broker_account_id, broker_host)',
+      written.account_id, accountRow.id),
+    c('(2) which is the column the migration adds, and it is a real row\'s id',
+      typeof written.account_id, 'string'),
+
+    // The pass that makes 037 safe to run before any code ships.
+    c('(3) the backfill points existing imported rows at the account',
+      [byId('trade-1').account_id, byId('trade-2').account_id],
+      [assignedAccount, assignedAccount]),
+    c('(4) ONE update per identity, not one per row',
+      old.writes.filter((s) => s.kind === 'update' && s.table === 'trade_plans').length, 1),
+    c('(5) and it reports the identity it assigned', backfill.counts.backfilled, 1),
+    c('(6) a second pass has nothing to do and writes nothing',
+      secondBackfillWrites, 0),
+
+    // The two rows it must not touch.
+    c('(7) a row on a host this pull never saw is left unassigned',
+      byId('trade-3').account_id, null),
+    c('(8) and a manual plan is left unassigned — NULL means unassigned, not manual',
+      byId('plan-1').account_id, null),
+
+    // THE ONE THAT PROTECTS THE BACKFILL FROM /today. An import with no
+    // identity map must not name the column, or every trade-form opening
+    // would undo the assignment the last sync made.
+    c('(9) an import with no identity map does not clear an assignment',
+      (noMap.rows[0] ?? {}).account_id, 'acct-already-there'),
+    c('(10) because it does not name the column in any statement',
+      noMap.writes.every((s) => !('account_id' in (s.values ?? {}))), true),
+
+    // The provenance goes together or not at all.
+    c('(11) an unlink clears account_id with the rest of the provenance',
+      [(unlinked.rows[0] ?? {}).account_id,
+       (unlinked.rows[0] ?? {}).broker_account_id,
+       (unlinked.rows[0] ?? {}).broker_host,
+       (unlinked.rows[0] ?? {}).broker_trade_key],
+      [null, null, null, null]),
+
+    // The policy list, now fourteen.
+    c('(12) account_id is in EXECUTION_FACTS deliberately, so the broker restates it',
+      EXECUTION_FACTS_FOR_TEST.some(({ column }) => column === 'account_id'), true),
+  ]);
+}
+
 async function main() {
   await flagGroup();
   await firstImportGroup();
@@ -2724,6 +3341,12 @@ async function main() {
   await confirmScreenGroup();
   await unlinkGroup();
   await todayPanelGroup();
+
+  // REF-110 Stages 1-2 — the accounts pass and the account a trade carries.
+  await accountRecordGroup();
+  await accountBoundaryGroup();
+  await accountClosureGroup();
+  await accountStampGroup();
 
   console.log('');
   if (failures.length > 0) {

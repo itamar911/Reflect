@@ -170,6 +170,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+import { accountIdentity } from './accounts';
 import type { TradovateEnvironment } from './hosts';
 import type { BrokerTrade } from './fills';
 import {
@@ -302,6 +303,20 @@ const EXECUTION_FACTS = [
   { column: 'source', kind: 'exact' },
   { column: 'broker_account_id', kind: 'number' },
   { column: 'broker_host', kind: 'exact' },
+  // REF-110 Stage 2, and it is in this list DELIBERATELY rather than by
+  // analogy. The question the list asks is "may the broker overwrite what the
+  // trader put here", and for `account_id` the answer is yes: it is derived
+  // from `broker_account_id` and `broker_host`, which are already the broker's
+  // two lines above, so a trader who reassigned an IMPORTED row to a different
+  // portfolio is asserting something the broker directly contradicts. Manual
+  // rows are never in this list's reach — Stage 3's form owns those.
+  //
+  // THE COLUMN IS ONLY COMPARED WHEN THE PULL CAN RESOLVE IT. See {@link facts}:
+  // an unresolvable account leaves the key OUT of the wanted record entirely,
+  // and {@link changedFacts} then skips it rather than restating a NULL. That
+  // is what stops `/api/tradovate/today` — which has no identity map — from
+  // clearing an assignment the sync made an hour earlier.
+  { column: 'account_id', kind: 'exact' },
   { column: 'symbol', kind: 'exact' },
   { column: 'direction', kind: 'exact' },
   { column: 'entry_price', kind: 'number' },
@@ -348,12 +363,39 @@ type FactValues = Record<string, string | number | null>;
  * `actual_pnl`, which is the broker's own figure and the better of the two, and
  * `pnl_amount` is points × units × point_value — a number this row has no
  * honest inputs for.
+ *
+ *
+ * `account_id` IS PRESENT OR ABSENT, AND NEVER NULL (REF-110 Stage 2)
+ * -------------------------------------------------------------------
+ *
+ * Three states, not two, and conflating the last two is the bug this shape
+ * exists to prevent:
+ *
+ *   resolved      → the column is named, and an existing row is restated to it
+ *   NOT RESOLVED  → the key is ABSENT from the record, and the column is not
+ *                   named in any statement — not on the insert, not in the
+ *                   comparison
+ *
+ * "Not resolved" is the ordinary case on two of the three triggers.
+ * `/api/tradovate/today` passes no identity map at all, because it does not run
+ * the account sync; and the very first sync on a database where 037 has just
+ * run has an empty `accounts` table until the pass that fills it. If an absent
+ * account resolved to NULL instead, `/today` would CLEAR the assignment on
+ * every imported row, every time a trader opened the trade form — silently
+ * undoing the backfill between one sync and the next.
+ *
+ * So the absence is load-bearing, and it is also what keeps the deploy honest:
+ * with no map, every statement this module issues is byte-identical to the one
+ * it issued before REF-110.
  */
-function facts(trade: BrokerTrade): FactValues {
+function facts(trade: BrokerTrade, accountIds?: ReadonlyMap<string, string>): FactValues {
+  const accountId = accountIds?.get(accountIdentity(trade.host, trade.accountId));
+
   return {
     source: 'tradovate',
     broker_account_id: trade.accountId,
     broker_host: trade.host,
+    ...(accountId === undefined ? {} : { account_id: accountId }),
     symbol: trade.symbol,
     direction: trade.direction,
     entry_price: trade.entryPrice,
@@ -385,10 +427,20 @@ function alreadyStated(kind: 'exact' | 'number' | 'instant', stored: unknown, wa
   return String(stored) === String(wanted);
 }
 
-/** The subset of facts this row does not already state. Empty means no write. */
+/**
+ * The subset of facts this row does not already state. Empty means no write.
+ *
+ * A COLUMN THE PULL DID NOT STATE IS SKIPPED, not compared against undefined.
+ * Every fact but `account_id` is always present, so this branch exists for that
+ * one — see {@link facts} on why "the broker did not say" and "the broker says
+ * NULL" must not become the same statement. Written as a membership test on
+ * `wanted` rather than as a check for `undefined` so that a future fact with a
+ * legitimately undefined value cannot slip through it.
+ */
 function changedFacts(stored: Record<string, unknown>, wanted: FactValues): FactValues {
   const changes: FactValues = {};
   for (const { column, kind } of EXECUTION_FACTS) {
+    if (!(column in wanted)) continue;
     if (!alreadyStated(kind, stored[column], wanted[column])) changes[column] = wanted[column];
   }
   return changes;
@@ -413,13 +465,17 @@ function changedFacts(stored: Record<string, unknown>, wanted: FactValues): Fact
  * happened — and the honest reading of the column is the stronger one: this
  * row's facts came from the broker, not from somebody typing.
  */
-function newRow(userId: string, trade: BrokerTrade): Record<string, unknown> {
+function newRow(
+  userId: string,
+  trade: BrokerTrade,
+  accountIds?: ReadonlyMap<string, string>
+): Record<string, unknown> {
   return {
     user_id: userId,
     broker_trade_key: trade.brokerTradeKey,
     unplanned: true,
     rule_context_source: 'broker_verified',
-    ...facts(trade),
+    ...facts(trade, accountIds),
   };
 }
 
@@ -455,6 +511,21 @@ export interface ImportRequest {
    * stamps. One clock for both, so a run cannot disagree with itself.
    */
   nowMs?: number;
+  /**
+   * `${host}:${brokerAccountId}` → `accounts.id`, from the pass that just
+   * recorded them (REF-110 Stage 2).
+   *
+   * OPTIONAL, AND ITS ABSENCE IS A SUPPORTED STATE RATHER THAN A DEGRADED ONE.
+   * `/api/tradovate/today` does not run the account sync — it is free precisely
+   * because it has a pull in hand and makes no extra passes — so it passes
+   * nothing here, no statement names `account_id`, and the rows it imports are
+   * assigned by the backfill on the next sync or nightly run. See
+   * {@link facts} for why that is not the same as resolving to NULL.
+   *
+   * Built by `syncBrokerAccounts` in ./account-sync.ts, which owns the key's
+   * shape — the host is in it because Tradovate account ids are host-local.
+   */
+  accountIds?: ReadonlyMap<string, string>;
 }
 
 /**
@@ -547,7 +618,15 @@ async function decideLinks(
  * and the one thing that must not be tolerated here.
  */
 export async function importBrokerTrades(request: ImportRequest): Promise<BrokerImportCounts> {
-  const { client, userId, trades, isTradeSource, env = process.env, nowMs = Date.now() } = request;
+  const {
+    client,
+    userId,
+    trades,
+    isTradeSource,
+    env = process.env,
+    nowMs = Date.now(),
+    accountIds,
+  } = request;
 
   // Before anything else, and not an assertion about data: a falsy or
   // non-string user id reaching the cron's service-role client is the one bug
@@ -624,7 +703,7 @@ export async function importBrokerTrades(request: ImportRequest): Promise<Broker
         counts.skippedHidden += 1;
         continue;
       }
-      await restate(client, userId, String(stored.id), stored, trade, counts, refusals);
+      await restate(client, userId, String(stored.id), stored, trade, counts, refusals, accountIds);
       continue;
     }
 
@@ -633,7 +712,7 @@ export async function importBrokerTrades(request: ImportRequest): Promise<Broker
     // refuses, so the trade reaches the journal either way.
     const decision = decisions.get(trade.brokerTradeKey);
     if (decision?.kind === 'unique') {
-      const written = await linkOnto(client, userId, decision.planId, trade, nowMs, refusals);
+      const written = await linkOnto(client, userId, decision.planId, trade, nowMs, refusals, accountIds);
       if (written) {
         counts.linkedAuto += 1;
         continue;
@@ -642,7 +721,7 @@ export async function importBrokerTrades(request: ImportRequest): Promise<Broker
       counts.queued += 1;
     }
 
-    const { error } = await client.from('trade_plans').insert(newRow(userId, trade));
+    const { error } = await client.from('trade_plans').insert(newRow(userId, trade, accountIds));
 
     if (!error) {
       counts.imported += 1;
@@ -655,7 +734,7 @@ export async function importBrokerTrades(request: ImportRequest): Promise<Broker
     // been had the read seen it. Re-read rather than trust the row we did not
     // see.
     if (error.code === UNIQUE_VIOLATION) {
-      await restateByKey(client, userId, trade, counts, refusals);
+      await restateByKey(client, userId, trade, counts, refusals, accountIds);
       continue;
     }
 
@@ -703,12 +782,13 @@ async function linkOnto(
   planId: string,
   trade: BrokerTrade,
   nowMs: number,
-  refusals: string[]
+  refusals: string[],
+  accountIds?: ReadonlyMap<string, string>
 ): Promise<boolean> {
   const { error } = await client
     .from('trade_plans')
     .update({
-      ...facts(trade),
+      ...facts(trade, accountIds),
       broker_trade_key: trade.brokerTradeKey,
       unplanned: false,
       link_confirmed_at: new Date(nowMs).toISOString(),
@@ -730,9 +810,10 @@ async function restate(
   stored: Record<string, unknown>,
   trade: BrokerTrade,
   counts: BrokerImportCounts,
-  refusals: string[]
+  refusals: string[],
+  accountIds?: ReadonlyMap<string, string>
 ): Promise<void> {
-  const changes = changedFacts(stored, facts(trade));
+  const changes = changedFacts(stored, facts(trade, accountIds));
 
   // THE WHOLE OF IDEMPOTENCE, IN ONE BRANCH. A re-import of an unchanged trade
   // reaches here and returns without sending a statement.
@@ -771,7 +852,8 @@ async function restateByKey(
   userId: string,
   trade: BrokerTrade,
   counts: BrokerImportCounts,
-  refusals: string[]
+  refusals: string[],
+  accountIds?: ReadonlyMap<string, string>
 ): Promise<void> {
   const { data, error } = await client
     .from('trade_plans')
@@ -791,7 +873,7 @@ async function restateByKey(
     counts.skippedHidden += 1;
     return;
   }
-  await restate(client, userId, String(stored.id), stored, trade, counts, refusals);
+  await restate(client, userId, String(stored.id), stored, trade, counts, refusals, accountIds);
 }
 
 /**

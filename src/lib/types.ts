@@ -196,6 +196,21 @@ export interface TradePlan {
    *  a duplicate, it does not remember a deletion. So delete sets this, and
    *  the import skips a hidden key instead of resurrecting it. */
   hidden?: boolean;
+
+  // ── Added by migration 037, also run by hand (REF-110 Stages 1-2) ─────────
+
+  /** The portfolio this trade belongs to — a row in `accounts`.
+   *
+   *  NULL MEANS UNASSIGNED, NOT MANUAL, and the distinction is the whole of
+   *  Stage 3: every row written before REF-110 is in this state, and reading
+   *  it as "manual" would claim a trader's entire history for a portfolio
+   *  they never created. The screen shows those in an explicit "ללא תיק"
+   *  bucket they assign from (Imri, 17.10).
+   *
+   *  Written by the broker import from `broker_account_id` + `broker_host`,
+   *  and by the backfill pass in lib/tradovate/account-sync.ts. Nothing reads
+   *  it yet — the screen and the filter are Stages 4 and 5. */
+  account_id?: string | null;
 }
 
 /**

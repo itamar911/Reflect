@@ -105,9 +105,15 @@
  * route and their own privacy note (app/api/tradovate/trades/route.ts).
  */
 
-import { TradovateRequestError, TradovateUnpriceableError } from './errors';
+import { TradovateRequestError, TradovateUnpriceableError, withoutResponseBody } from './errors';
 import { closedToday, minutesSince } from './trading-day';
-import { partitionAccounts, permissionsCouldHelp, permittedAccountIds } from './accounts';
+import {
+  claimedAccounts,
+  partitionAccounts,
+  permissionsCouldHelp,
+  permittedAccountIds,
+  type ClaimedAccount,
+} from './accounts';
 import type { TradovateEnvironment } from './hosts';
 import type {
   TradovateAccount,
@@ -327,6 +333,40 @@ export interface BrokerTrade {
 export interface BrokerDay {
   day: BrokerDayContext;
   trades: BrokerTrade[];
+  /**
+   * What discovery saw, per host that ANSWERED it (REF-110 Stage 1).
+   *
+   * A host whose discovery failed has NO ENTRY HERE, and the absence is the
+   * payload: it is what lets the accounts sync tell "this account is gone" from
+   * "we never asked". See {@link HostAccounts}.
+   */
+  accounts: HostAccounts[];
+}
+
+/**
+ * One host's claimed accounts, from a discovery call that SUCCEEDED.
+ *
+ * The existence of this entry is a statement in its own right — "this host
+ * returned a list" — and `loadBrokerDay` only ever pushes one after
+ * {@link discoverHostAccounts} resolved. A host dropped by failure rule 1
+ * contributes nothing, which is exactly the fail-safe REF-110 §A.5 needs:
+ * treating "not in the list" as closed on a host that was never asked would
+ * mark every account on it closed on the first demo outage.
+ *
+ * NOT DEDUPLICATED ACROSS HOSTS, unlike the trade pooling above it. The day's
+ * dedupe exists because two hosts reporting the same account id might be one
+ * account and double-counting a trade would inflate a loss; here the identity
+ * is `(broker_account_id, broker_host)` on both sides of the join — 034 stamps
+ * the host on every imported row and 037's unique index carries it — so a
+ * host-qualified row is the only thing a trade can be joined to. An id that
+ * genuinely appears on both hosts becomes two account rows, one of which
+ * collects no trades, and that is the honest answer while nothing documents
+ * the two id spaces as shared.
+ */
+export interface HostAccounts {
+  host: TradovateEnvironment;
+  /** Owned or permitted, tradeable or not. Never another trader's. */
+  claimed: ClaimedAccount[];
 }
 
 /**
@@ -584,18 +624,42 @@ async function readPermittedAccounts(
 async function discoverHostAccounts(
   reader: TradovateReader,
   tradovateUserId: number | null
-): Promise<TradovateAccount[]> {
-  const accounts = (await reader.get<TradovateAccount[]>('/account/list')) ?? [];
+): Promise<{ accepted: TradovateAccount[]; claimed: ClaimedAccount[] }> {
+  // THE ONE READ IN THIS MODULE WHOSE FAILURE BODY IS THE TRADER'S OWN DATA.
+  // `/account/list` answers with a list of account NAMES, and a
+  // TradovateRequestError puts `body.slice(0, 300)` into its message — so an
+  // upstream error here hands a prop firm's account names to whatever logs it,
+  // four layers up, where nobody is thinking about this call. Reduced to a
+  // status code at the only point that knows what the body held. See
+  // withoutResponseBody() in ./errors.ts.
+  //
+  // This risk PREDATES REF-110 — the call has been made on every pull since
+  // Stage 1 — and REF-110 is the ticket that made somebody look at it.
+  let accounts: TradovateAccount[];
+  try {
+    accounts = (await reader.get<TradovateAccount[]>('/account/list')) ?? [];
+  } catch (error) {
+    throw withoutResponseBody(error);
+  }
 
   // Owned OR permitted (REF-90 Stage 2). The permission list is read only when
-  // some account on this host failed on ownership ALONE — see
-  // permissionsCouldHelp() — which is what keeps the normal trader at the one
-  // extra /account/list that Stage 1 costs them and no more.
+  // some account on this host failed on ownership — see permissionsCouldHelp(),
+  // and the REF-110 note on it for why tradeability is no longer part of that
+  // question. A trader whose accounts are all their own still pays nothing.
   const permitted = permissionsCouldHelp(accounts, tradovateUserId)
     ? await readPermittedAccounts(reader, tradovateUserId)
     : null;
 
-  return partitionAccounts(accounts, tradovateUserId, permitted).accepted;
+  // TWO ANSWERS OUT OF ONE LIST, AND NO SECOND REQUEST. `accepted` is what the
+  // day has always counted; `claimed` is the same trader's accounts WITHOUT the
+  // tradeability filter, which is what the accounts table records (REF-110
+  // Stage 1). Neither is derivable from the other — `accepted` has thrown the
+  // closed ones away and the raw list holds other traders' — so both leave
+  // here, from the one `/account/list` this pull was always going to make.
+  return {
+    accepted: partitionAccounts(accounts, tradovateUserId, permitted).accepted,
+    claimed: claimedAccounts(accounts, tradovateUserId, permitted),
+  };
 }
 
 /** The other one. Two environments, so this is total. */
@@ -897,13 +961,21 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
 
   const claimed = new Set<number>();
   const pooled: BrokerTrade[] = [];
+  /** One entry per host that ANSWERED discovery. See {@link HostAccounts}. */
+  const accounts: HostAccounts[] = [];
 
   for (const env of order) {
     const reader = readers[env]!;
 
     let accepted: TradovateAccount[];
     try {
-      accepted = await discoverHostAccounts(reader, tradovateUserId);
+      const discovered = await discoverHostAccounts(reader, tradovateUserId);
+      accepted = discovered.accepted;
+      // PUSHED HERE AND NOWHERE ELSE: past the catch, so the list holds exactly
+      // the hosts that returned something. A host dropped by rule 1 below is
+      // absent, and the accounts sync reads that absence as "not asked" rather
+      // than as "every account here is gone" (REF-110 §A.5).
+      accounts.push({ host: env, claimed: discovered.claimed });
     } catch (error) {
       // Rule 1. The mint host answering with a failure is the failure this pull
       // has always had; the other host is new, additive, and must not be able
@@ -986,6 +1058,7 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
       asOf,
     },
     trades,
+    accounts,
   };
 }
 
