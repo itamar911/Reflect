@@ -12,14 +12,45 @@
  * Or export the vars yourself; see .env.example for the shape. Credentials are
  * read from the environment only — never hardcoded, never logged.
  *
+ *
+ * THE --orders MODE (REF-113 STAGE 0)
+ * -----------------------------------
+ *
+ *   node --env-file=scripts/spike/.env scripts/spike/tradovate-spike.mjs --orders
+ *
+ * A SEPARATE MODE, not an extra step, and that is deliberate: the six original
+ * steps open a WebSocket, deliberately drop it and wait ~30s, which has nothing
+ * to do with orders and would make this slow to re-run. `--orders` authenticates
+ * and then reads the six order-shaped endpoints on BOTH hosts.
+ *
+ * It answers the seven questions REF-113's investigation could not answer from
+ * the repo, because NOTHING in the repo describes the `order` or `orderVersion`
+ * entity at field level — not vendored, not typed, and §2/§4 of FINDINGS.md are
+ * still [PENDING] because this script has never been run live. Those seven
+ * questions are printed at the top of its output as a checklist.
+ *
+ * WHAT IT PRINTS IS DELIBERATELY NOT THE DATA. Field NAMES and TYPES are what
+ * REF-113 needs; a stop price, an order id and a timestamp are the trader's
+ * position. So every sample value is replaced by its type name unless the field
+ * is in {@link VOCABULARY} — the low-cardinality enums (`ordStatus`,
+ * `orderType`, `action`, …) that are the whole point of the measurement and are
+ * not trader data. Fail closed: a field nobody listed prints as `<number>`.
+ * The aggregates are counts, which name nothing.
+ *
+ *
  * SAFETY: this script must never place, modify or cancel an order. Two
  * independent guards enforce that (allowlist + mutation denylist) on both the
  * REST and WebSocket paths. Do not weaken them to "just try something".
+ *
+ * Note for anyone adding an endpoint: the three added for `--orders` pass the
+ * mutation denylist UNCHANGED. `/orderStrategy/list` does not match
+ * `startorderstrategy`, which needs the `start` prefix. The regex was not
+ * touched and must not be.
  */
 
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = join(HERE, 'out');
@@ -30,6 +61,24 @@ const REST_URL = 'https://demo.tradovateapi.com/v1';
 const WS_URL = 'wss://demo.tradovateapi.com/v1/websocket';
 // wss://md.tradovateapi.com/v1/websocket is the Market Data socket. We are NOT
 // entitled to it (needs CME sub-vendor registration) and never open it.
+
+/**
+ * The two trading hosts, for --orders.
+ *
+ * Steps 1-6 are demo-only and stay that way. The app is not: `loadBrokerDay`
+ * asks BOTH hosts because the token's mint server says nothing about where the
+ * trader's accounts live (REF-90), so a measurement that only looked at demo
+ * would not describe what the integration will actually read.
+ *
+ * The live host is reached with the SAME token, which is what the app does
+ * (`getUserTradingApi` hands one token to a reader per host). A trial account
+ * with no live provisioning answers 401/403, and that is recorded rather than
+ * fatal — the same asymmetry as `loadBrokerDay`'s failure rule 1.
+ */
+const HOSTS = {
+  demo: REST_URL,
+  live: 'https://live.tradovateapi.com/v1',
+};
 
 // ---------------------------------------------------------------------------
 // Read-only guards
@@ -51,6 +100,11 @@ const ALLOWED_REST = new Set([
   '/orderVersion/list',
   '/position/list',
   '/user/list',
+  // REF-113 Stage 0. All three pass the mutation denylist unchanged; see the
+  // note in the module header before adding a fourth.
+  '/orderStrategy/list',
+  '/orderStrategyLink/list',
+  '/command/list',
 ]);
 
 const ALLOWED_WS = new Set(['authorize', 'user/syncrequest']);
@@ -149,10 +203,10 @@ let accessToken = null;
  * `p-ticket` / `p-time` body instead of the normal payload. `p-captcha` means a
  * third-party app cannot proceed and must wait an hour.
  */
-async function rest(path, { body = null, query = null, method = null } = {}) {
+async function rest(path, { body = null, query = null, method = null, baseUrl = REST_URL } = {}) {
   assertReadOnly('rest', path);
   const verb = method ?? (body ? 'POST' : 'GET');
-  const url = new URL(REST_URL + path);
+  const url = new URL(baseUrl + path);
   if (query) for (const [k, v] of Object.entries(query)) url.searchParams.set(k, String(v));
 
   const headers = { 'Content-Type': 'application/json' };
@@ -194,7 +248,7 @@ async function rest(path, { body = null, query = null, method = null } = {}) {
     const waitMs = (json['p-time'] ?? 1) * 1000;
     log(`Waiting ${waitMs / 1000}s then retrying with p-ticket...`);
     await new Promise((r) => setTimeout(r, waitMs));
-    return rest(path, { body: { ...(body ?? {}), 'p-ticket': json['p-ticket'] }, query, method });
+    return rest(path, { body: { ...(body ?? {}), 'p-ticket': json['p-ticket'] }, query, method, baseUrl });
   }
 
   if (!res.ok) {
@@ -646,12 +700,482 @@ function step6RateLimits() {
 }
 
 // ---------------------------------------------------------------------------
+// --orders  -  REF-113 STAGE 0: the order entities, measured
+// ---------------------------------------------------------------------------
+
+const ORDER_ENDPOINTS = [
+  '/order/list',
+  '/orderVersion/list',
+  '/orderStrategy/list',
+  '/orderStrategyLink/list',
+  '/command/list',
+  '/executionReport/list',
+];
+
+/** The round counts that mean "truncated", per FINDINGS.md §4. */
+const CAP_COUNTS = [1000, 1024, 2000, 2048, 4096];
+
+/**
+ * The only fields whose VALUE is printed.
+ *
+ * Low-cardinality enums and nothing else. These are the vocabulary REF-113 is
+ * measuring — "is there a `TrailingStop` in `orderType`", "does a cancelled
+ * order keep a readable `ordStatus`" — and an enum member names no trade.
+ *
+ * Everything absent from this set prints as its type. That direction is the
+ * point: a field nobody has thought about is a field whose value might be a
+ * price, so the default must be silence. Same fail-closed shape as
+ * src/lib/tradovate/allowlist.ts.
+ */
+const VOCABULARY = new Set([
+  'action',
+  'ordStatus',
+  'orderType',
+  'timeInForce',
+  'commandType',
+  'commandStatus',
+  'entityType',
+  'eventType',
+  'execType',
+  'rejectReason',
+  'label',
+  'accountType',
+  'status',
+]);
+
+/** An enum member looks like this. Anything else is treated as free text. */
+const ENUM_SHAPED = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/;
+
+/**
+ * One field's sample value, or its type name.
+ *
+ * Booleans and nulls print verbatim: a flag is not a measurement of anything a
+ * trader did. Arrays print their length only. Everything else has to earn it by
+ * being in {@link VOCABULARY} *and* being enum-shaped — a `label` that turns out
+ * to hold the trader's own free text falls back to `<string>` rather than
+ * leaking it.
+ */
+function safeSample(fieldPath, value) {
+  const leaf = fieldPath.split('.').pop();
+  if (value === null || value === undefined) return 'null';
+  if (typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) return `<array len=${value.length}>`;
+  if (typeof value === 'object') return '<object>';
+  if (VOCABULARY.has(leaf) && typeof value === 'string' && ENUM_SHAPED.test(value)) return value;
+  return `<${typeof value}>`;
+}
+
+/**
+ * Every field any row carried, its types, and one sanitised sample.
+ *
+ * Across ALL rows and not just the first, because these entities have optional
+ * fields that only appear on some of them — `stopPrice` is absent from a limit
+ * order's version and present on a stop's, which is exactly the distinction
+ * being measured. A shape read off row zero would report the wrong answer with
+ * total confidence.
+ */
+function fieldSurvey(rows) {
+  const fields = new Map();
+  for (const row of rows) {
+    for (const [path, info] of Object.entries(shapeOf(row))) {
+      const entry = fields.get(path) ?? { types: new Set(), sample: null, present: 0 };
+      entry.types.add(info.type);
+      entry.present += 1;
+      if (entry.sample === null || entry.sample === 'null') {
+        entry.sample = safeSample(path, info.sample);
+      }
+      fields.set(path, entry);
+    }
+  }
+  return fields;
+}
+
+/** Distinct values of one enum field across rows. Printable by construction. */
+function enumValues(rows, field) {
+  const seen = new Set();
+  for (const row of rows) {
+    const v = row?.[field];
+    if (typeof v === 'string' && ENUM_SHAPED.test(v)) seen.add(v);
+    else if (typeof v === 'number') seen.add(`<number>`);
+  }
+  return [...seen].sort();
+}
+
+/** Which field NAMES differ between two rows. Names only — never the values. */
+function changedFields(a, b) {
+  const keys = new Set([...Object.keys(a ?? {}), ...Object.keys(b ?? {})]);
+  const changed = [];
+  for (const k of keys) {
+    // JSON comparison: these are flat scalar entities, and this is only ever
+    // asked "did it change", never "to what".
+    if (JSON.stringify(a?.[k] ?? null) !== JSON.stringify(b?.[k] ?? null)) changed.push(k);
+  }
+  return changed.sort();
+}
+
+/** Versions grouped by their order, oldest first. `id` breaks a tie. */
+function versionsByOrder(versions) {
+  const byOrder = new Map();
+  for (const v of versions) {
+    const key = v?.orderId;
+    if (typeof key !== 'number') continue;
+    if (!byOrder.has(key)) byOrder.set(key, []);
+    byOrder.get(key).push(v);
+  }
+  for (const list of byOrder.values()) {
+    list.sort(
+      (x, y) =>
+        new Date(x.timestamp ?? 0) - new Date(y.timestamp ?? 0) || (x.id ?? 0) - (y.id ?? 0)
+    );
+  }
+  return byOrder;
+}
+
+/**
+ * The seven questions. Printed as a checklist the owner fills in by reading the
+ * rest of the file, because the script can measure but it cannot decide.
+ */
+const STAGE0_QUESTIONS = [
+  'Q1  Does `stopPrice` sit on orderVersion, or on order?  -> read the two FIELD SURVEY blocks.',
+  'Q2  Does a modify produce a NEW VERSION on the same order, and a ladder drag a CANCEL+REPLACE?',
+  '      -> read "versions per order" + "fields that differ between versions" + ordStatus values.',
+  'Q3  Are cancelled orders still returned, and how far back?  -> read ordStatus values + depth.',
+  'Q4  Which linkage field does a real bracket populate - orderStrategyLink, ocoId, parentId?',
+  '      -> read the /orderStrategy/list and /orderStrategyLink/list surveys, and order\'s fields.',
+  'Q5  How does a trailing stop appear, and is `pegDifference` visible?  -> orderType values.',
+  'Q6  Does /command/list separate a trader modify from a server trail step?  -> commandType values.',
+  'Q7  Response counts - does any land on a round number (truncated, not exhausted)?  -> COUNTS.',
+];
+
+async function stepOrders() {
+  const startedAt = new Date();
+  const lines = [];
+
+  /** Write one line to stdout and to the report file. Redacted on both. */
+  const w = (text = '') => {
+    const line = redact(String(text));
+    lines.push(line);
+    console.log(line);
+  };
+  const rule = (ch = '-') => w(ch.repeat(78));
+
+  rule('=');
+  w(`REF-113 STAGE 0 - order entities, measured.  ${startedAt.toISOString()}`);
+  rule('=');
+  w();
+  w('READ-ONLY. No order was placed, modified or cancelled; the allowlist and the');
+  w('mutation denylist both ran on every call below.');
+  w();
+  w('NO VALUES. Every sample is its TYPE NAME unless the field is a known enum.');
+  w('No price, no id, no timestamp and no quantity appears in this file. Counts do.');
+  w();
+  rule();
+  w('THE SEVEN QUESTIONS - fill these in by reading what follows');
+  rule();
+  for (const q of STAGE0_QUESTIONS) w(q);
+  w();
+  w('  [ ] Q1 answer: ');
+  w('  [ ] Q2 answer: ');
+  w('  [ ] Q3 answer: ');
+  w('  [ ] Q4 answer: ');
+  w('  [ ] Q5 answer: ');
+  w('  [ ] Q6 answer: ');
+  w('  [ ] Q7 answer: ');
+  w();
+
+  const findings = { startedAt: startedAt.toISOString(), hosts: {} };
+
+  for (const [host, baseUrl] of Object.entries(HOSTS)) {
+    rule('=');
+    w(`HOST: ${host}`);
+    rule('=');
+
+    const hostFindings = { endpoints: {} };
+    findings.hosts[host] = hostFindings;
+
+    /** @type {Record<string, unknown[]>} */
+    const data = {};
+
+    // ── counts first, so Q7 is answerable even if a later block throws ──────
+    rule();
+    w('COUNTS  (a count on a round number means TRUNCATED, not exhausted)');
+    rule();
+    for (const path of ORDER_ENDPOINTS) {
+      try {
+        const rows = (await rest(path, { baseUrl })) ?? [];
+        const list = Array.isArray(rows) ? rows : [];
+        data[path] = list;
+
+        const stamps = list
+          .map((r) => r?.timestamp ?? r?.transactTime ?? null)
+          .filter(Boolean)
+          .map((t) => new Date(t))
+          .filter((d) => !Number.isNaN(d.getTime()))
+          .sort((a, b) => a - b);
+        const depthDays = stamps.length
+          ? ((Date.now() - stamps[0].getTime()) / 86400000).toFixed(1)
+          : null;
+        const capped = CAP_COUNTS.includes(list.length);
+
+        w(
+          `  ${path.padEnd(26)} count=${String(list.length).padEnd(7)}` +
+            `depth=${(depthDays ? depthDays + 'd' : 'n/a').padEnd(10)}` +
+            (capped ? '*** ROUND NUMBER - TRUNCATED, history is NOT exhausted ***' : '')
+        );
+        hostFindings.endpoints[path] = { count: list.length, depthDays, capped };
+      } catch (e) {
+        // Recorded, never fatal. A host with no provisioning, or an entity a
+        // host does not expose, is a finding — the /tradingPermission/list
+        // precedent in fills.ts, where a 404 is the expected reply.
+        w(`  ${path.padEnd(26)} ERROR: ${e.message.slice(0, 120)}`);
+        hostFindings.endpoints[path] = { error: e.message.slice(0, 200) };
+        data[path] = [];
+      }
+    }
+    w();
+
+    if (Object.values(data).every((rows) => rows.length === 0)) {
+      w('Nothing on this host. Either it holds none of this user\'s accounts, or the');
+      w('account has never placed an order. Place a BRACKETED trade and drag a stop by');
+      w('hand in the Tradovate UI - not from this script - and re-run.');
+      w();
+      continue;
+    }
+
+    // ── field surveys ──────────────────────────────────────────────────────
+    for (const path of ORDER_ENDPOINTS) {
+      const rows = data[path];
+      if (!rows.length) continue;
+      rule();
+      w(`FIELD SURVEY  ${path}   (${rows.length} rows)`);
+      rule();
+      const fields = fieldSurvey(rows);
+      w(`  ${'field'.padEnd(26)} ${'type'.padEnd(18)} ${'on'.padEnd(8)} sample`);
+      for (const [name, info] of [...fields.entries()].sort()) {
+        w(
+          `  ${name.padEnd(26)} ${[...info.types].sort().join('|').padEnd(18)} ` +
+            `${`${info.present}/${rows.length}`.padEnd(8)} ${info.sample}`
+        );
+      }
+      hostFindings.endpoints[path].fields = Object.fromEntries(
+        [...fields.entries()].map(([k, v]) => [
+          k,
+          { types: [...v.types].sort(), presentOn: v.present, sample: v.sample },
+        ])
+      );
+      w();
+    }
+
+    // ── enum vocabularies - Q3, Q5, Q6 ─────────────────────────────────────
+    rule();
+    w('ENUM VOCABULARIES');
+    rule();
+    const orders = data['/order/list'] ?? [];
+    const versions = data['/orderVersion/list'] ?? [];
+    const commands = data['/command/list'] ?? [];
+
+    const ordStatuses = enumValues(orders, 'ordStatus');
+    const orderTypes = enumValues(versions, 'orderType').concat(enumValues(orders, 'orderType'));
+    const uniqueOrderTypes = [...new Set(orderTypes)].sort();
+    const commandTypes = enumValues(commands, 'commandType');
+
+    w(`  order.ordStatus          ${ordStatuses.join(', ') || '(none)'}`);
+    w(`  orderType                ${uniqueOrderTypes.join(', ') || '(none)'}`);
+    w(`  order.action             ${enumValues(orders, 'action').join(', ') || '(none)'}`);
+    w(`  orderVersion.timeInForce ${enumValues(versions, 'timeInForce').join(', ') || '(none)'}`);
+    w(`  command.commandType      ${commandTypes.join(', ') || '(none)'}`);
+    w(`  command.commandStatus    ${enumValues(commands, 'commandStatus').join(', ') || '(none)'}`);
+    w();
+    // Q3, stated as a boolean rather than left to the reader's eye.
+    const cancelShaped = ordStatuses.filter((s) => /cancel|reject|expire/i.test(s));
+    w(`  Q3 >> a terminal ordStatus IS visible: ${cancelShaped.length > 0}` +
+      (cancelShaped.length ? `  (${cancelShaped.join(', ')})` : ''));
+    const trailShaped = uniqueOrderTypes.filter((t) => /trail/i.test(t));
+    w(`  Q5 >> a trailing orderType IS present: ${trailShaped.length > 0}` +
+      (trailShaped.length ? `  (${trailShaped.join(', ')})` : ''));
+    w(`  Q5 >> pegDifference is a field on orderVersion: ` +
+      `${versions.some((v) => v && 'pegDifference' in v)}`);
+    const modifyShaped = commandTypes.filter((t) => /modify|replace/i.test(t));
+    w(`  Q6 >> a modify-shaped commandType IS present: ${modifyShaped.length > 0}` +
+      (modifyShaped.length ? `  (${modifyShaped.join(', ')})` : ''));
+    w();
+
+    // ── Q1 - where the stop price lives ────────────────────────────────────
+    rule();
+    w('Q1  WHERE THE STOP PRICE LIVES  -  the load-bearing question');
+    rule();
+    const orderHasStop = orders.some((o) => o && 'stopPrice' in o);
+    const versionHasStop = versions.some((v) => v && 'stopPrice' in v);
+    const versionStopCount = versions.filter((v) => v?.stopPrice != null).length;
+    w(`  'stopPrice' present on any /order/list row:        ${orderHasStop}`);
+    w(`  'stopPrice' present on any /orderVersion/list row: ${versionHasStop}`);
+    w(`  orderVersion rows with a non-null stopPrice:       ${versionStopCount}`);
+    w(`  'price' present on any /order/list row:            ${orders.some((o) => o && 'price' in o)}`);
+    w(`  'price' present on any /orderVersion/list row:     ${versions.some((v) => v && 'price' in v)}`);
+    w();
+    w(`  >> ${
+      versionHasStop && !orderHasStop
+        ? 'CONFIRMED: terms are on the VERSION. The version history IS the move history.'
+        : orderHasStop && !versionHasStop
+          ? 'REFUTED: terms are on the ORDER. REF-113 needs a different source - escalate.'
+          : versionHasStop && orderHasStop
+            ? 'BOTH carry it. Decide which is authoritative before building anything.'
+            : 'NEITHER carries it in this sample. Place a STOP order by hand and re-run.'
+    }`);
+    w();
+
+    // ── Q2 - versions per order, and what changes between them ─────────────
+    rule();
+    w('Q2  VERSIONS PER ORDER, AND WHAT CHANGES BETWEEN THEM');
+    rule();
+    const byOrder = versionsByOrder(versions);
+    const counts = [...byOrder.values()].map((l) => l.length);
+    const histogram = counts.reduce((acc, n) => {
+      const bucket = n >= 4 ? '4+' : String(n);
+      acc[bucket] = (acc[bucket] ?? 0) + 1;
+      return acc;
+    }, {});
+    w(`  distinct orderIds in /orderVersion/list: ${byOrder.size}`);
+    w(`  max versions on one order:               ${counts.length ? Math.max(...counts) : 0}`);
+    w(`  orders by version count:                 ${JSON.stringify(histogram)}`);
+    w(`  orders in /order/list with NO version:   ${
+      orders.filter((o) => typeof o?.id === 'number' && !byOrder.has(o.id)).length
+    }`);
+    w();
+
+    // Which fields move, and on how many orders. Names and counts only.
+    const changeTally = new Map();
+    for (const list of byOrder.values()) {
+      const seenHere = new Set();
+      for (let i = 1; i < list.length; i++) {
+        for (const f of changedFields(list[i - 1], list[i])) seenHere.add(f);
+      }
+      for (const f of seenHere) changeTally.set(f, (changeTally.get(f) ?? 0) + 1);
+    }
+    if (changeTally.size === 0) {
+      w('  No order in this sample has more than one version.');
+      w('  => either nothing was ever modified, OR a modify is a CANCEL+REPLACE here.');
+      w('  Cross-check against the terminal ordStatus count above before concluding.');
+    } else {
+      w('  fields that differ between consecutive versions of the SAME order:');
+      w(`  ${'field'.padEnd(26)} on how many orders`);
+      for (const [f, n] of [...changeTally.entries()].sort((a, b) => b[1] - a[1])) {
+        w(`  ${f.padEnd(26)} ${n}` + (f === 'stopPrice' ? '   <<< A STOP MOVE, IN PLACE' : ''));
+      }
+    }
+    w();
+    w(`  Q2 >> stopPrice changes across versions of one order: ${changeTally.has('stopPrice')}`);
+    w();
+
+    // ── the most recent order carrying a stop ──────────────────────────────
+    rule();
+    w('THE MOST RECENT ORDER THAT CARRIES A stopPrice');
+    rule();
+    const stopOrderIds = [...byOrder.entries()].filter(([, list]) =>
+      list.some((v) => v?.stopPrice != null)
+    );
+    if (stopOrderIds.length === 0) {
+      w('  None. No order in this sample ever carried a stopPrice, so REF-113 has');
+      w('  nothing to measure yet. Place a bracketed trade WITH A STOP by hand, drag');
+      w('  the stop at least once, then re-run.');
+      hostFindings.mostRecentStopOrder = null;
+    } else {
+      // Most recent by its FIRST version's instant - when the stop was placed.
+      const [, newest] = stopOrderIds.sort(
+        (a, b) => new Date(b[1][0]?.timestamp ?? 0) - new Date(a[1][0]?.timestamp ?? 0)
+      )[0];
+      const theOrder = orders.find((o) => o?.id === newest[0]?.orderId) ?? null;
+      const stopPrices = newest.map((v) => v?.stopPrice ?? null);
+      const distinctStops = new Set(stopPrices.filter((p) => p != null)).size;
+
+      w(`  orders carrying a stopPrice:     ${stopOrderIds.length}`);
+      w(`  versions on this one:            ${newest.length}`);
+      w(`  distinct stopPrice VALUES on it: ${distinctStops}   (count, not the prices)`);
+      w(`  its stopPrice moved:             ${distinctStops > 1}`);
+      w(`  orderType across its versions:   ${enumValues(newest, 'orderType').join(', ') || '(none)'}`);
+      w(`  its ordStatus:                   ${
+        typeof theOrder?.ordStatus === 'string' ? theOrder.ordStatus : '(not found in /order/list)'
+      }`);
+      w('  fields differing between its consecutive versions:');
+      for (let i = 1; i < newest.length; i++) {
+        w(`    v${i} -> v${i + 1}: ${changedFields(newest[i - 1], newest[i]).join(', ') || '(nothing)'}`);
+      }
+      hostFindings.mostRecentStopOrder = {
+        versionCount: newest.length,
+        distinctStopPrices: distinctStops,
+        moved: distinctStops > 1,
+        orderTypes: enumValues(newest, 'orderType'),
+        ordStatus: typeof theOrder?.ordStatus === 'string' ? theOrder.ordStatus : null,
+      };
+    }
+    w();
+
+    // ── Q4 - linkage ───────────────────────────────────────────────────────
+    rule();
+    w('Q4  BRACKET / OCO LINKAGE');
+    rule();
+    const strategies = data['/orderStrategy/list'] ?? [];
+    const links = data['/orderStrategyLink/list'] ?? [];
+    for (const field of ['ocoId', 'parentId', 'linkedId', 'oso', 'orderStrategyId']) {
+      const on = orders.filter((o) => o && field in o).length;
+      const nonNull = orders.filter((o) => o?.[field] != null).length;
+      w(`  order.${field.padEnd(18)} present on ${String(on).padEnd(6)} non-null on ${nonNull}`);
+    }
+    w(`  /orderStrategy/list rows:      ${strategies.length}`);
+    w(`  /orderStrategyLink/list rows:  ${links.length}`);
+    if (links.length) {
+      w(`  link.label values:             ${enumValues(links, 'label').join(', ') || '(none)'}`);
+    }
+    w();
+    hostFindings.linkage = {
+      strategies: strategies.length,
+      links: links.length,
+      orderFieldsNonNull: Object.fromEntries(
+        ['ocoId', 'parentId', 'linkedId', 'orderStrategyId'].map((f) => [
+          f,
+          orders.filter((o) => o?.[f] != null).length,
+        ])
+      ),
+    };
+  }
+
+  // The structured copy is JSON and goes through the same sanitiser path: only
+  // counts, booleans, field names and enum members were ever put into it.
+  dump('orders-findings', findings);
+
+  mkdirSync(OUT_DIR, { recursive: true });
+  const stamp = startedAt.toISOString().replace(/[:.]/g, '-');
+  const file = join(OUT_DIR, `orders-${stamp}.txt`);
+  writeFileSync(file, `${lines.join('\n')}\n`, 'utf8');
+  w(`Report written to ${file}`);
+  // Written twice on purpose: the line above lands in stdout only, after the
+  // file was closed, so the file does not claim to contain its own filename.
+
+  record('orders', findings);
+  return findings;
+}
+
+// ---------------------------------------------------------------------------
 
 async function main() {
   const started = new Date();
+  const ordersOnly = process.argv.includes('--orders');
+
   log(`Tradovate spike - READ ONLY - ${started.toISOString()}`);
   log(`REST ${REST_URL}`);
-  log(`WS   ${WS_URL}`);
+  if (!ordersOnly) log(`WS   ${WS_URL}`);
+
+  // REF-113 Stage 0. Authenticate, then read orders on both hosts and stop:
+  // the WebSocket steps are about replay semantics and cost ~30s of waiting,
+  // and this mode is meant to be re-run after each hand-placed trade.
+  if (ordersOnly) {
+    log(`Hosts: ${Object.keys(HOSTS).join(', ')}`);
+    await step1Auth();
+    await stepOrders();
+    const ordersFile = dump('spike-report-orders', { startedAt: started.toISOString(), ...report });
+    log(`\nStructured report written to ${ordersFile}`);
+    process.exit(0);
+  }
 
   const { userId } = await step1Auth();
   const { fills, fillPairs, contract } = await step2AccountsAndFill();
@@ -665,8 +1189,28 @@ async function main() {
   process.exit(0);
 }
 
-main().catch((err) => {
-  console.error(`\nSPIKE FAILED: ${redact(err.message)}`);
-  if (err.stack) console.error(redact(err.stack));
-  process.exit(1);
-});
+/**
+ * Only when run as the entry point.
+ *
+ * Added for REF-113 Stage 0 so the pure helpers below can be imported by
+ * ./orders-selfcheck.mjs without this file trying to authenticate. Running the
+ * script is unchanged.
+ */
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    console.error(`\nSPIKE FAILED: ${redact(err.message)}`);
+    if (err.stack) console.error(redact(err.stack));
+    process.exit(1);
+  });
+}
+
+/**
+ * The pure parts of --orders, for ./orders-selfcheck.mjs.
+ *
+ * The claim that the Stage 0 report contains no price, no id and no timestamp
+ * is a property of {@link safeSample} and {@link fieldSurvey}, and this repo's
+ * habit is to measure such a claim rather than believe it (see "IDEMPOTENCE IS
+ * MEASURED, NOT ASSERTED" in src/lib/tradovate/import.ts). Nothing in the app
+ * imports any of this.
+ */
+export { safeSample, fieldSurvey, changedFields, versionsByOrder, enumValues, VOCABULARY };

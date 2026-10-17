@@ -415,6 +415,76 @@ and from every file written to `out/`. `scripts/spike/.env` and
 
 ---
 
+## 7. Orders, versions and brackets — REF-113 Stage 0
+
+**[PENDING] — this whole section.** The script has a second mode that answers it,
+and like everything else here it needs the owner to run it.
+
+```
+node --env-file=scripts/spike/.env scripts/spike/tradovate-spike.mjs --orders
+```
+
+**Why there is nothing to quote here yet.** REF-113 needs to know where a stop
+price lives and whether moving one leaves a trace. **Nothing in the repository
+describes the `order` or `orderVersion` entity at field level** — not vendored,
+not in `src/lib/tradovate/types.ts`, not probed — and §2 and §4 above are
+`[PENDING]` for the same reason. So the investigation's design rests on a recalled
+reading of the public reference, which `types.ts` itself refuses as a basis for
+shipping ("the docs are the only authority — do not widen these types from
+guesswork").
+
+**It reads six endpoints on both hosts:** `/order/list`, `/orderVersion/list`,
+`/orderStrategy/list`, `/orderStrategyLink/list`, `/command/list`,
+`/executionReport/list`. Both hosts, because `loadBrokerDay` asks both and a
+demo-only measurement would not describe what the integration reads. A host with
+no provisioning is recorded, not fatal.
+
+**The seven questions it exists to answer**, printed as a checklist at the top of
+its own output:
+
+1. Does `stopPrice` sit on `orderVersion`, or on `order`? **This is load-bearing.**
+   If terms are on the version, the version history *is* the move history and
+   REF-113 is tractable. If they are on the order with no retained versions,
+   detecting a move needs the WebSocket stream and the ticket is a different one.
+2. Does a modify produce a new version on the same order, and a ladder drag a
+   cancel+replace? **Both must count as a move**, and which shape appears is a
+   property of the trader's front-end, not of the API.
+3. Are cancelled orders still returned, and how far back?
+4. Which linkage field does a real bracket populate — `orderStrategyLink`,
+   `ocoId`, `parentId`?
+5. How does a trailing stop appear, and is `pegDifference` visible?
+6. Does `/command/list` separate a trader modify from a server trail step?
+7. Do any response counts land on a round number — i.e. truncated, per §4?
+
+> **It needs a hand-placed trade first.** A bracketed entry *with a stop*, and
+> the stop dragged at least once, placed **by hand in the Tradovate UI** — the
+> script is read-only and cannot create one. Without that, questions 1, 2, 4 and
+> 5 return "nothing in this sample" and the run has answered nothing.
+
+**The output names no trade.** Field *names* and *types* are what REF-113 needs;
+a stop price, an order id, a quantity and an instant are the trader's position.
+So every sample value prints as its type name unless the field is one of the
+low-cardinality enums being measured (`ordStatus`, `orderType`, `action`,
+`timeInForce`, `commandType`, …). Fail closed: a field nobody listed prints as
+`<number>`. The aggregates are counts, which name nothing. That property is
+asserted rather than believed — `npm run test:spike-orders` drives the sanitiser
+over synthetic entities whose prices and ids are deliberately greppable, needs no
+credentials and no network, and is the one part of this directory that is a test.
+
+**Safety is unchanged.** The three added endpoints pass the existing mutation
+denylist without it being touched — `/orderStrategy/list` does not match
+`startorderstrategy`, which needs the `start` prefix. Verified:
+
+```
+rest /orderStrategy/list                ALLOWED
+rest /orderStrategyLink/list            ALLOWED
+rest /command/list                      ALLOWED
+rest /orderStrategy/startOrderStrategy  refused: mutation pattern
+rest /order/modifyOrder                 refused: mutation pattern
+```
+
+---
+
 ## Open questions for the owner
 
 1. **Credentials.** None are present, so nothing has been run live. Put them in
