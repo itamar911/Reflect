@@ -295,6 +295,46 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
   /** The plan whose close dialog is open, if any. */
   const [closingPlanId, setClosingPlanId] = useState<string | null>(null);
 
+  // ── The portfolio this trade belongs to (REF-110 Stage 3) ──────────────────
+  //
+  // Declared here, above handleClose, for the same reason the block above is:
+  // the trader's choice is reset on the way out.
+  //
+  // THREE VALUES, NOT TWO. The select holds a UUID, UNASSIGNED_VALUE ('') for
+  // "ללא תיק", or NEW_PORTFOLIO_VALUE while the trader is naming a new manual
+  // portfolio. The third is form state and never reaches the database: on
+  // submit it is exchanged for a real id by `ensureManualPortfolio`, and the
+  // row is created THEN — so a sheet opened, typed into and abandoned writes
+  // nothing.
+  //
+  // Unassigned is a real choice and not a missing one, which is why this
+  // field is not in `missingFieldKeys`: a trade without a portfolio is
+  // complete, and blocking a submit on it would let a bookkeeping question
+  // gate recording a trade. A trader who has not decided files it with no
+  // portfolio and assigns it later from the "ללא תיק" card on /accounts —
+  // the same bucket every pre-REF-110 row is already in.
+  const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
+  const [newPortfolioName, setNewPortfolioName] = useState('');
+  /**
+   * The default and the trader's override, held apart — and `null` is the
+   * difference between "has not chosen" and "chose ללא תיק".
+   *
+   * One value would not do. `loadContext` runs on open AND AGAIN whenever a
+   * leftover plan is closed from the open-plan prompt, and it applies the
+   * last-used default; with a single value, closing yesterday's plan would
+   * silently reset a portfolio the trader had just picked. That is the kind
+   * of defect nobody reports, because from the outside it looks like having
+   * mis-clicked.
+   *
+   * Two states rather than a "touched" ref because the ref would have to be
+   * mutated from an event handler after being captured by `handleClose`'s
+   * useCallback, which the React Compiler rejects — and is right to: the
+   * state it would describe is derived, so it should be derived.
+   */
+  const [defaultPortfolioId, setDefaultPortfolioId] = useState<string>(UNASSIGNED_VALUE);
+  const [portfolioChoice, setPortfolioChoice] = useState<string | null>(null);
+  const portfolioId = portfolioChoice ?? defaultPortfolioId;
+
   // Closing the sheet puts the chart back behind the button, so the next open
   // starts opted out again. It needs its own reset: the sheet keeps the rest of
   // its state across a plain close (only a successful submit clears the form),
@@ -310,6 +350,10 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     setDismissedPlanIds(new Set());
     setClosingPlanId(null);
     setOpenPlanError('');
+    // A portfolio choice lasts one opening, like "אחר כך" above it: the next
+    // time the sheet opens, the last-used default applies again (REF-110).
+    setPortfolioChoice(null);
+    setNewPortfolioName('');
     onClose();
   }, [onClose]);
 
@@ -370,25 +414,8 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
   const [chartSymbol, setChartSymbol] = useState('');
   const [chartTimeframe, setChartTimeframe] = useState('');
 
-  // ── The portfolio this trade belongs to (REF-110 Stage 3) ──────────────────
-  //
-  // THREE VALUES, NOT TWO. `portfolioId` holds a UUID, UNASSIGNED_VALUE ('')
-  // for "ללא תיק", or NEW_PORTFOLIO_VALUE while the trader is naming a new
-  // manual portfolio. The third is a form state and never reaches the
-  // database: on submit it is exchanged for a real id by
-  // `ensureManualPortfolio`, and the row is created THEN — nothing is written
-  // while the trader is still typing, so a form opened and abandoned leaves no
-  // portfolio behind.
-  //
-  // Unassigned is a real choice and not a missing one. A trader who has not
-  // decided files the trade with no portfolio and assigns it later from the
-  // "ללא תיק" card on /accounts, which is the same bucket every pre-REF-110
-  // row is in. That is why this field is not in `missingFieldKeys`: a trade
-  // without a portfolio is complete, and blocking a submit on it would make a
-  // bookkeeping question gate recording a trade.
-  const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
-  const [portfolioId, setPortfolioId] = useState<string>(UNASSIGNED_VALUE);
-  const [newPortfolioName, setNewPortfolioName] = useState('');
+  // The "תיק" field's ids. Its state lives above handleClose, with the rest
+  // of what the sheet resets on the way out (REF-110 Stage 3).
   const portfolioFieldId = useId();
   const portfolioHintId = useId();
   const newPortfolioFieldId = useId();
@@ -513,12 +540,11 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     // the whole point of "last used" is that it tracks what the trader has
     // been doing, and a session that opened the form before their first sync
     // would otherwise keep the empty answer all day.
-    setPortfolioId(
+    setDefaultPortfolioId(
       lastUsedId !== null && choosable.some((p) => p.id === lastUsedId)
         ? lastUsedId
         : UNASSIGNED_VALUE,
     );
-    setNewPortfolioName('');
 
     if (personalRes.data) setPersonalStrategyRows(personalRes.data as PersonalStrategy[]);
     if (rulesRes.data) setPresetRules(rulesRes.data as PresetRules);
@@ -1025,12 +1051,12 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
         setPnlFieldsError(false);
         setCheckedItems(new Set());
         setStrategyConditionsChecked({});
-        // The portfolio collapses back to the id the trade was actually filed
-        // under, so "תיק חדש…" is not still selected with a name the next
-        // submit would reuse. The next form open re-reads it anyway (the
-        // last-used default now resolves to this one), but the state between
-        // the two must not be a half-finished creation.
-        setPortfolioId(resolvedAccountId ?? UNASSIGNED_VALUE);
+        // The override is dropped so "תיק חדש…" is not still selected with a
+        // name the next submit would reuse. The next form open reads the
+        // last-used default, which now resolves to the portfolio this trade
+        // was just filed under — so the trader sees the same answer, arrived
+        // at from the database rather than from leftover state.
+        setPortfolioChoice(null);
         setNewPortfolioName('');
         setFormState('empty');
         onSuccess();
@@ -1209,7 +1235,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                     id={portfolioFieldId}
                     aria-describedby={portfolioHintId}
                     value={portfolioId}
-                    onChange={(e) => setPortfolioId(e.target.value)}
+                    onChange={(e) => setPortfolioChoice(e.target.value)}
                     className="w-full h-10 px-3 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none focus:border-tg-primary transition-colors appearance-none cursor-pointer"
                     style={{ background: 'var(--color-tg-surface-2)' }}
                   >
