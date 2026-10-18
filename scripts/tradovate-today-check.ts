@@ -78,6 +78,17 @@ import {
   type LiveRouteDeps,
 } from '../src/app/api/tradovate/live/route';
 import { forgetContractNames, loadOpenPositions } from '../src/lib/tradovate/positions';
+import type { BrokerLivePull } from '../src/app/api/tradovate/live/route';
+import {
+  FLAT_MS,
+  HOLDING_MS,
+  forgetLivePoll,
+  lastLivePull,
+  nextPollMs,
+  shareLivePull,
+  shouldKeepPolling,
+} from '../src/lib/tradovate/liveClock';
+import { openAccounts } from '../src/lib/tradovate/useLivePositions';
 import type {
   TradovateAccount,
   TradovateContract,
@@ -2296,6 +2307,7 @@ async function main() {
   await liveLoaderGroup();
   await liveRouteGroup();
   await liveCacheGroup();
+  await liveClockGroup();
 
   console.log();
   if (failures.length) {
@@ -3787,6 +3799,110 @@ async function liveCacheGroup() {
   ]);
 
   forgetLivePull();
+}
+
+// ── REF-108 Stage 2: the client clock ──────────────────────────────────────
+//
+// The policy is in ./liveClock.ts as pure functions precisely so it can be
+// asserted here, without a browser and without a timer. What is left in the
+// hook is a setTimeout and a visibility listener; the decisions are these.
+
+function verifiedPull(positions: number[]): BrokerLivePull {
+  return {
+    source: 'broker_verified',
+    asOf: new Date(NOW).toISOString(),
+    accounts: positions.map((netPos, i) => ({
+      accountId: `uuid-${i}`,
+      displayName: `Portfolio ${i}`,
+      positions: netPos === 0 ? [] : [{ contractName: 'ESZ6', netPos }],
+    })),
+  };
+}
+
+async function liveClockGroup() {
+  forgetLivePoll();
+
+  // One poll, however many callers. The property the three consumers rest on.
+  let calls = 0;
+  const slow = () =>
+    new Promise<BrokerLivePull>((resolve) => {
+      calls += 1;
+      setTimeout(() => resolve(verifiedPull([2])), 0);
+    });
+
+  const [a, b, c3] = await Promise.all([
+    shareLivePull('user-1', () => NOW, slow),
+    shareLivePull('user-1', () => NOW, slow),
+    shareLivePull('user-1', () => NOW, slow),
+  ]);
+  const shared = calls;
+  // The SAME OBJECT, not merely equal — the strongest form of "three
+  // components cannot disagree about what is open".
+  const sameObject = a === b && b === c3;
+
+  // A second user in the same tab. Never served the first one's positions.
+  forgetLivePoll();
+  await shareLivePull('user-1', () => NOW, async () => verifiedPull([2]));
+  const minePersists = lastLivePull('user-1') !== null;
+  const theirs = lastLivePull('user-2');
+
+  // A failed poll still stamps the clock, so one lapsed connection does not
+  // become a stream of requests.
+  forgetLivePoll();
+  await shareLivePull('user-1', () => NOW, async () => ({ source: 'broker_unavailable' }) as BrokerLivePull);
+  const failureRecorded = lastLivePull('user-1');
+
+  forgetLivePoll();
+
+  group('REF-108: one poll, one answer, whoever is asking', [
+    c('(1) three concurrent callers make one request', shared, 1),
+    c('(2) and all three receive the same object', sameObject, true),
+    c('(3) the answer is remembered for this user', minePersists, true),
+    c('(4) and is never handed to another one', theirs, null),
+    c('(5) a failure is recorded too, not retried on every timer',
+      failureRecorded, { source: 'broker_unavailable' }),
+  ]);
+
+  group('REF-108: how often, and when not at all', [
+    // 15 s holding / 60 s flat. The slow end of the ticket's range, and the
+    // reason is the penalty rather than the quota: p-captcha cannot be
+    // cleared by a third-party app, and it takes the rule engine's day pull
+    // down with it for an hour.
+    c('(1) holding a position polls at 15 s', nextPollMs(verifiedPull([2])), HOLDING_MS),
+    c('(2) a short counts as holding', nextPollMs(verifiedPull([-3])), HOLDING_MS),
+    c('(3) flat drops to 60 s', nextPollMs(verifiedPull([0])), FLAT_MS),
+    c('(4) no accounts at all is flat', nextPollMs(verifiedPull([])), FLAT_MS),
+    // An unknown state is not a held position, and guessing fast would make
+    // a failed first poll the most expensive one.
+    c('(5) no answer yet takes the slow interval', nextPollMs(null), FLAT_MS),
+    c('(6) and so does a failure', nextPollMs({ source: 'broker_unavailable' }), FLAT_MS),
+    c('(7) one account holding and one flat still polls fast',
+      nextPollMs(verifiedPull([0, 2])), HOLDING_MS),
+
+    // reflect_only cannot change within a session, and the three consumers
+    // mount on every page — polling it forever is a request a minute for an
+    // answer that is already final.
+    c('(8) reflect_only stops the loop', shouldKeepPolling({ source: 'reflect_only' }), false),
+    c('(9) an unavailable broker keeps polling',
+      shouldKeepPolling({ source: 'broker_unavailable' }), true),
+    // Resolves the moment the trader reconnects in another tab, which is
+    // exactly when they would be looking at this.
+    c('(10) an expired connection keeps polling',
+      shouldKeepPolling({ source: 'broker_expired' }), true),
+    c('(11) and so does a verified one', shouldKeepPolling(verifiedPull([2])), true),
+    c('(12) no answer yet keeps polling', shouldKeepPolling(null), true),
+
+    c('(13) the two intervals are 15 s and 60 s', [HOLDING_MS, FLAT_MS], [15_000, 60_000]),
+  ]);
+
+  group('REF-108: what the consumers render from', [
+    c('(1) an account with a position is listed', openAccounts(verifiedPull([2])).length, 1),
+    c('(2) a flat account is not', openAccounts(verifiedPull([0])).length, 0),
+    c('(3) mixed: only the holding one', openAccounts(verifiedPull([0, 2])).length, 1),
+    c('(4) nothing verified renders nothing',
+      openAccounts({ source: 'broker_unavailable' }).length, 0),
+    c('(5) and nor does no answer', openAccounts(null).length, 0),
+  ]);
 }
 
 main().catch((error) => {
