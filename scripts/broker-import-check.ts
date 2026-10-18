@@ -118,6 +118,8 @@ import {
   summarise,
 } from '../src/app/api/cron/send-alerts/route';
 import { alertRangeStart, zonedDayStart } from '../src/lib/email/alertWindow';
+import { dailySummaryEmail } from '../src/lib/email/alerts';
+import { EMAIL_COLORS } from '../src/lib/email/template';
 import {
   LOSS_LIMIT_LABEL,
   LOSS_LIMIT_NOTE,
@@ -2668,9 +2670,25 @@ async function confirmScreenGroup() {
   ]);
 }
 
+/**
+ * The hero stat's colour and printed value, read back out of the rendered
+ * email.
+ *
+ * `plColorFor` and `readout` are module-private in lib/email/alerts.ts and
+ * worth keeping that way, so REF-114's sign cases assert on what the trader
+ * actually receives. The hero is the only 36px tile in the mail (template.ts
+ * `tile`), which is what makes this unambiguous.
+ */
+function heroStat(html: string): { color: string; value: string } {
+  const m = html.match(/font-size:36px;font-weight:700;line-height:1\.15;color:([^;]+);">([^<]*)</);
+  return { color: m?.[1] ?? 'no hero', value: m?.[2] ?? 'no hero' };
+}
+
 async function alertSummaryGroup() {
   // A SHORT THAT MADE MONEY. entry above exit, `actual_pnl` positive — the
   // test that used to read `exit_price > entry_price` called this a loss.
+  // Points 10, money 500: the two units are far enough apart to tell which
+  // one `totalPL` is reporting.
   const winningShort = {
     status: 'closed', direction: 'short',
     entry_price: 110, exit_price: 100, actual_pnl: 500, rr_ratio: 2,
@@ -2679,10 +2697,44 @@ async function alertSummaryGroup() {
     status: 'closed', direction: 'long',
     entry_price: 100, exit_price: 90, actual_pnl: -500, rr_ratio: 2,
   };
-  // An imported row: no plan behind it, so no R:R by design.
+  // An imported row AS THE IMPORT WRITES IT: no plan behind it, so no R:R by
+  // design, and `pnl_amount` NULL — import.ts:362 does not write it, and the
+  // prices are index points. `actual_pnl` is the broker's own figure and the
+  // only money on the row.
   const brokerRow = {
     status: 'closed', direction: 'long',
-    entry_price: 100, exit_price: 105, actual_pnl: 250, rr_ratio: null,
+    entry_price: 100, exit_price: 105, actual_pnl: 250, pnl_amount: null, rr_ratio: null,
+  };
+  // A MANUAL CLOSE: no broker figure, so `pnl_amount` — points × units ×
+  // point_value, written by CloseTrade — is the money. 5 points × 2 × $2.
+  const manualRow = {
+    status: 'closed', direction: 'long',
+    entry_price: 100, exit_price: 105, actual_pnl: null, pnl_amount: 20, rr_ratio: null,
+  };
+  // Both columns set and disagreeing. `actual_pnl` is the trader's real or
+  // overridden figure; `pnl_amount` can be inflated by a misconfigured point
+  // value (lib/pnl.ts header).
+  const overridden = { ...manualRow, actual_pnl: 300 };
+  // Closed, priced, and no money figure anywhere: a manual close with no
+  // `units` (CloseTrade.tsx:144 yields null), or a row from before the
+  // `actual_pnl` backfill.
+  const noMoney = {
+    status: 'closed', direction: 'long',
+    entry_price: 100, exit_price: 105, actual_pnl: null, pnl_amount: null, rr_ratio: null,
+  };
+
+  // THE REF-114 SHAPE: points and money of OPPOSITE SIGN. +2 points on one
+  // contract and −1 point on twenty is +1 in points and −$36 in money, so
+  // the day the trader had is a loss and the day the points describe is a
+  // gain. Reachable with no code change by a trader who scales differently
+  // between trades.
+  const smallWinner = {
+    status: 'closed', direction: 'long',
+    entry_price: 100, exit_price: 102, actual_pnl: 4, pnl_amount: null, rr_ratio: null,
+  };
+  const bigLoser = {
+    status: 'closed', direction: 'long',
+    entry_price: 200, exit_price: 199, actual_pnl: -40, pnl_amount: null, rr_ratio: null,
   };
 
   const shortOnly = summarise([winningShort]);
@@ -2691,10 +2743,16 @@ async function alertSummaryGroup() {
   const openPlan = summarise([{ status: 'open', entry_price: 100, exit_price: null, rr_ratio: 4 }]);
   const empty = summarise([]);
 
+  const scaled = summarise([smallWinner, bigLoser]);
+  const scaledMail = dailySummaryEmail('דני', scaled, 'יום שישי, 16 באוקטובר');
+  const hero = heroStat(scaledMail.html);
+
   group('the alert emails count a short the way a trader does', [
     // THE §0ד BUG, in the one file Stage 4 did not reach.
     c('(1) a profitable short is a win', shortOnly.winRate, 100),
-    c('(2) and its P&L is positive in points', shortOnly.totalPL, 10),
+    // REF-114. The hero stat is labelled `P&L היום` and prefixed `$`, so the
+    // figure under it is the broker's 500 and not the 10 points behind it.
+    c('(2) and its P&L is the money, not the points', shortOnly.totalPL, 500),
     c('(3) one win and one loss is 50%', mixed.winRate, 50),
     // THE §0ג BUG. 2 and null must average to 2, not to 1.
     c('(4) a null R:R is excluded from the average, not counted as zero',
@@ -2707,6 +2765,44 @@ async function alertSummaryGroup() {
       [openPlan.trades, openPlan.winRate], [1, 0]),
     c('(8) no rows is all zeroes',
       [empty.trades, empty.winRate, empty.avgRR, empty.totalPL], [0, 0, 0, 0]),
+
+    // ── REF-114: which figure, per row shape ──────────────────────────────
+    // The reported bug. 5 index points on an MNQ-style row is not $5.
+    c('(9) a broker row reports the broker figure, not its index points',
+      summarise([brokerRow]).totalPL, 250),
+    c('(10) a manual row still reports points x units x value',
+      summarise([manualRow]).totalPL, 20),
+    c('(11) actual_pnl wins over pnl_amount',
+      summarise([overridden]).totalPL, 300),
+    // 0, NOT 5. A trade with no size cannot be stated in dollars, and the
+    // alternative is the points-and-dollars sum identity.ts refuses.
+    c('(12) a closed row with no money figure contributes 0, not its points',
+      summarise([noMoney]).totalPL, 0),
+    // AND IT IS STILL A WIN, at 0. `isWinningTrade` falls back to points when
+    // there is no money figure (lib/pnl.ts:92-94) and `tradeMoneyPnl` does
+    // not, so this row shape is the one place `winRate` and `totalPL` can
+    // still disagree: a day of only these reports 100% wins and $0.00. Pinned
+    // rather than fixed — the fallback is the shared win test every page
+    // reads, and changing it is not REF-114.
+    c('(13) and it still counts as a trade, and as a win by points at 0 money',
+      [summarise([noMoney]).trades, summarise([noMoney]).winRate], [1, 100]),
+
+    // ── REF-114: the sign, which drives three decisions ───────────────────
+    // Points would sum to +1 here. Money sums to -36.
+    c('(14) when points and money disagree on the sign, money decides',
+      scaled.totalPL, -36),
+    c('(15) and the points sum really does disagree',
+      Math.sign((102 - 100) + (199 - 200)), 1),
+    // Each of the three readers of `totalPL`, on the day that used to arrive
+    // green with a profit in its subject about a losing day.
+    c('(16) the hero stat is red and prints the loss',
+      hero, { color: EMAIL_COLORS.danger, value: '-$36.00' }),
+    c('(17) the readout does not call it a positive day',
+      scaledMail.text.includes('יום חיובי'), false),
+    c('(18) it names the loss, with the win rate that makes it one',
+      scaledMail.text.includes('הפסד למרות אחוז הצלחה מעל 50%'), true),
+    c('(19) and the subject line carries the loss, not a gain',
+      scaledMail.subject.includes('-$36.00'), true),
   ]);
 }
 

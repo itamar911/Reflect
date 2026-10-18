@@ -34,7 +34,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { isUserAllowed } from '@/lib/tradovate/allowlist';
 import { listConnectionsForImport } from '@/lib/tradovate/connections';
 import { syncUserTrades } from '@/lib/tradovate/sync';
-import { isWinningTrade, pnlRow, tradeDirection } from '@/lib/pnl';
+import { isWinningTrade, pnlRow, tradeMoneyPnl } from '@/lib/pnl';
 import { alertRangeStart, zonedDayStart } from '@/lib/email/alertWindow';
 import {
   dailySummaryEmail,
@@ -202,10 +202,20 @@ async function dispatchAlert(
  *     design, because nobody filled in a form — into a zero dragging the
  *     average down. The filter-before-average pattern is the one the stats
  *     page and the weekly summary already use.
- *   - **`totalPL` stays in price points** and is direction-aware for the same
- *     reason as the win test. It is NOT switched to money here: the email's
- *     label says points, and changing the unit is a copy change rather than
- *     a bug fix.
+ *   - **`totalPL` is money, through `tradeMoneyPnl`** — the same definition
+ *     the stats page, the journal, the dashboard and the weekly card read, so
+ *     the email cannot disagree with them about a day. It summed price points
+ *     into a `$`-prefixed hero stat until REF-114: for a broker row the two
+ *     price columns are quantity-weighted means, so the sum was the broker's
+ *     own figure with quantity and point value divided out of every term —
+ *     -$76.38 printed for a -$605.50 day. Points-vs-money is not only the
+ *     printed figure: `totalPL` also picks the hero's colour, the Hebrew
+ *     readout and the subject, and because quantity varies between trades the
+ *     points sum can carry the OPPOSITE SIGN from the money sum, which arrives
+ *     as a green email titled with a profit about a losing day. A closed row
+ *     with no money figure at all therefore contributes 0 rather than its raw
+ *     points — a sum that mixes points and dollars is wrong in a way no reader
+ *     can see (lib/pnl.ts, identity.ts:76-84).
  */
 export function summarise(rows: readonly Record<string, unknown>[]): {
   trades: number;
@@ -226,15 +236,7 @@ export function summarise(rows: readonly Record<string, unknown>[]): {
         )
       : 0;
 
-  const totalPL = closed.reduce((sum, t) => {
-    const row = pnlRow(t);
-    const entry = Number(row.entry_price);
-    const exit = Number(row.exit_price);
-    if (!Number.isFinite(entry) || !Number.isFinite(exit)) return sum;
-    // The same direction rule as the win test, so the two cannot disagree
-    // about whether a trade went the trader's way.
-    return sum + (tradeDirection(row) === 'long' ? exit - entry : entry - exit);
-  }, 0);
+  const totalPL = closed.reduce((sum, t) => sum + tradeMoneyPnl(pnlRow(t)), 0);
 
   return { trades: rows.length, winRate, avgRR, totalPL };
 }
