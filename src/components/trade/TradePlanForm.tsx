@@ -34,6 +34,21 @@ import {
 } from '@/lib/rules/tradeRuleContext';
 import { tradeDirection } from '@/lib/pnl';
 import { NOT_ENTERED } from '@/lib/trades/status';
+import {
+  NEW_PORTFOLIO_VALUE,
+  PORTFOLIO_COPY,
+  UNASSIGNED_VALUE,
+  portfolioLabel,
+  shownPortfolios,
+  sortPortfolios,
+  statusLabel,
+  type Portfolio,
+} from '@/lib/portfolios/portfolio';
+import {
+  ensureManualPortfolio,
+  readLastUsedPortfolioId,
+  readPortfolios,
+} from '@/lib/portfolios/read';
 
 // Saved TP/SL input unit preference, read during render via
 // useSyncExternalStore (null on the server / until a valid value is saved).
@@ -215,9 +230,21 @@ interface TradePlanFormProps {
   /** A "warn"-action personal rule that's currently triggered — shown as a persistent banner, doesn't block submission. */
   initialWarning?: string | null;
   disciplineAlertsEnabled: boolean;
+  /**
+   * Migration 037 has been run, so `accounts` and `trade_plans.account_id`
+   * exist (REF-110 Stage 3).
+   *
+   * A prop and not a call, for `withHidden`'s reason: the answer is
+   * `isImportEnabled()`, which reads `process.env` in a server-only module.
+   * The layout evaluates it and AppShell passes it down. False means the
+   * "תיק" field is not rendered and `account_id` is not named by the insert —
+   * which makes the insert byte-identical to the one that shipped before this
+   * stage.
+   */
+  portfoliosEnabled?: boolean;
 }
 
-export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess, initialWarning, disciplineAlertsEnabled }: TradePlanFormProps) {
+export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess, initialWarning, disciplineAlertsEnabled, portfoliosEnabled = false }: TradePlanFormProps) {
   const limits = getPlanLimits(plan);
   const titleId = useId();
   const symbolRef = useRef<HTMLInputElement>(null);
@@ -343,6 +370,29 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
   const [chartSymbol, setChartSymbol] = useState('');
   const [chartTimeframe, setChartTimeframe] = useState('');
 
+  // ── The portfolio this trade belongs to (REF-110 Stage 3) ──────────────────
+  //
+  // THREE VALUES, NOT TWO. `portfolioId` holds a UUID, UNASSIGNED_VALUE ('')
+  // for "ללא תיק", or NEW_PORTFOLIO_VALUE while the trader is naming a new
+  // manual portfolio. The third is a form state and never reaches the
+  // database: on submit it is exchanged for a real id by
+  // `ensureManualPortfolio`, and the row is created THEN — nothing is written
+  // while the trader is still typing, so a form opened and abandoned leaves no
+  // portfolio behind.
+  //
+  // Unassigned is a real choice and not a missing one. A trader who has not
+  // decided files the trade with no portfolio and assigns it later from the
+  // "ללא תיק" card on /accounts, which is the same bucket every pre-REF-110
+  // row is in. That is why this field is not in `missingFieldKeys`: a trade
+  // without a portfolio is complete, and blocking a submit on it would make a
+  // bookkeeping question gate recording a trade.
+  const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
+  const [portfolioId, setPortfolioId] = useState<string>(UNASSIGNED_VALUE);
+  const [newPortfolioName, setNewPortfolioName] = useState('');
+  const portfolioFieldId = useId();
+  const portfolioHintId = useId();
+  const newPortfolioFieldId = useId();
+
   // Stable client identity so it can appear in hook deps without refiring
   // them every render (in demo mode createClient returns a fresh Proxy).
   const supabase = useMemo(() => createClient(), []);
@@ -415,7 +465,12 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     // holds a pull briefly — so this is normally the SAME object the gate
     // judged, rather than a second look at a day that may have moved. Started
     // inside the Promise.all so the pull overlaps the three queries.
-    const [rulesRes, personalRes, history, openPlansRes] = await Promise.all([
+    // The trader's portfolios and the one their last plan was filed under
+    // (REF-110 Stage 3). Both inside the existing Promise.all rather than
+    // after it, so the field costs no added latency on a form open — and both
+    // issue ZERO statements when migration 037 has not been run, which is
+    // what `portfoliosEnabled` is for.
+    const [rulesRes, personalRes, history, openPlansRes, portfolioRows, lastUsedId] = await Promise.all([
       supabase.from('preset_rules').select('*').eq('user_id', userId).single(),
       supabase.from('personal_strategies').select('*').eq('user_id', userId).order('created_at'),
       loadBrokerDayPull(userId).then((broker) => loadTradeRuleContext(userId, broker, supabase)),
@@ -437,7 +492,33 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
         .eq('status', 'open')
         .lt('submitted_at', startOfTodayIso())
         .order('submitted_at', { ascending: true }),
+      readPortfolios(supabase, userId, portfoliosEnabled),
+      readLastUsedPortfolioId(supabase, userId, portfoliosEnabled),
     ]);
+
+    // Hidden portfolios are dropped here and not on the screen: hiding one
+    // means "stop offering me this", and a form that still listed it would
+    // make the hide read as cosmetic. A trade already filed under a hidden
+    // portfolio keeps it — nothing here rewrites an existing row.
+    const choosable = sortPortfolios(shownPortfolios(portfolioRows));
+    setPortfolios(choosable);
+
+    // The default (REF-110 §B): the portfolio of the trader's most recent
+    // plan. It is only applied when that portfolio is still CHOOSABLE — a
+    // trader who hid it, or whose last plan predates a rename, gets no
+    // default rather than a selection they cannot see in the list. A
+    // first-time trader gets none either, which is the correct degradation.
+    //
+    // Deliberately reasserted on every form open rather than only the first:
+    // the whole point of "last used" is that it tracks what the trader has
+    // been doing, and a session that opened the form before their first sync
+    // would otherwise keep the empty answer all day.
+    setPortfolioId(
+      lastUsedId !== null && choosable.some((p) => p.id === lastUsedId)
+        ? lastUsedId
+        : UNASSIGNED_VALUE,
+    );
+    setNewPortfolioName('');
 
     if (personalRes.data) setPersonalStrategyRows(personalRes.data as PersonalStrategy[]);
     if (rulesRes.data) setPresetRules(rulesRes.data as PresetRules);
@@ -480,7 +561,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
       // must not leave yesterday's list on screen.
       setTodayLines(null);
     }
-  }, [supabase, userId]);
+  }, [supabase, userId, portfoliosEnabled]);
 
   useEffect(() => {
     // loadContext flips the loading flag synchronously to mark the fetch this
@@ -862,6 +943,27 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     const sl = slPrice;
     const tp = tpPrice;
 
+    // ── The portfolio, resolved to an id (REF-110 Stage 3) ───────────────────
+    //
+    // THE LAZY CREATION HAPPENS HERE AND NOWHERE ELSE. "תיק חדש…" is a form
+    // state until this line; a trader who opened the sheet, typed a name and
+    // changed their mind has written nothing. `ensureManualPortfolio` is
+    // idempotent by name, so a double-submit — or the same name typed again
+    // next week — reuses the row rather than making a second one called the
+    // same thing.
+    //
+    // A refused creation resolves to null and the trade is filed UNASSIGNED
+    // rather than lost. The trade is the thing the trader came here to
+    // record; the portfolio is bookkeeping they can fix from /accounts in two
+    // clicks, and failing the submit over it would be the wrong trade.
+    const resolvedAccountId = !portfoliosEnabled
+      ? null
+      : portfolioId === NEW_PORTFOLIO_VALUE
+        ? await ensureManualPortfolio(supabase, userId, newPortfolioName, portfoliosEnabled)
+        : portfolioId === UNASSIGNED_VALUE
+          ? null
+          : portfolioId;
+
     const { data: insertedTrade, error } = await supabase.from('trade_plans').insert({
       user_id: userId,
       strategy: form.strategy,
@@ -884,6 +986,14 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
       strategy_conditions_checked: entryConditions.length > 0
         ? entryConditions.map((condition) => ({ condition, checked: strategyConditionsChecked[condition] === true }))
         : null,
+      // PRESENT OR ABSENT, never a key with an undefined value — and absent
+      // whenever migration 037 has not been run, which is what keeps this
+      // insert byte-identical to the pre-REF-110 one on such a deployment.
+      // Spread rather than `account_id: x ?? null`, for the same reason
+      // `changedFacts` skips an absent column in the import: naming a column
+      // the database does not have is a PostgREST 42703 on the one statement
+      // the trader cannot afford to lose.
+      ...(portfoliosEnabled ? { account_id: resolvedAccountId } : {}),
     }).select('id').single();
 
     if (error) {
@@ -915,6 +1025,13 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
         setPnlFieldsError(false);
         setCheckedItems(new Set());
         setStrategyConditionsChecked({});
+        // The portfolio collapses back to the id the trade was actually filed
+        // under, so "תיק חדש…" is not still selected with a name the next
+        // submit would reuse. The next form open re-reads it anyway (the
+        // last-used default now resolves to this one), but the state between
+        // the two must not be a half-finished creation.
+        setPortfolioId(resolvedAccountId ?? UNASSIGNED_VALUE);
+        setNewPortfolioName('');
         setFormState('empty');
         onSuccess();
         handleClose();
@@ -1073,6 +1190,59 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
 
             {/* Step 1 — Asset, direction & strategy */}
             <FormSection step={1} label="נכס ואסטרטגיה" active={activeStep === 1} done={activeStep > 1}>
+              {/* ── "תיק" — which account this trade belongs to (REF-110 §B) ──
+                  First in the section, above the symbol, because it is the
+                  only field here whose answer the trader usually already
+                  knows before they open the sheet — and because the sentence
+                  under it is what tells a broker-connected trader they can
+                  leave it alone.
+
+                  Rendered as its own markup rather than through <Select>, for
+                  one reason: the helper line is tied to the control with
+                  aria-describedby. Imri's requirement is that every element
+                  explains itself, and an explanation a screen reader does not
+                  reach only explains it to some traders. */}
+              {portfoliosEnabled && (
+                <div className="flex flex-col gap-1">
+                  <label htmlFor={portfolioFieldId} className="text-xs font-medium text-tg-muted">תיק</label>
+                  <select
+                    id={portfolioFieldId}
+                    aria-describedby={portfolioHintId}
+                    value={portfolioId}
+                    onChange={(e) => setPortfolioId(e.target.value)}
+                    className="w-full h-10 px-3 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none focus:border-tg-primary transition-colors appearance-none cursor-pointer"
+                    style={{ background: 'var(--color-tg-surface-2)' }}
+                  >
+                    <option value={UNASSIGNED_VALUE}>ללא תיק</option>
+                    {portfolios.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {/* The status rides in the option text because a
+                            <select> cannot carry a chip. A closed portfolio is
+                            still choosable — a trader reconciling last month's
+                            trades needs it. */}
+                        {p.status === 'active' ? portfolioLabel(p) : `${portfolioLabel(p)} · ${statusLabel(p.status)}`}
+                      </option>
+                    ))}
+                    <option value={NEW_PORTFOLIO_VALUE}>תיק חדש…</option>
+                  </select>
+                  <p id={portfolioHintId} className="text-[11px] text-tg-muted">{PORTFOLIO_COPY.formField}</p>
+                  {portfolioId === NEW_PORTFOLIO_VALUE && (
+                    <div className="flex flex-col gap-1 mt-1">
+                      <label htmlFor={newPortfolioFieldId} className="text-xs font-medium text-tg-muted">שם התיק החדש</label>
+                      <input
+                        id={newPortfolioFieldId}
+                        type="text"
+                        value={newPortfolioName}
+                        onChange={(e) => setNewPortfolioName(e.target.value)}
+                        placeholder="למשל: אינטראקטיב, אישי"
+                        className="w-full h-10 px-3 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none focus:border-tg-primary transition-colors"
+                        style={{ background: 'var(--color-tg-surface-2)' }}
+                      />
+                      <p className="text-[11px] text-tg-muted">{PORTFOLIO_COPY.createManual}</p>
+                    </div>
+                  )}
+                </div>
+              )}
               <div ref={(el) => { fieldRefs.current.symbol = el; }} style={fieldHighlightStyle('symbol')} className="flex flex-col gap-1">
                 <label htmlFor={symbolId} className="text-xs font-medium text-tg-muted">סימול</label>
                 <input

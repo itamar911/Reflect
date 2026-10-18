@@ -186,12 +186,16 @@ export default function AppShell({
   displayName,
   plan,
   disciplineAlertsEnabled,
+  portfoliosEnabled,
 }: {
   children: React.ReactNode;
   userId: string;
   displayName: string;
   plan: PlanTier;
   disciplineAlertsEnabled: boolean;
+  /** Migration 037 has been run (REF-110). Decides the nav row and the
+   *  trade form's "תיק" field; see `primaryNav` and lib/portfolios/read.ts. */
+  portfoliosEnabled: boolean;
 }) {
   const pathname = usePathname();
   const router   = useRouter();
@@ -670,6 +674,7 @@ export default function AppShell({
         onSuccess={() => router.refresh()}
         initialWarning={ruleWarning}
         disciplineAlertsEnabled={disciplineAlertsEnabled}
+        portfoliosEnabled={portfoliosEnabled}
       />
       )}
 

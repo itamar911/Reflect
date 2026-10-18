@@ -1,7 +1,7 @@
 'use client';
 
 /** Id carried by every route's content landmark — the skip link's target.
-    Each layout owns exactly one: AppShell (the 11 app routes), the (auth)
+    Each layout owns exactly one: AppShell (the 12 app routes), the (auth)
     layout, the (protected) layout, and the standalone public pages. */
 export const MAIN_CONTENT_ID = 'main-content';
 
