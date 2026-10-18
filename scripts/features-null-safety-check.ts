@@ -33,9 +33,15 @@
  */
 
 import { computeTraderProfile } from '../src/lib/identity';
+import { buildTradeSummary } from '../src/app/api/ai-coach/route';
+import {
+  computeStats as computeSetupStats,
+  type LinkedTrade as SetupLinkedTrade,
+} from '../src/components/setups/SetupsClient';
+import { computeStats as computeStrategyStats } from '../src/components/strategies/StrategiesClient';
 import { computeWeeklyStats, type TradeRow } from '../src/lib/weekly/stats';
 import { exportRow, type ExportTrade } from '../src/lib/journal/csv';
-import { tradeDirection, tradePointsPnl, isWinningTrade, pnlRow } from '../src/lib/pnl';
+import { tradeDirection, tradePointsPnl, tradeMoneyPnl, isWinningTrade, pnlRow } from '../src/lib/pnl';
 import { averageOf, rrValue, scaleValue, intentText, intentNumber } from '../src/lib/intent';
 
 // ── Harness ──────────────────────────────────────────────────────────────────
@@ -454,6 +460,133 @@ group('CSV still exports a filled row in full', [
   // A strategy with a comma must not shift every later column by one.
   c('(8) a comma in a strategy name does not break the row',
     exportRow({ ...csvTrade(LONG_WIN), strategy: 'Breakout, London' }).length, 11),
+]);
+
+// ── REF-115 / REF-106: points shown as dollars ───────────────────────────────
+//
+// THE ONE FIXTURE ROW THAT SEPARATES THE TWO UNITS. A broker round trip whose
+// price moved 5 points and whose recorded money is $250 — a $50-a-point
+// contract, which is ES. Every site in REF-115 summed the 5 and labelled it
+// `$`, so this row reads 250 everywhere after the fix and 5 before it. A row
+// where the two numbers coincide could not tell the difference, which is why
+// this one is 50x apart.
+//
+// SHORT, so the same assertions double as the §0ד check: price FELL from 5000
+// to 4995, the trader was short, the trade made money. Anything reading
+// `exit > entry` calls it a loss.
+
+const POINTS_VS_DOLLARS: Fixture = {
+  ...BROKER,
+  id: 'five-points-two-fifty',
+  // Named, so the STRATEGY breakdown exists as well as the hourly one.
+  // Inherited from BROKER this was null, the bucket was skipped, and
+  // assertion (11) passed on the hourly breakdown's copy of the same string.
+  strategy: 'Range Reversal',
+  direction: 'short',
+  entry_price: 5000,
+  exit_price: 4995,
+  pnl_amount: 250,
+  actual_pnl: 250,
+  rr_ratio: null,
+};
+
+/** The same trade with no money recorded at all — the "ללא סכום" shape. */
+const NO_MONEY: Fixture = {
+  ...POINTS_VS_DOLLARS,
+  id: 'priced-by-nothing',
+  pnl_amount: null,
+  actual_pnl: null,
+};
+
+const setupTrade = (f: Fixture, setupId: string | null): SetupLinkedTrade => ({
+  id: f.id,
+  strategy: f.strategy ?? '',
+  symbol: f.symbol,
+  entry_price: f.entry_price,
+  exit_price: f.exit_price,
+  status: f.status,
+  setup_id: setupId,
+  submitted_at: f.submitted_at,
+  rr_ratio: f.rr_ratio,
+  take_profit: f.take_profit,
+  direction: f.direction,
+  pnl_amount: f.pnl_amount,
+  actual_pnl: f.actual_pnl,
+});
+
+const strategyTrade = (f: Fixture) => ({
+  id: f.id,
+  strategy: f.strategy ?? '',
+  symbol: f.symbol,
+  entry_price: f.entry_price,
+  exit_price: f.exit_price,
+  take_profit: f.take_profit,
+  rr_ratio: f.rr_ratio,
+  status: f.status,
+  direction: f.direction,
+  pnl_amount: f.pnl_amount,
+  actual_pnl: f.actual_pnl,
+  submitted_at: f.submitted_at,
+  closed_at: f.closed_at,
+});
+
+const SETUP_ID = 'setup-1';
+const setupStats = computeSetupStats(SETUP_ID, [setupTrade(POINTS_VS_DOLLARS, SETUP_ID)]);
+const setupStatsNoRR = computeSetupStats(SETUP_ID, [
+  setupTrade(POINTS_VS_DOLLARS, SETUP_ID),
+  setupTrade({ ...LONG_WIN, rr_ratio: 3 }, SETUP_ID),
+]);
+const strategyStats = computeStrategyStats(
+  POINTS_VS_DOLLARS.strategy ?? '',
+  [strategyTrade(POINTS_VS_DOLLARS)]
+);
+
+const coachSummary = buildTradeSummary([POINTS_VS_DOLLARS as unknown as Record<string, unknown>]);
+const coachNoMoney = buildTradeSummary([NO_MONEY as unknown as Record<string, unknown>]);
+
+group('REF-115 / REF-106: five points is $250, not $5', [
+  // The two numbers this group is about, stated once so a later reader can
+  // see what every assertion below is distinguishing.
+  c('(0) the fixture moved 5 points and made $250',
+    [tradePointsPnl(POINTS_VS_DOLLARS), tradeMoneyPnl(POINTS_VS_DOLLARS)], [5, 250]),
+
+  // ── Site 3: setups (REF-106) ───────────────────────────────────────────
+  c('(1) a setup\'s total P&L is money', setupStats.totalPnl, 250),
+  c('(2) and its average is money', setupStats.avgPnl, 250),
+  // The profitable short. `exit_price - entry_price` is -5 here, so anything
+  // direction-blind reports a loss and a 0% win rate.
+  c('(3) a profitable short is a win', setupStats.winRate, 100),
+  // §0ג: averaged over the rows that carry a ratio, not over every linked row.
+  c('(4) avgRR skips the row with no planned ratio', setupStatsNoRR.avgRR, 3),
+  c('(5) and is null when NO row carries one', setupStats.avgRR, null),
+
+  // ── Site 4: strategies ─────────────────────────────────────────────────
+  c('(6) a strategy\'s total P&L is money', strategyStats.totalPnl, 250),
+  c('(7) and its win rate reads the money', strategyStats.winRate, 100),
+
+  // ── Site 2: ai-coach ───────────────────────────────────────────────────
+  // Six figures are labelled for the model and the system prompt tells it to
+  // quote them back as dollars. The summary is a string, so these assert on
+  // what Claude actually receives.
+  c('(8) the coach is told the money total', coachSummary.includes('Total P&L: $250.00'), true),
+  c('(9) and never the points total', coachSummary.includes('5.00'), false),
+  c('(10) the winning-trades line is money', coachSummary.includes('P&L from winning trades: +$250.00'), true),
+  c('(11) the strategy breakdown is money',
+    coachSummary.includes('"pl":250'), true),
+  c('(12) and so is the hourly one',
+    (coachSummary.match(/"pl":250/g) ?? []).length, 2),
+
+  // A row with no money contributes 0 — and a FIGURE with nothing behind it
+  // says so, rather than reporting a measured $0.00. Without this, a day of
+  // hand-closed rows reads as 100% success and $0.00 and the coach is asked
+  // to explain it.
+  c('(13) a figure with no money behind it reads ללא סכום',
+    coachNoMoney.includes('Total P&L: ללא סכום'), true),
+  c('(14) and never as a measured zero', coachNoMoney.includes('$0.00'), false),
+  c('(15) the breakdowns say it too', coachNoMoney.includes('"pl":"ללא סכום"'), true),
+  // It is still a win — isWinningTrade falls back to points — which is
+  // exactly why the amount must not read $0.00 beside it.
+  c('(16) the row is still counted as a win', coachNoMoney.includes('Win rate: 100%'), true),
 ]);
 
 // ── Summary ──────────────────────────────────────────────────────────────────

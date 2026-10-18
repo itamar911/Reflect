@@ -57,9 +57,8 @@ The app is **Hebrew, RTL**. `src/app/layout.tsx` sets `lang="he" dir="rtl"`
 globally, and most components set `dir="rtl"` on their root as well.
 
 The exception is charts: recharts renders LTR, so chart containers explicitly set
-`dir="ltr"` (see `src/components/stats/PnlChart.tsx`,
-`src/components/dashboard/TradeHeatmap.tsx`). Keep that pattern — don't "fix" a
-chart's direction to match the page.
+`dir="ltr"` (see `src/components/stats/PnlChart.tsx`). Keep that pattern — don't
+"fix" a chart's direction to match the page.
 
 ## Visual conventions
 

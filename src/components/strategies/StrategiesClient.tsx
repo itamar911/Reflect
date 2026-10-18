@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { TrendingUp, Rocket, ArrowLeftRight, RefreshCw, Building2, Activity, Ruler, X } from 'lucide-react';
 import { renderPlainAiText } from '@/lib/ai/textFormatting';
-import { tradePointsPnl, isWinningTrade } from '@/lib/pnl';
+import { tradeMoneyPnl, isWinningTrade } from '@/lib/pnl';
 import { averageOf, rrValue } from '@/lib/intent';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
@@ -58,20 +58,41 @@ export interface TradeSummary {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-// Points P&L goes through the shared helper, which reads the `direction`
-// column and keeps take_profit-vs-entry only as its pre-`direction` fallback.
-// Reading the comparison first — as this file did — calls every profitable
-// short a loss (REF-107 §0ד).
-const calcPnl = tradePointsPnl;
+//
+// MONEY, NOT PRICE POINTS (REF-115 site 4). This read `tradePointsPnl`, so a
+// strategy's "P&L" was a sum of price differences — not multiplied by units or
+// by point value — shown beside a win rate derived from real money. The two
+// disagreed about the same trades, and the figure disagreed with the journal,
+// the dashboard and the stats page, all three of which use `tradeMoneyPnl`.
+//
+// `fmtPnl` carries no currency symbol, which is why this was Tier 2 rather
+// than Tier 1: the unit was undeclared rather than mislabelled. It is still
+// the wrong number.
+//
+// The page's query already selects `direction`, `pnl_amount` and `actual_pnl`
+// (REF-107 Stage 4), so this needed no widening — only the right helper.
+const calcPnl = tradeMoneyPnl;
+/**
+ * The money figure for ONE ROW, or null while the trade is still open.
+ *
+ * `tradePointsPnl` was nullable and `tradeMoneyPnl` is not — it answers 0 for
+ * an open trade — so swapping one for the other without this would have put a
+ * confident "+0.00" on every open position in the list. The guards at the two
+ * render sites test for null and were right; this keeps them meaning what
+ * they meant.
+ */
+function rowPnl(t: TradeSummary): number | null {
+  return t.status === 'closed' && t.exit_price != null ? tradeMoneyPnl(t) : null;
+}
 function fmtPnl(v: number) { return `${v >= 0 ? '+' : ''}${v.toFixed(2)}`; }
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', year: '2-digit' });
 }
 
-function computeStats(strategyName: string, trades: TradeSummary[]) {
+export function computeStats(strategyName: string, trades: TradeSummary[]) {
   const linked  = trades.filter(t => t.strategy === strategyName);
   const closed  = linked.filter(t => t.status === 'closed' && t.exit_price != null);
-  const pnls    = closed.map(t => calcPnl(t) ?? 0);
+  const pnls    = closed.map(t => calcPnl(t));
   // Win count comes from the canonical test, so a profitable short counts as
   // the win it is rather than as a loss (REF-107 §0ד).
   const wins    = closed.filter(t => isWinningTrade(t) === true);
@@ -458,7 +479,8 @@ export default function StrategiesClient({
                             אין עסקאות עם האסטרטגיה הזו עדיין
                           </p>
                         ) : linked.map((t, i) => {
-                          const pnl = calcPnl(t);
+                          const pnl = rowPnl(t);
+                          const won = isWinningTrade(t) === true;
                           return (
                             <div key={t.id} className="flex items-center gap-3 px-4 py-2.5"
                               style={{ borderTop: i > 0 ? `1px solid ${BORDER}` : undefined }}>
@@ -468,12 +490,12 @@ export default function StrategiesClient({
                                   <span className="text-xs px-1.5 py-0.5 rounded-md"
                                     style={{
                                       background: t.status === 'closed'
-                                        ? (pnl != null && pnl > 0 ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.1)')
+                                        ? (won ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.1)')
                                         : 'rgba(0,210,210,0.1)',
                                       color: t.status === 'closed'
-                                        ? (pnl != null && pnl > 0 ? GREEN : RED) : GOLD,
+                                        ? (won ? GREEN : RED) : GOLD,
                                     }}>
-                                    {t.status === 'closed' ? (pnl != null && pnl > 0 ? 'רווח' : 'הפסד') : 'פתוח'}
+                                    {t.status === 'closed' ? (won ? 'רווח' : 'הפסד') : 'פתוח'}
                                   </span>
                                 </div>
                                 <p className="text-[10px] mt-0.5" style={{ color: MUTED }}>
@@ -653,7 +675,8 @@ export default function StrategiesClient({
                 ) : (
                   <div className="flex flex-col">
                     {linked.map((t, i) => {
-                      const pnl = calcPnl(t);
+                      const pnl = rowPnl(t);
+                      const won = isWinningTrade(t) === true;
                       return (
                         <div key={t.id}
                           className="flex items-center gap-3 px-4 py-2.5"
@@ -666,13 +689,13 @@ export default function StrategiesClient({
                               <span className="text-xs px-1.5 py-0.5 rounded-md"
                                 style={{
                                   background: t.status === 'closed'
-                                    ? (pnl != null && pnl > 0 ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.1)')
+                                    ? (won ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.1)')
                                     : 'rgba(0,210,210,0.1)',
                                   color: t.status === 'closed'
-                                    ? (pnl != null && pnl > 0 ? GREEN : RED)
+                                    ? (won ? GREEN : RED)
                                     : GOLD,
                                 }}>
-                                {t.status === 'closed' ? (pnl != null && pnl > 0 ? 'רווח' : 'הפסד') : 'פתוח'}
+                                {t.status === 'closed' ? (won ? 'רווח' : 'הפסד') : 'פתוח'}
                               </span>
                             </div>
                             <p className="text-[10px] mt-0.5" style={{ color: MUTED }}>

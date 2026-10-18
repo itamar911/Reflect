@@ -11,6 +11,9 @@ export async function POST(request: Request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+  // `pnl` is MONEY and the prompt labels it with a `$` (REF-115 site 5). It
+  // used to be price points under no unit at all, which Claude read as a
+  // result and reasoned about — "תוצאה: 5" on a trade that made $250.
   const { trade, pnl } = await request.json();
   // Direction from the column, through the shared helper. The tp-vs-entry
   // comparison that stood here told Claude every profitable short was a long
@@ -32,7 +35,7 @@ export async function POST(request: Request) {
 
 אסטרטגיה: ${trade.strategy ?? '—'}${trade.symbol ? ` | נכס: ${trade.symbol}` : ''} | כיוון: ${longShort}
 כניסה: ${trade.entry_price}${part('SL', trade.stop_loss)}${part('TP', trade.take_profit)}${part('יציאה', trade.exit_price)}
-${pnl != null ? `תוצאה: ${pnl > 0 ? '+' : ''}${pnl.toFixed(2)}` : 'עסקה פתוחה'}${part('R:R', trade.rr_ratio != null ? `1:${trade.rr_ratio}` : null)}
+${pnl != null ? `תוצאה: ${pnl > 0 ? '+' : ''}$${pnl.toFixed(2)}` : 'עסקה פתוחה'}${part('R:R', trade.rr_ratio != null ? `1:${trade.rr_ratio}` : null)}
 ${trade.emotional_state != null ? `מצב רגשי: ${trade.emotional_state}/5` : 'מצב רגשי: לא תועד'}${part('סיבה', trade.trade_reason)}
 ${trade.exit_reason ? `סיבת יציאה: ${trade.exit_reason}` : ''}
 

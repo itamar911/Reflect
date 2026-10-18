@@ -1544,7 +1544,13 @@ export default function DashboardClient({
       const res = await fetch('/api/ai-trade-review', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ trade: t, pnl: calcPnl(t) }),
+        // MONEY, NOT PRICE POINTS (REF-115 site 5). This sent `calcPnl`, so
+        // Claude was handed a price difference and asked to judge the trade on
+        // it — a 5-point winner on a $50 contract reached the model as "5".
+        // `effectivePnl` is already defined at the top of this file and is
+        // what every other figure on this page uses: money when the row has
+        // it, points only as the fallback for rows that carry none.
+        body: JSON.stringify({ trade: t, pnl: effectivePnl(t) }),
       });
       const { review } = await res.json();
       setTradeAi(p => ({ ...p, [t.id]: review || 'לא ניתן לטעון ניתוח.' }));

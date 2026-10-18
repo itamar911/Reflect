@@ -10,8 +10,8 @@
    and legal routes.
 
    What IS reused is the overflow pattern: a scroll container wrapping the
-   table (PerformanceTable.tsx, TradeHeatmap.tsx, TradeCalendar.tsx all do
-   this), so a wide table scrolls inside its own box and never widens the page.
+   table (PerformanceTable.tsx and TradeCalendar.tsx both do this), so a wide
+   table scrolls inside its own box and never widens the page.
 
    `text-align: start`, not `right`: these pages are RTL but carry LTR runs, and
    start follows whichever direction the cell actually inherits. */

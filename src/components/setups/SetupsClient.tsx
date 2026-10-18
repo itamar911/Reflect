@@ -6,6 +6,8 @@ import { createClient } from '@/lib/supabase/client';
 import { Sparkles, Target, ImageOff } from 'lucide-react';
 import { renderPlainAiText } from '@/lib/ai/textFormatting';
 import { formatMoney } from '@/lib/money';
+import { isWinningTrade, tradeMoneyPnl } from '@/lib/pnl';
+import { averageOf, rrValue } from '@/lib/intent';
 import { SIGNED_URL_TTL_SECONDS, isOwnedPath, removeSetupImage } from '@/lib/setups/imageUrls';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -41,7 +43,22 @@ export interface LinkedTrade {
   status: string;
   setup_id: string | null;
   submitted_at: string;
-  rr_ratio: number;
+  /**
+   * NULLABLE since migration 034: a row the broker imported carries no
+   * planned ratio. It was typed `number` and read with `Number(t.rr_ratio)`,
+   * and `Number(null)` is 0 — so every imported trade linked to a setup
+   * dragged that setup's average R:R toward 1:0 (REF-107 §0ג).
+   */
+  rr_ratio: number | null;
+  // ── What the money figures need (REF-106 / REF-115 site 3) ───────────────
+  //
+  // Selected by (app)/setups/page.tsx. `direction` is what keeps a profitable
+  // short from reading as a loss; the two money columns are what make the
+  // figure money at all rather than a price difference.
+  take_profit: number | null;
+  direction: 'long' | 'short' | null;
+  pnl_amount: number | null;
+  actual_pnl: number | null;
 }
 
 type View = 'list' | 'create' | 'detail';
@@ -57,9 +74,25 @@ const MUTED  = 'var(--color-tg-muted)';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function pnl(t: LinkedTrade) {
+/**
+ * The money a trade made, or null while it is open (REF-106).
+ *
+ * This was `Number(exit) - Number(entry)` — a PRICE DIFFERENCE, rendered
+ * through `formatMoney` and therefore shown with a `$`. Two separate bugs in
+ * one line: it is not multiplied by units or point value, so it is not money
+ * at all; and it reads no direction, so every profitable short was a loss
+ * (REF-107 §0ד).
+ *
+ * `identity.ts` carried the same line, was fixed first, and its header is the
+ * sentence this ticket quotes back: "a sum that mixes points and dollars is
+ * wrong in a way no reader can see."
+ *
+ * Null while open, which `tradeMoneyPnl` alone would not give — it answers 0
+ * for an open trade — and the render site below tests for null.
+ */
+function pnl(t: LinkedTrade): number | null {
   if (t.status !== 'closed' || t.exit_price == null) return null;
-  return Number(t.exit_price) - Number(t.entry_price);
+  return tradeMoneyPnl(t);
 }
 
 // REF-99: the `$` here used to be hardcoded while the stats page hardcoded ₪
@@ -68,21 +101,26 @@ function fmt(v: number, d = 1) {
   return formatMoney(v, { decimals: d, minus: '−' });
 }
 
-function computeStats(setupId: string, trades: LinkedTrade[]) {
+export function computeStats(setupId: string, trades: LinkedTrade[]) {
   const linked  = trades.filter(t => t.setup_id === setupId);
   const closed  = linked.filter(t => t.status === 'closed' && t.exit_price != null);
-  const pnls    = closed.map(t => pnl(t)!);
-  const wins    = pnls.filter(p => p > 0);
+  const pnls    = closed.map(t => tradeMoneyPnl(t));
+  // The canonical win test, not `p > 0`. It prefers a real money figure and
+  // falls back to direction-aware points, so the count here agrees with the
+  // journal, the stats page and the dashboard about the same trades.
+  const wins    = closed.filter(t => isWinningTrade(t) === true);
   const total   = pnls.reduce((s, p) => s + p, 0);
+  // Averaged over the rows that CARRY a ratio. The old denominator was every
+  // linked trade, so one imported row with no plan behind it pulled the
+  // setup's average toward 1:0 (REF-107 §0ג). Null renders as "—", not 0.
+  const avgRR   = averageOf(linked, t => rrValue(t.rr_ratio));
   return {
     tradeCount: linked.length,
     closedCount: closed.length,
     winRate:  closed.length > 0 ? Math.round(wins.length / closed.length * 100) : 0,
     totalPnl: total,
     avgPnl:   closed.length > 0 ? total / closed.length : 0,
-    avgRR:    linked.length > 0
-      ? Number((linked.reduce((s, t) => s + Number(t.rr_ratio), 0) / linked.length).toFixed(1))
-      : 0,
+    avgRR:    avgRR !== null ? Number(avgRR.toFixed(1)) : null,
   };
 }
 
@@ -372,7 +410,7 @@ function SetupCard({ setup, stats, onClick }: {
           <StatBadge label="הצלחה" value={`${stats.winRate}%`}
             color={stats.winRate >= 60 ? '#4ade80' : stats.winRate >= 40 ? '#facc15' : '#f87171'} />
           <StatBadge label="P&L" value={stats.closedCount > 0 ? fmt(stats.totalPnl) : '—'} color={profitColor} />
-          <StatBadge label="R:R" value={`1:${stats.avgRR}`} color={GOLD} />
+          <StatBadge label="R:R" value={stats.avgRR != null ? `1:${stats.avgRR}` : '—'} color={GOLD} />
         </>}
       </div>
     </button>
@@ -486,7 +524,7 @@ function DetailView({ setup, stats, linked, unlinked, aiReview, aiLoading, delet
             color: stats.winRate >= 60 ? '#4ade80' : stats.winRate >= 40 ? '#facc15' : stats.closedCount > 0 ? '#f87171' : MUTED },
           { label: 'P&L', value: stats.closedCount > 0 ? fmt(stats.totalPnl) : '—',
             color: stats.totalPnl > 0 ? '#4ade80' : stats.totalPnl < 0 ? '#f87171' : MUTED },
-          { label: 'ממוצע R:R', value: stats.tradeCount > 0 ? `1:${stats.avgRR}` : '—', color: GOLD },
+          { label: 'ממוצע R:R', value: stats.avgRR != null ? `1:${stats.avgRR}` : '—', color: GOLD },
         ].map(({ label, value, color }) => (
           <div key={label} className="rounded-xl p-2.5 text-center" style={{ background: SURF, border: `1px solid ${BORDER}` }}>
             <p className="text-[10px]" style={{ color: MUTED }}>{label}</p>
@@ -594,6 +632,7 @@ function TradeRow({ trade, isLinked, onToggle, borderTop }: {
   borderTop: boolean;
 }) {
   const p = pnl(trade);
+  const won = isWinningTrade(trade) === true;
   return (
     <div className="flex items-center gap-3 py-2.5 px-1"
       style={{ borderTop: borderTop ? `1px solid ${BORDER}` : undefined }}>
@@ -618,7 +657,7 @@ function TradeRow({ trade, isLinked, onToggle, borderTop }: {
         </p>
       </div>
       {p !== null && (
-        <span className="text-xs font-bold shrink-0" style={{ color: p > 0 ? '#4ade80' : '#f87171' }}>
+        <span className="text-xs font-bold shrink-0" style={{ color: won ? '#4ade80' : '#f87171' }}>
           {fmt(p, 1)}
         </span>
       )}

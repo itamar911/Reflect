@@ -78,9 +78,10 @@ export const EMAIL_COLORS = {
    *
    * NOTE: html.light does not override this one, and #f59e0b measures 2.15:1
    * on white — below the 3:1 floor even for large text. It is the one value in
-   * this palette that does not pass on a light surface, so neither `alerts.ts`
-   * nor `api/send-email` uses it for text: a sub-threshold R:R reads in
-   * `textSecondary` rather than amber in both.
+   * this palette that does not pass on a light surface, so `alerts.ts` does
+   * not use it for text: a sub-threshold R:R reads in `textSecondary` rather
+   * than amber. (`api/send-email` used to be the second such caller and was
+   * deleted as dead code in REF-115.)
    *
    * Kept here because `api/send-feedback` still maps the `feature` type to it.
    * That one is unresolved: the colour is the type encoding across bug/feature/

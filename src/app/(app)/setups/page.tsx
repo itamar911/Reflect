@@ -27,9 +27,17 @@ export default async function SetupsPage() {
     // contributing an outcome.
     supabase
       .from('trade_plans')
+      // `direction` and the money columns are selected because this page's
+      // P&L is MONEY and its win test reads a real figure rather than
+      // comparing two prices (REF-106 / REF-115 site 3). Without them the
+      // client could only subtract entry from exit, which is a price
+      // difference shown under a `$` — and, read without `direction`, calls
+      // every profitable short a loss (REF-107 §0ד). The same column list
+      // /strategies already selects, for the same reason.
+      //
       // `hidden` only where the column exists — this reader names its
       // columns, so it has to ask (lib/trades/visible.ts).
-      .select(withHidden('id, strategy, symbol, entry_price, exit_price, status, setup_id, submitted_at, rr_ratio', hiddenExists))
+      .select(withHidden('id, strategy, symbol, entry_price, exit_price, take_profit, status, direction, pnl_amount, actual_pnl, setup_id, submitted_at, rr_ratio', hiddenExists))
       .eq('user_id', user.id)
       .neq('status', 'not_entered')
       .order('submitted_at', { ascending: false }),
