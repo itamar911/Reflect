@@ -214,6 +214,7 @@ export default function AppShell({
   plan,
   disciplineAlertsEnabled,
   portfoliosEnabled,
+  liveEnabled,
 }: {
   children: React.ReactNode;
   userId: string;
@@ -223,6 +224,8 @@ export default function AppShell({
   /** Migration 037 has been run (REF-110). Decides the nav row and the
    *  trade form's "תיק" field; see `primaryNav` and lib/portfolios/read.ts. */
   portfoliosEnabled: boolean;
+  /** The allowlist AND migration 037 — REF-108's poll gate. See TradePlanForm. */
+  liveEnabled: boolean;
 }) {
   const pathname = usePathname();
   const router   = useRouter();
@@ -702,6 +705,7 @@ export default function AppShell({
         initialWarning={ruleWarning}
         disciplineAlertsEnabled={disciplineAlertsEnabled}
         portfoliosEnabled={portfoliosEnabled}
+        liveEnabled={liveEnabled}
       />
       )}
 

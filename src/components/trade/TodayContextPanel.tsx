@@ -13,6 +13,7 @@ import {
   type TodayTradeLine,
 } from '@/lib/rules/todayLines';
 import type { RuleContextSource } from '@/lib/types';
+import LivePositions from '@/components/tradovate/LivePositions';
 
 /**
  * "Your day so far" — the context panel at the top of the trade form
@@ -294,6 +295,15 @@ export interface TodayContextPanelProps {
    * about how many closes there were.
    */
   lines?: TodayTradeLine[] | null;
+  /**
+   * Who is looking, and whether there is a broker to ask (REF-108 Stage 3).
+   *
+   * Both are needed for the live-position line and for nothing else, so the
+   * panel renders exactly as it did when `live` is absent. `enabled` is the
+   * server-side gate — the allowlist AND migration 037 — evaluated in the
+   * layout, because neither half is readable from the browser.
+   */
+  live?: { userId: string; enabled: boolean } | null;
 }
 
 export default function TodayContextPanel({
@@ -305,6 +315,7 @@ export default function TodayContextPanel({
   maxDailyLoss,
   source,
   lines = null,
+  live = null,
 }: TodayContextPanelProps) {
   const failed = source === 'broker_expired' || source === 'broker_unavailable';
 
@@ -359,6 +370,18 @@ export default function TodayContextPanel({
           <h3 id={headingId} className="text-sm font-semibold text-tg-text">
             היום שלך
           </h3>
+
+          {/* ── What is open right now (REF-108) ───────────────────────────
+              ABOVE the day's figures and OUTSIDE the `loaded` branch, both
+              deliberately. A position the trader is currently in is the most
+              important true thing this panel can say, and it is true whether
+              or not the day's closed figures have arrived — the two come from
+              different reads on different clocks.
+
+              It renders nothing when the trader is flat, so a quiet panel
+              reads exactly as it did before. A statement of fact and never an
+              instruction (§8). */}
+          {live && <LivePositions userId={live.userId} enabled={live.enabled} />}
 
           {!loaded ? (
             <p className="text-sm leading-relaxed" style={{ color: 'var(--color-tg-text-2)' }}>

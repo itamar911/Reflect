@@ -39,6 +39,9 @@
  * Usage: npm run test:broker-day
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
+
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import {
@@ -89,6 +92,11 @@ import {
   shouldKeepPolling,
 } from '../src/lib/tradovate/liveClock';
 import { openAccounts } from '../src/lib/tradovate/useLivePositions';
+import {
+  NO_PRICE_NOTE,
+  contractsLabel,
+  positionLines,
+} from '../src/components/tradovate/LivePositionLines';
 import type {
   TradovateAccount,
   TradovateContract,
@@ -2308,6 +2316,7 @@ async function main() {
   await liveRouteGroup();
   await liveCacheGroup();
   await liveClockGroup();
+  liveNeverReachesRulesGroup();
 
   console.log();
   if (failures.length) {
@@ -3895,6 +3904,53 @@ async function liveClockGroup() {
     c('(13) the two intervals are 15 s and 60 s', [HOLDING_MS, FLAT_MS], [15_000, 60_000]),
   ]);
 
+  group('REF-108: the line a trader reads', [
+    // Hebrew has a dual. "2 חוזים" reads as a translation; "שני חוזים" reads
+    // as a sentence.
+    c('(1) one contract', contractsLabel(1), 'חוזה אחד'),
+    c('(2) two take the dual', contractsLabel(2), 'שני חוזים'),
+    c('(3) three take the numeral', contractsLabel(3), '3 חוזים'),
+    // The MAGNITUDE. `netPos` is signed and direction is deliberately not
+    // rendered (the copy REF-108 specified); a short must not read as "-3".
+    c('(4) a short reads by magnitude', contractsLabel(-3), '3 חוזים'),
+    c('(5) and a short of one is still one', contractsLabel(-1), 'חוזה אחד'),
+
+    // One portfolio: no name on the line, because it would be noise on every
+    // one of them.
+    c('(6) a single portfolio is not named',
+      positionLines(openAccounts(verifiedPull([2]))), ['פוזיציה פתוחה · שני חוזים ESZ6']),
+    // Several: the name IS the point (REF-108, 16.10) — a trader with two
+    // evaluations needs to know which one they are in.
+    c('(7) two portfolios are both named',
+      positionLines([
+        { accountId: 'a', displayName: 'Eval One', positions: [{ contractName: 'ESZ6', netPos: 1 }] },
+        { accountId: 'b', displayName: 'Eval Two', positions: [{ contractName: 'MNQZ6', netPos: -2 }] },
+      ]),
+      ['פוזיציה פתוחה · חוזה אחד ESZ6 · Eval One', 'פוזיציה פתוחה · שני חוזים MNQZ6 · Eval Two']),
+    c('(8) several positions are one line each',
+      positionLines([
+        {
+          accountId: 'a', displayName: 'Solo', positions: [
+            { contractName: 'ESZ6', netPos: 1 },
+            { contractName: 'MNQZ6', netPos: 4 },
+          ],
+        },
+      ]).length, 2),
+    // A contract we could not name still says how much is held.
+    c('(9) an unnamed contract still reports the size',
+      positionLines([{ accountId: 'a', displayName: 'Solo', positions: [{ contractName: null, netPos: 1 }] }]),
+      ['פוזיציה פתוחה · חוזה אחד']),
+    c('(10) flat renders no line', positionLines(openAccounts(verifiedPull([0]))), []),
+
+    // The sentence that stops a missing number reading as a broken one.
+    // Pinned verbatim, because a reword is a product decision taken again.
+    c('(11) the no-price note, verbatim', NO_PRICE_NOTE,
+      'המחיר החי אינו זמין דרך הברוקר; הרווח/הפסד ייספר עם הסגירה.'),
+    // §8: it describes, it does not instruct.
+    c('(12) and it instructs nobody to do anything',
+      /כדאי|תעצור|מומלץ|עליך|שים לב/.test(NO_PRICE_NOTE), false),
+  ]);
+
   group('REF-108: what the consumers render from', [
     c('(1) an account with a position is listed', openAccounts(verifiedPull([2])).length, 1),
     c('(2) a flat account is not', openAccounts(verifiedPull([0])).length, 0),
@@ -3902,6 +3958,67 @@ async function liveClockGroup() {
     c('(4) nothing verified renders nothing',
       openAccounts({ source: 'broker_unavailable' }).length, 0),
     c('(5) and nor does no answer', openAccounts(null).length, 0),
+  ]);
+}
+
+// ── REF-108 §E: the live figure never reaches a rule ───────────────────────
+//
+// ASSERTED OVER THE SOURCE, because an absence cannot be asserted by running
+// code that never runs. "The rule engine does not read live positions" is not
+// a function call that can be checked — it is the lack of one.
+//
+// The same device REF-110 Stage 5 used for the account filter, and it matters
+// more here. A live figure is true for one second; a discipline rule that
+// fired on one would lift itself on the next poll, and a block that
+// un-blocks is worse than no block. REF-90 option A's whole premise is that
+// the rules act on CLOSED money.
+
+function sourceUnder(dir: string): string {
+  const root = path.join(process.cwd(), dir);
+  if (!fs.existsSync(root)) return '';
+  const out: string[] = [];
+  const walk = (at: string) => {
+    for (const entry of fs.readdirSync(at, { withFileTypes: true })) {
+      const full = path.join(at, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (/\.tsx?$/.test(entry.name)) out.push(fs.readFileSync(full, 'utf8'));
+    }
+  };
+  walk(root);
+  return out.join('\n');
+}
+
+function liveNeverReachesRulesGroup() {
+  const rules = sourceUnder('src/lib/rules');
+  const validators = sourceUnder('src/lib/validators');
+  const ai = [
+    'src/app/api/ai-chat', 'src/app/api/ai-coach', 'src/app/api/ai-debrief',
+    'src/app/api/ai-patterns', 'src/app/api/ai-trade-review',
+    'src/app/api/cron/send-alerts', 'src/lib/weekly',
+  ].map(sourceUnder).join('\n');
+
+  const reachesLive = (src: string) =>
+    src.includes('tradovate/positions') ||
+    src.includes('tradovate/liveClock') ||
+    src.includes('tradovate/useLivePositions') ||
+    src.includes('tradovate/live/route') ||
+    src.includes('/api/tradovate/live');
+
+  group('REF-108 §E: a live position cannot reach a rule', [
+    c('(1) lib/rules imports none of the live modules', reachesLive(rules), false),
+    c('(2) nor does the validator', reachesLive(validators), false),
+    c('(3) nor do the AI routes and the weekly summary', reachesLive(ai), false),
+    // The structural half, stronger than the import check: there is nowhere
+    // for the figure to go. BrokerDayContext's seven scalars are all about
+    // finished trades, and `netPos` is not among them.
+    c('(4) the rule engine never names netPos', rules.includes('netPos'), false),
+    c('(5) and never names an open or unrealised figure',
+      /openPnl|openPnL|unrealis|unrealiz/i.test(rules), false),
+    // The positive control: the grep can fire, so a clean result means
+    // something. The route itself obviously reaches the loader.
+    c('(6) and the needle is a real one',
+      reachesLive(fs.readFileSync(path.join(process.cwd(), 'src/app/api/tradovate/live/route.ts'), 'utf8')),
+      true),
   ]);
 }
 

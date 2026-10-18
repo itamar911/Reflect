@@ -2,6 +2,7 @@
 import { createClient, getCachedUser } from '@/lib/supabase/server';
 import { getUserPlan } from '@/lib/plans/getUserPlan';
 import { isImportEnabled } from '@/lib/tradovate/import';
+import { isUserAllowed } from '@/lib/tradovate/allowlist';
 import AppShell from '@/components/layout/AppShell';
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -33,6 +34,19 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // and whether the trade form asks for a "תיק".
   const portfoliosEnabled = isImportEnabled();
 
+  // Whether there is a broker to ask what the trader is holding (REF-108).
+  // STRICTER than the line above and a different question: that one asks
+  // whether `accounts` exists, this asks whether this trader has a broker
+  // view at all. Both halves are server-only — `isUserAllowed` reads an
+  // environment variable — which is why this is decided here and travels as
+  // a prop, the same arrangement `canSync` uses on three other pages.
+  //
+  // The route refuses a caller outside the allowlist anyway and the clock
+  // stops polling on `reflect_only`, so a wrong `false` costs the feature and
+  // a wrong `true` costs exactly one request. Deciding it here is about not
+  // making that request for every trader on every page.
+  const liveEnabled = portfoliosEnabled && isUserAllowed(user.id);
+
   return (
     <AppShell
       userId={user.id}
@@ -40,6 +54,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       plan={plan}
       disciplineAlertsEnabled={alertSettings?.discipline_enabled ?? true}
       portfoliosEnabled={portfoliosEnabled}
+      liveEnabled={liveEnabled}
     >
       {children}
     </AppShell>

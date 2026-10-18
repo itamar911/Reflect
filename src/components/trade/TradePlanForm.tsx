@@ -242,9 +242,21 @@ interface TradePlanFormProps {
    * stage.
    */
   portfoliosEnabled?: boolean;
+  /**
+   * The trader has a broker view: the allowlist AND migration 037
+   * (REF-108 Stage 3).
+   *
+   * A stricter gate than `portfoliosEnabled` and a different question — that
+   * one asks whether the `accounts` table exists, this asks whether there is
+   * anything to poll for. Evaluated in the layout, because `isUserAllowed`
+   * reads process.env and is server-only. False means the day panel never
+   * mounts the poll, which is the difference between one wasted request per
+   * form open and none.
+   */
+  liveEnabled?: boolean;
 }
 
-export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess, initialWarning, disciplineAlertsEnabled, portfoliosEnabled = false }: TradePlanFormProps) {
+export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess, initialWarning, disciplineAlertsEnabled, portfoliosEnabled = false, liveEnabled = false }: TradePlanFormProps) {
   const limits = getPlanLimits(plan);
   const titleId = useId();
   const symbolRef = useRef<HTMLInputElement>(null);
@@ -1212,6 +1224,9 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
               maxDailyLoss={presetRules?.max_daily_loss ?? null}
               source={contextSource}
               lines={todayLines}
+              // REF-108: what the trader is holding right now. The panel
+              // renders nothing from this when they are flat.
+              live={liveEnabled ? { userId, enabled: true } : null}
             />
 
             {/* Step 1 — Asset, direction & strategy */}

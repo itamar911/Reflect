@@ -22,6 +22,7 @@ import { Wallet } from 'lucide-react';
 
 import { createClient, getCachedUser } from '@/lib/supabase/server';
 import { isImportEnabled } from '@/lib/tradovate/import';
+import { isUserAllowed } from '@/lib/tradovate/allowlist';
 import { readPortfolios, UNASSIGNED_SAMPLE_LIMIT } from '@/lib/portfolios/read';
 import {
   PORTFOLIO_COPY,
@@ -156,6 +157,10 @@ export default async function AccountsPage() {
       <PageHeader />
       <AccountsClient
         userId={user.id}
+        // REF-108: whether the cards' reserved slot has anything to poll
+        // for. Stricter than `enabled` above — the allowlist as well as the
+        // migration — and server-only on both halves.
+        liveEnabled={enabled && isUserAllowed(user.id)}
         cards={cards}
         unassignedCount={unassignedFigures.trades}
         unassignedPnl={unassignedFigures.netPnl}

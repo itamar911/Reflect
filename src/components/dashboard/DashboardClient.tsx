@@ -7,6 +7,7 @@ import { formatMoney } from '@/lib/money';
 import { createClient } from '@/lib/supabase/client';
 import { DASH_TRADE_SELECT, mapDashTrade, type RawTradeRow } from '@/lib/dashboard/trades';
 import { visibleTrades, withAccount, withHidden } from '@/lib/trades/visible';
+import LivePositions from '@/components/tradovate/LivePositions';
 import type { DashTrade } from '@/lib/dashboard/trades';
 import { tradeMoneyPnl, hasMoneyPnl, isWinningTrade, tradeDirection, tradePointsPnl } from '@/lib/pnl';
 import { getPlanLimits, type PlanTier } from '@/lib/plans/config';
@@ -1600,6 +1601,15 @@ export default function DashboardClient({
           <h1 style={{ fontSize: 22, fontWeight: 700, color: TEXT, letterSpacing: '-0.02em', lineHeight: 1 }}>
             {greeting && `${greeting}, `}<span style={{ color: ACCENT }}>{displayName}</span>
           </h1>
+          {/* What the trader is holding right now (REF-108). Its own
+              component rather than a branch in this 1,900-line file, and it
+              renders nothing at all when they are flat — so the greeting row
+              is unchanged for a trader with no open position. `canSync` is
+              already the allowlist AND the import flag, which is exactly the
+              gate the poll wants. */}
+          <div style={{ marginTop: 6 }}>
+            <LivePositions userId={userId} enabled={canSync} />
+          </div>
         </div>
         {/* NO `refreshOnChange` HERE, and that is the point of the prop. The
             realtime subscription below already refetches on a

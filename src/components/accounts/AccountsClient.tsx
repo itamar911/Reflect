@@ -103,6 +103,8 @@ export interface UnassignedTrade {
 
 interface Props {
   userId: string;
+  /** The allowlist AND migration 037 — the REF-108 slot's poll gate. */
+  liveEnabled: boolean;
   cards: PortfolioCardData[];
   unassignedCount: number;
   unassignedPnl: number;
@@ -111,7 +113,7 @@ interface Props {
 }
 
 export default function AccountsClient({
-  userId, cards, unassignedCount, unassignedPnl, unassignedWinRate, unassignedSample,
+  userId, liveEnabled, cards, unassignedCount, unassignedPnl, unassignedWinRate, unassignedSample,
 }: Props) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
@@ -155,6 +157,8 @@ export default function AccountsClient({
               key={card.id}
               card={card}
               busy={busy}
+              userId={userId}
+              liveEnabled={liveEnabled}
               onRename={(nickname) => run(() => renamePortfolio(supabase, userId, card.id, nickname))}
               onHide={() => run(() => setPortfolioHidden(supabase, userId, card.id, true))}
             />
@@ -197,6 +201,8 @@ export default function AccountsClient({
                   key={card.id}
                   card={card}
                   busy={busy}
+                  userId={userId}
+                  liveEnabled={liveEnabled}
                   onRename={(nickname) => run(() => renamePortfolio(supabase, userId, card.id, nickname))}
                   onUnhide={() => run(() => setPortfolioHidden(supabase, userId, card.id, false))}
                 />
@@ -211,9 +217,12 @@ export default function AccountsClient({
 
 // ── The card ────────────────────────────────────────────────────────────────
 
-function PortfolioCard({ card, busy, onRename, onHide, onUnhide }: {
+function PortfolioCard({ card, busy, userId, liveEnabled, onRename, onHide, onUnhide }: {
   card: PortfolioCardData;
   busy: boolean;
+  /** Both for the REF-108 slot, and for nothing else on the card. */
+  userId: string;
+  liveEnabled: boolean;
   onRename: (nickname: string) => Promise<boolean>;
   onHide?: () => Promise<boolean>;
   onUnhide?: () => Promise<boolean>;
@@ -337,7 +346,7 @@ function PortfolioCard({ card, busy, onRename, onHide, onUnhide }: {
       )}
 
       {/* ── REF-108's reserved region. Fixed height, above the figures. ── */}
-      <LivePnlSlot portfolioId={card.id} />
+      <LivePnlSlot portfolioId={card.id} userId={userId} enabled={liveEnabled} />
 
       {/* ── The three realised figures ───────────────────────────────── */}
       <div className="grid grid-cols-3 gap-2">
