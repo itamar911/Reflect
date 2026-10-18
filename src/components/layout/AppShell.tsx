@@ -65,6 +65,11 @@ const IconDashboard  = () => <Svg><rect x="3" y="3" width="7" height="7" rx="1"/
 const IconCalendar   = () => <Svg><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></Svg>;
 const IconList       = () => <Svg><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="4" cy="6" r="1.2" fill="currentColor" stroke="none"/><circle cx="4" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="4" cy="18" r="1.2" fill="currentColor" stroke="none"/></Svg>;
 const IconStats      = () => <Svg><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><line x1="2" y1="20" x2="22" y2="20"/></Svg>;
+// "התיקים שלי" (REF-110 Stage 4). Lucide's `wallet` geometry, inlined as a
+// local <Svg> like its ten neighbours: CLAUDE.md's "Lucide only" rule is
+// about icon SETS, and one imported component among eleven hand-inlined ones
+// would be the odd stroke width in the rail.
+const IconWallet     = () => <Svg><path d="M19 7V5a2 2 0 00-2-2H5a2 2 0 000 4h15a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V5"/><path d="M16 12h.01"/></Svg>;
 const IconTag        = () => <Svg><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></Svg>;
 const IconNotebook   = () => <Svg><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/><line x1="9" y1="15" x2="13" y2="15"/></Svg>;
 const IconAI         = () => <Svg><path d="M12 2l2.4 5.2 5.6.8-4 4 .9 5.6-5-2.7-5 2.7.9-5.6-4-4 5.6-.8L12 2z"/></Svg>;
@@ -83,12 +88,34 @@ const PRIMARY_NAV: NavItem[] = [
   { href: '/journal',    label: 'יומן חודשי',         icon: <IconCalendar /> },
   { href: '/trades',     label: 'כל העסקאות',         icon: <IconList /> },
   { href: '/stats',      label: 'סטטיסטיקה',          icon: <IconStats /> },
+  { href: '/accounts',   label: 'התיקים שלי',         icon: <IconWallet /> },
   { href: '/setups',     label: 'סטאפים ותגיות',      icon: <IconTag /> },
   { href: '/notebook',   label: 'מחברת',              icon: <IconNotebook /> },
   { href: '/coach',      label: 'מאמן AI',             icon: <IconAI /> },
   { href: '/rules',      label: 'חוקי מסחר',          icon: <IconShield /> },
   { href: '/strategies', label: 'אסטרטגיות',          icon: <IconStrategy /> },
 ];
+
+/**
+ * The rail, minus the rows this deployment cannot serve (REF-110 Stage 4).
+ *
+ * "התיקים שלי" is dropped in two cases, for two different reasons:
+ *
+ *   - **The gate is shut.** `portfoliosEnabled` is `isImportEnabled()`,
+ *     evaluated in the layout. Migration 037 may not have been run, in which
+ *     case /accounts renders its one-line "not available here" state. A nav
+ *     row leading to that is worse than no row.
+ *   - **Demo mode.** `src/proxy.ts`'s `DEMO_SECTIONS` does not list
+ *     `accounts`, so `/demo/accounts` redirects to the demo dashboard. A link
+ *     that silently sends a visitor somewhere else is the worst of the three
+ *     options, and the other two — a fixture portfolio, or widening
+ *     DEMO_SECTIONS onto a page with no fixtures — are both larger than this
+ *     ticket. The row comes back the day the demo grows portfolios.
+ */
+function primaryNav(portfoliosEnabled: boolean, isDemo: boolean): NavItem[] {
+  if (portfoliosEnabled && !isDemo) return PRIMARY_NAV;
+  return PRIMARY_NAV.filter((item) => item.href !== '/accounts');
+}
 
 const SECONDARY_NAV: NavItem[] = [
   { href: '/settings', label: 'הגדרות',            icon: <IconSettings /> },
@@ -412,7 +439,7 @@ export default function AppShell({
             icon slot (right:0, width:W_SHUT) reproduces the visible rail
             exactly, regardless of collapsed/expanded state. */}
         <nav className="flex-1 overflow-y-auto overflow-x-hidden py-2 flex flex-col gap-0.5 pl-2 [scrollbar-gutter:stable]">
-          {PRIMARY_NAV.map(item => (
+          {primaryNav(portfoliosEnabled, isDemo).map(item => (
             <NavLink
               key={item.href}
               item={{ ...item, href: navPrefix + item.href }}

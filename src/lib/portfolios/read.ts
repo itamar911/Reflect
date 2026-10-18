@@ -306,3 +306,41 @@ export async function assignTradesToPortfolio(
     .in('id', [...tradeIds]);
   return !error;
 }
+
+/**
+ * File EVERY unassigned trade under one portfolio.
+ *
+ * The common case by a distance, and the reason it is its own function rather
+ * than "tick select-all": a trader who has been using Reflect for a year and
+ * has just connected one broker wants their whole history in one portfolio,
+ * and the list the screen can reasonably render is bounded
+ * ({@link UNASSIGNED_SAMPLE_LIMIT}) while their backlog is not. Ticking every
+ * box on a page of two hundred would file two hundred of eight hundred rows
+ * and look like it had finished.
+ *
+ * Still ONE statement, and still scoped by user and by "still unassigned" —
+ * the id list is the only thing that goes.
+ */
+export async function assignAllUnassigned(
+  client: SupabaseClient,
+  userId: string,
+  portfolioId: string,
+): Promise<boolean> {
+  const { error } = await client
+    .from('trade_plans')
+    .update({ account_id: portfolioId })
+    .eq('user_id', userId)
+    .is('account_id', null);
+  return !error;
+}
+
+/**
+ * How many unassigned trades the "ללא תיק" card lists for picking.
+ *
+ * It bounds what is RENDERED, not what can be assigned — {@link
+ * assignAllUnassigned} reaches the rest in one statement, and the card says
+ * so when the backlog is longer than this. Two hundred rows of checkboxes is
+ * already more than anyone will read; the number exists so the page cannot be
+ * made unusable by a trader with a long history.
+ */
+export const UNASSIGNED_SAMPLE_LIMIT = 200;

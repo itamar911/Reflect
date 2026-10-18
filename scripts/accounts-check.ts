@@ -68,6 +68,8 @@ import {
 } from '../src/lib/portfolios/portfolio';
 import {
   PORTFOLIO_SELECT,
+  UNASSIGNED_SAMPLE_LIMIT,
+  assignAllUnassigned,
   assignTradesToPortfolio,
   ensureManualPortfolio,
   readLastUsedPortfolioId,
@@ -664,6 +666,31 @@ async function assignGroup() {
     c('scoped to the chosen ids', statement.filters.some(([op, col]) => op === 'in' && col === 'id'), true),
     c('an empty selection sends nothing', emptyDb.statements.length, 0),
     c('and still succeeds', emptyOk, true),
+  ]);
+
+  // ── "שייך את כל N העסקאות" — the backlog longer than the rendered list ───
+  const allDb = new FakeDb([
+    { id: 'u1', user_id: USER, account_id: null },
+    { id: 'u2', user_id: USER, account_id: null },
+    { id: 'u3', user_id: USER, account_id: PORTFOLIO_B },
+    { id: 'u4', user_id: OTHER_USER, account_id: null },
+  ]);
+  await assignAllUnassigned(allDb.client(), USER, PORTFOLIO_A);
+  const allAfter = Object.fromEntries(allDb.rows.map((r) => [r.id as string, r.account_id ?? null]));
+  const allStatement = allDb.writes[0];
+
+  group('Stage 4: "assign all" reaches rows the list never rendered', [
+    // THE REASON THIS IS A SEPARATE FUNCTION. The card lists at most
+    // UNASSIGNED_SAMPLE_LIMIT rows; ticking every box on that list would file
+    // 200 of 800 and look finished.
+    c('every unassigned row of this trader moves', [allAfter.u1, allAfter.u2], [PORTFOLIO_A, PORTFOLIO_A]),
+    c('an already-filed row is untouched', allAfter.u3, PORTFOLIO_B),
+    c('another trader\'s backlog is untouched', allAfter.u4, null),
+    c('still one statement', allDb.writes.length, 1),
+    c('and it carries no id list', allStatement.filters.some(([op]) => op === 'in'), false),
+    c('scoped by user', allStatement.filters.some(([op, col, v]) => op === 'eq' && col === 'user_id' && v === USER), true),
+    c('scoped to the unassigned', allStatement.filters.some(([op, col]) => op === 'is' && col === 'account_id'), true),
+    c('the rendered list is bounded', UNASSIGNED_SAMPLE_LIMIT > 0, true),
   ]);
 }
 
