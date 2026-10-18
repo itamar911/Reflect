@@ -197,6 +197,12 @@ export async function respondToDebriefRequest(
     exit_price: num('exit_price'),
     entry_price: num('entry_price'),
     direction: (trade.direction as 'long' | 'short' | null) ?? null,
+    // J1. The same `unplanned` the prompt already branches on: a trade the
+    // trader confirmed was not planned is not scored on planning, and the
+    // result comes back normalised over what WAS measured. Without this the
+    // row scored ~40/100 for carrying no stop, no target and no R:R — none
+    // of which it could have carried.
+    unplanned,
   };
 
   // The score is computed deterministically in code — Claude never sees a request
@@ -234,6 +240,8 @@ export async function respondToDebriefRequest(
       score: scoreResult.total,
       breakdown: scoreResult.breakdown,
       correctedFlags: scoreResult.correctedFlags,
+      // So the badge can say "ציון ביצוע" rather than "ציון" (J1).
+      executionOnly: scoreResult.executionOnly,
       documented,
       outcome,
       // So the UI can say when it was written, and tell a fresh answer from a
@@ -282,6 +290,8 @@ export async function respondToDebriefRequest(
     score: scoreResult.total,
     breakdown: scoreResult.breakdown,
     correctedFlags: scoreResult.correctedFlags,
+    // So the badge can say "ציון ביצוע" rather than "ציון" (J1).
+    executionOnly: scoreResult.executionOnly,
     documented,
     outcome,
     generatedAt,

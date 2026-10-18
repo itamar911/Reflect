@@ -24,6 +24,13 @@ interface AIDebriefResult {
   improve?: string;
   lesson?: string;
   score?: number;
+  /**
+   * The score is out of EXECUTION ONLY — the trader confirmed this trade was
+   * not planned, so the planning block was skipped and the rest normalised
+   * (J1). The badge says so, because "ציון 100" on a trade with no plan
+   * would read as praise for not planning.
+   */
+  executionOnly?: boolean;
   documented?: boolean;
 }
 
@@ -146,7 +153,7 @@ export default function TradeDebrief({ trade, existingAnswer }: TradeDebriefProp
               <div className="flex items-center justify-between p-3 rounded-xl"
                 style={{ background: 'var(--color-tg-primary-muted)', border: '1px solid var(--color-tg-primary)30' }}>
                 <span className="text-xs text-tg-text-2 flex items-center gap-1.5">
-                  ציון עסקה
+                  {aiResult.executionOnly ? 'ציון ביצוע' : 'ציון עסקה'}
                   {aiResult.documented && (
                     <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md"
                       style={{ background: 'var(--color-tg-surface)', color: 'var(--color-tg-primary)' }}>

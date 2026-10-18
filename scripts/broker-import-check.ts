@@ -57,6 +57,7 @@ import {
 } from '../src/lib/tradovate/account-sync';
 import { accountIdentity, claimedAccounts } from '../src/lib/tradovate/accounts';
 import { runBrokerImport } from '../src/lib/tradovate/import-cron';
+import { computeTradeScore, type TradeScoreInput } from '../src/lib/scoring/tradeScore';
 import type { BrokerTrade, HostAccounts } from '../src/lib/tradovate/fills';
 import type { TradovateEnvironment } from '../src/lib/tradovate/hosts';
 import type { TradovateAccount } from '../src/lib/tradovate/types';
@@ -2351,7 +2352,8 @@ async function debriefGateGroup() {
   const declined = linkStateRow('declined');
   const { deps: declinedDeps, state: declinedState, prompts: declinedPrompts } =
     promptCapturingDeps(declined);
-  await respondToDebriefRequest(debriefRequest(), declinedDeps);
+  const declinedRes = await respondToDebriefRequest(debriefRequest(), declinedDeps);
+  const declinedBody = await declinedRes.json();
   const declinedPrompt = declinedPrompts[0] ?? '';
 
   // A hand-entered trade, which is every trade this route has ever been
@@ -2386,6 +2388,13 @@ async function debriefGateGroup() {
       declinedPrompt.includes('NO PLAN'), true),
     c('(11) a manual trade is unaffected',
       [manualState.modelCalls, (manualPrompts[0] ?? '').includes('תכנון (planning)')], [1, true]),
+
+    // J1, from the ROUTE rather than from the pure function: the response
+    // this row produces is an execution score out of what was measurable,
+    // and no longer the ~40 that scoring three nulls as failures produced.
+    c('(12) the response is flagged as an execution score', declinedBody.executionOnly, true),
+    c('(13) scored over the blocks that applied', declinedBody.breakdown.scoredOutOf, 40),
+    c('(14) and it is not the old 40/100', declinedBody.score === 40, false),
   ]);
 }
 
@@ -3444,6 +3453,9 @@ async function main() {
   await accountClosureGroup();
   await accountStampGroup();
 
+  // J1 — the unplanned row's score (REF-107 Stage 3b follow-up).
+  scoringGroup();
+
   console.log('');
   if (failures.length > 0) {
     console.log(`${failures.length} failing assertion(s):`);
@@ -3451,6 +3463,141 @@ async function main() {
     process.exit(1);
   }
   console.log('All groups passed.');
+}
+
+// ── J1: a trade the trader never planned is not scored on planning ─────────
+//
+// A declined broker row (source tradovate, unplanned, link_confirmed_at set)
+// carries no stop, no target and no R:R, because there was no plan to carry
+// them. The planning block scored those three nulls 0/60 and the row came out
+// at 40/100 — a trader penalised for ANSWERING HONESTLY when the product
+// asked whether they had planned it.
+//
+// The fix must be a new BRANCH and not a new formula, so the first group here
+// is about the rows that must not move.
+
+/** A fully planned manual trade, clean on every discipline flag. */
+const PLANNED: TradeScoreInput = {
+  stop_loss: 4990,
+  take_profit: 5020,
+  rr_ratio: 3,
+  required_min_rr: null,
+  strategy_conditions_checked: null,
+  moved_sl: false,
+  exited_early: false,
+  fomo_entry: false,
+  revenge_trade: false,
+  exit_price: 5010,
+  entry_price: 5000,
+  direction: 'long',
+};
+
+/** The declined broker row: no intent at all, and the flags all clean. */
+const DECLINED: TradeScoreInput = {
+  ...PLANNED,
+  stop_loss: null,
+  take_profit: null,
+  rr_ratio: null,
+  unplanned: true,
+};
+
+function scoringGroup() {
+  const planned = computeTradeScore(PLANNED);
+  const unplannedManual = computeTradeScore({ ...PLANNED, stop_loss: null, take_profit: null, rr_ratio: null });
+  const withConditions = computeTradeScore({
+    ...PLANNED,
+    strategy_conditions_checked: [
+      { condition: 'a', checked: true },
+      { condition: 'b', checked: true },
+      { condition: 'c', checked: false },
+      { condition: 'd', checked: false },
+    ],
+    moved_sl: true,
+  });
+  const sloppy = computeTradeScore({ ...PLANNED, fomo_entry: true, revenge_trade: true });
+
+  // THE PROOF THAT NOTHING MOVED, stated as an invariant rather than as four
+  // remembered numbers: before J1 the total WAS the sum of the three blocks,
+  // and for every row that is not `unplanned` it still is. Normalisation is
+  // the identity here because `scoredOutOf` is 100 for all of these.
+  const sumsToBlocks = (r: ReturnType<typeof computeTradeScore>) =>
+    r.total === r.breakdown.planning.score + r.breakdown.strategyAdherence.score + r.breakdown.discipline.score;
+
+  group('J1: a planned trade scores exactly as it did', [
+    c('(1) a fully planned clean trade', planned.total, 100),
+    c('(2) a manual trade with no stop, target or R:R still loses those points',
+      unplannedManual.total, 40),
+    c('(3) strategy conditions redistribute the maxima, as before',
+      withConditions.total, 73),
+    c('(4) and the discipline flags still cost what they cost', sloppy.total, 84),
+
+    // The invariant. If normalisation ever stops being the identity for these
+    // shapes, all four of these fail at once rather than one number drifting.
+    c('(5) every one of them still totals the sum of its blocks',
+      [planned, unplannedManual, withConditions, sloppy].every(sumsToBlocks), true),
+    c('(6) because the denominator is 100 for all of them',
+      [planned, unplannedManual, withConditions, sloppy].map((r) => r.breakdown.scoredOutOf),
+      [100, 100, 100, 100]),
+    c('(7) and none of them is an execution score',
+      [planned, unplannedManual, withConditions, sloppy].some((r) => r.executionOnly), false),
+    // A manual row with nothing filled in is NOT the J1 case: the trader had
+    // a form and left it empty, which the planning block is right to score.
+    c('(8) an empty manual form is still measured on planning',
+      unplannedManual.breakdown.planning.max, 60),
+  ]);
+
+  const declined = computeTradeScore(DECLINED);
+  const declinedSloppy = computeTradeScore({ ...DECLINED, moved_sl: true, fomo_entry: true });
+  const declinedWithConditions = computeTradeScore({
+    ...DECLINED,
+    strategy_conditions_checked: [
+      { condition: 'a', checked: true },
+      { condition: 'b', checked: false },
+    ],
+  });
+
+  group('J1: a trade the trader did not plan is scored on execution', [
+    // THE TICKET. 40/100 before, because three nulls were scored as failures.
+    c('(1) a clean unplanned execution is no longer ~40', declined.total, 100),
+    c('(2) the planning block is skipped, not zeroed', declined.breakdown.planning.max, 0),
+    c('(3) and it says why rather than listing empty fields',
+      declined.breakdown.planning.details, ['לא נמדד תכנון: סימנת שהעסקה לא תוכננה מראש']),
+    c('(4) the denominator is what was actually available', declined.breakdown.scoredOutOf, 40),
+    c('(5) and the result is flagged as execution-only', declined.executionOnly, true),
+
+    // Still a real score: a badly executed unplanned trade is not a 100.
+    c('(6) moving a stop and a FOMO entry still cost', declinedSloppy.total, 50),
+    c('(7) over the same denominator', declinedSloppy.breakdown.scoredOutOf, 40),
+
+    // Strategy adherence is NOT part of planning and is not skipped: a trader
+    // who ticked entry conditions did that, plan or no plan.
+    c('(8) strategy conditions still count', declinedWithConditions.breakdown.strategyAdherence.score, 15),
+    c('(9) and widen the denominator', declinedWithConditions.breakdown.scoredOutOf, 70),
+    c('(10) which changes the normalised result', declinedWithConditions.total, 79),
+
+    // The discipline block is untouched in every case.
+    c('(11) discipline is scored out of 40 either way',
+      [declined.breakdown.discipline.max, planned.breakdown.discipline.max], [40, 40]),
+  ]);
+
+  // A QUEUED row is never scored at all — the debrief route does not reach
+  // scoring for one — and J1 does not change that. Asserted at the one place
+  // that decides it, so the statement is about the product and not about this
+  // function being called with a flag nobody sets.
+  group('J1: a queued row is still not scored', [
+    c('(1) queued is not declined', linkState({
+      source: 'tradovate', unplanned: true, link_confirmed_at: null,
+    } as Parameters<typeof linkState>[0]), 'queued'),
+    c('(2) declined is', linkState({
+      source: 'tradovate', unplanned: true, link_confirmed_at: '2026-10-16T10:00:00.000Z',
+    } as Parameters<typeof linkState>[0]), 'declined'),
+    c('(3) a linked row is neither', linkState({
+      source: 'tradovate', unplanned: false, link_confirmed_at: '2026-10-16T10:00:00.000Z',
+    } as Parameters<typeof linkState>[0]), 'linked'),
+    c('(4) and a manual row has no link state at all', linkState({
+      source: 'manual', unplanned: false, link_confirmed_at: null,
+    } as Parameters<typeof linkState>[0]), null),
+  ]);
 }
 
 main().catch((error) => {
