@@ -64,7 +64,7 @@ import type { Portfolio, PortfolioStatus } from './portfolio';
  * `accounts` later does not silently start travelling.
  */
 export const PORTFOLIO_SELECT =
-  'id,broker,display_name,nickname,status,hidden,last_seen_at';
+  'id,broker,display_name,nickname,status,hidden,last_seen_at,broker_account_id,broker_host';
 
 /** The wire shape of {@link PORTFOLIO_SELECT}. */
 interface RawPortfolioRow {
@@ -75,6 +75,9 @@ interface RawPortfolioRow {
   status: string;
   hidden: boolean | null;
   last_seen_at: string | null;
+  /** Both or neither — 037's identity CHECK. See {@link Portfolio}. */
+  broker_account_id: number | string | null;
+  broker_host: string | null;
 }
 
 const STATUSES: readonly string[] = ['active', 'closed', 'archived'];
@@ -96,7 +99,23 @@ function mapPortfolio(row: RawPortfolioRow): Portfolio {
     status: (STATUSES.includes(row.status) ? row.status : 'active') as PortfolioStatus,
     hidden: row.hidden === true,
     last_seen_at: row.last_seen_at ?? null,
+    // BOTH OR NEITHER, enforced here as well as by 037's CHECK. A half-stated
+    // identity would key the live-positions join on `live:NaN`, which matches
+    // nothing and silently drops a position the trader is holding — so a row
+    // that cannot state both states neither, and the join simply misses it
+    // the honest way.
+    ...brokerIdentity(row),
   };
+}
+
+/** The `(broker_account_id, broker_host)` pair, or two nulls. */
+function brokerIdentity(row: RawPortfolioRow): Pick<Portfolio, 'brokerAccountId' | 'brokerHost'> {
+  const id = row.broker_account_id == null ? null : Number(row.broker_account_id);
+  const host = row.broker_host === 'live' || row.broker_host === 'demo' ? row.broker_host : null;
+  if (id === null || host === null || !Number.isFinite(id)) {
+    return { brokerAccountId: null, brokerHost: null };
+  }
+  return { brokerAccountId: id, brokerHost: host };
 }
 
 /**

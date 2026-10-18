@@ -71,6 +71,13 @@ import {
   MAX_SINCE_AGE_MS,
 } from '../src/lib/tradovate/trading-day';
 import { respondToTradesRequest, type TradesRouteDeps } from '../src/app/api/tradovate/trades/route';
+import {
+  FRESH_MS,
+  forgetLivePull,
+  respondToLiveRequest,
+  type LiveRouteDeps,
+} from '../src/app/api/tradovate/live/route';
+import { forgetContractNames, loadOpenPositions } from '../src/lib/tradovate/positions';
 import type {
   TradovateAccount,
   TradovateContract,
@@ -2284,6 +2291,12 @@ async function main() {
 
   await bothPathsAgree();
 
+  // ── REF-108: live positions ───────────────────────────────────────────────
+
+  await liveLoaderGroup();
+  await liveRouteGroup();
+  await liveCacheGroup();
+
   console.log();
   if (failures.length) {
     console.log(`${failures.length} failing case(s):`);
@@ -3461,6 +3474,319 @@ async function bothPathsAgree() {
       errorBodies.some((text) => text.includes('/account/list')),
     ], [false, false, false, true]),
   ]);
+}
+
+// ── REF-108: what the trader is holding right now ──────────────────────────
+//
+// Three groups, and the first assertion in two of them is about something
+// ABSENT. That is the shape this feature needs: the route must carry no price
+// — we are not entitled to one, and a fabricated figure is worse than none —
+// and one poll must not become three.
+
+/** An open position on the shared fixture account. `netPos` is signed. */
+function openPosition(netPos: number, over: Partial<TradovatePosition> = {}): TradovatePosition {
+  return {
+    id: 9500 + Math.abs(netPos),
+    accountId: ACCOUNT.id,
+    contractId: CONTRACT_ID,
+    timestamp: '2026-10-14T05:30:00.000Z',
+    tradeDate: { year: 2026, month: 10, day: 14 },
+    netPos,
+    ...over,
+  };
+}
+
+/** Both hosts answering: `live` from the scene, `demo` holding nothing. */
+function liveReaders(data: Scene) {
+  const live = reader(data);
+  const demo = reader(scene({ accounts: [], positions: [] }));
+  return { readers: { live, demo }, live, demo };
+}
+
+const LIVE_UUID = 'aaaaaaaa-0000-4000-8000-000000000001';
+
+function liveDeps(over: Partial<LiveRouteDeps> = {}): LiveRouteDeps {
+  return {
+    currentUserId: async () => 'user-1',
+    isAllowed: () => true,
+    portfoliosEnabled: () => true,
+    now: () => NOW,
+    loadPositions: async () => ({
+      accounts: [
+        { brokerAccountId: ACCOUNT.id, host: 'live', positions: [{ contractName: 'ESZ6', netPos: 2 }] },
+      ],
+      asOf: new Date(NOW).toISOString(),
+    }),
+    resolveAccounts: async () =>
+      new Map([[`live:${ACCOUNT.id}`, { accountId: LIVE_UUID, displayName: 'My Eval' }]]),
+    ...over,
+  };
+}
+
+async function liveBody(deps: LiveRouteDeps): Promise<Record<string, unknown>> {
+  forgetLivePull();
+  const response = await respondToLiveRequest(deps);
+  return (await response.json()) as Record<string, unknown>;
+}
+
+/** Every key anywhere in a nested body. The leak assertion reads this. */
+function allKeys(value: unknown, out: Set<string> = new Set<string>()): Set<string> {
+  if (Array.isArray(value)) {
+    for (const entry of value) allKeys(entry, out);
+  } else if (value && typeof value === 'object') {
+    for (const [key, child] of Object.entries(value)) {
+      out.add(key);
+      allKeys(child, out);
+    }
+  }
+  return out;
+}
+
+/** Run something whose route logs, and hand back the lines. */
+async function liveLogsOf(run: () => Promise<unknown>): Promise<string[]> {
+  const lines: string[] = [];
+  const real = console.warn;
+  console.warn = (line: unknown) => void lines.push(String(line));
+  try {
+    await run();
+  } finally {
+    console.warn = real;
+  }
+  return lines;
+}
+
+async function liveLoaderGroup() {
+  forgetContractNames();
+  const flat = liveReaders(scene({ positions: [POSITION] }));
+  const flatPull = await loadOpenPositions({
+    readers: flat.readers, environment: 'live', tradovateUserId: ACCOUNT.userId, nowMs: NOW,
+  });
+
+  forgetContractNames();
+  const held = liveReaders(scene({ positions: [openPosition(2)] }));
+  const heldPull = await loadOpenPositions({
+    readers: held.readers, environment: 'live', tradovateUserId: ACCOUNT.userId, nowMs: NOW,
+  });
+
+  // The SECOND pull, warm. Deliberately not preceded by forgetContractNames().
+  const again = liveReaders(scene({ positions: [openPosition(2)] }));
+  await loadOpenPositions({
+    readers: again.readers, environment: 'live', tradovateUserId: ACCOUNT.userId, nowMs: NOW,
+  });
+
+  forgetContractNames();
+  const short = liveReaders(scene({ positions: [openPosition(-3)] }));
+  const shortPull = await loadOpenPositions({
+    readers: short.readers, environment: 'live', tradovateUserId: ACCOUNT.userId, nowMs: NOW,
+  });
+
+  // A stranger's account holding a position, on a host they share.
+  forgetContractNames();
+  const stranger = liveReaders(
+    scene({
+      accounts: [ACCOUNT, { id: 7101, name: 'NOTYOURS', userId: 999, accountType: 'Customer' }],
+      positions: [openPosition(1), openPosition(4, { id: 9999, accountId: 7101 })],
+    })
+  );
+  const strangerPull = await loadOpenPositions({
+    readers: stranger.readers, environment: 'live', tradovateUserId: ACCOUNT.userId, nowMs: NOW,
+  });
+
+  // Failure rule 1: the non-mint host is forgiven, the mint host is not.
+  const broken: TradovateReader = {
+    get: () => Promise.reject(new TradovateRequestError('/account/list', 403, 'nope')),
+  };
+  forgetContractNames();
+  const demoDown = await loadOpenPositions({
+    readers: { live: reader(scene({ positions: [openPosition(1)] })), demo: broken },
+    environment: 'live', tradovateUserId: ACCOUNT.userId, nowMs: NOW,
+  });
+  forgetContractNames();
+  const mintDown = await thrown(() =>
+    loadOpenPositions({
+      readers: { live: broken, demo: reader(scene({ positions: [openPosition(1)] })) },
+      environment: 'live', tradovateUserId: ACCOUNT.userId, nowMs: NOW,
+    })
+  );
+
+  group('REF-108: what is open, and nothing about what it is worth', [
+    // A FLAT POSITION IS NOT A POSITION. The row survives the whole trading
+    // day with netPos 0, and telling a trader who has gone flat that they are
+    // still holding something is the one wrong statement here that would
+    // change what they do next.
+    c('(1) netPos 0 is excluded', flatPull.accounts, []),
+    c('(2) an open position is reported, with its account', heldPull.accounts.length, 1),
+    c('(3) signed: a long stays positive', heldPull.accounts[0].positions[0].netPos, 2),
+    c('(4) signed: a short stays negative', shortPull.accounts[0].positions[0].netPos, -3),
+    c('(5) the contract is named', heldPull.accounts[0].positions[0].contractName, 'ESZ6'),
+    c('(6) the broker account rides along, host-qualified',
+      [heldPull.accounts[0].brokerAccountId, heldPull.accounts[0].host], [ACCOUNT.id, 'live']),
+    c('(7) asOf is the instant of the pull', heldPull.asOf, new Date(NOW).toISOString()),
+
+    // THE ABSENCE. No price reaches this shape, because there is none to have.
+    c('(8) a position carries no price-shaped key',
+      [...allKeys(heldPull.accounts)].filter((k) => /price|pnl|value|avg|mark/i.test(k)),
+      []),
+
+    c('(9) a stranger\'s position is not reported', strangerPull.accounts.length, 1),
+    c('(10) and what is reported is the trader\'s own account',
+      strangerPull.accounts[0].brokerAccountId, ACCOUNT.id),
+
+    // THE PRICING CHAIN IS NOT WALKED. A name costs /contract/item; a
+    // valuePerPoint would cost two more reads for a number nothing multiplies.
+    c('(11) the reads are the three a name needs — no maturity, no product',
+      held.live.calls, ['/account/list', '/position/list', '/contract/item']),
+    c('(12) a second pull reuses the cached name',
+      again.live.calls, ['/account/list', '/position/list']),
+
+    c('(13) the non-mint host failing is forgiven', demoDown.accounts.length, 1),
+    c('(14) the mint host failing is fatal', mintDown, 'TradovateRequestError'),
+  ]);
+}
+
+async function liveRouteGroup() {
+  const verified = await liveBody(liveDeps());
+
+  forgetLivePull();
+  const noSession = await respondToLiveRequest(liveDeps({ currentUserId: async () => null }));
+
+  const notAllowed = await liveBody(liveDeps({ isAllowed: () => false }));
+  const noMigration = await liveBody(liveDeps({ portfoliosEnabled: () => false }));
+
+  // Two accounts, two names — REF-108's 16.10 requirement that a figure is
+  // useless without the portfolio beside it.
+  const twoAccounts = await liveBody(
+    liveDeps({
+      loadPositions: async () => ({
+        accounts: [
+          { brokerAccountId: 7001, host: 'live', positions: [{ contractName: 'ESZ6', netPos: 1 }] },
+          { brokerAccountId: 7002, host: 'demo', positions: [{ contractName: 'MNQZ6', netPos: -2 }] },
+        ],
+        asOf: new Date(NOW).toISOString(),
+      }),
+      resolveAccounts: async () =>
+        new Map([
+          ['live:7001', { accountId: 'uuid-a', displayName: 'Eval One' }],
+          ['demo:7002', { accountId: 'uuid-b', displayName: 'Eval Two' }],
+        ]),
+    })
+  );
+
+  // Both of these log on purpose, so both run inside the capture — otherwise
+  // the suite's own output carries two warnings that look like failures.
+  let unrecorded: Record<string, unknown> = {};
+  let failed: Record<string, unknown> = {};
+  const logs = await liveLogsOf(async () => {
+    unrecorded = await liveBody(liveDeps({ resolveAccounts: async () => new Map() }));
+    failed = await liveBody(
+      liveDeps({
+        loadPositions: async () => {
+          throw new TradovateNotConnectedError('user-1', 'expired');
+        },
+      })
+    );
+  });
+  const verifiedKeys = [...allKeys(verified)].sort();
+
+  group('REF-108: the route answers with positions and never with a figure', [
+    c('(1) a signed-out caller gets 401', noSession.status, 401),
+    c('(2) outside the allowlist is reflect_only, not a 403', notAllowed, { source: 'reflect_only' }),
+    c('(3) without migration 037 it is reflect_only too', noMigration, { source: 'reflect_only' }),
+    c('(4) a verified pull carries the account and the position',
+      [verified.source, (verified.accounts as unknown[]).length], ['broker_verified', 1]),
+    c('(5) the id is OURS, not the broker\'s',
+      (verified.accounts as { accountId: string }[])[0].accountId, LIVE_UUID),
+    c('(6) and the name is the one the trader sees',
+      (verified.accounts as { displayName: string }[])[0].displayName, 'My Eval'),
+
+    // THE LEAK ASSERTION, over the EXACT key set rather than a spot check. A
+    // later change that adds a price has to edit this line on purpose — the
+    // same device /today uses to keep trade rows out of the rule engine.
+    c('(7) the body has exactly these keys and no others', verifiedKeys,
+      ['accountId', 'accounts', 'asOf', 'contractName', 'displayName', 'netPos', 'positions', 'source']),
+    c('(8) no broker host reaches the browser', verifiedKeys.includes('host'), false),
+    c('(9) no broker account id reaches the browser', verifiedKeys.includes('brokerAccountId'), false),
+
+    c('(10) two accounts resolve to two names',
+      (twoAccounts.accounts as { displayName: string }[]).map((a) => a.displayName),
+      ['Eval One', 'Eval Two']),
+    // Dropped rather than rendered nameless: "you are holding something,
+    // somewhere" is worse than silence, and the next sync records the account.
+    c('(11) a position on an unrecorded account is dropped',
+      (unrecorded.accounts as unknown[]).length, 0),
+    c('(12) and the pull is still verified rather than failed', unrecorded.source, 'broker_verified'),
+    c('(13) a lapsed connection is a state, not an error', failed, { source: 'broker_expired' }),
+
+    // Counts only. This is the highest-frequency log line in the product, so
+    // a leak here repeats 240 times an hour per trader.
+    c('(14) the log carries a count', logs.some((l) => l.includes('unresolved=1')), true),
+    c('(15) and no account name, id or user id', [
+      logs.some((l) => l.includes('My Eval')),
+      logs.some((l) => l.includes(String(ACCOUNT.id))),
+      logs.some((l) => l.includes('user-1')),
+    ], [false, false, false]),
+  ]);
+}
+
+async function liveCacheGroup() {
+  let pulls = 0;
+  const counting = liveDeps({
+    loadPositions: async () => {
+      pulls += 1;
+      return { accounts: [], asOf: new Date(NOW).toISOString() };
+    },
+  });
+
+  forgetLivePull();
+  pulls = 0;
+  await respondToLiveRequest(counting);
+  await respondToLiveRequest(counting);
+  await respondToLiveRequest(counting);
+  const sequential = pulls;
+
+  // Three consumers arriving together. Without the shared in-flight promise
+  // this is three upstream pulls, which is the whole reason the hold exists.
+  forgetLivePull();
+  pulls = 0;
+  await Promise.all([
+    respondToLiveRequest(counting),
+    respondToLiveRequest(counting),
+    respondToLiveRequest(counting),
+  ]);
+  const concurrent = pulls;
+
+  let clock = NOW;
+  const moving = liveDeps({
+    now: () => clock,
+    loadPositions: async () => {
+      pulls += 1;
+      return { accounts: [], asOf: new Date(clock).toISOString() };
+    },
+  });
+  forgetLivePull();
+  pulls = 0;
+  await respondToLiveRequest(moving);
+  clock = NOW + FRESH_MS + 1;
+  await respondToLiveRequest(moving);
+  const afterExpiry = pulls;
+
+  forgetLivePull();
+  pulls = 0;
+  await respondToLiveRequest(counting);
+  await respondToLiveRequest(
+    liveDeps({ currentUserId: async () => 'user-2', loadPositions: counting.loadPositions })
+  );
+  const otherUser = pulls;
+
+  group('REF-108: one poll, however many consumers are watching', [
+    c('(1) three sequential calls inside the window are one pull', sequential, 1),
+    c('(2) three concurrent calls share one in-flight pull', concurrent, 1),
+    c('(3) past the window it pulls again', afterExpiry, 2),
+    c('(4) another trader is never served this one\'s answer', otherUser, 2),
+    c('(5) the window is ten seconds', FRESH_MS, 10_000),
+  ]);
+
+  forgetLivePull();
 }
 
 main().catch((error) => {

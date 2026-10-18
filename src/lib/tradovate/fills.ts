@@ -620,8 +620,14 @@ async function readPermittedAccounts(
  * six reads that follow it. It is also the stage whose failure is forgivable on
  * one host and fatal on the other, which is the same requirement stated as an
  * error path.
+ *
+ * EXPORTED SINCE REF-108. ./positions.ts asks the same question — which
+ * accounts are this trader's — for a read that has nothing to do with the day,
+ * and a second copy of it would be a second answer: the ownership rule, the
+ * conditional permission read and the `withoutResponseBody` reduction below
+ * are all things that must not exist twice.
  */
-async function discoverHostAccounts(
+export async function discoverHostAccounts(
   reader: TradovateReader,
   tradovateUserId: number | null
 ): Promise<{ accepted: TradovateAccount[]; claimed: ClaimedAccount[] }> {

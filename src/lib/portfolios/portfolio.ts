@@ -63,6 +63,22 @@ export interface Portfolio {
   status: PortfolioStatus;
   hidden: boolean;
   last_seen_at: string | null;
+  /**
+   * The broker's own identity for this row — both halves, or neither
+   * (REF-108 Stage 1).
+   *
+   * 037's `accounts_broker_identity_check` guarantees that pairing: a
+   * Tradovate row carries both, a manual row carries neither. They are here
+   * because the live-positions route has to join `(broker_account_id,
+   * broker_host)` — which is what `/position/list` hands back — to OUR uuid,
+   * and that join is the one thing between a position and the portfolio name
+   * the trader recognises.
+   *
+   * Both are ids, neither is free text, so they carry none of the privacy
+   * weight `display_name` does. Nothing renders them.
+   */
+  brokerAccountId: number | null;
+  brokerHost: 'live' | 'demo' | null;
 }
 
 /**
