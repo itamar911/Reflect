@@ -139,12 +139,40 @@ export function figuresFor(rows: readonly PortfolioTradeRow[]): PortfolioFigures
  */
 export const UNASSIGNED_KEY = '__unassigned__';
 
+/**
+ * Which bucket a row belongs in.
+ *
+ * EVERY TRADE LANDS ON EXACTLY ONE CARD, and `known` is what guarantees it. A
+ * row pointing at an id that is not one of this trader's portfolios is filed
+ * as unassigned rather than into a bucket with no card to render it — in
+ * which case it would be in the totals, absent from every card on the screen,
+ * and absent from "ללא תיק" too. A figure that is in the sum and on no card
+ * is the one failure mode of this screen that a trader could not debug.
+ *
+ * It is not hypothetical. `account_id` is written from a browser under RLS
+ * and `trade_plans`' policy only asks whose ROW it is, not whose ACCOUNT the
+ * id names — so a crafted request can point a trader's own trade at a
+ * portfolio that is not theirs. Nobody else's data is exposed by that (the
+ * row stays theirs, and `accounts` is behind its own policy), but the trade
+ * would vanish from this screen. The complete fix is a WITH CHECK on
+ * `trade_plans` requiring the id to name one of `auth.uid()`'s accounts,
+ * which is a migration; this makes the screen honest in the meantime.
+ *
+ * Omitted — which is what `figuresFor` and the suite do — every id is trusted.
+ */
+function bucketFor(row: PortfolioTradeRow, known?: ReadonlySet<string>): string {
+  const id = row.account_id ?? null;
+  if (id === null) return UNASSIGNED_KEY;
+  return known === undefined || known.has(id) ? id : UNASSIGNED_KEY;
+}
+
 export function figuresByPortfolio(
   rows: readonly PortfolioTradeRow[],
+  known?: ReadonlySet<string>,
 ): Map<string, PortfolioFigures> {
   const grouped = new Map<string, PortfolioTradeRow[]>();
   for (const row of countableTrades(rows)) {
-    const key = row.account_id ?? UNASSIGNED_KEY;
+    const key = bucketFor(row, known);
     const bucket = grouped.get(key);
     if (bucket) bucket.push(row);
     else grouped.set(key, [row]);

@@ -107,7 +107,14 @@ export default async function AccountsPage() {
   ]);
 
   const rows = countableTrades((tradesRes.data ?? []) as unknown as RawRow[]);
-  const figures = figuresByPortfolio(rows);
+
+  // The ids that have a card. Passed to the grouping so that a row pointing
+  // at anything else is filed as unassigned rather than into a bucket nothing
+  // renders — see `bucketFor`. The invariant it buys is the one this screen
+  // lives or dies by: every trade is on exactly one card, and the cards sum
+  // to the trader's own total.
+  const known = new Set(portfolios.map((p) => p.id));
+  const figures = figuresByPortfolio(rows, known);
 
   const cards: PortfolioCardData[] = sortPortfolios(portfolios).map((p: Portfolio) => {
     const f: PortfolioFigures = figures.get(p.id) ?? NO_FIGURES;
@@ -127,7 +134,11 @@ export default async function AccountsPage() {
     };
   });
 
-  const unassignedRows = rows.filter((row) => (row.account_id ?? null) === null);
+  // The same rule as the grouping above, or the card's count and its list
+  // would disagree about what "unassigned" means.
+  const unassignedRows = rows.filter(
+    (row) => row.account_id == null || !known.has(row.account_id),
+  );
   const unassignedFigures = figures.get(UNASSIGNED_KEY) ?? NO_FIGURES;
 
   // Bounded for RENDERING only. `assignAllUnassigned` reaches the rest in one

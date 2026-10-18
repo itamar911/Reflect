@@ -747,6 +747,25 @@ function figuresGroup() {
     c('last trade is the newest counted row', a.lastTradeAt, '2026-10-16T09:00:00.000Z'),
 
     c('the unassigned bucket is in the same map', figures.get(UNASSIGNED_KEY)?.trades, 1),
+    // EVERY TRADE IS ON EXACTLY ONE CARD. A row pointing at an id that is not
+    // one of this trader's portfolios is filed as unassigned rather than into
+    // a bucket with no card to render it — a figure that is in the sum and on
+    // no card is the one failure of this screen a trader could not debug.
+    c(
+      'a row pointing at an unknown portfolio is unassigned, not invisible',
+      figuresByPortfolio(rows, new Set([PORTFOLIO_A])).get(UNASSIGNED_KEY)?.trades,
+      2,
+    ),
+    c(
+      'and the known one is unaffected',
+      figuresByPortfolio(rows, new Set([PORTFOLIO_A])).get(PORTFOLIO_A)?.netPnl,
+      a.netPnl,
+    ),
+    c(
+      'the cards still sum to the total when one id is unknown',
+      [...figuresByPortfolio(rows, new Set([PORTFOLIO_A])).values()].reduce((s, f) => s + f.netPnl, 0),
+      [...figures.values()].reduce((s, f) => s + f.netPnl, 0),
+    ),
     c('and totals the same way', figures.get(UNASSIGNED_KEY)?.netPnl, 10),
     c('a portfolio with nothing has no win rate', emptyFigures.winRate, null),
     c('and no last trade', emptyFigures.lastTradeAt, null),
