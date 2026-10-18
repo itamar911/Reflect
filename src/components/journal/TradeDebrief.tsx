@@ -25,12 +25,14 @@ interface AIDebriefResult {
   lesson?: string;
   score?: number;
   /**
-   * The score is out of EXECUTION ONLY — the trader confirmed this trade was
-   * not planned, so the planning block was skipped and the rest normalised
-   * (J1). The badge says so, because "ציון 100" on a trade with no plan
-   * would read as praise for not planning.
+   * The trader confirmed this trade was not planned (J1).
+   *
+   * It changes no number — the planning block still scores zero out of
+   * sixty, because entering without a plan is the failure this product
+   * measures. It is here so the modal can say WHY the score is what it is,
+   * rather than leaving a ~40 to read as an unexplained verdict.
    */
-  executionOnly?: boolean;
+  unplanned?: boolean;
   documented?: boolean;
 }
 
@@ -153,7 +155,7 @@ export default function TradeDebrief({ trade, existingAnswer }: TradeDebriefProp
               <div className="flex items-center justify-between p-3 rounded-xl"
                 style={{ background: 'var(--color-tg-primary-muted)', border: '1px solid var(--color-tg-primary)30' }}>
                 <span className="text-xs text-tg-text-2 flex items-center gap-1.5">
-                  {aiResult.executionOnly ? 'ציון ביצוע' : 'ציון עסקה'}
+                  ציון עסקה
                   {aiResult.documented && (
                     <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md"
                       style={{ background: 'var(--color-tg-surface)', color: 'var(--color-tg-primary)' }}>
@@ -163,6 +165,14 @@ export default function TradeDebrief({ trade, existingAnswer }: TradeDebriefProp
                 </span>
                 <span className="text-xl font-bold" style={{ color: 'var(--color-tg-primary)' }}>{aiResult.score}/100</span>
               </div>
+            )}
+            {/* WHY the score is what it is (J1). Without it a ~40 on a trade
+                the trader executed cleanly reads as an unexplained verdict;
+                with it, it reads as the one thing that was missing. */}
+            {aiResult.score !== undefined && aiResult.unplanned && (
+              <p className="text-[11px] leading-snug" style={{ color: 'var(--color-tg-muted)' }}>
+                תכנון 0/60 — לא הוגשה תוכנית
+              </p>
             )}
             {[
               ['סיכום', aiResult.summary],

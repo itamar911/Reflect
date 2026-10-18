@@ -37,6 +37,15 @@ export interface AIDebriefResult {
   outcome?: ScoreOutcome;
   documented?: boolean;
   correctedFlags?: string[];
+  /**
+   * The trader confirmed this trade was not planned (J1).
+   *
+   * It changes no number — planning is still scored out of sixty, because
+   * entering without a plan is the failure this block measures. It is here
+   * so the breakdown can name the reason instead of leaving "תכנון 0/60" to
+   * be read as a scoring quirk.
+   */
+  unplanned?: boolean;
   error?: string;
 
   // ── Persistence (REF-107 Stage 3a) ────────────────────────────────────────
@@ -479,6 +488,16 @@ export function AIDebriefView({ result }: { result: AIDebriefResult }) {
             </div>
           ))}
         </div>
+      )}
+
+      {/* WHY the planning cell above is zero (J1). The grid has room for a
+          label and two digits, so the reason goes under it rather than
+          inside it — and it is the same sentence the breakdown's own
+          `planning.details` carries, so the prompt and the screen agree. */}
+      {breakdownCategories && result.unplanned && (
+        <p className="text-[11px] leading-snug" style={{ color: 'var(--color-tg-muted)' }}>
+          תכנון {result.breakdown?.planning.score ?? 0}/{result.breakdown?.planning.max ?? 60} — לא הוגשה תוכנית
+        </p>
       )}
 
       {outcomePoints && (

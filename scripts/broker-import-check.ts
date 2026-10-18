@@ -2389,12 +2389,13 @@ async function debriefGateGroup() {
     c('(11) a manual trade is unaffected',
       [manualState.modelCalls, (manualPrompts[0] ?? '').includes('תכנון (planning)')], [1, true]),
 
-    // J1, from the ROUTE rather than from the pure function: the response
-    // this row produces is an execution score out of what was measurable,
-    // and no longer the ~40 that scoring three nulls as failures produced.
-    c('(12) the response is flagged as an execution score', declinedBody.executionOnly, true),
-    c('(13) scored over the blocks that applied', declinedBody.breakdown.scoredOutOf, 40),
-    c('(14) and it is not the old 40/100', declinedBody.score === 40, false),
+    // J1, from the ROUTE rather than from the pure function. The decision
+    // was reversed on 18.10: the row is scored on the full scale and the
+    // missing plan costs what it costs.
+    c('(12) the response says the trade was unplanned', declinedBody.unplanned, true),
+    c('(13) planning is zero out of sixty',
+      [declinedBody.breakdown.planning.score, declinedBody.breakdown.planning.max], [0, 60]),
+    c('(14) and the score is 40 on the full scale', declinedBody.score, 40),
   ]);
 }
 
@@ -3465,16 +3466,21 @@ async function main() {
   console.log('All groups passed.');
 }
 
-// ── J1: a trade the trader never planned is not scored on planning ─────────
+// ── J1: a trade with no plan scores zero on planning ───────────────────────
 //
-// A declined broker row (source tradovate, unplanned, link_confirmed_at set)
-// carries no stop, no target and no R:R, because there was no plan to carry
-// them. The planning block scored those three nulls 0/60 and the row came out
-// at 40/100 — a trader penalised for ANSWERING HONESTLY when the product
-// asked whether they had planned it.
+// REVERSED ON 18.10, and the reversal is the product decision rather than an
+// implementation one. The first version skipped the planning block for a
+// declined broker row and normalised over what remained, so a cleanly
+// executed unplanned trade scored 100. The decision went the other way:
 //
-// The fix must be a new BRANCH and not a new formula, so the first group here
-// is about the rows that must not move.
+//   ENTERING WITHOUT A PLAN IS THE DISCIPLINE FAILURE THIS PRODUCT MEASURES.
+//   A scale that normalises it away says an impulse trade executed tidily is
+//   a 100, which is the opposite of what Reflect exists to tell a trader.
+//
+// So the scoring is exactly what it was before J1, and what survives is the
+// one part that was right: the trader is told WHY, in one line, instead of
+// being shown three itemised zeros for fields that were never going to be
+// filled. These groups pin both halves — the numbers, and the sentence.
 
 /** A fully planned manual trade, clean on every discipline flag. */
 const PLANNED: TradeScoreInput = {
@@ -3503,7 +3509,7 @@ const DECLINED: TradeScoreInput = {
 
 function scoringGroup() {
   const planned = computeTradeScore(PLANNED);
-  const unplannedManual = computeTradeScore({ ...PLANNED, stop_loss: null, take_profit: null, rr_ratio: null });
+  const emptyForm = computeTradeScore({ ...PLANNED, stop_loss: null, take_profit: null, rr_ratio: null });
   const withConditions = computeTradeScore({
     ...PLANNED,
     strategy_conditions_checked: [
@@ -3516,74 +3522,65 @@ function scoringGroup() {
   });
   const sloppy = computeTradeScore({ ...PLANNED, fomo_entry: true, revenge_trade: true });
 
-  // THE PROOF THAT NOTHING MOVED, stated as an invariant rather than as four
-  // remembered numbers: before J1 the total WAS the sum of the three blocks,
-  // and for every row that is not `unplanned` it still is. Normalisation is
-  // the identity here because `scoredOutOf` is 100 for all of these.
   const sumsToBlocks = (r: ReturnType<typeof computeTradeScore>) =>
     r.total === r.breakdown.planning.score + r.breakdown.strategyAdherence.score + r.breakdown.discipline.score;
 
-  group('J1: a planned trade scores exactly as it did', [
+  group('J1: a manual or linked trade scores exactly as it always has', [
     c('(1) a fully planned clean trade', planned.total, 100),
-    c('(2) a manual trade with no stop, target or R:R still loses those points',
-      unplannedManual.total, 40),
-    c('(3) strategy conditions redistribute the maxima, as before',
-      withConditions.total, 73),
-    c('(4) and the discipline flags still cost what they cost', sloppy.total, 84),
-
-    // The invariant. If normalisation ever stops being the identity for these
-    // shapes, all four of these fail at once rather than one number drifting.
-    c('(5) every one of them still totals the sum of its blocks',
-      [planned, unplannedManual, withConditions, sloppy].every(sumsToBlocks), true),
-    c('(6) because the denominator is 100 for all of them',
-      [planned, unplannedManual, withConditions, sloppy].map((r) => r.breakdown.scoredOutOf),
-      [100, 100, 100, 100]),
-    c('(7) and none of them is an execution score',
-      [planned, unplannedManual, withConditions, sloppy].some((r) => r.executionOnly), false),
-    // A manual row with nothing filled in is NOT the J1 case: the trader had
-    // a form and left it empty, which the planning block is right to score.
-    c('(8) an empty manual form is still measured on planning',
-      unplannedManual.breakdown.planning.max, 60),
+    c('(2) an empty form loses the planning points', emptyForm.total, 40),
+    c('(3) strategy conditions redistribute the maxima', withConditions.total, 73),
+    c('(4) and the discipline flags cost what they cost', sloppy.total, 84),
+    // The total IS the sum of the blocks — no normalisation anywhere.
+    c('(5) every total is the sum of its three blocks',
+      [planned, emptyForm, withConditions, sloppy].every(sumsToBlocks), true),
+    c('(6) planning is measured out of 60 when there are no entry conditions',
+      emptyForm.breakdown.planning.max, 60),
   ]);
 
   const declined = computeTradeScore(DECLINED);
   const declinedSloppy = computeTradeScore({ ...DECLINED, moved_sl: true, fomo_entry: true });
-  const declinedWithConditions = computeTradeScore({
-    ...DECLINED,
-    strategy_conditions_checked: [
-      { condition: 'a', checked: true },
-      { condition: 'b', checked: false },
-    ],
-  });
 
-  group('J1: a trade the trader did not plan is scored on execution', [
-    // THE TICKET. 40/100 before, because three nulls were scored as failures.
-    c('(1) a clean unplanned execution is no longer ~40', declined.total, 100),
-    c('(2) the planning block is skipped, not zeroed', declined.breakdown.planning.max, 0),
-    c('(3) and it says why rather than listing empty fields',
-      declined.breakdown.planning.details, ['לא נמדד תכנון: סימנת שהעסקה לא תוכננה מראש']),
-    c('(4) the denominator is what was actually available', declined.breakdown.scoredOutOf, 40),
-    c('(5) and the result is flagged as execution-only', declined.executionOnly, true),
+  group('J1: a trade with no plan is scored on the same 100-point scale', [
+    // THE REVERSAL. 100 under the first version; 40 now, and 40 is the point.
+    c('(1) planning scores zero out of sixty',
+      [declined.breakdown.planning.score, declined.breakdown.planning.max], [0, 60]),
+    c('(2) discipline is awarded as computed', declined.breakdown.discipline.score, 40),
+    c('(3) so the trade scores 40, not 100', declined.total, 40),
+    c('(4) and the total is still the sum of its blocks', sumsToBlocks(declined), true),
 
-    // Still a real score: a badly executed unplanned trade is not a 100.
-    c('(6) moving a stop and a FOMO entry still cost', declinedSloppy.total, 50),
-    c('(7) over the same denominator', declinedSloppy.breakdown.scoredOutOf, 40),
+    // A badly executed unplanned trade scores lower still — discipline is
+    // the only block it can lose further.
+    c('(5) moving a stop and a FOMO entry cost on top', declinedSloppy.total, 20),
 
-    // Strategy adherence is NOT part of planning and is not skipped: a trader
-    // who ticked entry conditions did that, plan or no plan.
-    c('(8) strategy conditions still count', declinedWithConditions.breakdown.strategyAdherence.score, 15),
-    c('(9) and widen the denominator', declinedWithConditions.breakdown.scoredOutOf, 70),
-    c('(10) which changes the normalised result', declinedWithConditions.total, 79),
+    // WHAT SURVIVED THE REVERSAL: the reason, in one line, instead of three
+    // complaints about fields that were never going to be filled.
+    c('(6) the planning details are one line naming the reason',
+      declined.breakdown.planning.details, ['תכנון 0/60 — לא הוגשה תוכנית']),
+    c('(7) and not the three itemised zeros',
+      declined.breakdown.planning.details.some((d) => d.includes('לא הוגדר Stop Loss')), false),
+    // A planned row keeps its itemised lines — the one-liner is for the row
+    // that could not have had them.
+    c('(8) a planned trade still gets its itemised planning lines',
+      planned.breakdown.planning.details.length, 3),
+    // An EMPTY MANUAL FORM is not the unplanned case: the trader had the
+    // form and left it blank, so they are shown which fields they skipped.
+    c('(9) an empty manual form is still itemised',
+      emptyForm.breakdown.planning.details.some((d) => d.includes('לא הוגדר Stop Loss')), true),
+    c('(10) and scores the same 40 by a different route',
+      [emptyForm.total, declined.total], [40, 40]),
 
-    // The discipline block is untouched in every case.
-    c('(11) discipline is scored out of 40 either way',
-      [declined.breakdown.discipline.max, planned.breakdown.discipline.max], [40, 40]),
+    // The label cannot disagree with the number beside it: the maxima move
+    // when a strategy carries entry conditions, so the line is interpolated.
+    c('(11) the line follows the real maximum',
+      computeTradeScore({
+        ...DECLINED,
+        strategy_conditions_checked: [{ condition: 'a', checked: true }],
+      }).breakdown.planning.details,
+      ['תכנון 0/30 — לא הוגשה תוכנית']),
   ]);
 
   // A QUEUED row is never scored at all — the debrief route does not reach
-  // scoring for one — and J1 does not change that. Asserted at the one place
-  // that decides it, so the statement is about the product and not about this
-  // function being called with a flag nobody sets.
+  // scoring for one — and neither J1 nor its reversal changes that.
   group('J1: a queued row is still not scored', [
     c('(1) queued is not declined', linkState({
       source: 'tradovate', unplanned: true, link_confirmed_at: null,

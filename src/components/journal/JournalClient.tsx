@@ -341,9 +341,7 @@ function MobileTradeCard({ t, onView, onEdit, onDelete, onClose, onDebrief, hasD
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span style={{ fontSize: 13, color: MUTED, fontWeight: 600 }}>{fmtDate(t.submitted_at)}</span>
-            {isClosed && (
-              <ScoreRing score={t.plan_score} size={30} executionOnly={linkState(t) === 'declined'} />
-            )}
+            {isClosed && <ScoreRing score={t.plan_score} size={30} />}
             {t.has_rule_violation && (
               <span title="חוק הופר" className="flex items-center">
                 <AlertTriangle role="img" aria-label="חוק הופר" size={14} color={AMBER} />
@@ -1046,10 +1044,7 @@ export default function JournalClient({
                     {/* Score + rule-violation flag */}
                     <TD>
                       <div className="flex items-center gap-1.5">
-                        <ScoreRing
-                          score={isClosed ? t.plan_score : null}
-                          executionOnly={linkState(t) === 'declined'}
-                        />
+                        <ScoreRing score={isClosed ? t.plan_score : null} />
                         {t.has_rule_violation && (
                           <span title="חוק הופר" className="flex items-center">
                             <AlertTriangle role="img" aria-label="חוק הופר" size={14} color={AMBER} />
@@ -1321,32 +1316,16 @@ function TD({ children }: { children: React.ReactNode }) {
   return <td>{children}</td>;
 }
 
-/**
- * Post-trade score (0-100) as a small colored ring; muted — when no score.
- *
- * `executionOnly` names it "ציון ביצוע" (J1). A trade the trader confirmed
- * was not planned is not scored on planning and the rest is normalised, so
- * the number is out of a different question — and an unlabelled "100" on a
- * trade with no plan would read as praise for not having one.
- *
- * The distinction lives in the accessible name and the tooltip rather than
- * in the ring, which has room for two digits and nothing else.
- */
-function ScoreRing({ score, size = 34, executionOnly = false }: {
-  score: number | null;
-  size?: number;
-  executionOnly?: boolean;
-}) {
+/** Post-trade score (0-100) as a small colored ring; muted — when no score. */
+function ScoreRing({ score, size = 34 }: { score: number | null; size?: number }) {
   if (score == null) return <span style={{ color: MUTED, fontWeight: 600 }}>—</span>;
   const clamped = Math.min(Math.max(Math.round(score), 0), 100);
   const color = clamped >= 80 ? GREEN : clamped >= 60 ? AMBER : RED;
-  const label = executionOnly ? 'ציון ביצוע' : 'ציון';
   const c = size / 2;
   const r = c - 3;
   const circ = 2 * Math.PI * r;
   return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={`${label} ${clamped}`} className="shrink-0">
-      <title>{`${label} ${clamped}`}</title>
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={`ציון ${clamped}`} className="shrink-0">
       <circle cx={c} cy={c} r={r} fill="none" stroke="rgba(128,128,128,0.22)" strokeWidth={2.5} />
       <circle cx={c} cy={c} r={r} fill="none" stroke={color} strokeWidth={2.5}
         strokeDasharray={`${(clamped / 100) * circ} ${circ}`}

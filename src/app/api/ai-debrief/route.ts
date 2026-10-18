@@ -240,8 +240,9 @@ export async function respondToDebriefRequest(
       score: scoreResult.total,
       breakdown: scoreResult.breakdown,
       correctedFlags: scoreResult.correctedFlags,
-      // So the badge can say "ציון ביצוע" rather than "ציון" (J1).
-      executionOnly: scoreResult.executionOnly,
+      // So the UI can say WHY the planning block is zero (J1). It changes no
+      // number and the badge still reads "ציון".
+      unplanned,
       documented,
       outcome,
       // So the UI can say when it was written, and tell a fresh answer from a
@@ -290,8 +291,9 @@ export async function respondToDebriefRequest(
     score: scoreResult.total,
     breakdown: scoreResult.breakdown,
     correctedFlags: scoreResult.correctedFlags,
-    // So the badge can say "ציון ביצוע" rather than "ציון" (J1).
-    executionOnly: scoreResult.executionOnly,
+    // So the UI can say WHY the planning block is zero (J1). It changes no
+    // number and the badge still reads "ציון".
+    unplanned,
     documented,
     outcome,
     generatedAt,

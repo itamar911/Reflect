@@ -2,36 +2,36 @@
  * Deterministic trade scoring.
  *
  *
- * J1 — WHY A TRADE THE TRADER NEVER PLANNED IS NOT SCORED ON PLANNING
- * --------------------------------------------------------------------
+ * J1 — A TRADE WITH NO PLAN SCORES ZERO ON PLANNING, AND THAT IS THE POINT
+ * -------------------------------------------------------------------------
  *
  * A broker row the trader has confirmed was not planned (REF-107 Stage 3b,
- * `linkState === 'declined'`) carries no stop, no target and no R:R, because
- * there was no plan to carry them. The planning block scored those three
- * nulls at zero out of sixty and the row came out at ~40/100 — which reads as
- * a bad trade and is in fact a HONEST ANSWER PENALISED. The trader told us
- * they did not plan it; the score then told them off for it.
+ * `linkState === 'declined'`) carries no stop, no target and no R:R. It is
+ * scored on the full 100-point scale like any other trade, so the planning
+ * block is 0/60 and the total lands around 40.
  *
- * So for those rows the planning block is skipped entirely — not zeroed,
- * skipped, with `max: 0` — and what remains is normalised back to 0-100.
- * `breakdown.scoredOutOf` records the raw points that were actually
- * available, so the number is auditable rather than merely different, and
- * `executionOnly` is what the two consumers branch on to call it
- * "ציון ביצוע" rather than "ציון".
+ * THIS WAS BRIEFLY THE OTHER WAY and was reversed on 18.10. The first version
+ * skipped the planning block, normalised over what remained, and called the
+ * result "ציון ביצוע" — on the reasoning that a trader who answers honestly
+ * should not be penalised for the answer. The decision went the other way,
+ * and the reasoning is the product's:
  *
- * WHAT THIS DELIBERATELY DOES NOT TOUCH:
+ *   **Entering without a plan IS the discipline failure this product
+ *   measures.** A score that normalises it away says a trade taken on
+ *   impulse and executed tidily is a 100, which is the opposite of what
+ *   Reflect exists to tell a trader. Honesty about not planning is worth
+ *   something — it is what makes the row scoreable at all — but it does not
+ *   make the missing plan cost nothing.
  *
- *   - a MANUAL row, planned or not. The trader filled in a form; an empty
- *     field there is a choice and the planning block is the right place to
- *     say so.
- *   - a LINKED broker row. The merge put the trader's own plan onto it, so
- *     it has one and is measured against it.
- *   - a QUEUED row (`link_confirmed_at` NULL). It is not scored at all —
- *     the debrief route does not reach scoring for one — and nothing here
- *     changes that.
+ * What survives from that version is the one part that was right: the trader
+ * is TOLD WHY. `unplanned` replaces the three itemised zeros with a single
+ * line naming the reason, so the breakdown reads "תכנון 0/60 — לא הוגשה
+ * תוכנית" instead of three separate complaints about fields that were never
+ * going to be filled. It changes no number.
  *
- * The regression suite asserts every pre-existing fixture's total is
- * byte-identical, because this must be a new branch and not a new formula.
+ * A QUEUED row (`link_confirmed_at` NULL) is still not scored at all — the
+ * debrief route never reaches scoring for one — and nothing here changes
+ * that.
  */
 export interface TradeScoreInput {
   stop_loss: number | null;
@@ -52,6 +52,11 @@ export interface TradeScoreInput {
    * `linkState(row) === 'declined'` — a `tradovate` row with `unplanned`
    * true and a `link_confirmed_at`. OPTIONAL and defaulting to false, so
    * every existing caller and fixture means exactly what it meant.
+   *
+   * IT CHANGES NO NUMBER. The planning block still scores what it scores,
+   * which for a row carrying no stop, target or R:R is zero. This only
+   * decides whether the trader is told the reason in one line or shown three
+   * itemised zeros for fields that were never going to be filled.
    */
   unplanned?: boolean;
 }
@@ -62,24 +67,8 @@ export interface TradeScoreResult {
     planning: { score: number; max: number; details: string[] };
     strategyAdherence: { score: number; max: number; details: string[] };
     discipline: { score: number; max: number; details: string[] };
-    /**
-     * The raw points this trade could have earned, before normalisation.
-     *
-     * 100 for every ordinary row, which is why `total` is unchanged for them.
-     * Lower when a block was skipped — see `executionOnly` — and the number
-     * is here so the figure can be explained rather than just differing.
-     */
-    scoredOutOf: number;
   };
   correctedFlags: string[]; // contradictions fixed
-  /**
-   * The planning block was skipped and `total` is an execution score (J1).
-   *
-   * What the debrief and the journal badge read to say "ציון ביצוע" instead
-   * of "ציון". A score out of a different denominator under the same word
-   * would be the worst of both.
-   */
-  executionOnly: boolean;
 }
 
 const TOLERANCE_PCT = 0.001; // 0.1%
@@ -98,7 +87,7 @@ export function computeTradeScore(input: TradeScoreInput): TradeScoreResult {
   const correctedFlags: string[] = [];
   let { exited_early } = input;
   const { moved_sl, stop_loss, take_profit, rr_ratio, required_min_rr, strategy_conditions_checked, fomo_entry, revenge_trade, exit_price } = input;
-  const executionOnly = input.unplanned === true;
+  const unplanned = input.unplanned === true;
 
   // ── Contradiction correction ────────────────────────────────────────────
   if (exit_price !== null && take_profit !== null && withinTolerance(exit_price, take_profit)) {
@@ -114,55 +103,64 @@ export function computeTradeScore(input: TradeScoreInput): TradeScoreResult {
 
   // ── Planning ─────────────────────────────────────────────────────────────
   //
-  // SKIPPED ENTIRELY for a trade the trader told us they did not plan (J1).
-  // Not scored as zero — `max` is 0 too, so the points simply are not on the
-  // table and the normalisation below hands back a score out of what was.
-  const slMax = executionOnly ? 0 : hasStrategyConditions ? 10 : 20;
-  const tpMax = executionOnly ? 0 : hasStrategyConditions ? 5 : 10;
-  const rrMax = executionOnly ? 0 : hasStrategyConditions ? 15 : 30;
+  // SCORED FOR EVERY ROW, including one the trader says was not planned. See
+  // the header: entering without a plan is the failure this block measures,
+  // and a scale that excused it would be measuring nothing.
+  const slMax = hasStrategyConditions ? 10 : 20;
+  const tpMax = hasStrategyConditions ? 5 : 10;
+  const rrMax = hasStrategyConditions ? 15 : 30;
 
   const planningDetails: string[] = [];
   let planningScore = 0;
 
-  if (executionOnly) {
-    // ONE LINE FOR THE WHOLE BLOCK, and it says why rather than reading as a
-    // zero. "לא הוגדר Stop Loss (0/20)" three times over is the sentence this
-    // replaces, and it was being shown to a trader for having answered a
-    // question honestly.
-    planningDetails.push('לא נמדד תכנון: סימנת שהעסקה לא תוכננה מראש');
+  if (stop_loss !== null) {
+    planningScore += slMax;
+    planningDetails.push(`הוגדר Stop Loss (+${slMax})`);
   } else {
-    if (stop_loss !== null) {
-      planningScore += slMax;
-      planningDetails.push(`הוגדר Stop Loss (+${slMax})`);
-    } else {
-      planningDetails.push(`לא הוגדר Stop Loss (0/${slMax})`);
-    }
+    planningDetails.push(`לא הוגדר Stop Loss (0/${slMax})`);
+  }
 
-    if (take_profit !== null) {
-      planningScore += tpMax;
-      planningDetails.push(`הוגדר Take Profit (+${tpMax})`);
-    } else {
-      planningDetails.push(`לא הוגדר Take Profit (0/${tpMax})`);
-    }
+  if (take_profit !== null) {
+    planningScore += tpMax;
+    planningDetails.push(`הוגדר Take Profit (+${tpMax})`);
+  } else {
+    planningDetails.push(`לא הוגדר Take Profit (0/${tpMax})`);
+  }
 
-    const rrPassed = required_min_rr !== null
-      ? rr_ratio !== null && rr_ratio >= required_min_rr
-      : rr_ratio !== null;
+  const rrPassed = required_min_rr !== null
+    ? rr_ratio !== null && rr_ratio >= required_min_rr
+    : rr_ratio !== null;
 
-    if (rrPassed) {
-      planningScore += rrMax;
-      planningDetails.push(
-        required_min_rr !== null
-          ? `יחס R:R ${rr_ratio} עומד במינימום הנדרש ${required_min_rr} (+${rrMax})`
-          : `יחס R:R ${rr_ratio} תועד (+${rrMax})`
-      );
-    } else {
-      planningDetails.push(
-        required_min_rr !== null
-          ? `יחס R:R ${rr_ratio ?? '—'} מתחת למינימום הנדרש ${required_min_rr} (0/${rrMax})`
-          : `לא תועד יחס R:R (0/${rrMax})`
-      );
-    }
+  if (rrPassed) {
+    planningScore += rrMax;
+    planningDetails.push(
+      required_min_rr !== null
+        ? `יחס R:R ${rr_ratio} עומד במינימום הנדרש ${required_min_rr} (+${rrMax})`
+        : `יחס R:R ${rr_ratio} תועד (+${rrMax})`
+    );
+  } else {
+    planningDetails.push(
+      required_min_rr !== null
+        ? `יחס R:R ${rr_ratio ?? '—'} מתחת למינימום הנדרש ${required_min_rr} (0/${rrMax})`
+        : `לא תועד יחס R:R (0/${rrMax})`
+    );
+  }
+
+
+  // WHY, IN ONE LINE, INSTEAD OF THREE ITEMISED ZEROS (J1).
+  //
+  // The score above is unchanged — a row with no stop, target or R:R scores
+  // zero whether or not it says so. What changes is what the trader reads:
+  // "לא הוגדר Stop Loss (0/20)" three times over is three complaints about
+  // fields that were never going to be filled, where one sentence naming the
+  // reason is the same fact said once.
+  //
+  // Interpolated rather than hardcoded as "0/60": the maxima move when a
+  // strategy carries entry conditions, and a label that could disagree with
+  // the number beside it is worse than no label.
+  if (unplanned) {
+    planningDetails.length = 0;
+    planningDetails.push(`תכנון ${planningScore}/${slMax + tpMax + rrMax} — לא הוגשה תוכנית`);
   }
 
   // ── Strategy adherence ───────────────────────────────────────────────────
@@ -181,6 +179,26 @@ export function computeTradeScore(input: TradeScoreInput): TradeScoreResult {
   }
 
   // ── Discipline ───────────────────────────────────────────────────────────
+  //
+  // THE FOUR "NOT VIOLATED" DEFAULTS ARE PROVISIONAL, and on an imported row
+  // they are the reason an unplanned trade still scores around 40 rather
+  // than near zero.
+  //
+  // `moved_sl`, `exited_early`, `fomo_entry` and `revenge_trade` are all
+  // SELF-REPORTED, set in CloseTrade.tsx by a trader answering four
+  // questions. A broker row has none of them, so each reads `=== true` as
+  // false and the block awards its full 40 — not because the trade was
+  // disciplined, but because nothing contradicted it. A trade entered on
+  // impulse and managed badly can therefore collect the whole discipline
+  // block for having no evidence against it.
+  //
+  // REF-113 is what changes that: it reads the orders behind a trade's
+  // fills, so `moved_sl` in particular stops being a question the trader
+  // answers and becomes something the broker can be asked. When it lands,
+  // revisit whether an absent self-report should still default to
+  // "not violated" or to "unknown" — an unknown that awards no points is a
+  // different and arguably more honest block, and it is a product decision
+  // rather than this function's to make unilaterally.
   const disciplineDetails: string[] = [];
   let disciplineScore = 0;
 
@@ -212,15 +230,7 @@ export function computeTradeScore(input: TradeScoreInput): TradeScoreResult {
     disciplineDetails.push('זוהתה עסקת נקמנות (0/8)');
   }
 
-  const earned = planningScore + strategyScore + disciplineScore;
-  const scoredOutOf = slMax + tpMax + rrMax + strategyMax + 40;
-
-  // NORMALISED, so the number is always out of 100 and the two consumers do
-  // not each have to divide. For an ordinary row `scoredOutOf` is 100 and
-  // this is the identity — which is what keeps every existing total
-  // byte-identical. The guard is for a shape that cannot occur today
-  // (discipline is always 40) and costs one comparison to make impossible.
-  const total = scoredOutOf > 0 ? Math.round((earned / scoredOutOf) * 100) : 0;
+  const total = planningScore + strategyScore + disciplineScore;
 
   return {
     total,
@@ -228,9 +238,7 @@ export function computeTradeScore(input: TradeScoreInput): TradeScoreResult {
       planning: { score: planningScore, max: slMax + tpMax + rrMax, details: planningDetails },
       strategyAdherence: { score: strategyScore, max: strategyMax, details: strategyDetails },
       discipline: { score: disciplineScore, max: 40, details: disciplineDetails },
-      scoredOutOf,
     },
     correctedFlags,
-    executionOnly,
   };
 }
