@@ -485,6 +485,67 @@ rest /order/modifyOrder                 refused: mutation pattern
 
 ---
 
+## 8. Open positions and cash balances — REF-108 Stage 0
+
+**[PENDING] — this whole section.** The `--live` mode answers it, and like
+everything else here it needs the owner to run it — **with a position open.**
+
+```
+node --env-file=scripts/spike/.env scripts/spike/tradovate-spike.mjs --live
+```
+
+**Why there is nothing to quote here yet.** REF-108 needs a number for an open
+position, and the one thing it cannot have is a mark price: Market Data is
+**Denied in our OAuth registration** and the feed needs CME sub-vendor
+registration (see the table at the top of this file, and
+`src/lib/tradovate/types.ts:66`). That leaves two questions the repository
+cannot answer, and until now this script was asking neither — `/position/list`
+has been in `ALLOWED_REST` since the first version and was **never called**.
+
+> **Q8 — does any cash-balance field carry an unrealised / open P&L?**
+>
+> `src/lib/tradovate/fills.ts:78` already names
+> `/cashBalance/getcashbalancesnapshot` and quotes its documentation for
+> `realizedPnL`. If the same body carries an **open** figure, REF-108 needs no
+> mark price and no arithmetic of ours — the broker computes it, per account,
+> which is the shape the ticket asks for. Whether it does is **recalled at
+> best, and unverified**.
+>
+> A realised-only answer adds nothing: that is the figure `fills.ts` already
+> derives from fill pairs.
+
+> **Q9 — does `/position/list` carry an average entry price at all?**
+>
+> `netPrice`, `avgPrice`, `bought` and `sold` appear **nowhere in this
+> repository**. `types.ts` declares six fields — `id`, `accountId`,
+> `contractId`, `timestamp`, `tradeDate`, `netPos` — and its header forbids
+> widening from guesswork, so the formula REF-108 was specified around rests
+> on a field nobody here has seen. A positive answer makes that formula one
+> input short rather than two; **it does not supply the mark.**
+
+**What the mode prints.** The same sanitised `field → type → sample` survey as
+`--orders`, under the same rule — every sample is its type name unless the
+field is a known enum — plus a `<<< P&L-SHAPED` marker on any field whose NAME
+matches `pnl | p_and_l | unrealiz | unrealis | realiz | realis | open | pl`
+(as a word, so `plugin` and `displayName` do not fire). The verdict is a list
+of field names and two booleans. **No balance, no price, no id and no
+timestamp reaches the output**, which `scripts/spike/orders-selfcheck.mjs`
+asserts directly — including that a flagged field's own value still prints as
+`<number>`.
+
+**Three endpoints were added to the allowlist** — `/position/list`,
+`/cashBalance/list`, `/cashBalance/getcashbalancesnapshot` — and the mutation
+denylist was **not touched**. The snapshot is the only non-auth POST in the
+script: it is documented as a POST taking `{ accountId }`, it reads, and the
+self-check pins that `liquidatePosition`, `closePosition` and `placeOrder` are
+all still refused.
+
+> **A flat account answers neither question**, and the output says so in both
+> places rather than reporting a confident "no". Open a position by hand in
+> the Tradovate UI — not from this script — and re-run.
+
+---
+
 ## Open questions for the owner
 
 1. **Credentials.** None are present, so nothing has been run live. Put them in

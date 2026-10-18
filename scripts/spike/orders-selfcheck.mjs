@@ -27,6 +27,11 @@ import {
   versionsByOrder,
   enumValues,
   VOCABULARY,
+  // REF-108 Stage 0 (--live).
+  pnlShapedFields,
+  assertReadOnly,
+  LIVE_ENDPOINTS,
+  POSITION_PRICE_FIELDS,
 } from './tradovate-spike.mjs';
 
 let failures = 0;
@@ -189,6 +194,84 @@ group('a tie on timestamp is broken by id, so the initial stop is never ambiguou
   const b = version({ id: 11, timestamp: '2026-10-14T05:00:00Z' });
   c('(1) forwards', versionsByOrder([a, b]).get(884422).map((v) => v.id), [10, 11]);
   c('(2) backwards — same answer', versionsByOrder([b, a]).get(884422).map((v) => v.id), [10, 11]);
+});
+
+// ── 7. REF-108 Stage 0 (--live): the flagger, and the guard ─────────────────
+//
+// `--live` reads a trader's open positions and their cash balance, which is
+// the most sensitive pair of endpoints this script has touched. Two properties
+// are worth pinning rather than believing: that its verdict is built from
+// field NAMES and never values, and that adding three endpoints to the
+// allowlist did not widen it by anything else.
+
+group('REF-108: the P&L flagger reads names, and reads them widely', () => {
+  // The names worth catching. A miss here is the whole feature: a field this
+  // does not flag is a field nobody looks at twice.
+  c('(1) openPnL', pnlShapedFields(['openPnL']), ['openPnL']);
+  c('(2) unrealizedPnl', pnlShapedFields(['unrealizedPnl']), ['unrealizedPnl']);
+  c('(3) unrealisedPL — the other spelling', pnlShapedFields(['unrealisedPL']), ['unrealisedPL']);
+  c('(4) realizedPnL', pnlShapedFields(['realizedPnL']), ['realizedPnL']);
+  c('(5) totalPnL', pnlShapedFields(['totalPnL']), ['totalPnL']);
+  c('(6) openPositionValue', pnlShapedFields(['openPositionValue']), ['openPositionValue']);
+  c('(7) a bare pl', pnlShapedFields(['pl']), ['pl']);
+  c('(8) plToday', pnlShapedFields(['plToday']), ['plToday']);
+
+  // …and the names that must NOT be flagged, or the list stops being read.
+  // Every one of these carries `pl` as a substring.
+  c('(9) plugin is not a P&L', pnlShapedFields(['userPlugins']), []);
+  c('(10) displayName is not a P&L', pnlShapedFields(['displayName']), []);
+  c('(11) template is not a P&L', pnlShapedFields(['templateId']), []);
+
+  // It reads the LEAF of a dotted path, because `fieldSurvey` emits nested
+  // paths and a nested openPnL is still an openPnL.
+  c('(12) a nested leaf is read', pnlShapedFields(['balance.openPnL']), ['balance.openPnL']);
+  c('(13) a parent named open does not drag its children in',
+    pnlShapedFields(['open.currencyId']), []);
+
+  // It takes the Map fieldSurvey returns, not only an array.
+  const survey = fieldSurvey([{ openPnL: 1234.56, currencyId: 7, name: 'x' }]);
+  c('(14) it accepts a survey Map', pnlShapedFields(survey), ['openPnL']);
+
+  // THE ONE THAT MATTERS. The flagger names the field and the survey still
+  // refuses to print what is in it: 1234.56 is a trader's money.
+  const printed = [...survey.entries()].map(([k, v]) => `${k} ${v.sample}`).join(' | ');
+  c('(15) the flagged field\'s VALUE is still not printed', printed.includes('1234.56'), false);
+  c('(16) it prints as its type instead', survey.get('openPnL').sample, '<number>');
+});
+
+group('REF-108: the allowlist grew by exactly three, and the denylist did not move', () => {
+  const allowed = (path) => {
+    try {
+      assertReadOnly('rest', path);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  c('(1) /position/list is allowed', allowed('/position/list'), true);
+  c('(2) /cashBalance/list is allowed', allowed('/cashBalance/list'), true);
+  c('(3) the snapshot is allowed', allowed('/cashBalance/getcashbalancesnapshot'), true);
+  c('(4) and those are the three --live reads', LIVE_ENDPOINTS, [
+    '/position/list',
+    '/cashBalance/list',
+    '/cashBalance/getcashbalancesnapshot',
+  ]);
+
+  // The guard is still a guard. These are the calls that would close a
+  // trader's position, and two are shaped like the ones just added.
+  c('(5) liquidatePosition still refused', allowed('/order/liquidatePosition'), false);
+  c('(6) closePosition still refused', allowed('/position/closePosition'), false);
+  c('(7) placeOrder still refused', allowed('/order/placeOrder'), false);
+  c('(8) an unlisted read is still refused', allowed('/marginSnapshot/list'), false);
+  // The mutation denylist outranks the allowlist, and must keep doing so.
+  c('(9) a mutating path is refused even spelled like an allowed one',
+    allowed('/cashBalance/updateCashBalance'), false);
+
+  // Q9's field list is names only — asserted because it is the one list in
+  // --live that names things we expect NOT to find.
+  c('(10) the Q9 names are the recalled ones', POSITION_PRICE_FIELDS.includes('netPrice'), true);
+  c('(11) and none of them is declared in the repo today', POSITION_PRICE_FIELDS.length, 8);
 });
 
 console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'} — ${checks - failures}/${checks} checks\n`);

@@ -46,6 +46,44 @@
  * mutation denylist UNCHANGED. `/orderStrategy/list` does not match
  * `startorderstrategy`, which needs the `start` prefix. The regex was not
  * touched and must not be.
+ *
+ *
+ * THE --live MODE (REF-108 STAGE 0)
+ * ---------------------------------
+ *
+ *   node --env-file=scripts/spike/.env scripts/spike/tradovate-spike.mjs --live
+ *
+ * RUN IT WITH A POSITION OPEN. That is the whole point: every question it asks
+ * is about an open position, and a flat account answers none of them.
+ *
+ * It exists because REF-108's investigation reached two questions the
+ * repository cannot answer and this script was not asking:
+ *
+ *   Q8  Does any cash-balance field carry an UNREALISED / OPEN P&L?
+ *       If one does, REF-108 needs no mark price — and we are NOT entitled to
+ *       a mark price (Market Data is Denied in our OAuth registration), so
+ *       this is the difference between the live figure existing and not.
+ *   Q9  Does /position/list carry an average entry price at all?
+ *       `netPrice`, `avgPrice`, `bought` and `sold` appear NOWHERE in this
+ *       repository. src/lib/tradovate/types.ts declares six fields and its
+ *       header forbids widening from guesswork, so the formula REF-108 was
+ *       specified around rests on a field nobody here has seen.
+ *
+ * A SEPARATE MODE for `--orders`' reason: steps 1-6 open a WebSocket and wait
+ * ~30s, which has nothing to do with positions and makes a re-run slow. This
+ * one authenticates and reads three endpoints on both hosts.
+ *
+ * SAME PRINTING RULES, AND THEY ARE NOT RELAXED HERE. Field names and types;
+ * every sample replaced by its type name unless the field is a known enum. A
+ * cash balance IS the trader's money and a position IS their exposure, so the
+ * one thing this mode must not do is print what it measures. The verdict it
+ * produces is a list of FIELD NAMES and booleans.
+ *
+ * ONE OF THE THREE IS A POST, and it is worth naming: Tradovate documents
+ * `/cashBalance/getcashbalancesnapshot` as a POST taking `{ accountId }`. It
+ * reads, it does not write, and it passes the mutation denylist unchanged —
+ * but it is the only non-auth POST in this file, so do not let it become a
+ * precedent for "the denylist allowed it, so it must be fine".
  */
 
 import { writeFileSync, mkdirSync } from 'node:fs';
@@ -105,6 +143,14 @@ const ALLOWED_REST = new Set([
   '/orderStrategy/list',
   '/orderStrategyLink/list',
   '/command/list',
+  // REF-108 Stage 0 (--live). All three pass the mutation denylist unchanged:
+  // none of them contains `place`, `cancel`, `modify`, `liquidat`,
+  // `closeposition`, `create`, `update` or `delete` as a substring. The
+  // snapshot is a POST and still a read — see the module header, and do not
+  // treat "the denylist allowed it" as the argument.
+  '/position/list',
+  '/cashBalance/list',
+  '/cashBalance/getcashbalancesnapshot',
 ]);
 
 const ALLOWED_WS = new Set(['authorize', 'user/syncrequest']);
@@ -847,6 +893,267 @@ const STAGE0_QUESTIONS = [
   'Q7  Response counts - does any land on a round number (truncated, not exhausted)?  -> COUNTS.',
 ];
 
+// ---------------------------------------------------------------------------
+// REF-108 STAGE 0 - the live-position measurement (--live)
+// ---------------------------------------------------------------------------
+
+/** The three endpoints --live reads, per host. The snapshot is a POST. */
+const LIVE_ENDPOINTS = ['/position/list', '/cashBalance/list', '/cashBalance/getcashbalancesnapshot'];
+
+/**
+ * A field name that might be carrying a profit-and-loss figure.
+ *
+ * NAMES ONLY — this never looks at a value, which is what keeps the verdict
+ * printable. It is deliberately WIDE: a false positive costs one line in a
+ * report the owner reads once, and a false negative costs the whole feature,
+ * because a field this misses is a field nobody looks at again.
+ *
+ * `pl` is matched only as a word-ish boundary (`pl`, `plToday`, `total_pl`)
+ * rather than as a substring, or it would flag `plugin`, `displayName` and
+ * `template` and the list would stop being worth reading.
+ */
+const PNL_SHAPED =
+  /(pnl|p_?and_?l|unrealiz|unrealis|realiz|realis|open|^pl$|^pl[A-Z_]|[_.]pl$|[_.]pl[A-Z_])/i;
+
+/**
+ * Which of a survey's field names look like a P&L figure.
+ *
+ * Takes the Map {@link fieldSurvey} returns, or any iterable of names, so the
+ * self-check can drive it without building a survey.
+ */
+export function pnlShapedFields(fields) {
+  const names = fields instanceof Map ? [...fields.keys()] : [...fields];
+  return names.filter((name) => PNL_SHAPED.test(String(name).split('.').pop())).sort();
+}
+
+/**
+ * Q8 and Q9, printed at the top so the owner knows what they are reading.
+ *
+ * Same shape as {@link STAGE0_QUESTIONS}: the script measures, the owner
+ * decides, and the checklist is where the decision gets written down.
+ */
+const LIVE_QUESTIONS = [
+  'Q8  Does any cash-balance field carry an unrealised/open P&L?',
+  '      -> read "FLAGGED FIELDS" under each /cashBalance survey, and the Q8 verdict.',
+  '      -> if YES, REF-108 stage 4 uses it and needs no mark price (we have no entitlement).',
+  '      -> if NO, the floor ships as v1 and the live number leaves the launch blocker.',
+  'Q9  Does /position/list carry an average entry price at all?',
+  '      -> read the /position/list survey. netPrice / avgPrice / bought / sold appear',
+  '         NOWHERE in this repository, so this is measuring whether they exist.',
+];
+
+/** Names Q9 asks about. Presence is reported per name; values never are. */
+const POSITION_PRICE_FIELDS = ['netPrice', 'avgPrice', 'bought', 'boughtValue', 'sold', 'soldValue', 'prevPos', 'prevPrice'];
+
+async function stepLive() {
+  const startedAt = new Date();
+  const lines = [];
+
+  const w = (text = '') => {
+    const line = redact(String(text));
+    lines.push(line);
+    console.log(line);
+  };
+  const rule = (ch = '-') => w(ch.repeat(78));
+
+  rule('=');
+  w(`REF-108 STAGE 0 - open positions and cash balances, measured.  ${startedAt.toISOString()}`);
+  rule('=');
+  w();
+  w('READ-ONLY. No order was placed, modified or cancelled. The allowlist and the');
+  w('mutation denylist both ran on every call below, including the one POST.');
+  w();
+  w('NO VALUES. Every sample is its TYPE NAME unless the field is a known enum.');
+  w('No price, no balance, no id, no timestamp and no quantity appears in this file.');
+  w('Counts, field names and booleans do.');
+  w();
+  w('*** RUN THIS WITH A POSITION OPEN. A flat account answers neither question. ***');
+  w();
+  rule();
+  w('THE TWO QUESTIONS - fill these in by reading what follows');
+  rule();
+  for (const q of LIVE_QUESTIONS) w(q);
+  w();
+  w('  [ ] Q8 answer: ');
+  w('  [ ] Q9 answer: ');
+  w();
+
+  const findings = { startedAt: startedAt.toISOString(), hosts: {} };
+
+  for (const [host, baseUrl] of Object.entries(HOSTS)) {
+    rule('=');
+    w(`HOST: ${host}`);
+    rule('=');
+
+    const hostFindings = { endpoints: {} };
+    findings.hosts[host] = hostFindings;
+
+    // The account the snapshot is asked about. `/account/list` is already read
+    // by step 2 and by the app on every pull, so this costs nothing new.
+    //
+    // FIRST `Customer` ACCOUNT, matching what the product records: src/lib/
+    // tradovate/accounts.ts keeps the TYPE filter even after REF-110 widened
+    // everything else, because a House or Omnibus account is never an end
+    // trader's portfolio. Falls back to the first account of any type so that
+    // a trial login with an unusual shape still measures something.
+    let accountId = null;
+    let accountCount = 0;
+    try {
+      const accounts = (await rest('/account/list', { baseUrl })) ?? [];
+      const list = Array.isArray(accounts) ? accounts : [];
+      accountCount = list.length;
+      const customer = list.find((a) => a?.accountType === 'Customer') ?? list[0] ?? null;
+      accountId = typeof customer?.id === 'number' ? customer.id : null;
+      w(`  /account/list            count=${list.length}  usable account for the snapshot: ${accountId !== null}`);
+    } catch (e) {
+      w(`  /account/list            ERROR: ${e.message.slice(0, 120)}`);
+    }
+    hostFindings.accounts = { count: accountCount, snapshotAccountFound: accountId !== null };
+    w();
+
+    /** @type {Record<string, unknown[]>} */
+    const data = {};
+
+    for (const path of LIVE_ENDPOINTS) {
+      try {
+        // The snapshot is the POST, and it needs an account to be about. With
+        // no account there is nothing to ask, which is a finding rather than
+        // an error.
+        if (path === '/cashBalance/getcashbalancesnapshot' && accountId === null) {
+          w(`  ${path.padEnd(38)} SKIPPED - no account id on this host`);
+          hostFindings.endpoints[path] = { skipped: 'no account' };
+          data[path] = [];
+          continue;
+        }
+
+        const raw =
+          path === '/cashBalance/getcashbalancesnapshot'
+            ? await rest(path, { baseUrl, body: { accountId } })
+            : await rest(path, { baseUrl });
+
+        // The snapshot answers with ONE object; the two lists answer with an
+        // array. `fieldSurvey` wants rows either way.
+        const list = Array.isArray(raw) ? raw : raw ? [raw] : [];
+        data[path] = list;
+        w(`  ${path.padEnd(38)} count=${list.length}`);
+        hostFindings.endpoints[path] = { count: list.length };
+      } catch (e) {
+        // Recorded, never fatal — the /tradingPermission/list precedent. A
+        // host with no provisioning answers 401/403 and that is a finding.
+        w(`  ${path.padEnd(38)} ERROR: ${e.message.slice(0, 120)}`);
+        hostFindings.endpoints[path] = { error: e.message.slice(0, 200) };
+        data[path] = [];
+      }
+    }
+    w();
+
+    if (Object.values(data).every((rows) => rows.length === 0)) {
+      w('Nothing on this host. Either it holds none of this user\'s accounts, or the');
+      w('account has never traded. Open a position by hand in the Tradovate UI - not');
+      w('from this script - and re-run.');
+      w();
+      continue;
+    }
+
+    // ── field surveys, with the flagged names called out ───────────────────
+    for (const path of LIVE_ENDPOINTS) {
+      const rows = data[path];
+      if (!rows.length) continue;
+      rule();
+      w(`FIELD SURVEY  ${path}   (${rows.length} rows)`);
+      rule();
+      const fields = fieldSurvey(rows);
+      w(`  ${'field'.padEnd(26)} ${'type'.padEnd(18)} ${'on'.padEnd(8)} sample`);
+      for (const [name, info] of [...fields.entries()].sort()) {
+        const flagged = pnlShapedFields([name]).length > 0;
+        w(
+          `  ${name.padEnd(26)} ${[...info.types].sort().join('|').padEnd(18)} ` +
+            `${`${info.present}/${rows.length}`.padEnd(8)} ${info.sample}` +
+            (flagged ? '   <<< P&L-SHAPED' : '')
+        );
+      }
+
+      const flagged = pnlShapedFields(fields);
+      w();
+      w(`  FLAGGED FIELDS: ${flagged.length ? flagged.join(', ') : '(none)'}`);
+      hostFindings.endpoints[path].fields = Object.fromEntries(
+        [...fields.entries()].map(([k, v]) => [
+          k,
+          { types: [...v.types].sort(), presentOn: v.present, sample: v.sample },
+        ])
+      );
+      hostFindings.endpoints[path].flagged = flagged;
+      w();
+    }
+
+    // ── Q8 ─────────────────────────────────────────────────────────────────
+    rule();
+    w('Q8  DOES A CASH BALANCE CARRY AN UNREALISED / OPEN P&L?');
+    rule();
+    const balanceFlagged = [
+      ...(hostFindings.endpoints['/cashBalance/list']?.flagged ?? []),
+      ...(hostFindings.endpoints['/cashBalance/getcashbalancesnapshot']?.flagged ?? []),
+    ];
+    const unique = [...new Set(balanceFlagged)].sort();
+    // "Open" rather than "realized": a field named for the REALISED figure is
+    // the one fills.ts already knows about and is not what REF-108 needs.
+    const openShaped = unique.filter((n) => /unrealiz|unrealis|open/i.test(n));
+    w(`  P&L-shaped fields on the two cash-balance reads: ${unique.join(', ') || '(none)'}`);
+    w(`  of those, OPEN/UNREALISED-shaped:                ${openShaped.join(', ') || '(none)'}`);
+    w();
+    w(`  >> ${
+      openShaped.length
+        ? 'YES. REF-108 stage 4 can use the broker\'s own figure - no mark price needed.\n' +
+          '     Next: confirm the unit and the sign by hand against the platform, and ask\n' +
+          '     vendor compliance whether an owner-facing unrealised figure is entitled.'
+        : unique.length
+          ? 'ONLY REALISED. That is the figure fills.ts already derives, so it adds nothing.\n' +
+            '     The floor (positions, no number) is v1.'
+          : 'NO P&L FIELD AT ALL on this host. The floor is v1.'
+    }`);
+    w();
+    hostFindings.q8 = { flagged: unique, openShaped, verdict: openShaped.length > 0 };
+
+    // ── Q9 ─────────────────────────────────────────────────────────────────
+    rule();
+    w('Q9  DOES /position/list CARRY AN AVERAGE ENTRY PRICE?');
+    rule();
+    const positions = data['/position/list'] ?? [];
+    const present = POSITION_PRICE_FIELDS.filter((f) => positions.some((p) => p && f in p));
+    const open = positions.filter((p) => typeof p?.netPos === 'number' && p.netPos !== 0).length;
+    w(`  position rows:              ${positions.length}`);
+    w(`  of those, netPos !== 0:     ${open}${open === 0 ? '   *** NO OPEN POSITION - Q9 is not answered, re-run holding one ***' : ''}`);
+    w(`  price-shaped fields found:  ${present.join(', ') || '(none)'}`);
+    for (const field of POSITION_PRICE_FIELDS) {
+      w(`    ${field.padEnd(14)} ${positions.some((p) => p && field in p)}`);
+    }
+    w();
+    w(`  >> ${
+      present.length
+        ? 'PRESENT. types.ts may be widened to the measured fields - and only to those.\n' +
+          '     An average entry price makes the (mark - avg) formula one input short\n' +
+          '     rather than two, which still leaves the mark unavailable.'
+        : open === 0
+          ? 'UNANSWERED - nothing was open. Re-run with a position.'
+          : 'ABSENT. The six declared fields are all there is, and no derivation of an\n' +
+            '     average entry is available for a multi-account trader (investigation A.2).'
+    }`);
+    w();
+    hostFindings.q9 = { positions: positions.length, open, priceFieldsPresent: present };
+  }
+
+  dump('live-findings', findings);
+
+  mkdirSync(OUT_DIR, { recursive: true });
+  const stamp = startedAt.toISOString().replace(/[:.]/g, '-');
+  const file = join(OUT_DIR, `live-${stamp}.txt`);
+  writeFileSync(file, `${lines.join('\n')}\n`, 'utf8');
+  w(`Report written to ${file}`);
+
+  record('live', findings);
+  return findings;
+}
+
 async function stepOrders() {
   const startedAt = new Date();
   const lines = [];
@@ -1160,10 +1467,23 @@ async function stepOrders() {
 async function main() {
   const started = new Date();
   const ordersOnly = process.argv.includes('--orders');
+  const liveOnly = process.argv.includes('--live');
 
   log(`Tradovate spike - READ ONLY - ${started.toISOString()}`);
   log(`REST ${REST_URL}`);
-  if (!ordersOnly) log(`WS   ${WS_URL}`);
+  if (!ordersOnly && !liveOnly) log(`WS   ${WS_URL}`);
+
+  // REF-108 Stage 0. Same arrangement as --orders and for the same reason:
+  // the WebSocket steps cost ~30s of waiting and say nothing about positions,
+  // and this mode is meant to be re-run while a position is open.
+  if (liveOnly) {
+    log(`Hosts: ${Object.keys(HOSTS).join(', ')}`);
+    await step1Auth();
+    await stepLive();
+    const liveFile = dump('spike-report-live', { startedAt: started.toISOString(), ...report });
+    log(`\nStructured report written to ${liveFile}`);
+    process.exit(0);
+  }
 
   // REF-113 Stage 0. Authenticate, then read orders on both hosts and stop:
   // the WebSocket steps are about replay semantics and cost ~30s of waiting,
@@ -1213,4 +1533,17 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
  * MEASURED, NOT ASSERTED" in src/lib/tradovate/import.ts). Nothing in the app
  * imports any of this.
  */
-export { safeSample, fieldSurvey, changedFields, versionsByOrder, enumValues, VOCABULARY };
+export {
+  safeSample,
+  fieldSurvey,
+  changedFields,
+  versionsByOrder,
+  enumValues,
+  VOCABULARY,
+  LIVE_ENDPOINTS,
+  POSITION_PRICE_FIELDS,
+  // REF-108 Stage 0. The guard itself, so the self-check can assert that the
+  // three new endpoints pass AND that nothing mutating slipped in beside
+  // them — the discipline is the point, not the endpoints.
+  assertReadOnly,
+};
