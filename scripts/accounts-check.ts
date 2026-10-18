@@ -53,6 +53,9 @@
  * Usage: npm run test:accounts
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
+
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import {
@@ -83,6 +86,13 @@ import {
   figuresFor,
   type PortfolioTradeRow,
 } from '../src/lib/portfolios/figures';
+import {
+  ACCOUNT_PARAM,
+  accountHref,
+  resolveAccountParam,
+  tradesInAccount,
+} from '../src/lib/portfolios/filter';
+import { withAccount } from '../src/lib/trades/visible';
 import { syncBrokerAccounts } from '../src/lib/tradovate/account-sync';
 import type { HostAccounts } from '../src/lib/tradovate/fills';
 import type { TradovateAccount } from '../src/lib/tradovate/types';
@@ -751,6 +761,175 @@ function figuresGroup() {
   ]);
 }
 
+// ── Group: the filter ───────────────────────────────────────────────────────
+
+function filterParamGroup() {
+  group('Stage 5: what ?account= is allowed to mean', [
+    c('a uuid is a filter', resolveAccountParam(PORTFOLIO_A, ON), PORTFOLIO_A),
+    c('absent means all accounts', resolveAccountParam(undefined, ON), null),
+    c('empty means all accounts', resolveAccountParam('', ON), null),
+    // NOT a filter that matches nothing: `account_id` is a UUID column, and a
+    // malformed value reaching .eq() is Postgres 22P02 — a 400 from PostgREST
+    // and a 500 on the page. A broken link must degrade to "all accounts".
+    c('junk is not a filter', resolveAccountParam('not-a-uuid', ON), null),
+    c('an injection attempt is not a filter', resolveAccountParam("' OR 1=1--", ON), null),
+    // Two portfolios is not a view this product offers, and quietly picking
+    // the first would show a filtered page nobody asked for.
+    c('a repeated parameter is not a filter', resolveAccountParam([PORTFOLIO_A, PORTFOLIO_B], ON), null),
+    // 037 not run: no filter, so the page issues exactly the statements it
+    // issued before REF-110 even when somebody follows a link into it.
+    c('the gate shut means no filter', resolveAccountParam(PORTFOLIO_A, OFF), null),
+
+    c('a href carries the id', accountHref('/trades', PORTFOLIO_A), `/trades?account=${PORTFOLIO_A}`),
+    c('and the bare path means all', accountHref('/trades', null), '/trades'),
+    c('the key is stable', ACCOUNT_PARAM, 'account'),
+  ]);
+}
+
+async function filterReaderGroup() {
+  // ── The in-memory half, for /stats ────────────────────────────────────────
+  const rows: PortfolioTradeRow[] = [
+    trade({ account_id: PORTFOLIO_A, pnl_amount: 100 }),
+    trade({ account_id: PORTFOLIO_B, pnl_amount: 200 }),
+    trade({ account_id: null, pnl_amount: 300 }),
+  ];
+
+  const inB = tradesInAccount(rows, PORTFOLIO_B);
+  const unfiltered = tradesInAccount(rows, null);
+
+  group('Stage 5: a trade in A is absent under ?account=B, present with no param', [
+    // The three assertions REF-110's test plan names, in order.
+    c('a trade in A is absent under ?account=B', inB.some((r) => r.account_id === PORTFOLIO_A), false),
+    c('the B trade is there', inB.map((r) => r.pnl_amount), [200]),
+    c('every trade is there with no param', unfiltered.length, 3),
+    c('including the unassigned one', unfiltered.some((r) => r.account_id === null), true),
+    // An unassigned row is not in ANY portfolio's view. It belongs to the
+    // "ללא תיק" bucket on /accounts and to no filtered page.
+    c('an unassigned trade is in no portfolio', tradesInAccount(rows, PORTFOLIO_A).length, 1),
+    // Identity when unfiltered, matching visibleTrades, so the overwhelmingly
+    // common page view allocates nothing.
+    c('no filter returns the same array', unfiltered === rows, true),
+  ]);
+
+  // ── The server-side half, and the finding it exists for ──────────────────
+  //
+  // THE ASSERTION THAT MATTERS. /trades and /journal cap at 1,000 rows BEFORE
+  // anything filters, so a trader with 1,400 trades who filtered to one
+  // portfolio would be shown whatever subset of it fell inside the newest
+  // thousand — fewer trades than the portfolio holds, with nothing saying so.
+  // Here, a trade that is the 1,001st row overall is returned when filtering
+  // to its portfolio, because the WHERE clause runs first.
+  const many: Row[] = [];
+  for (let i = 0; i < 1000; i += 1) {
+    many.push({ id: `a-${i}`, user_id: USER, account_id: PORTFOLIO_A, status: 'closed' });
+  }
+  // Oldest row in the table, so it is the one a .limit(1000) would drop.
+  many.push({ id: 'the-1001st', user_id: USER, account_id: PORTFOLIO_B, status: 'closed' });
+
+  const db = new FakeDb(many);
+  const filtered = await withAccount(
+    db.client().from('trade_plans').select('*').eq('user_id', USER),
+    PORTFOLIO_B,
+  ).limit(1000);
+
+  const unfilteredDb = new FakeDb(many);
+  const everything = await withAccount(
+    unfilteredDb.client().from('trade_plans').select('*').eq('user_id', USER),
+    null,
+  ).limit(1000);
+
+  const rowsIn = (res: { data: unknown }) => (res.data as Row[]).map((r) => r.id as string);
+  const statement = db.statements[0];
+
+  group('Stage 5: the 1,001st trade is returned when the filter is in the WHERE clause', [
+    c('the filtered read finds it', rowsIn(filtered), ['the-1001st']),
+    // The same row, through the same cap, with no filter: dropped. This is
+    // the finding stated as the difference between two reads.
+    c('the unfiltered read drops it', rowsIn(everything).includes('the-1001st'), false),
+    c('and returns the cap', rowsIn(everything).length, 1000),
+    c('the filter is a WHERE clause', statement.filters.some(([op, col, v]) => op === 'eq' && col === 'account_id' && v === PORTFOLIO_B), true),
+    c('and the user filter is still there', statement.filters.some(([op, col, v]) => op === 'eq' && col === 'user_id' && v === USER), true),
+
+    // withAccount's withHidden-shaped property: unfiltered, the caller's own
+    // query comes back untouched, so a page with no ?account= issues the
+    // statement it issued before REF-110.
+    c('no filter adds no clause', unfilteredDb.statements[0].filters.filter(([op]) => op === 'eq').length, 1),
+  ]);
+}
+
+// ── Group: where the filter and the names must never reach ─────────────────
+
+/**
+ * Read every .ts/.tsx under a directory. Source-level assertions need the
+ * source; there is no other way to assert that something is ABSENT from code
+ * that, by definition, is never executed by this suite.
+ */
+function sourceUnder(dir: string): string {
+  const root = path.join(process.cwd(), dir);
+  if (!fs.existsSync(root)) return '';
+  const out: string[] = [];
+  const walk = (at: string) => {
+    for (const entry of fs.readdirSync(at, { withFileTypes: true })) {
+      const full = path.join(at, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (/\.tsx?$/.test(entry.name)) out.push(fs.readFileSync(full, 'utf8'));
+    }
+  };
+  walk(root);
+  return out.join('\n');
+}
+
+/**
+ * The six places the filter is never applied, and the one thing that must
+ * never leave the product.
+ *
+ * ASSERTED OVER THE SOURCE, not over behaviour, and deliberately: these are
+ * statements about code paths this suite does not execute and should not have
+ * to. "The rule engine never filters by account" is not a function call that
+ * can be checked — it is the absence of one, and the honest way to assert an
+ * absence is to look.
+ */
+function neverReachesGroup() {
+  const rules = sourceUnder('src/lib/rules');
+  const ai = [
+    'src/app/api/ai-chat', 'src/app/api/ai-coach', 'src/app/api/ai-debrief',
+    'src/app/api/ai-patterns', 'src/app/api/ai-trade-review',
+    'src/app/api/cron/send-alerts', 'src/lib/weekly', 'src/lib/ai',
+  ].map(sourceUnder).join('\n');
+
+  // THE TABLE, not the column names. `profiles.display_name` is the trader's
+  // OWN name and `send-alerts` reads it to address an email — a grep for the
+  // bare column would fail on that and be telling the truth about nothing.
+  // What must never happen is an AI payload joining `accounts`, so that is
+  // what is asserted: the table, and the module that is the only sanctioned
+  // way to reach it.
+  const readsAccountsTable = (src: string) =>
+    src.includes("from('accounts')") || src.includes('from("accounts")');
+
+  group('REF-110 §E/§F: where the filter and the account names never go', [
+    // Imri, 17.10: one trader, many portfolios, ONE discipline record. A
+    // per-account rule scope would let someone stay inside every limit while
+    // breaking all of them together (REF-90 §3ב).
+    c('the rule engine does not import the filter', rules.includes('portfolios/filter'), false),
+    c('the rule engine does not read ?account=', rules.includes("'account'") && rules.includes('searchParams'), false),
+    c('the rule engine never names account_id', rules.includes('account_id'), false),
+    c('the AI routes do not import the filter', ai.includes('portfolios/filter'), false),
+
+    // §F's one genuinely new hazard. `account_id` reaching ai-chat is a UUID
+    // of ours and harmless; a NAME is a prop firm's identity leaving the
+    // product. The join site does not exist, and this is what keeps it that
+    // way.
+    c('no AI route imports the accounts read', ai.includes('portfolios/read'), false),
+    c('no AI route reads the accounts table', readsAccountsTable(ai), false),
+    c('nor does the rule engine', readsAccountsTable(rules), false),
+    // The grep is only worth anything if it could fire. The module that DOES
+    // read the table proves the needle is findable.
+    c('and the needle is a real one',
+      readsAccountsTable(fs.readFileSync(path.join(process.cwd(), 'src/lib/portfolios/read.ts'), 'utf8')),
+      true),
+  ]);
+}
+
 // ── Group: the six Hebrew lines ─────────────────────────────────────────────
 
 function copyGroup() {
@@ -802,6 +981,9 @@ async function main() {
   await readGroup();
   await assignGroup();
   figuresGroup();
+  filterParamGroup();
+  await filterReaderGroup();
+  neverReachesGroup();
   copyGroup();
 
   console.log('');

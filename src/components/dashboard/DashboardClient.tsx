@@ -6,7 +6,7 @@ import { formatPnlPoints } from '@/lib/utils';
 import { formatMoney } from '@/lib/money';
 import { createClient } from '@/lib/supabase/client';
 import { DASH_TRADE_SELECT, mapDashTrade, type RawTradeRow } from '@/lib/dashboard/trades';
-import { visibleTrades, withHidden } from '@/lib/trades/visible';
+import { visibleTrades, withAccount, withHidden } from '@/lib/trades/visible';
 import type { DashTrade } from '@/lib/dashboard/trades';
 import { tradeMoneyPnl, hasMoneyPnl, isWinningTrade, tradeDirection, tradePointsPnl } from '@/lib/pnl';
 import { getPlanLimits, type PlanTier } from '@/lib/plans/config';
@@ -1273,6 +1273,7 @@ export default function DashboardClient({
   canConnectBroker,
   hiddenColumnExists,
   canSync,
+  accountId = null,
 }: {
   trades: DashTrade[];
   displayName: string;
@@ -1313,6 +1314,23 @@ export default function DashboardClient({
    * the E16 sentence in the button's place instead.
    */
   canSync: boolean;
+  /**
+   * The portfolio this dashboard is scoped to, or null for all of them
+   * (REF-110 Stage 5).
+   *
+   * HERE FOR THE REFETCH AND FOR NOTHING ELSE. The realtime subscription
+   * below fires on any `trade_plans` change for this user, including one in
+   * a portfolio this view is not showing, and the refetch replaces the
+   * server's rows wholesale. Without the same `.eq()` the page would silently
+   * widen to every portfolio the first time another tab closed a trade —
+   * figures changing under the trader with the filter chip still on screen,
+   * which is the worst of both states.
+   *
+   * Already validated as a UUID by `resolveAccountParam`, and already null
+   * when migration 037 has not been run, so `withAccount` can be applied here
+   * without a second gate.
+   */
+  accountId?: string | null;
 }) {
   const limits = getPlanLimits(plan);
   const [trades,   setTrades]   = useState<DashTrade[]>(initialTrades);
@@ -1362,13 +1380,21 @@ export default function DashboardClient({
     // fires on any trade_plans change, so without the same neq a plan marked
     // 'not_entered' in the trade form would be absent on load and present a
     // second later, when this replaces the server's rows with its own.
-    const { data } = await supabase
-      .from('trade_plans')
-      // `hidden` only where the column exists. Decided on the SERVER and passed
-      // down — see the prop — because the flag that answers it is server-only.
-      .select(withHidden(DASH_TRADE_SELECT, hiddenColumnExists))
-      .eq('user_id', userId)
-      .neq('status', 'not_entered')
+    //
+    // The same is true of the portfolio filter (REF-110 Stage 5), and more
+    // visibly: a change in a portfolio this view is NOT showing still fires
+    // the subscription, so without `withAccount` the dashboard would widen to
+    // every portfolio while the filter chip was still on screen.
+    const { data } = await withAccount(
+      supabase
+        .from('trade_plans')
+        // `hidden` only where the column exists. Decided on the SERVER and passed
+        // down — see the prop — because the flag that answers it is server-only.
+        .select(withHidden(DASH_TRADE_SELECT, hiddenColumnExists))
+        .eq('user_id', userId)
+        .neq('status', 'not_entered'),
+      accountId,
+    )
       .order('submitted_at', { ascending: false })
       .limit(500);
 
@@ -1376,7 +1402,7 @@ export default function DashboardClient({
     // refetch, which is the one path that could reintroduce one after the
     // server page filtered it out (REF-107 E12).
     if (data) setTrades(visibleTrades(data as unknown as RawTradeRow[]).map(mapDashTrade));
-  }, [userId, hiddenColumnExists]);
+  }, [userId, hiddenColumnExists, accountId]);
 
   // Subscribe to trade_plans changes so the dashboard stays in sync with edits
   // made elsewhere (journal close/edit/delete, new trade plans, other tabs).

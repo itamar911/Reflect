@@ -4,7 +4,20 @@ import { Download } from 'lucide-react';
 
 import { buildCsv, type ExportTrade } from '@/lib/journal/csv';
 
-export default function JournalExport({ trades }: { trades: ExportTrade[] }) {
+export default function JournalExport({ trades, accountLabel = null }: {
+  trades: ExportTrade[];
+  /**
+   * The portfolio the page is filtered to, when it is (REF-110 Stage 5).
+   *
+   * THE EXPORT INHERITS THE FILTER, because it is built from the rows the
+   * page is already showing — a trader who filtered to one portfolio and
+   * pressed export means that portfolio. That is almost certainly right, and
+   * the other reading ("export is always everything") is defensible enough
+   * that picking one silently is how a support ticket starts. So the button
+   * says which one it is, in its own tooltip, on the control that does it.
+   */
+  accountLabel?: string | null;
+}) {
   function handleExport() {
     // Row shape lives in lib/journal/csv.ts so it can be asserted without a
     // browser; this function keeps only what needs one.
@@ -31,7 +44,7 @@ export default function JournalExport({ trades }: { trades: ExportTrade[] }) {
         borderColor: 'var(--color-tg-border)',
         color: 'var(--color-tg-text-2)',
       }}
-      title="ייצוא לקובץ CSV"
+      title={accountLabel === null ? 'ייצוא לקובץ CSV' : `ייצוא לקובץ CSV — ${accountLabel} בלבד`}
     >
       <Download aria-hidden="true" size={13} />
       CSV

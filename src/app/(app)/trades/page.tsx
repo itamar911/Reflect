@@ -2,18 +2,36 @@ import { createClient, getCachedUser } from '@/lib/supabase/server';
 import JournalExport from '@/components/journal/JournalExport';
 import JournalClient from '@/components/journal/JournalClient';
 import BrokerSyncButton, { ReflectOnlyNote } from '@/components/tradovate/BrokerSyncButton';
+import AccountFilterChip from '@/components/accounts/AccountFilterChip';
 import { isUserAllowed } from '@/lib/tradovate/allowlist';
 import { isImportEnabled } from '@/lib/tradovate/import';
-import { visibleTrades } from '@/lib/trades/visible';
+import { visibleTrades, withAccount } from '@/lib/trades/visible';
+import { resolveAccountParam, type RawSearchParams } from '@/lib/portfolios/filter';
+import { readPortfolioLabel } from '@/lib/portfolios/read';
 import { isQueuedBrokerRow } from '@/lib/journal/link';
 import { intentNumber, intentText, rrValue, scaleValue } from '@/lib/intent';
 
 export const metadata = { title: 'כל העסקאות — Reflect' };
 
-export default async function TradesPage() {
+export default async function TradesPage({ searchParams }: {
+  /** A PROMISE on Next 16, and awaiting it is not optional — reading it
+   *  synchronously is a build error, not a warning. It also opts this route
+   *  out of static rendering, which it already was: it reads a session. */
+  searchParams: Promise<RawSearchParams>;
+}) {
   const supabase = await createClient();
   const { data: { user } } = await getCachedUser();
   if (!user) return null;
+
+  // ── ?account= — the opt-in portfolio view (REF-110 Stage 5) ──────────────
+  //
+  // SERVER-SIDE, and that is forced rather than chosen: the query below takes
+  // .limit(1000) BEFORE anything filters, so an in-memory filter would show a
+  // trader with 1,400 trades across three accounts whatever subset of one
+  // account happened to fall inside the newest thousand rows — fewer trades
+  // than the account holds, with nothing on the page saying so.
+  const accountId = resolveAccountParam((await searchParams).account, isImportEnabled());
+  const accountLabel = await readPortfolioLabel(supabase, user.id, accountId);
 
   // THE ONE PAGE THAT KEEPS 'not_entered' ROWS. Every other reader excludes
   // them at the query (REF-82 §5.2) because they are not trades; this page's
@@ -25,10 +43,13 @@ export default async function TradesPage() {
   // 'not_entered' plan is in neither "פתוחות" nor "סגורות", which is correct —
   // it is neither.
   const [{ data: trades }, { data: violations }] = await Promise.all([
-    supabase
-      .from('trade_plans')
-      .select('*')
-      .eq('user_id', user.id)
+    withAccount(
+      supabase
+        .from('trade_plans')
+        .select('*')
+        .eq('user_id', user.id),
+      accountId,
+    )
       .order('submitted_at', { ascending: false })
       .limit(1000),
     supabase
@@ -175,9 +196,17 @@ export default async function TradesPage() {
         </div>
         <div className="flex items-start gap-2">
           {canSync ? <BrokerSyncButton userId={user.id} refreshOnChange /> : <ReflectOnlyNote />}
-          <JournalExport trades={exportTrades} />
+          {/* The CSV inherits the filter, because it is built from the rows
+              above (REF-110 §D.3). Stated in the button's own tooltip rather
+              than left to be discovered: "export is always everything" is
+              also a defensible reading, and silently picking one is how a
+              support ticket is born. */}
+          <JournalExport trades={exportTrades} accountLabel={accountLabel} />
         </div>
       </div>
+      {accountLabel !== null && (
+        <AccountFilterChip label={accountLabel} clearHref="/trades" />
+      )}
       <JournalClient key={listKey} trades={allTrades} queueCount={queueCount} />
     </div>
   );

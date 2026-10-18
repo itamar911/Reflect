@@ -9,7 +9,11 @@ import BehaviorChips from '@/components/stats/BehaviorChips';
 import RecordsGrid from '@/components/stats/RecordsGrid';
 import { MUTED, TEXT, fmt, Section } from '@/components/stats/shared';
 import type { TradePlan } from '@/lib/types';
+import AccountFilterChip from '@/components/accounts/AccountFilterChip';
 import { visibleTrades } from '@/lib/trades/visible';
+import { isImportEnabled } from '@/lib/tradovate/import';
+import { resolveAccountParam, tradesInAccount, type RawSearchParams } from '@/lib/portfolios/filter';
+import { readPortfolioLabel } from '@/lib/portfolios/read';
 import { tradePointsPnl, tradeMoneyPnl, hasMoneyPnl, isWinningTrade } from '@/lib/pnl';
 import { averageOf, rrValue, intentText } from '@/lib/intent';
 import { TrendingUp, BarChart2, Target, CandlestickChart } from 'lucide-react';
@@ -25,10 +29,23 @@ const pnlOf = tradePointsPnl;
 const pnlIls = tradeMoneyPnl;
 
 // ── Page ──────────────────────────────────────────────────────────────────────
-export default async function StatsPage() {
+export default async function StatsPage({ searchParams }: {
+  /** A Promise on Next 16 — see the note in app/(app)/trades/page.tsx. */
+  searchParams: Promise<RawSearchParams>;
+}) {
   const supabase = await createClient();
   const { data: { user } } = await getCachedUser();
   if (!user) redirect('/login');
+
+  // ── ?account= — IN MEMORY HERE, and only here (REF-110 §D.3) ─────────────
+  //
+  // The read below is UNBOUNDED, so filtering the array it returns is exact
+  // and costs one pass. On /trades and /journal the same choice would be a
+  // bug: those two cap at 1,000 rows before any filter runs, so the filter
+  // has to be in the WHERE clause there. The split is forced by the queries,
+  // not by preference.
+  const accountId = resolveAccountParam((await searchParams).account, isImportEnabled());
+  const accountLabel = await readPortfolioLabel(supabase, user.id, accountId);
 
   // Every figure on this page is a statistic about trades the user took, and
   // several of them (avgRR, the symbol and strategy tables, the
@@ -46,7 +63,10 @@ export default async function StatsPage() {
   // A row the trader deleted is not in their statistics (REF-107 E12). This
   // page reads select('*'), so the column arrives for free and the filter is
   // the whole change.
-  const trades  = visibleTrades((raw ?? []) as unknown as TradePlan[]);
+  // `select('*')` above, so `account_id` arrives for free and the filter is
+  // the whole change — the same shape as `visibleTrades` beside it, and like
+  // it, the identity when there is nothing to drop.
+  const trades  = tradesInAccount(visibleTrades((raw ?? []) as unknown as TradePlan[]), accountId);
   const closed  = trades.filter(t => t.status === 'closed' && t.exit_price != null);
 
   // ── Empty state ─────────────────────────────────────────────────────────────
@@ -54,11 +74,18 @@ export default async function StatsPage() {
     return (
       <div dir="rtl" className="stats-page min-h-screen px-4 py-6 flex flex-col gap-8">
         <PageHeader />
+        {/* The chip belongs on the empty state more than anywhere else: a
+            filtered portfolio with no trades renders the same "אין עדיין
+            נתונים" a brand-new account does, and without this line the only
+            reading is that the statistics have been lost. */}
+        {accountLabel !== null && <AccountFilterChip label={accountLabel} clearHref="/stats" />}
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center py-16">
             <div className="mb-4" style={{ color: MUTED }}><BarChart2 aria-hidden="true" size={48} /></div>
             <p style={{ fontSize: 14, fontWeight: 700, color: TEXT }}>אין עדיין נתונים</p>
-            <p style={{ fontSize: 12, color: MUTED, marginTop: 4 }}>תעד עסקאות כדי לראות סטטיסטיקות</p>
+            <p style={{ fontSize: 12, color: MUTED, marginTop: 4 }}>
+              {accountLabel === null ? 'תעד עסקאות כדי לראות סטטיסטיקות' : 'אין עסקאות בתיק הזה'}
+            </p>
           </div>
         </div>
       </div>
@@ -302,6 +329,7 @@ export default async function StatsPage() {
 
       {/* ── Header ─────────────────────────────────────────────── */}
       <PageHeader />
+      {accountLabel !== null && <AccountFilterChip label={accountLabel} clearHref="/stats" />}
 
       {/* ── Section 1: KPI hero band ───────────────────────────── */}
       <KpiHero

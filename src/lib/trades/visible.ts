@@ -87,3 +87,38 @@ export function visibleTrades<T extends object>(rows: T[]): T[] {
 export function withHidden(columns: string, hiddenExists: boolean): string {
   return hiddenExists ? `${columns},hidden` : columns;
 }
+
+/**
+ * Scope a query to one portfolio, or leave it exactly as it was
+ * (REF-110 Stage 5).
+ *
+ * THE SAME PROPERTY {@link withHidden} IS HERE FOR, and the valuable one:
+ * when there is no filter — which is almost every page view, because absence
+ * means all accounts — the caller gets back **its own query, untouched**, so
+ * an unfiltered page issues the statement it issued before REF-110, byte for
+ * byte. That is also what makes the feature safe on a deployment where
+ * migration 037 has not been run: `resolveAccountParam` answers null there,
+ * and null is the identity.
+ *
+ * IT TAKES THE QUERY AND NOT THE COLUMN LIST, which is the one place this
+ * differs from `withHidden`, and the difference is not a preference. REF-110
+ * §D.3 pencilled this in as "the column added via a `withAccount()` helper",
+ * on the assumption that a reader with a named column list has to SELECT
+ * `account_id` in order to filter on it. It does not: PostgREST filters on
+ * columns a statement never projects, so the dashboard's `DASH_TRADE_SELECT`
+ * needs no new entry and no row needs to carry an id nothing renders. What
+ * does need the gate is the FILTER — `.eq('account_id', …)` against a
+ * database without 037 is a PostgREST 42703 and a 500 on the page — and that
+ * is what this guards.
+ *
+ * Typed structurally rather than against `PostgrestFilterBuilder`: this
+ * module is browser-safe and pure by design (see the header), and importing
+ * supabase-js's builder types here to describe one method would be the first
+ * dependency in it.
+ */
+export function withAccount<Q extends { eq(column: string, value: string): Q }>(
+  query: Q,
+  accountId: string | null,
+): Q {
+  return accountId === null ? query : query.eq('account_id', accountId);
+}

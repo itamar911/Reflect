@@ -3,26 +3,42 @@ import { BookOpen } from 'lucide-react';
 import JournalExport from '@/components/journal/JournalExport';
 import TradeCalendar from '@/components/journal/TradeCalendar';
 import BrokerSyncButton, { ReflectOnlyNote } from '@/components/tradovate/BrokerSyncButton';
+import AccountFilterChip from '@/components/accounts/AccountFilterChip';
 import { isUserAllowed } from '@/lib/tradovate/allowlist';
 import { isImportEnabled } from '@/lib/tradovate/import';
-import { visibleTrades } from '@/lib/trades/visible';
+import { visibleTrades, withAccount } from '@/lib/trades/visible';
+import { resolveAccountParam, type RawSearchParams } from '@/lib/portfolios/filter';
+import { readPortfolioLabel } from '@/lib/portfolios/read';
 
 export const metadata = { title: 'יומן חודשי — Reflect' };
 
-export default async function JournalPage() {
+export default async function JournalPage({ searchParams }: {
+  /** A Promise on Next 16 — see the note on the same parameter in
+   *  app/(app)/trades/page.tsx. */
+  searchParams: Promise<RawSearchParams>;
+}) {
   const supabase = await createClient();
   const { data: { user } } = await getCachedUser();
   if (!user) return null;
+
+  // Server-side for the same reason as /trades: the read below is capped at
+  // 1,000 rows before any filter, so an in-memory one would silently show a
+  // heavy trader fewer days than the portfolio actually holds.
+  const accountId = resolveAccountParam((await searchParams).account, isImportEnabled());
+  const accountLabel = await readPortfolioLabel(supabase, user.id, accountId);
 
   // 'not_entered' plans are left out of this page entirely (REF-82 §5.2). The
   // monthly calendar is a P&L-and-count grid with no per-trade row — there is
   // nowhere to say "never entered", and counting one would put a trade on a day
   // the user did not trade. They are visible on All Trades, which has rows.
-  const { data: trades } = await supabase
-    .from('trade_plans')
-    .select('*')
-    .eq('user_id', user.id)
-    .neq('status', 'not_entered')
+  const { data: trades } = await withAccount(
+    supabase
+      .from('trade_plans')
+      .select('*')
+      .eq('user_id', user.id)
+      .neq('status', 'not_entered'),
+    accountId,
+  )
     .order('submitted_at', { ascending: false })
     .limit(1000);
 
@@ -82,9 +98,13 @@ export default async function JournalPage() {
               everything from the prop in useMemo and holds only the viewed
               month in state, so router.refresh() alone redraws the grid. */}
           {canSync ? <BrokerSyncButton userId={user.id} refreshOnChange /> : <ReflectOnlyNote />}
-          <JournalExport trades={exportTrades} />
+          {/* Inherits the filter, same decision as /trades. */}
+          <JournalExport trades={exportTrades} accountLabel={accountLabel} />
         </div>
       </div>
+      {accountLabel !== null && (
+        <AccountFilterChip label={accountLabel} clearHref="/journal" />
+      )}
       {allTrades.length === 0 ? (
         <div className="text-center py-12 rounded-2xl border border-tg-border"
           style={{ background: 'var(--color-tg-surface)' }}>

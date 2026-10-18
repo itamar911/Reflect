@@ -3,13 +3,19 @@ import { getUserPlan } from '@/lib/plans/getUserPlan';
 import DashboardClient from '@/components/dashboard/DashboardClient';
 import { DASH_TRADE_SELECT, mapDashTrade } from '@/lib/dashboard/trades';
 import type { DashTrade, RawTradeRow } from '@/lib/dashboard/trades';
+import AccountFilterChip from '@/components/accounts/AccountFilterChip';
 import { isUserAllowed } from '@/lib/tradovate/allowlist';
 import { isImportEnabled } from '@/lib/tradovate/import';
-import { visibleTrades, withHidden } from '@/lib/trades/visible';
+import { visibleTrades, withAccount, withHidden } from '@/lib/trades/visible';
+import { resolveAccountParam, type RawSearchParams } from '@/lib/portfolios/filter';
+import { readPortfolioLabel } from '@/lib/portfolios/read';
 
 export const metadata = { title: 'דשבורד — Reflect' };
 
-export default async function DashboardPage() {
+export default async function DashboardPage({ searchParams }: {
+  /** A Promise on Next 16 — see the note in app/(app)/trades/page.tsx. */
+  searchParams: Promise<RawSearchParams>;
+}) {
   const supabase = await createClient();
   const { data: { user } } = await getCachedUser();
   if (!user) return null;
@@ -17,19 +23,29 @@ export default async function DashboardPage() {
   // isImportEnabled() is the flag the owner sets AFTER running migration 034.
   const hiddenColumnExists = isImportEnabled();
 
+  // Server-side, and the id travels down to DashboardClient as well: the
+  // realtime refetch there has to issue the SAME query, or a filtered
+  // dashboard would widen to every portfolio the first time another tab
+  // touched a trade. The same argument `hiddenColumnExists` is passed for.
+  const accountId = resolveAccountParam((await searchParams).account, hiddenColumnExists);
+  const accountLabel = await readPortfolioLabel(supabase, user.id, accountId);
+
   const [profileRes, tradesRes, { tier: plan }] = await Promise.all([
     supabase.from('profiles').select('display_name').eq('id', user.id).single(),
     // 'not_entered' is excluded here and in DashboardClient's own refetch,
     // which has to stay in step with this query: a plan the user never entered
     // is not a trade (REF-82 §5.2), and the dashboard also reads a non-empty
     // trade list as "this user is past the welcome state".
-    supabase.from('trade_plans')
-      // `hidden` only where the column exists (lib/trades/visible.ts). The
-      // same decision is passed to DashboardClient, whose realtime refetch
-      // has to issue the same query — see `hiddenColumnExists` there.
-      .select(withHidden(DASH_TRADE_SELECT, hiddenColumnExists))
-      .eq('user_id', user.id)
-      .neq('status', 'not_entered')
+    withAccount(
+      supabase.from('trade_plans')
+        // `hidden` only where the column exists (lib/trades/visible.ts). The
+        // same decision is passed to DashboardClient, whose realtime refetch
+        // has to issue the same query — see `hiddenColumnExists` there.
+        .select(withHidden(DASH_TRADE_SELECT, hiddenColumnExists))
+        .eq('user_id', user.id)
+        .neq('status', 'not_entered'),
+      accountId,
+    )
       .order('submitted_at', { ascending: false })
       .limit(500),
     getUserPlan(supabase, user.id),
@@ -56,14 +72,27 @@ export default async function DashboardPage() {
   const canSync = canConnectBroker && hiddenColumnExists;
 
   return (
-    <DashboardClient
-      trades={trades}
-      displayName={displayName}
-      userId={user.id}
-      plan={plan}
-      canConnectBroker={canConnectBroker}
-      hiddenColumnExists={hiddenColumnExists}
-      canSync={canSync}
-    />
+    <>
+      {/* Outside DashboardClient rather than inside it: the chip is a link
+          and a label, it needs no state, and threading it through a
+          1,900-line client component to render six words would be the only
+          reason that component would have to know the filter exists. The id
+          below is a different matter — the refetch genuinely needs it. */}
+      {accountLabel !== null && (
+        <div dir="rtl" className="px-4 pt-4">
+          <AccountFilterChip label={accountLabel} clearHref="/dashboard" />
+        </div>
+      )}
+      <DashboardClient
+        trades={trades}
+        displayName={displayName}
+        userId={user.id}
+        plan={plan}
+        canConnectBroker={canConnectBroker}
+        hiddenColumnExists={hiddenColumnExists}
+        canSync={canSync}
+        accountId={accountId}
+      />
+    </>
   );
 }

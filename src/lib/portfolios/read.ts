@@ -131,6 +131,40 @@ export async function readPortfolios(
 }
 
 /**
+ * What the filter chip on a scoped page says (REF-110 Stage 5).
+ *
+ * ONE ROW, and only when there is a filter — an unscoped page, which is
+ * almost every page view, makes no statement at all. The chip renders
+ * `nickname ?? display_name`, the same label the card does, because a trader
+ * who renamed a portfolio and then filtered by it must not be shown the
+ * broker's name they renamed away from.
+ *
+ * A null answer means "the id in the URL is not a portfolio of yours" —
+ * deleted, or someone else's link. The caller then renders no chip and no
+ * filter, which is the honest degradation: showing an empty journal under a
+ * chip naming nothing would read as "you have no trades".
+ */
+export async function readPortfolioLabel(
+  client: SupabaseClient,
+  userId: string,
+  portfolioId: string | null,
+): Promise<string | null> {
+  if (portfolioId === null) return null;
+
+  const { data, error } = await client
+    .from('accounts')
+    .select('display_name,nickname')
+    .eq('user_id', userId)
+    .eq('id', portfolioId)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  const row = data as { display_name: string; nickname: string | null };
+  const nickname = row.nickname?.trim();
+  return nickname ? nickname : row.display_name;
+}
+
+/**
  * The portfolio the trader's most recent plan was filed under, if any.
  *
  * REF-110 §B's default for the trade form, and it needs NO NEW COLUMN — it is
