@@ -36,10 +36,16 @@
  *     `stop_history IS NULL` forever.
  *   - **Several stops resolve to the furthest and several targets to the
  *     nearest** — the deliberate asymmetry (Imri, 19.10).
+ *   - **The initial stop is the one the position OPENED under.** Q8's seven
+ *     measured versions, where version one is eleven ticks from the entry and
+ *     the stop the trader actually took is a hundred and thirty-one; plus the
+ *     clock that decides it, every way that clock can be unavailable, and the
+ *     drag onto the market that is an exit rather than a move.
  *   - **`isAutomated` can only subtract.** Missing, true and false are three
  *     distinct inputs and two of them count the move.
  *   - **One request per order per run.** A bracket closing two trades is read
- *     once.
+ *     once, `/command/list` is one call per host however many orders the day
+ *     held, and it does not spend the deps ceiling.
  *   - **Nothing identifying reaches a log or an error.** A stop price, an order
  *     id, an account id and a symbol are absent from every line the reader
  *     emits, including the line it emits when a read fails with the trader's
@@ -59,6 +65,7 @@ import {
 import type { BrokerTrade, TradovateReader } from '../src/lib/tradovate/fills';
 import { TradovateRequestError } from '../src/lib/tradovate/errors';
 import type {
+  TradovateCommand,
   TradovateOrder,
   TradovateOrderStrategy,
   TradovateOrderStrategyLink,
@@ -214,6 +221,15 @@ function evidenceOf(params: {
   strategiesComplete?: boolean;
   unscanned?: StopEvidence['unscanned'];
   automated?: ReadonlyMap<number, boolean>;
+  /**
+   * `orderId` → its versions' instants, as `/command/list` supplies them.
+   *
+   * Written as a plain object because every fixture below states it per order,
+   * and OMITTING IT IS A CASE IN ITS OWN RIGHT: no instants means the fill
+   * anchor falls back to version one, which is what every group written before
+   * this one is now also testing.
+   */
+  commandTimes?: Record<number, readonly number[]>;
 }): StopEvidence {
   const unread = new Set(params.unread ?? []);
   const orders = new Map(params.orders.map((row) => [row.id, row]));
@@ -234,6 +250,11 @@ function evidenceOf(params: {
   const strategyByOrder = new Map<number, number>();
   for (const id of params.links ?? []) strategyByOrder.set(id, STRATEGY);
 
+  const commandTimes = new Map<number, readonly number[]>();
+  for (const [orderId, stamps] of Object.entries(params.commandTimes ?? {})) {
+    commandTimes.set(Number(orderId), stamps);
+  }
+
   return {
     orders,
     versions,
@@ -241,6 +262,7 @@ function evidenceOf(params: {
     strategiesComplete: params.strategiesComplete ?? true,
     unscanned: params.unscanned ?? (unread.size > 0 ? 'capped' : null),
     automated: params.automated,
+    commandTimes: params.commandTimes === undefined ? undefined : commandTimes,
   };
 }
 
@@ -263,6 +285,8 @@ interface StubPlan {
   versions: readonly TradovateOrderVersion[];
   strategies?: readonly TradovateOrderStrategy[];
   links?: Record<number, readonly TradovateOrderStrategyLink[]>;
+  /** The day's commands, in no particular order — the reader sorts them. */
+  commands?: readonly TradovateCommand[];
   /** Paths that throw. The body is deliberately full of greppable secrets. */
   failing?: readonly string[];
 }
@@ -286,6 +310,7 @@ class StubReader {
         }
 
         if (path === '/order/list') return this.plan.orders as unknown as T;
+        if (path === '/command/list') return (this.plan.commands ?? []) as unknown as T;
         if (path === '/orderStrategy/list') return (this.plan.strategies ?? []) as unknown as T;
         if (path === '/orderStrategyLink/deps') {
           return ((masterid !== undefined ? this.plan.links?.[masterid] : []) ?? []) as unknown as T;
@@ -314,6 +339,21 @@ function bracketPlan(overrides: Partial<StubPlan> = {}): StubPlan {
   };
 }
 
+/**
+ * One command per version of the bracket's stop, all after the entry fill —
+ * which is what a bracket submitted with a MARKET entry looks like.
+ *
+ * DELIBERATELY OUT OF ORDER, and one of them belongs to another account's order
+ * entirely. The reader sorts, and it scopes through the orders map rather than
+ * through a field on the command.
+ */
+const BRACKET_COMMANDS: readonly TradovateCommand[] = [
+  { id: 701, orderId: STOP_ORDER, timestamp: new Date(TRADE.openedAtMs + 200_000).toISOString() },
+  { id: 702, orderId: STOP_ORDER, timestamp: new Date(TRADE.openedAtMs + 10_000).toISOString() },
+  { id: 703, orderId: STOP_ORDER, timestamp: new Date(TRADE.openedAtMs + 100_000).toISOString() },
+  { id: 704, orderId: 81_200, timestamp: new Date(TRADE.openedAtMs).toISOString() },
+];
+
 // ── Groups ──────────────────────────────────────────────────────────────────
 
 function measuredCaseGroup() {
@@ -339,6 +379,11 @@ function measuredCaseGroup() {
       [history.movedAtMs, 'movedAtMs' in history], [null, true]),
     c('(9) one trade, so nothing is shared',
       [history.sharedWithTrades ?? null, history.capped ?? null], [null, null]),
+    // No commands in this fixture, so the fill anchor fell back to version one
+    // — which on a market entry with one stop is the same version it would have
+    // anchored on anyway. `fillAnchorGroup` is where the two diverge.
+    c('(10) the anchor fell back, and the shape says so rather than implying it',
+      [history.preFillVersions, history.anchoredAtFill], [0, false]),
   ]);
 }
 
@@ -686,6 +731,256 @@ function wrongSideGroup() {
       [draggedIntoProfit.initialStop, draggedIntoProfit.finalStop,
        draggedIntoProfit.initialStopSide],
       [STOP_1, STOP_3, 'risk']),
+  ]);
+}
+
+/**
+ * The fill anchor, and the fixture is Q8's own numbers. REF-113 follow-up.
+ *
+ * THE MEASUREMENT. `?mode=orders` on 19.10 reported the MNQZ6 long's protective
+ * stop as SEVEN versions, as signed tick distances from the 29704.00 entry:
+ *
+ *     -11   -132   -131   -131   -211   -90   +1
+ *
+ * and the trader's account of the same trade is two drags. Both are true. The
+ * entry was a BUY STOP they walked down twice before it filled, and a bracket
+ * re-prices its stop every time the entry it hangs off moves, so versions one
+ * to three are the broker following the trigger — the third minted at the fill,
+ * where 132 ticks off the trigger became 131 off the price that actually filled.
+ * Version four is a modify that restates the price. Five and six are the drags.
+ * Seven is the stop pulled onto the market to get out.
+ *
+ * WHAT THE PRE-ANCHOR CODE STORED, AND IT IS CASE (2) BELOW: `initialStop`
+ * 29701.25, which is version one, ELEVEN TICKS of risk on a trade that risked a
+ * hundred and thirty-one, with `movedCount = 5`. That row is in the database and
+ * `ref-113-direction-investigation.md` §2 is the reading of it.
+ *
+ * AND THE EXIT PRICE IS THE ONE THING HERE THAT IS A READING RATHER THAN A
+ * MEASUREMENT. Q8 reports the version at +1 tick; whether the trade got out AT
+ * that price (the stop dragged onto the market, which is what makes it an exit
+ * and not a move) or ABOVE it (the stop tightened to break-even and cancelled
+ * while the market ran on, which makes it a third move) is not in the version
+ * list. Both are fixtures — (1) and (8) — because the two differ by one move on
+ * a real row and the difference should be visible in the suite rather than
+ * assumed in the module.
+ */
+function fillAnchorGroup() {
+  const ENTRY = 29_704.0;
+  const TICK = 0.25;
+  /** A signed tick distance from the entry, which is how Q8 reported these. */
+  const at = (ticks: number) => ENTRY + ticks * TICK;
+
+  /** Q8's seven versions, in ticks. The whole fixture is derived from this. */
+  const Q8 = [-11, -132, -131, -131, -211, -90, 1];
+  const PRICES = Q8.map(at);
+
+  const FILL = Date.parse('2026-10-19T11:16:00.000Z');
+  const EXIT = FILL + 240_000;
+  /**
+   * One instant per version, as `/command/list` supplies them.
+   *
+   * THE THIRD IS THE FILL ITSELF, and that is the `<=` the anchor turns on: the
+   * version the broker minted as the position opened is the stop the position
+   * opened under. A `<` here would anchor on -132 and report three moves.
+   */
+  const STAMPS = [
+    FILL - 180_000,
+    FILL - 60_000,
+    FILL,
+    FILL + 30_000,
+    FILL + 90_000,
+    FILL + 150_000,
+    EXIT,
+  ];
+
+  const mnq: BrokerTrade = {
+    ...TRADE,
+    symbol: 'MNQZ6',
+    entryPrice: ENTRY,
+    // The stop was dragged onto the market, so the trade got out at it.
+    exitPrice: at(1),
+    openedAtMs: FILL,
+    closedAtMs: EXIT,
+  };
+
+  const orders = [
+    order(ENTRY_ORDER, {
+      action: 'Buy',
+      ordStatus: 'Filled',
+      timestamp: new Date(FILL - 180_000).toISOString(),
+    }),
+    order(STOP_ORDER, { timestamp: new Date(FILL - 180_000).toISOString() }),
+    order(EXIT_ORDER, { ordStatus: 'Filled', timestamp: new Date(EXIT).toISOString() }),
+  ];
+
+  /** The stop's seven versions, plus the entry trigger's and the exit's. */
+  const versions = [
+    // The breakout trigger, as +148 ticks. A `Buy` on a long, so the side test
+    // keeps it out of the candidate set — pinned in `wrongSideGroup`.
+    version(90_001, ENTRY_ORDER, { orderType: 'Stop', stopPrice: at(148), orderQty: 1 }),
+    ...PRICES.map((stopPrice, i) =>
+      version(90_010 + i, STOP_ORDER, { orderType: 'Stop', stopPrice, orderQty: 1 })
+    ),
+    version(90_030, EXIT_ORDER, { orderType: 'Market', orderQty: 1 }),
+  ];
+
+  const base = { trade: mnq, orders, versions, links: [ENTRY_ORDER, STOP_ORDER] };
+
+  // ── (1) The measurement, anchored ─────────────────────────────────────────
+  const anchored = derive({ ...base, commandTimes: { [STOP_ORDER]: STAMPS } });
+
+  // ── (2) No clock: the production answer, and flagged as one ───────────────
+  const noClock = derive({ ...base });
+
+  // ── (3) A command list shorter than the version list is REFUSED ───────────
+  // Three instants for seven versions cannot be paired positionally, and a
+  // partial pairing would anchor on whichever version happened to be timed.
+  const short = derive({ ...base, commandTimes: { [STOP_ORDER]: STAMPS.slice(0, 3) } });
+
+  // ── (4) The version's own timestamp outranks the commands ─────────────────
+  // Measured absent, so this branch is live only on a host that sends it — and
+  // it needs no pairing, so it is tried first. The commands here are deliberate
+  // nonsense: all before the fill, which would anchor on the last version.
+  const stamped = derive({
+    ...base,
+    versions: versions.map((row) =>
+      row.orderId === STOP_ORDER
+        ? { ...row, timestamp: new Date(STAMPS[row.id - 90_010]).toISOString() }
+        : row
+    ),
+    commandTimes: { [STOP_ORDER]: STAMPS.map(() => FILL - 300_000) },
+  });
+
+  // ── (5) A stop placed by hand AFTER the trader was already in ─────────────
+  // Every version is after the fill, so nothing precedes the initial stop — the
+  // same `preFillVersions: 0` as case (2) and the opposite `anchoredAtFill`.
+  const afterFill = derive({
+    ...base,
+    versions: [
+      version(90_001, ENTRY_ORDER, { orderType: 'Market', orderQty: 1 }),
+      version(90_010, STOP_ORDER, { orderType: 'Stop', stopPrice: at(-131), orderQty: 1 }),
+      version(90_011, STOP_ORDER, { orderType: 'Stop', stopPrice: at(-90), orderQty: 1 }),
+      version(90_030, EXIT_ORDER, { orderType: 'Market', orderQty: 1 }),
+    ],
+    commandTimes: { [STOP_ORDER]: [FILL + 30_000, FILL + 60_000] },
+  });
+
+  // ── (6) Restated prices are not moves ────────────────────────────────────
+  // A quantity or TIF modify mints a version at the price it already had. Four
+  // of them inside the window is a stop that was never touched.
+  const restated = derive({
+    ...base,
+    versions: [
+      version(90_001, ENTRY_ORDER, { orderType: 'Market', orderQty: 1 }),
+      ...[at(-131), at(-131), at(-131), at(-131)].map((stopPrice, i) =>
+        version(90_010 + i, STOP_ORDER, { orderType: 'Stop', stopPrice, orderQty: 1 })
+      ),
+      version(90_030, EXIT_ORDER, { orderType: 'Market', orderQty: 1 }),
+    ],
+    commandTimes: { [STOP_ORDER]: [FILL - 1_000, FILL + 1_000, FILL + 2_000, FILL + 3_000] },
+  });
+
+  // ── (7) The mirror, on a short ───────────────────────────────────────────
+  // Every sign inverts: the entry is a SELL stop walked UP, the protective stop
+  // is ABOVE the entry, and the drag onto the market goes DOWN through the exit.
+  const shortTrade: BrokerTrade = { ...mnq, direction: 'short', exitPrice: at(-1) };
+  const short_ = derive({
+    trade: shortTrade,
+    orders: [
+      order(ENTRY_ORDER, {
+        action: 'Sell',
+        ordStatus: 'Filled',
+        timestamp: new Date(FILL - 180_000).toISOString(),
+      }),
+      order(STOP_ORDER, { action: 'Buy', timestamp: new Date(FILL - 180_000).toISOString() }),
+      order(EXIT_ORDER, {
+        action: 'Buy',
+        ordStatus: 'Filled',
+        timestamp: new Date(EXIT).toISOString(),
+      }),
+    ],
+    versions: [
+      version(90_001, ENTRY_ORDER, { orderType: 'Stop', stopPrice: at(-148), orderQty: 1 }),
+      ...Q8.map((ticks, i) =>
+        version(90_010 + i, STOP_ORDER, { orderType: 'Stop', stopPrice: at(-ticks), orderQty: 1 })
+      ),
+      version(90_030, EXIT_ORDER, { orderType: 'Market', orderQty: 1 }),
+    ],
+    links: [ENTRY_ORDER, STOP_ORDER],
+    commandTimes: { [STOP_ORDER]: STAMPS },
+  });
+
+  // ── (8) The other reading of the exit ────────────────────────────────────
+  // The trade got out ABOVE the stop's last version — `ref-113-direction-
+  // investigation.md` records a manual exit at 29714.75 — so the +1 tick
+  // version is a stop tightened to break-even and then cancelled, which is a
+  // real move. The last step crossed nothing, and the cut must not fire.
+  const exitAbove = derive({
+    ...base,
+    trade: { ...mnq, exitPrice: 29_714.75 },
+    commandTimes: { [STOP_ORDER]: STAMPS },
+  });
+
+  // ── (9) The cut never empties the window ─────────────────────────────────
+  // One version, beyond the exit, on a cancelled order: the trader placed a
+  // stop, closed by hand, and the market ran past where the stop had been.
+  // There is no step to have crossed anything and `initialStop` has to exist.
+  const onlyVersion = derive({
+    ...base,
+    trade: { ...mnq, exitPrice: at(-200) },
+    versions: [
+      version(90_001, ENTRY_ORDER, { orderType: 'Market', orderQty: 1 }),
+      version(90_010, STOP_ORDER, { orderType: 'Stop', stopPrice: at(-131), orderQty: 1 }),
+      version(90_030, EXIT_ORDER, { orderType: 'Market', orderQty: 1 }),
+    ],
+    commandTimes: { [STOP_ORDER]: [FILL + 10_000] },
+  });
+
+  group('the fill anchor: the stop the position OPENED under, not version one', [
+    c('(1) REGRESSION, Q8 19.10: the anchor is the version minted at the fill',
+      [anchored.initialStop, anchored.preFillVersions, anchored.anchoredAtFill],
+      [at(-131), 2, true]),
+    c('(1b) two moves and `mixed` — the drags the trader remembers, and no more',
+      [anchored.movedCount, anchored.direction, anchored.verdict],
+      [2, 'mixed', 'moved']),
+    c('(1c) the final stop is the last PROTECTIVE version, not the exit drag',
+      anchored.finalStop, at(-90)),
+    c('(1d) and all seven versions are still there as evidence',
+      anchored.versions.map((v) => v.stopPrice), PRICES),
+    c('(1e) the side is read off the anchored version',
+      anchored.initialStopSide, 'risk'),
+    // The row production actually wrote. 29701.25 is eleven ticks of risk on a
+    // trade that risked a hundred and thirty-one.
+    c('(2) no clock: the pre-anchor answer, and `anchoredAtFill` says so',
+      [noClock.initialStop, noClock.anchoredAtFill, noClock.preFillVersions],
+      [29_701.25, false, 0]),
+    c('(3) a command list shorter than the versions is refused outright',
+      [short.initialStop, short.anchoredAtFill], [29_701.25, false]),
+    c('(4) a version that carries its own timestamp outranks the commands',
+      [stamped.initialStop, stamped.movedCount, stamped.anchoredAtFill],
+      [at(-131), 2, true]),
+    // Both are `preFillVersions: 0`. The flag is the only thing that separates
+    // "nothing preceded the stop" from "we could not tell".
+    c('(5) a stop placed after the fill anchors on version one, and the clock RAN',
+      [afterFill.initialStop, afterFill.preFillVersions, afterFill.anchoredAtFill,
+       afterFill.movedCount],
+      [at(-131), 0, true, 1]),
+    // The anchor is version one here — it was already in force at the fill —
+    // so nothing precedes it and all four restatements are inside the window.
+    c('(6) a version that restates its price is not a move',
+      [restated.verdict, restated.movedCount, restated.initialStop, restated.preFillVersions],
+      ['kept', 0, at(-131), 0]),
+    c('(7) a short mirrors every sign of it',
+      [short_.initialStop, short_.finalStop, short_.movedCount, short_.direction,
+       short_.preFillVersions],
+      [at(131), at(90), 2, 'mixed', 2]),
+    // The boundary of the exit cut: a last step that crossed nothing.
+    c('(8) a stop tightened to break-even and cancelled is a MOVE, not an exit',
+      [exitAbove.movedCount, exitAbove.finalStop, exitAbove.direction],
+      [3, at(1), 'mixed']),
+    c('(9) the exit cut never empties the window',
+      [onlyVersion.initialStop, onlyVersion.finalStop, onlyVersion.verdict],
+      [at(-131), at(-131), 'kept']),
   ]);
 }
 
@@ -1073,11 +1368,29 @@ async function readerGroup() {
     readStopHistories({ readers: { demo: scoped.reader() }, trades: [TRADE] })
   );
 
+  // The anchor's clock, end to end through the reader. The bracket's stop has
+  // three versions and three commands, all after the fill, so the anchor is
+  // version one — and the point is that it got there by READING a clock.
+  const timed = new StubReader(bracketPlan({ commands: BRACKET_COMMANDS }));
+  const { result: withClock } = await captureLogs(() =>
+    readStopHistories({ readers: { demo: timed.reader() }, trades: [TRADE] })
+  );
+
+  // THE CEILING IS NOT SPENT ON IT. A budget of four is exactly one strategy
+  // link plus the three candidate orders' versions; if `/command/list` took one
+  // the scan would cap out, the trade would be dropped, and this would be 0.
+  const tight = new StubReader(bracketPlan({ commands: BRACKET_COMMANDS }));
+  const { result: onBudget } = await captureLogs(() =>
+    readStopHistories({ readers: { demo: tight.reader() }, trades: [TRADE], maxDeps: 4 })
+  );
+
   group('the reader: one request per order, per run, for this trader only', [
     c('(1) the measured trade comes back as moved',
       [histories.size, histories.get(TRADE.brokerTradeKey)?.verdict], [1, 'moved']),
     c('(2) one /order/list and one /orderStrategy/list, whatever the trade count',
       [stub.countOf('/order/list'), stub.countOf('/orderStrategy/list')], [1, 1]),
+    c('(2b) and one /command/list, which is a list and not a per-order deps call',
+      [stub.countOf('/command/list'), stub.countOf('/commandReport/deps')], [1, 0]),
     // Three: the exit order plus the two bracket siblings. Not one per TRADE,
     // and not one per version. WAS FOUR BEFORE THE SIDE TEST — the entry order
     // is no longer a candidate, so the run is one request cheaper as well as
@@ -1089,6 +1402,18 @@ async function readerGroup() {
     c('(5) a host with no trades in the run is never asked', liveStub.calls.length, 0),
     c('(6) another account\'s order is never fetched',
       scoped.calls.some((call) => call.masterid === 81_200), false),
+    // The clock reached the derivation. Without the commands this same trade
+    // comes back `anchoredAtFill: false` — assertion (1) above runs that plan.
+    c('(7) the commands reach the anchor, and the fallback flag clears',
+      [withClock.get(TRADE.brokerTradeKey)?.anchoredAtFill,
+       histories.get(TRADE.brokerTradeKey)?.anchoredAtFill],
+      [true, false]),
+    c('(8) and the anchored answer is still the measured one',
+      [withClock.get(TRADE.brokerTradeKey)?.initialStop,
+       withClock.get(TRADE.brokerTradeKey)?.movedCount],
+      [STOP_1, 2]),
+    c('(9) /command/list does not spend the deps ceiling',
+      [onBudget.size, onBudget.get(TRADE.brokerTradeKey)?.verdict], [1, 'moved']),
   ]);
 }
 
@@ -1124,6 +1449,17 @@ async function readerFailureGroup() {
     readStopHistories({ readers: { demo: interdayStub.reader() }, trades: [TRADE] })
   );
 
+  // `/command/list` down. THE ONLY READ HERE WHOSE FAILURE IS NOT A GAP IN THE
+  // EVIDENCE: it costs the anchor and nothing else, so the trade is answered,
+  // stored, and never retried — the alternative is withholding a verdict, a
+  // stop price and a target over a field that says how the anchor was reached.
+  const clockDown = new StubReader(
+    bracketPlan({ commands: BRACKET_COMMANDS, failing: ['/command/list'] })
+  );
+  const { result: unanchored, lines: clockLines } = await captureLogs(() =>
+    readStopHistories({ readers: { demo: clockDown.reader() }, trades: [TRADE] })
+  );
+
   group('a read that fails costs one nullable column, and is retried', [
     c('(1) /order/list down: nothing answered, nothing thrown', none.size, 0),
     c('(2) and it was logged as a KIND, with the status', listLines.length, 1),
@@ -1138,6 +1474,19 @@ async function readerFailureGroup() {
       [1, 'interday']),
     c('(6) the ceiling is a constant, not a magic number in a loop',
       MAX_ORDER_DEPS_PER_RUN, 60),
+    // A worse anchor, not an unreadable one. This is the one failure in the
+    // module that does not reach for `'unknown'`.
+    c('(7) /command/list down: the trade is still answered, with the flag down',
+      [unanchored.size, unanchored.get(TRADE.brokerTradeKey)?.verdict,
+       unanchored.get(TRADE.brokerTradeKey)?.anchoredAtFill,
+       unanchored.get(TRADE.brokerTradeKey)?.reason],
+      [1, 'moved', false, null]),
+    c('(8) and it was logged as a KIND, like every other failure',
+      clockLines.some((line) => line.includes('TradovateRequestError:500')), true),
+    // An inter-day day has no candidate orders, so there is nothing for a clock
+    // to place and the request is not made rather than made and discarded.
+    c('(9) a day with no candidate orders never asks for the commands',
+      interdayStub.countOf('/command/list'), 0),
   ]);
 }
 
@@ -1147,7 +1496,13 @@ async function leakGroup() {
   // runs before the error is even classified.
   const leaky = new StubReader(
     bracketPlan({
-      failing: ['/order/list', '/orderStrategy/list', '/orderStrategyLink/deps', '/orderVersion/deps'],
+      failing: [
+        '/order/list',
+        '/command/list',
+        '/orderStrategy/list',
+        '/orderStrategyLink/deps',
+        '/orderVersion/deps',
+      ],
     })
   );
   const { lines: failureLines } = await captureLogs(() =>
@@ -1155,7 +1510,9 @@ async function leakGroup() {
   );
 
   // And the successful path's own line, which is the one that runs every day.
-  const quiet = new StubReader(bracketPlan());
+  // With the commands read, so the line that carries a command COUNT is the one
+  // the secrets below are grepped out of.
+  const quiet = new StubReader(bracketPlan({ commands: BRACKET_COMMANDS }));
   const { lines: successLines } = await captureLogs(() =>
     readStopHistories({ readers: { demo: quiet.reader() }, trades: [TRADE] })
   );
@@ -1180,7 +1537,8 @@ async function leakGroup() {
     c('(2) the failure line names the kind and the status',
       failureLines.some((line) => line.includes('TradovateRequestError:500')), true),
     c('(3) the daily line is counts only',
-      successLines.some((line) => /orders=\d+ candidates=\d+ deps=\d+/.test(line)), true),
+      successLines.some((line) =>
+        /orders=\d+ candidates=\d+ commands=\d+ deps=\d+/.test(line)), true),
     c('(4) and it reports the verdict totals, never a per-symbol count',
       successLines.some((line) => /moved=1 kept=0 none=0 unknown=0/.test(line)), true),
   ]);
@@ -1193,6 +1551,7 @@ async function main() {
   cancellationGroup();
   severalOrdersGroup();
   wrongSideGroup();
+  fillAnchorGroup();
   automatedGroup();
   trailingGroup();
   layerGroup();

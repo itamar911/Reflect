@@ -540,9 +540,10 @@ export interface TradovateOrder {
  * a WebSocket subscription. The measured bracket's stop had three versions and
  * three distinct `stopPrice` values: the `New` plus the two drags.
  *
- * ORDER BY `id` ASCENDING, NEVER BY TIME. There is no timestamp on this entity —
- * measured, not assumed — and `id` was the only field besides `stopPrice` that
- * changed between versions, so it is monotonic and it is the whole ordering.
+ * ORDER BY `id` ASCENDING, NEVER BY TIME. The measurement found no timestamp on
+ * this entity and `id` was the only field besides `stopPrice` that changed
+ * between versions, so it is monotonic and it is the whole ordering. See
+ * {@link timestamp} for the one question that ordering is not enough for.
  *
  * `price` is the limit price and `stopPrice` the trigger: a target is a `Limit`
  * and reads the first, a stop is a `Stop`/`StopLimit` and reads the second.
@@ -570,6 +571,59 @@ export interface TradovateOrderVersion {
   orderQty?: number;
   /** The trail distance. Optional because it was never measured — see above. */
   pegDifference?: number;
+  /**
+   * When this revision was created. MEASURED ABSENT, AND DECLARED ANYWAY.
+   *
+   * The ordering of the versions answers "did the stop move". It cannot answer
+   * "was this version already in force when the position opened", which is the
+   * question REF-113's fill anchor asks — a bracket submitted behind a resting
+   * entry re-prices its stop every time the trigger moves, and those revisions
+   * are the broker following the trader's entry rather than the trader touching
+   * their risk. That needs a clock.
+   *
+   * The 19.10 survey found this field on no version row, so ./orders.ts gets the
+   * instants from `/command/list` instead, paired positionally. This field is
+   * the BETTER source and is read first wherever a host sends it: an instant on
+   * the row itself needs no pairing to be trusted. Same contingency
+   * `pegDifference` is, for the same reason — optional means "the measurement
+   * did not find it", not "we are unsure what it means".
+   */
+  timestamp?: string;
+}
+
+/**
+ * One instruction the trader (or the server) gave about an order.
+ * GET /v1/command/list.
+ *
+ * READ FOR `timestamp` AND NOTHING ELSE, and that is a narrower read than this
+ * entity invites. §2.1 of the investigation ruled commands out of v1 entirely,
+ * and the clause it ruled them out under was "the order a verdict wants is the
+ * order of the versions, and `id` ascending gives it for free" — which was true
+ * of the verdict and false of the ANCHOR. ./orders.ts needs to know which
+ * revisions of a stop predate the entry fill, {@link TradovateOrderVersion}
+ * carries no instant, and a command is the only place this API puts one on a
+ * modification.
+ *
+ * `isAutomated` IS DELIBERATELY NOT DECLARED even though it is the field §2.1
+ * named and `StopEvidence.automated` is still empty without it. It was present
+ * on 8 of 15 measured commands, there is no way to tell "Tradovate omits a false
+ * boolean" from "not populated on this command type" by counting, and a wrong
+ * `true` mutes a real move while a wrong `false` can block a trader out of the
+ * app over something they did not do. Attributing a command to a VERSION is also
+ * a join this entity does not carry — the pairing ./orders.ts does is positional
+ * and is good enough for "before or after the fill", which is one bit with a
+ * conservative fallback, and not good enough to decide whose move it was.
+ *
+ * `accountId` is not declared either: the measurement did not confirm it, and
+ * ./orders.ts scopes these rows through the order ids it already holds, which
+ * are already filtered to the trader's own accounts.
+ */
+export interface TradovateCommand {
+  id: number;
+  /** The order it was given about. The only join this read uses. */
+  orderId?: number;
+  /** ISO 8601 instant. The field this entity is read for. */
+  timestamp?: string;
 }
 
 /**

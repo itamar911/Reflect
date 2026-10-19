@@ -96,6 +96,46 @@
  * answer this module must never give.
  *
  *
+ * AND THE INITIAL STOP IS ANCHORED AT THE ENTRY FILL, NOT AT VERSION ONE
+ * ---------------------------------------------------------------------
+ *
+ * MEASURED ON THE SAME 19.10 TRADE, and it is the second defect that one row
+ * held. Q8 of the probe reported the protective stop's seven versions as signed
+ * tick distances from the entry:
+ *
+ *     -11   -132   -131   -131   -211   -90   +1
+ *
+ * Two of those are the trader moving their risk. The entry was a BUY STOP whose
+ * trigger they walked down twice before it filled, and A BRACKET RE-PRICES ITS
+ * STOP EVERY TIME THE ENTRY IT HANGS OFF MOVES — so the first three versions are
+ * the broker following the trigger, the third being the one it minted at the
+ * fill, when 132 ticks from the trigger became 131 from the price that actually
+ * filled. The seventh is a drag to the market to get out. Taking version one as
+ * the initial stop stored ELEVEN TICKS of risk on a trade that risked a hundred
+ * and thirty-one, and counted five moves against the two the trader made.
+ *
+ * So the window a verdict is computed over has both ends cut, and the two ends
+ * are cut by different kinds of evidence:
+ *
+ *   - **The anchor**, by a clock. {@link StopHistory.initialStop} is the last
+ *     version in force at the moment the entry filled — see
+ *     {@link anchorStop} — and everything before it is reported as a count in
+ *     {@link StopHistory.preFillVersions} rather than as a move.
+ *   - **The exit drag**, by a status and a crossing. A trader who drags their
+ *     stop onto the market to get out leaves a cancelled order whose last step
+ *     crossed the price they got out at, and that is an exit and not a
+ *     protective move. See {@link withoutExitDrag}.
+ *
+ * THE CLOCK IS THE EXPENSIVE HALF AND IT FAILS SAFE. A version carries no
+ * instant (./types.ts measured it absent), so the instants come from
+ * `/command/list` paired POSITIONALLY with the versions, and the pairing is
+ * refused outright unless every version has a command to pair with. When it is
+ * refused — no commands, a short list, a failed read — the anchor falls back to
+ * version one, which is exactly the old behaviour, and
+ * {@link StopHistory.anchoredAtFill} is `false` so that no reader has to guess
+ * which of the two it is holding.
+ *
+ *
  * THE FOUR WAYS THIS ANSWERS "I DO NOT KNOW", AND WHY TWO OF THEM ARE NOT STORED
  * -----------------------------------------------------------------------------
  *
@@ -122,18 +162,32 @@
  * WHAT THIS MODULE REFUSES TO READ, AND WHY THAT IS THE COST CONTROL
  * -----------------------------------------------------------------
  *
- * ZERO `/command/list` IN v1 (§2.1). Commands are the only place a MODIFY
- * carries a timestamp and an `isAutomated` flag, and neither is needed: the
+ * ONE `/command/list` AND NO `/commandReport/deps`, WHICH IS A DEPARTURE FROM
+ * §2.1 AND IS ARGUED WHERE IT IS SPENT. §2.1 read zero commands because "the
  * order a verdict wants is the order of the versions, and `id` ascending gives
- * it for free. So `movedAtMs` is always `null` here and this module makes
- * exactly one call shape per candidate order.
+ * it for free" — true of the verdict and false of the anchor, which needs a
+ * clock and has nowhere else to get one (see the section above). It is ONE LIST
+ * CALL PER HOST PER RUN, not one per order, and it buys exactly one bit per
+ * version: before the fill, or after it.
+ *
+ * `movedAtMs` IS STILL ALWAYS NULL. The pairing that decides that bit is
+ * positional, which is sound for a question whose wrong answer is a documented
+ * fallback and is not sound as a published instant — see
+ * {@link TradovateCommand}. `isAutomated` is left on the table for the same
+ * reason and `automated` stays empty.
  *
  * The budget per run, per host: one `/order/list`, one `/orderStrategy/list`,
- * one `/orderStrategyLink/deps` per strategy, one `/orderVersion/deps` per
- * candidate order. A typical day of three trades reaches seven to nine calls
- * against a documented 5,000 per hour. {@link MAX_ORDER_DEPS_PER_RUN} is the
- * hard stop, and what matters about it is the FAILURE DIRECTION: over the
- * ceiling, a trade reads `'unknown'`, never `'none'`.
+ * one `/command/list`, one `/orderStrategyLink/deps` per strategy, one
+ * `/orderVersion/deps` per candidate order. A typical day of three trades
+ * reaches eight to ten calls against a documented 5,000 per hour.
+ * {@link MAX_ORDER_DEPS_PER_RUN} is the hard stop, and what matters about it is
+ * the FAILURE DIRECTION: over the ceiling, a trade reads `'unknown'`, never
+ * `'none'`.
+ *
+ * THE THREE LIST CALLS DO NOT SPEND THE CEILING and the deps calls do, which is
+ * the same split the ceiling had before: what escalates to a `p-captcha` is a
+ * fan-out proportional to the day's order count, and a flat one-per-host read is
+ * not one.
  *
  *
  * AND NOTHING HERE PUTS A PRICE IN A MESSAGE
@@ -141,7 +195,8 @@
  *
  * `withoutResponseBody` wraps EVERY read, before anything else in the function.
  * `TradovateRequestError` puts `body.slice(0, 300)` into its message, and for
- * `/orderVersion/deps` that body is the trader's own stop prices — handed to
+ * `/orderVersion/deps` — and for `/command/list`, which echoes the terms of
+ * every modification — that body is the trader's own stop prices, handed to
  * whatever logs it, four layers up, where nobody is thinking about this call.
  * Same reduction `discoverHostAccounts` makes on `/account/list`, for the same
  * reason. The log line below is counts only.
@@ -152,6 +207,7 @@ import { withoutResponseBody } from './errors';
 import type { TradovateEnvironment } from './hosts';
 import { redactSecrets } from './redact';
 import type {
+  TradovateCommand,
   TradovateOrder,
   TradovateOrderStrategy,
   TradovateOrderStrategyLink,
@@ -199,7 +255,17 @@ export interface StopHistory {
   verdict: 'moved' | 'kept' | 'none' | 'unknown';
   /** Why the verdict is `'unknown'`, and null whenever it is not. */
   reason: 'interday' | 'ambiguous' | 'capped' | 'failed' | null;
-  /** The stop as first submitted. This is what `broker_stop_loss` holds. */
+  /**
+   * The stop THE POSITION OPENED UNDER. This is what `broker_stop_loss` holds.
+   *
+   * "As first submitted" until the fill anchor, and the distance between the two
+   * readings was measured at 120 ticks on one real trade — see the header. It is
+   * the last version in force when the entry filled, which on a trade with no
+   * bracket and no moved entry is still version one.
+   *
+   * `versions[preFillVersions]`, and that identity is worth keeping: the
+   * revisions this skipped are still in {@link versions} rather than erased.
+   */
   initialStop: number | null;
   /**
    * Which side of the entry {@link initialStop} sat on. REF-113 follow-up.
@@ -222,17 +288,39 @@ export interface StopHistory {
    * `'wrong'` is the signal to show nothing rather than to show a number that
    * disagrees with the trade it describes.
    *
-   * ONLY THE FIRST VERSION IS TESTED, AND THAT IS NOT AN OVERSIGHT. A long's
+   * ONLY {@link initialStop} IS TESTED, AND THAT IS NOT AN OVERSIGHT. A long's
    * stop dragged into profit ends ABOVE the entry legitimately — the measured
    * 19.10 bracket does exactly that — so a side test anchored to
-   * {@link finalStop} would call the healthiest case a defect.
+   * {@link finalStop} would call the healthiest case a defect. It is tested on
+   * the ANCHORED version rather than on version one for the same reason: the
+   * side of a revision that was never in force says nothing about the trade.
    */
   initialStopSide: 'risk' | 'wrong' | null;
-  /** The stop as last submitted. In the JSON only — no column holds it. */
+  /**
+   * The stop as last submitted, over the counted window alone. In the JSON only.
+   *
+   * NOT NECESSARILY THE LAST ENTRY OF {@link versions}: a drag onto the market
+   * to force an exit is the stop being used rather than moved, and it is cut
+   * from the window (see the header). On the measured trade that is the
+   * difference between reporting a final stop one tick ABOVE the entry and the
+   * ninety ticks below it the trader was actually protected at.
+   */
   finalStop: number | null;
   /** The target nearest the entry. This is what `broker_take_profit` holds. */
   initialTarget: number | null;
-  /** How many times the stop price changed. A cancellation is NOT a move. */
+  /**
+   * How many times the stop price changed, inside the counted window.
+   *
+   * THREE THINGS ARE NOT A MOVE, and each of them put a number on this field
+   * that the trader would not recognise:
+   *
+   *   - a cancellation, which states no price at all (edge case 5);
+   *   - a revision that restates the price it already had, which Tradovate
+   *     mints for a quantity or TIF modify — the measured entry trigger had
+   *     seven versions and three distinct prices;
+   *   - anything outside the window: the broker's pre-fill re-pricing and the
+   *     drag that closed the trade. See the header.
+   */
   movedCount: number;
   /**
    * Which way it went, over CONSECUTIVE STEPS and never end-to-end (§C).
@@ -246,9 +334,13 @@ export interface StopHistory {
    */
   direction: 'tightened' | 'widened' | 'mixed' | null;
   /**
-   * When the move happened. ALWAYS NULL IN v1 — a version carries no timestamp
-   * and `/command/list` is not read (§2.1). Declared so that the field's
-   * absence is a stated fact rather than a shape change later.
+   * When the move happened. STILL ALWAYS NULL, AND NO LONGER FOR WANT OF A
+   * READ. `/command/list` is read now (see the header) and its instants are
+   * paired positionally with the versions — which is enough to decide whether a
+   * version predates the fill, a one-bit question whose wrong answer is a
+   * documented fallback, and is not enough to publish as the instant a trader
+   * touched their stop. Declared so that the field's absence is a stated fact
+   * rather than a shape change later.
    */
   movedAtMs: null;
   /** Whether the stop was a trailing one. Its steps are the server's, not the trader's. */
@@ -257,8 +349,42 @@ export interface StopHistory {
   noStopPlaced: boolean;
   /** Which layer attributed the orders. See the header. */
   source: 'linked' | 'inferred' | 'none';
-  /** The stop prices, oldest first. Without instants, in v1. */
+  /**
+   * EVERY stop price the chosen order stated, oldest first. The evidence.
+   *
+   * THE WHOLE LIST AND NOT THE COUNTED WINDOW, on purpose. The verdict fields
+   * above are a reading of this list, and a reading that threw away its own
+   * input would leave nobody able to check it — which is how the 19.10 defect
+   * survived a sync: the row said `movedCount: 5` and held nothing that could
+   * say which five. Without instants, in v1.
+   */
   versions: { stopPrice: number }[];
+  /**
+   * How many entries of {@link versions} precede {@link initialStop} — the
+   * revisions that were already superseded when the position opened.
+   *
+   * Zero on a trade entered at market, which is most of them. Non-zero is the
+   * signature of a bracket submitted behind an entry that moved before it
+   * filled, and it is the count the 19.10 trade needed to be two.
+   */
+  preFillVersions: number;
+  /**
+   * Whether {@link initialStop} was decided by a clock or fell back to the
+   * first version.
+   *
+   * `false` IS NOT A FAILURE AND IS NOT WORTH HIDING. It means the instants for
+   * this order's versions could not be established — no commands were read, the
+   * list was shorter than the versions, the read failed — so the answer is the
+   * pre-anchor answer: version one, with every version counted. On a trade whose
+   * stop was placed once and left alone the two readings are identical, which is
+   * why this is a flag rather than an `'unknown'`.
+   *
+   * WHAT A READER SHOULD DO WITH IT: nothing, unless it is about to tell the
+   * trader a number they could dispute. `preFillVersions === 0` with
+   * `anchoredAtFill === false` is the common, uninteresting case; a `false` on a
+   * stop with many versions is the one worth a second look.
+   */
+  anchoredAtFill: boolean;
   /** The targets that were not chosen, nearest first (§1.3 of decision 3). */
   otherTargets: number[];
   /** Present when one logical position became several trade rows (§1.3). */
@@ -294,12 +420,36 @@ export interface StopEvidence {
   /** Why some versions are missing, when some are. */
   unscanned: 'capped' | 'failed' | null;
   /**
+   * `orderId` → the instants of that order's commands, ASCENDING. The clock the
+   * fill anchor runs on, and the only reason `/command/list` is read.
+   *
+   * PAIRED POSITIONALLY WITH THE VERSIONS, which is the whole fragility of this
+   * field and is why {@link anchorStop} refuses the pairing unless the list is
+   * at least as long as the version list. A command is given per modification
+   * and a version is minted per modification, so the Nth command of an order is
+   * the Nth version of it — until something in that sequence mints one and not
+   * the other, and a cancel is exactly that (it is a command, and the measured
+   * one minted no version). A cancel is LAST, so it lengthens the list without
+   * shifting the pairs; anything that could shift them would have to be a
+   * command in the middle that minted no version, and the refusal above is what
+   * stands in for not being able to rule that out.
+   *
+   * ABSENT OR SHORT IS A VALUE, as everywhere else here: it means the anchor
+   * falls back to version one and says so. Never an `'unknown'` — a fallback
+   * anchor is a worse number, not an unreadable one.
+   */
+  commandTimes?: ReadonlyMap<number, readonly number[]>;
+  /**
    * `orderVersion.id` → whether the server rather than the trader produced it.
    *
-   * EMPTY IN v1, and it is a parameter rather than a field read off the version
-   * because that is where the value actually comes from: `isAutomated` was
-   * measured on `/command/list`, which this module does not read (§2.1). The
-   * three states are deliberate and are not symmetrical:
+   * STILL EMPTY, AND NOW FOR A SHARPER REASON THAN "WE DO NOT READ COMMANDS".
+   * `isAutomated` is measured on `/command/list`, which {@link commandTimes}
+   * does read — but a command carries no version id, so attributing one to a
+   * version means trusting the same positional pairing the anchor uses, and a
+   * misattributed `true` MUTES A REAL MOVE on exactly the trade whose stop was
+   * modified in some way that minted no version. The anchor can afford that bet
+   * because its fallback is a documented one; this field's fallback is silence.
+   * The three states are deliberate and are not symmetrical:
    *
    *   `true`    → the step is NOT counted as the trader's
    *   `false`   → counted
@@ -607,6 +757,41 @@ interface ProtectiveOrder {
   layer: Layer;
   versions: readonly TradovateOrderVersion[];
   type: string | null;
+  /**
+   * The order's own `ordStatus`, carried from the order rather than the version.
+   *
+   * Read by {@link withoutExitDrag} alone, and read there because a cancelled
+   * stop is the state a hand-forced exit leaves behind. It is the order's field
+   * and not the version's — the versions name the terms, the order names what
+   * became of it.
+   */
+  ordStatus?: string;
+}
+
+/**
+ * One stop candidate's versions, placed against the entry fill.
+ *
+ * The output of the two cuts the header describes, and it is computed PER
+ * CANDIDATE rather than once for the winner, because the selection ranks
+ * candidates by the risk their initial stop states — and after the anchor, that
+ * is the anchored version's risk and not version one's. Ranking on one number
+ * and reporting another is how the 19.10 row came to describe a price it had
+ * never chosen.
+ */
+interface AnchoredStop {
+  order: ProtectiveOrder;
+  /** Every stated stop price, oldest first. {@link StopHistory.versions}. */
+  all: number[];
+  /** Index into {@link all} of the anchor. `all[preFill]` is the initial stop. */
+  preFill: number;
+  /** Whether a clock decided {@link preFill}. {@link StopHistory.anchoredAtFill}. */
+  anchoredAtFill: boolean;
+  /**
+   * The versions the verdict is computed over: the anchor onward, less an exit
+   * drag. NEVER EMPTY — every caller indexes it, and the cuts above are written
+   * so that they cannot take the last version away.
+   */
+  counted: readonly TradovateOrderVersion[];
 }
 
 /** An `'unknown'` answer, with the reason it is one. */
@@ -628,6 +813,8 @@ function unknownHistory(
     noStopPlaced: false,
     source: 'none',
     versions: [],
+    preFillVersions: 0,
+    anchoredAtFill: false,
     otherTargets: [],
     ...extra,
   };
@@ -689,7 +876,13 @@ export function deriveStopHistory(params: {
       continue;
     }
     const ordered = inVersionOrder(versions);
-    scanned.push({ orderId, layer, versions: ordered, type: orderTypeOf(ordered) });
+    scanned.push({
+      orderId,
+      layer,
+      versions: ordered,
+      type: orderTypeOf(ordered),
+      ordStatus: evidence.orders.get(orderId)?.ordStatus,
+    });
   }
 
   // Layers A and B before C, and C only if the first two produced nothing. An
@@ -747,6 +940,8 @@ export function deriveStopHistory(params: {
       noStopPlaced: true,
       source: chosenTarget.initialTarget === null ? 'none' : chosenTarget.source,
       versions: [],
+      preFillVersions: 0,
+      anchoredAtFill: false,
       otherTargets: chosenTarget.otherTargets,
       ...capped,
       ...sharedWith,
@@ -776,17 +971,24 @@ export function deriveStopHistory(params: {
   // give. So the risk side merely OUTRANKS the wrong side: as long as one real
   // stop is present it wins outright, and when none is, the best of a bad set
   // is still reported and {@link StopHistory.initialStopSide} says it is bad.
-  const onRiskSide = stopOrders.filter((order) => riskOf(order, trade) > 0);
-  const ranked = onRiskSide.length > 0 ? onRiskSide : stopOrders;
-  const stop = ranked.reduce((worst, order) =>
-    riskOf(order, trade) > riskOf(worst, trade) ? order : worst
+  //
+  // ANCHORED FIRST, THEN RANKED, and the order of those two matters: the risk a
+  // candidate states is the risk of the version that was in force when the
+  // position opened, not of a revision the broker superseded before the fill.
+  const anchored = stopOrders.map((order) =>
+    anchorStop({ order, trade, commandTimes: evidence.commandTimes })
+  );
+  const onRiskSide = anchored.filter((entry) => riskOf(entry, trade) > 0);
+  const ranked = onRiskSide.length > 0 ? onRiskSide : anchored;
+  const stop = ranked.reduce((worst, entry) =>
+    riskOf(entry, trade) > riskOf(worst, trade) ? entry : worst
   );
 
-  const prices = stopPrices(stop.versions);
+  const counted = stopPrices(stop.counted);
   const steps = countMoves({
-    versions: stop.versions,
+    versions: stop.counted,
     direction: trade.direction,
-    trailing: isTrailingType(stop.type),
+    trailing: isTrailingType(stop.order.type),
     automated: evidence.automated,
   });
 
@@ -795,21 +997,183 @@ export function deriveStopHistory(params: {
   return {
     verdict: steps.movedCount > 0 ? 'moved' : 'kept',
     reason: null,
-    initialStop: prices[0],
+    initialStop: counted[0],
     initialStopSide: riskOf(stop, trade) > 0 ? 'risk' : 'wrong',
-    finalStop: prices[prices.length - 1],
+    finalStop: counted[counted.length - 1],
     initialTarget: chosenTarget.initialTarget,
     movedCount: steps.movedCount,
     direction: steps.direction,
     movedAtMs: null,
-    trailing: isTrailingType(stop.type),
+    trailing: isTrailingType(stop.order.type),
     noStopPlaced: false,
-    source: stop.layer === 'window' ? 'inferred' : 'linked',
-    versions: prices.map((stopPrice) => ({ stopPrice })),
+    source: stop.order.layer === 'window' ? 'inferred' : 'linked',
+    versions: stop.all.map((stopPrice) => ({ stopPrice })),
+    preFillVersions: stop.preFill,
+    anchoredAtFill: stop.anchoredAtFill,
     otherTargets: chosenTarget.otherTargets,
     ...capped,
     ...sharedWith,
   };
+}
+
+/**
+ * The instant of each of an order's versions, in version order. REF-113
+ * follow-up, and the clock the fill anchor needs.
+ *
+ * TWO SOURCES, AND THE WEAKER ONE IS THE ONE THAT RUNS TODAY:
+ *
+ *   1. The version's own `timestamp`, when a host sends one. Measured absent on
+ *      every row of the 19.10 sample (./types.ts), so this is a contingency —
+ *      but it needs no pairing to be trusted, so it is tried first.
+ *   2. `/command/list`, paired POSITIONALLY. See
+ *      {@link StopEvidence.commandTimes} for why that pairing holds and what it
+ *      cannot survive.
+ *
+ * ALL OR NOTHING, PER SOURCE. A list where some instants are known and some are
+ * not would let the anchor land on a version whose neighbour simply had no
+ * clock, which is a wrong anchor wearing a right one's clothes — and mixing the
+ * two sources could put a version stamp and a command stamp in one comparison,
+ * which is not a comparison. So a source either times every version or supplies
+ * nothing, and nothing means the documented fallback.
+ */
+function versionInstants(
+  order: ProtectiveOrder,
+  commandTimes: StopEvidence['commandTimes']
+): (number | null)[] {
+  const none = order.versions.map(() => null);
+  if (order.versions.length === 0) return none;
+
+  const own = order.versions.map((version) => instant(version.timestamp));
+  if (own.every((ms) => ms !== null)) return own;
+
+  const commands = commandTimes?.get(order.orderId);
+  if (commands === undefined || commands.length < order.versions.length) return none;
+  return order.versions.map((_, i) => commands[i]);
+}
+
+/**
+ * One stop candidate's versions, cut at both ends. See the module header.
+ *
+ * THE ANCHOR IS THE LAST VERSION IN FORCE AT THE FILL, which is the largest
+ * index whose instant is at or before `openedAtMs` — AT, not before, and that
+ * `<=` is load-bearing: the measured bracket's third version is the one the
+ * broker minted as the fill happened, re-pricing the stop from 132 ticks off the
+ * entry TRIGGER to 131 off the price that actually filled. It is the stop the
+ * position opened under and a `<` would have skipped it.
+ *
+ * `openedAtMs` IS THE FIRST OPENING FILL AND NOT THE LAST. On a position scaled
+ * into over several fills, the stop in force at the first one is the stop the
+ * trader opened under; anchoring at the last would read their own adjustments
+ * between the first contract and the last as the broker's pre-fill re-pricing
+ * and drop them from the count. Later is the greedier reading and this takes the
+ * earlier one, for the same reason the module prefers the most risk to the
+ * least.
+ *
+ * NO INSTANTS MEANS INDEX ZERO AND `anchoredAtFill: false`. Every version
+ * AFTER the fill also means index zero — a stop placed by hand once the trader
+ * was already in has nothing before it to skip — and that case is flagged
+ * `true`, because the clock did answer. The two look the same in `preFill` and
+ * are told apart by the flag, which is the only reason the flag exists.
+ */
+function anchorStop(params: {
+  order: ProtectiveOrder;
+  trade: BrokerTrade;
+  /** The clock alone. The order's own status travels on {@link ProtectiveOrder}. */
+  commandTimes: StopEvidence['commandTimes'];
+}): AnchoredStop {
+  const { order, trade, commandTimes } = params;
+
+  const times = versionInstants(order, commandTimes);
+  // The versions that STATE a price, carrying the instant of their position in
+  // the full list — a cancellation states no price and is not a candidate for
+  // the anchor, but it did consume a command, so the pairing is done before
+  // this filter and never after it.
+  const stated = order.versions
+    .map((version, i) => ({ version, price: finite(version.stopPrice), atMs: times[i] }))
+    .filter((entry): entry is { version: TradovateOrderVersion; price: number; atMs: number | null } =>
+      entry.price !== null
+    );
+
+  const fillMs = finite(trade.openedAtMs);
+  const timed = fillMs !== null && stated.every((entry) => entry.atMs !== null);
+
+  let preFill = 0;
+  if (timed) {
+    for (let i = 0; i < stated.length; i += 1) {
+      if (stated[i].atMs! <= fillMs) preFill = i;
+    }
+  }
+
+  const counted = withoutExitDrag(stated.slice(preFill), order, trade);
+
+  return {
+    order,
+    all: stated.map((entry) => entry.price),
+    preFill,
+    anchoredAtFill: timed,
+    counted: counted.map((entry) => entry.version),
+  };
+}
+
+/**
+ * The counted window, less the drag that closed the trade.
+ *
+ * WHAT THIS CUTS, IN THE TRADER'S WORDS: "I pulled my stop up to the market to
+ * get out." The broker sees a modification like any other, and the counted
+ * window would see a move toward the entry — on the measured trade, a final
+ * stop ONE TICK ABOVE the entry on a long, which both reports a move the trader
+ * did not make to their risk and throws away the ninety-tick stop they were
+ * actually protected at.
+ *
+ * THREE CONDITIONS, ALL OF THEM NECESSARY, AND THEY ARE NARROW ON PURPOSE:
+ *
+ *   1. It is the LAST version. A drag to the market is the last thing that
+ *      happens to a stop; one in the middle is a stop that was moved and then
+ *      moved again, and that is two moves.
+ *   2. The order is CANCELLED. A stop that filled is a stop that did its job at
+ *      the price it stated, and that price belongs in the history.
+ *   3. The LAST STEP CROSSED THE EXIT: the version before it sits on the
+ *      protective side of the price the trade actually got out at, and the last
+ *      one sits at or past it. A long needs `before < exit <= after`, a short
+ *      the mirror.
+ *
+ * AND (3) IS A CROSSING RATHER THAN A POSITION BECAUSE A POSITION IS NOT ENOUGH
+ * — this is the first thing the suite caught. "The last version is at or beyond
+ * the exit" is also true of a stop that was tightened once and then cancelled
+ * while the market ran past where it used to be: a long stopped at 95, tightened
+ * to 96, cancelled, and closed by hand at 90 has a last version above its exit
+ * and has genuinely been moved. What that case does NOT have is a last step that
+ * crossed 90 — it was already on the far side of it before the step. A drag onto
+ * the market is by construction a crossing: the stop starts where it was
+ * protecting from and ends where the trade got out.
+ *
+ * AND IT NEVER EMPTIES THE WINDOW. A stop whose only counted version is the
+ * drag itself keeps it: `initialStop` has to come from somewhere, and a window
+ * with nothing in it would read as `'none'` — the one wrong answer this module
+ * must never give. A one-version window also has no move to miscount, and no
+ * step to have crossed anything, so there is nothing to gain by cutting it.
+ */
+function withoutExitDrag<T extends { price: number }>(
+  stated: readonly T[],
+  order: ProtectiveOrder,
+  trade: BrokerTrade
+): readonly T[] {
+  if (stated.length < 2) return stated;
+  // A substring test, for the reason `isStopType` gives: the measured value is
+  // `Canceled`, the spelling with two Ls exists in the wild, and a status this
+  // test fails to recognise leaves the version counted — which is the direction
+  // that over-reports rather than the one that invents a stop price.
+  if (order.ordStatus === undefined || !/cancel/i.test(order.ordStatus)) return stated;
+
+  const { exitPrice } = trade;
+  const before = stated[stated.length - 2].price;
+  const after = stated[stated.length - 1].price;
+  const crossed =
+    trade.direction === 'long'
+      ? before < exitPrice && after >= exitPrice
+      : before > exitPrice && after <= exitPrice;
+
+  return crossed ? stated.slice(0, -1) : stated;
 }
 
 /**
@@ -832,7 +1196,7 @@ function stopPrices(versions: readonly TradovateOrderVersion[]): number[] {
 }
 
 /**
- * The risk this stop's FIRST version states, signed. Positive is a real stop.
+ * The risk this stop's ANCHORED version states, signed. Positive is a real stop.
  *
  * The number "furthest from entry" was always reaching for and never had: a
  * long risks `entry - stop` and a short risks `stop - entry`, so one subtraction
@@ -842,17 +1206,20 @@ function stopPrices(versions: readonly TradovateOrderVersion[]): number[] {
  * sit above or below the entry — the same rule {@link countMoves} states at
  * more length, and for the same reason.
  *
- * THE FIRST VERSION AND NOTHING ELSE. A stop dragged into profit ends on the
+ * THE ANCHORED VERSION AND NOTHING ELSE. A stop dragged into profit ends on the
  * wrong side legitimately, which is a healthy trade and not a defect; what
- * cannot happen is a protective stop SUBMITTED there, because the book would
- * have filled it on arrival.
+ * cannot happen is a protective stop IN FORCE AT THE FILL on the wrong side,
+ * because the book would have filled it on arrival. It was version one before
+ * the fill anchor, and that is what made the 19.10 trade rank its candidates on
+ * a price the broker had already superseded.
  *
- * Safe to index: every caller has already filtered to orders with at least one
- * stated stop price (`stopPrices(...).length > 0` in {@link deriveStopHistory}).
+ * Safe to index: {@link AnchoredStop.counted} is never empty, and every caller
+ * has already filtered to orders with at least one stated stop price
+ * (`stopPrices(...).length > 0` in {@link deriveStopHistory}).
  */
-function riskOf(order: ProtectiveOrder, trade: BrokerTrade): number {
-  const first = stopPrices(order.versions)[0];
-  return trade.direction === 'long' ? trade.entryPrice - first : first - trade.entryPrice;
+function riskOf(stop: AnchoredStop, trade: BrokerTrade): number {
+  const anchor = stopPrices(stop.counted)[0];
+  return trade.direction === 'long' ? trade.entryPrice - anchor : anchor - trade.entryPrice;
 }
 
 /** A target's price: the limit price of its first version. */
@@ -917,6 +1284,11 @@ function nearestTarget(
 
 /**
  * How many times the stop moved, and which way — over CONSECUTIVE STEPS (§C).
+ *
+ * TAKES THE COUNTED WINDOW AND NOT THE ORDER'S VERSIONS. What is outside that
+ * window is the broker re-pricing a bracket before the fill and the trader
+ * dragging the stop onto the market to get out, and neither is a move; the cuts
+ * are {@link anchorStop}'s and this function sees only what survived them.
  *
  * END-TO-END WOULD BE WRONG AND IT IS WORTH SAYING WHY: a stop dragged up to
  * break-even and then back down to where it started has moved twice, and
@@ -989,6 +1361,8 @@ function countMoves(params: {
 interface ReadTally {
   orders: number;
   candidates: number;
+  /** Command rows kept for the anchor. Zero means every history fell back. */
+  commands: number;
   deps: number;
   moved: number;
   kept: number;
@@ -1034,6 +1408,7 @@ export async function readStopHistories(params: {
   const tally: ReadTally = {
     orders: 0,
     candidates: 0,
+    commands: 0,
     deps: 0,
     moved: 0,
     kept: 0,
@@ -1152,6 +1527,19 @@ async function readHostEvidence(params: {
   }
   tally.candidates += wanted.size;
 
+  // ── The fill anchor's clock ──────────────────────────────────────────────
+  // AFTER THE CANDIDATE SET AND SKIPPED WHEN IT IS EMPTY, which is not a
+  // micro-optimisation: a day of nothing but inter-day trades has no candidate
+  // orders at all, that is the common case rather than the edge (every swing
+  // trade is one), and there is nothing for a clock to place. The read goes
+  // unmade rather than made and discarded.
+  //
+  // A failure costs the anchor and not the answer — the histories fall back to
+  // version one and say so — so it is deliberately NOT folded into `unscanned`,
+  // which is the channel for gaps that have to become `'unknown'`.
+  const commandTimes =
+    wanted.size > 0 ? await readCommandTimes({ reader, orders, tally }) : new Map();
+
   const versions = new Map<number, readonly TradovateOrderVersion[]>();
   // Seeded from the bracket map rather than starting at null: a strategy we
   // could not read is a gap in the evidence exactly as a version we could not
@@ -1189,7 +1577,71 @@ async function readHostEvidence(params: {
     strategyByOrder,
     strategiesComplete: incomplete === null,
     unscanned,
+    commandTimes,
   };
+}
+
+/**
+ * `orderId` → its commands' instants, ascending. The fill anchor's only clock.
+ *
+ * ONE CALL, NO DEPS, NO BUDGET. `/command/list` is a day-scoped list exactly as
+ * `/order/list` is, so it costs one request per host however many orders the day
+ * held — which is why it does not spend {@link MAX_ORDER_DEPS_PER_RUN}, the
+ * ceiling that exists to bound a per-order fan-out.
+ *
+ * SCOPED THROUGH THE ORDERS MAP AND NOT THROUGH A FIELD ON THE COMMAND. The
+ * response is the whole visible scope, which for a prop trader includes accounts
+ * that are not theirs to read; `orders` is already filtered to the accounts
+ * these trades were traded on, so a command whose `orderId` is not in it is
+ * dropped. That needs no `accountId` on the command, which the measurement never
+ * confirmed (./types.ts).
+ *
+ * A FAILURE IS NOT A GAP IN THE EVIDENCE. It returns an empty map, every anchor
+ * falls back to version one, and `anchoredAtFill` is `false` on every history of
+ * the host. Nothing becomes `'unknown'` over it: a fallback anchor is the answer
+ * this module gave for three stages, and the trade's verdict, its stop prices
+ * and its target are all still read.
+ */
+async function readCommandTimes(params: {
+  reader: TradovateReader;
+  orders: ReadonlyMap<number, TradovateOrder>;
+  tally: ReadTally;
+}): Promise<Map<number, number[]>> {
+  const { reader, orders, tally } = params;
+  const times = new Map<number, number[]>();
+
+  let raw: TradovateCommand[];
+  try {
+    // The body of a command list is every modification's terms — the trader's
+    // stop prices, in the response this module is most likely to log.
+    raw = (await reader.get<TradovateCommand[]>('/command/list')) ?? [];
+  } catch (error) {
+    tally.failures.push(kindOf(withoutResponseBody(error)));
+    return times;
+  }
+
+  if (TRUNCATION_COUNTS.has(raw.length)) tally.failures.push(`roundcount:${raw.length}`);
+
+  for (const command of raw) {
+    if (!usableId(command.orderId) || !orders.has(command.orderId)) continue;
+    const ms = instant(command.timestamp);
+    // A command with no readable instant is DROPPED, which shortens the list
+    // and therefore refuses the pairing for that order outright. Keeping a
+    // placeholder would shift every pair after it by one.
+    if (ms === null) continue;
+    const list = times.get(command.orderId) ?? [];
+    list.push(ms);
+    times.set(command.orderId, list);
+  }
+
+  for (const list of times.values()) {
+    // Ascending, to be paired against the versions in `id` order. The response
+    // order is not documented and is not relied on.
+    list.sort((a, b) => a - b);
+    tally.commands += list.length;
+  }
+
+  return times;
 }
 
 /**
@@ -1284,6 +1736,7 @@ function kindOf(error: unknown): string {
 function report(tally: ReadTally): void {
   const line =
     `[tradovate][orders] orders=${tally.orders} candidates=${tally.candidates} ` +
+    `commands=${tally.commands} ` +
     `deps=${tally.deps} moved=${tally.moved} kept=${tally.kept} none=${tally.none} ` +
     `unknown=${tally.unknown} dropped=${tally.dropped} capped=${tally.capped}` +
     (tally.failures.length > 0 ? ` kinds=${[...new Set(tally.failures)].join(',')}` : '');

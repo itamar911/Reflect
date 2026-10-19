@@ -3692,6 +3692,11 @@ const MOVED_HISTORY: StopHistory = {
   noStopPlaced: false,
   source: 'linked',
   versions: [{ stopPrice: 4504 }, { stopPrice: 4508.5 }, { stopPrice: 4512 }],
+  // The entry filled at market, so no revision preceded the stop the position
+  // opened under — and the fill anchor still RAN, which is the difference
+  // `anchoredAtFill` exists to state (REF-113 fill anchor).
+  preFillVersions: 0,
+  anchoredAtFill: true,
   otherTargets: [],
 };
 
