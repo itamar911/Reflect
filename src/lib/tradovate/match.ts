@@ -3,7 +3,9 @@
  *
  * PURE AND BROWSER-SAFE. No Supabase client, no fetch, no `process.env`, no
  * `Date.now()`, and — deliberately — no import from ./fills.ts, which is
- * server-only. Both halves of Stage 3 need this answer: the import computes it
+ * server-only. The one import, ../symbols, is pure for the same reason and was
+ * split out of here so the two sides of a symbol stop sharing a parser (see its
+ * header). Both halves of Stage 3 need this answer: the import computes it
  * on the server to decide whether to write onto a plan or queue a row, and the
  * confirmation screen computes it in the browser to list the candidates for a
  * row that was queued. One rule, one module, two callers, and no way for the
@@ -68,6 +70,8 @@
  * checked against a clock, and the clock is injected rather than read, because
  * a matcher that calls `Date.now()` cannot be tested at a fixed point.
  */
+
+import { brokerInstrument, planInstrument } from '../symbols';
 
 /** Everything this module needs to know about the broker's side. */
 export interface MatchableTrade {
@@ -144,56 +148,22 @@ export type MatchResult =
  */
 export const MATCH_WINDOW_MS = 8 * 60 * 60 * 1000;
 
-/** The twelve CME month codes, in the order the exchange lists them. */
-const MONTH_CODES = 'FGHJKMNQUVXZ';
-
-/** A standard contract name: root, month code, one or two year digits. */
-const CONTRACT_NAME = new RegExp(`^([A-Z]{1,4})[${MONTH_CODES}]\\d{1,2}$`);
-
-/** A bare root with no expiry, which is what a trader types by hand. */
-const BARE_ROOT = /^[A-Z]{1,4}$/;
-
-/**
- * The root of a symbol, or null when nothing can be read off it.
- *
- * `MNQZ6` is `MNQ`; `NQ` is `NQ`; a spread leg, an option name, a continuous
- * contract or anything with a space is NULL — and null is the answer that makes
- * the symbol sit out the decision entirely.
- *
- * ./fills.ts states, at length, that there is NO NAME PARSING anywhere in the
- * pricing chain, and means it: "spreads, options and continuous contracts all
- * carry names that such a rule reads wrongly". §B weighed that warning against
- * this use and kept it, on the grounds that a misread here costs a trip to the
- * confirmation queue rather than a wrong product or a 404 — but the warning is
- * why this function's failure mode is null and never a guess.
- */
-export function symbolRoot(symbol: string | null | undefined): string | null {
-  if (typeof symbol !== 'string') return null;
-  const name = symbol.trim().toUpperCase();
-  if (name === '') return null;
-
-  const contract = CONTRACT_NAME.exec(name);
-  if (contract) return contract[1];
-  return BARE_ROOT.test(name) ? name : null;
-}
-
 /**
  * Whether the two symbols are confidently about different instruments.
  *
  * A NEGATIVE FILTER, AND IT IS THE ONLY WAY THE SYMBOL MAY PARTICIPATE (§B).
- * `trade_plans.symbol` is free text — the form uppercases it and otherwise
- * stores whatever was typed, and its own placeholder offers three different
- * formats — so requiring equality would refuse the great majority of real
- * plans. Refusing only a contradiction keeps a typo out of the auto-link path
- * without turning the field into a gate.
+ * `trade_plans.symbol` is free text — the form uppercases it, suggests a few
+ * formats and otherwise stores whatever was typed, so a trader may write `NQ`,
+ * `NQ1`, `NQ1!`, `/NQ` or `MNQ` for the contract the broker calls `MNQZ6`.
+ * Requiring equality would refuse the great majority of real plans. Refusing
+ * only a contradiction keeps a typo out of the auto-link path without turning
+ * the field into a gate.
  *
- * THE MICRO RULE IS WHY THIS IS NOT JUST `a !== b`. `MNQ` and `NQ` are the same
- * instrument at two sizes, as are `MES` and `ES`; a trader who writes the one
- * and trades the other has not contradicted themselves, and this is the exact
- * case §B had in mind when it said a trader who wrote `NQ` must still match a
- * contract named for the micro. So a root that is a tail of the other is not a
- * conflict. `ES` against `MNQ` is — neither is a tail of the other — and that
- * is the wrong link worth refusing.
+ * THE TWO SIDES ARE READ BY DIFFERENT FUNCTIONS, and that is the REF-107 fix:
+ * ../symbols resolves a trader's free text and a broker's contract name
+ * separately, then reduces both to one canonical root — micros folded into
+ * their minis from an explicit table — so `MNQ` and `NQ` are the same
+ * instrument and `ES` against `MNQ` is still the wrong link worth refusing.
  *
  * Either side unreadable means no conflict: the symbol has nothing to say.
  */
@@ -201,11 +171,10 @@ export function rootsConflict(
   planSymbol: string | null | undefined,
   brokerSymbol: string | null | undefined
 ): boolean {
-  const broker = symbolRoot(brokerSymbol);
-  const plan = symbolRoot(planSymbol);
+  const broker = brokerInstrument(brokerSymbol);
+  const plan = planInstrument(planSymbol);
   if (broker === null || plan === null) return false;
-  if (plan === broker) return false;
-  return !plan.endsWith(broker) && !broker.endsWith(plan);
+  return plan !== broker;
 }
 
 /**

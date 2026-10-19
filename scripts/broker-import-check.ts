@@ -94,8 +94,14 @@ import {
   MATCH_WINDOW_MS,
   matchBrokerTrade,
   planCandidates,
+  rootsConflict,
   type CandidatePlan,
 } from '../src/lib/tradovate/match';
+import {
+  brokerSymbolRoot,
+  canonicalRoot,
+  planSymbolRoot,
+} from '../src/lib/symbols';
 import {
   confirmLink,
   declineLink,
@@ -2016,6 +2022,218 @@ async function matchRuleGroup() {
   ]);
 }
 
+// ── REF-107 — the two sides of a symbol ────────────────────────────────────
+//
+// The matcher's symbol rule used ONE parser for both sides, and a trader's
+// free text is not the language Tradovate speaks. `NQ1` — the continuous
+// contract every TradingView user reads off their chart — parsed as root `N`
+// + month `Q` (August) + year `1`, so a plan written `NQ1` was judged a
+// different instrument from `MNQZ6`: the trade went to the confirmation queue,
+// the queue computes its candidates with the same function, and the only
+// action the screen could offer was "not planned". Seven other roots misparse
+// identically, and `SIL`/`SI` was a second live false conflict of the same
+// silent kind — the accidental `endsWith` test could not see micro silver.
+//
+// So these three groups pin, in order: what each side reads, the micro table
+// that replaced the tail test, and the production trade end to end.
+
+/** The micro→mini pairs the table owns, with a contract name for each side. */
+const MICRO_PAIRS: { micro: string; mini: string; microContract: string; miniContract: string }[] = [
+  { micro: 'MNQ', mini: 'NQ', microContract: 'MNQZ6', miniContract: 'NQZ6' },
+  { micro: 'MES', mini: 'ES', microContract: 'MESZ6', miniContract: 'ESZ6' },
+  { micro: 'MYM', mini: 'YM', microContract: 'MYMZ6', miniContract: 'YMZ6' },
+  { micro: 'M2K', mini: 'RTY', microContract: 'M2KZ6', miniContract: 'RTYZ6' },
+  { micro: 'MGC', mini: 'GC', microContract: 'MGCZ6', miniContract: 'GCZ6' },
+  { micro: 'MCL', mini: 'CL', microContract: 'MCLZ6', miniContract: 'CLZ6' },
+  { micro: 'SIL', mini: 'SI', microContract: 'SILZ6', miniContract: 'SIZ6' },
+];
+
+async function symbolRootGroup() {
+  /**
+   * The eight roots whose second letter is a CME month code, which is the
+   * whole of the misparse: `NQ1` reads as a well-formed contract name and no
+   * later check could tell it from one. The other eighteen common roots
+   * returned null and therefore worked BY ACCIDENT — an unreadable root sits
+   * the decision out — which is why `ES1` was fine and `NQ1` was not, for a
+   * reason invisible to the trader.
+   */
+  const misparsed: [string, string][] = [
+    ['NQ1', 'NQ'],
+    ['YM1', 'YM'],
+    ['NG1', 'NG'],
+    ['ZN1', 'ZN'],
+    ['HG1', 'HG'],
+    ['ZF1', 'ZF'],
+    ['MNQ1', 'MNQ'],
+    ['MYM1', 'MYM'],
+  ];
+
+  group('a plan symbol is read in the language a trader writes (REF-107)', [
+    ...misparsed.map(([typed, root]) =>
+      c(`(1) ${typed} is the ${root} continuous contract, not a 2021 expiry`,
+        planSymbolRoot(typed), root)),
+
+    c('(2) the TradingView spelling of the same thing', planSymbolRoot('NQ1!'), 'NQ'),
+    c('(3) a bare bang', planSymbolRoot('NQ!'), 'NQ'),
+    c('(4) the second month', planSymbolRoot('NQ2'), 'NQ'),
+    c('(5) the thinkorswim spelling', planSymbolRoot('/NQ'), 'NQ'),
+    c('(6) a bare root is itself', planSymbolRoot('NQ'), 'NQ'),
+    c('(7) lower case is the same symbol', planSymbolRoot('nq1'), 'NQ'),
+    c('(8) and so is a symbol with spaces around it', planSymbolRoot('  NQ1  '), 'NQ'),
+
+    // NON-REGRESSION. A real contract name must still read as one from the
+    // plan side too — a trader may paste exactly what the broker shows them.
+    c('(9) a contract name still reads as a contract', planSymbolRoot('NQZ6'), 'NQ'),
+    c('(10) including a micro contract', planSymbolRoot('MNQZ6'), 'MNQ'),
+    // The ordering inside planSymbolRoot earns this one: `ESH2` ends in a `2`,
+    // but `ESH` is not a root we know, so the contract reading wins and the
+    // March-2022 name resolves to `ES` rather than to `ESH`.
+    c('(11) a dated contract whose year digit looks like a continuous marker',
+      planSymbolRoot('ESH2'), 'ES'),
+
+    // A root carrying a digit is admitted by name, never by shape.
+    c('(12) a root with a digit in it', planSymbolRoot('M2K'), 'M2K'),
+    // Not in the known-roots list, so it falls through every reading above and
+    // is still resolved — the list makes the ambiguous cases certain, it does
+    // not decide what may match.
+    c('(13) a root the list has never heard of still resolves', planSymbolRoot('ZQ1'), 'ZQ'),
+
+    // Null is the answer that makes the symbol sit the decision out, and
+    // ./fills.ts's warning about name parsing is why it is the failure mode.
+    c('(14) a spread leg is unreadable, as before', planSymbolRoot('NQ/ES SPREAD'), null),
+    c('(15) an empty symbol', [planSymbolRoot(''), planSymbolRoot('   ')], [null, null]),
+    c('(16) a null column', [planSymbolRoot(null), planSymbolRoot(undefined)], [null, null]),
+    // Still out, exactly as today: admitting `6E` by shape would also admit
+    // `M6E` as a root of its own, and the micro table does not carry that pair.
+    c('(17) a currency root remains out of the decision',
+      [planSymbolRoot('6E'), planSymbolRoot('6J')], [null, null]),
+  ]);
+
+  group('a broker symbol is read in the language Tradovate sends (REF-107)', [
+    c('(1) the production contract', brokerSymbolRoot('MNQZ6'), 'MNQ'),
+    c('(2) its mini', brokerSymbolRoot('NQZ6'), 'NQ'),
+    c('(3) a two-digit year', brokerSymbolRoot('ESH27'), 'ES'),
+    c('(4) a root with a digit', brokerSymbolRoot('M2KZ6'), 'M2K'),
+    // The narrow reading stays narrow. A single-letter root is a real contract
+    // from this side — the two-character floor is a PLAN-SIDE rule only.
+    c('(5) a single-letter root is a contract here', brokerSymbolRoot('CZ6'), 'C'),
+    // And the decorations a human types are not Tradovate's to send, so this
+    // side does not invent a reading for them.
+    c('(6) a continuous marker is not broker notation', brokerSymbolRoot('NQ1'), 'N'),
+    c('(7) a spread leg is unreadable', brokerSymbolRoot('NQ/ES SPREAD'), null),
+    c('(8) an absent symbol', brokerSymbolRoot(null), null),
+  ]);
+}
+
+async function microMiniGroup() {
+  group('a micro and its mini are one instrument, from a table (REF-107)', [
+    ...MICRO_PAIRS.map((pair) =>
+      c(`(1) ${pair.micro} is ${pair.mini}`, canonicalRoot(pair.micro), pair.mini)),
+
+    // BOTH DIRECTIONS FOR ALL SEVEN. The old rule was "one root is a tail of
+    // the other", which got five of these right by coincidence of spelling:
+    // `SIL` does not end in `SI`, and `M2K` shares no letter with `RTY`.
+    ...MICRO_PAIRS.map((pair) =>
+      c(`(2) a plan written ${pair.mini} matches a ${pair.microContract} trade`,
+        rootsConflict(pair.mini, pair.microContract), false)),
+    ...MICRO_PAIRS.map((pair) =>
+      c(`(3) a plan written ${pair.micro} matches a ${pair.miniContract} trade`,
+        rootsConflict(pair.micro, pair.miniContract), false)),
+
+    // The two the tail test got wrong, called out so a failure names them.
+    c('(4) micro silver against its mini, which the tail test refused',
+      rootsConflict('SIL', 'SIZ6'), false),
+    c('(5) micro Russell against its mini, which shares no letters',
+      rootsConflict('M2K', 'RTYZ6'), false),
+
+    // NON-REGRESSION. The table widens nothing beyond itself: two different
+    // instruments still contradict, and that is the wrong link worth refusing.
+    c('(6) two different instruments still conflict',
+      [rootsConflict('ES', 'MNQZ6'), rootsConflict('NQ', 'ESZ6'), rootsConflict('GC', 'CLZ6')],
+      [true, true, true]),
+    c('(7) a micro against ANOTHER instrument\'s micro conflicts',
+      rootsConflict('MES', 'MNQZ6'), true),
+    c('(8) an unreadable side never conflicts',
+      [rootsConflict('NQ/ES SPREAD', 'MNQZ6'), rootsConflict('NQ1', 'NQ/ES SPREAD'),
+       rootsConflict(null, 'MNQZ6'), rootsConflict('NQ1', null)],
+      [false, false, false, false]),
+    // And the bug itself, at the level of the rule rather than the match.
+    c('(9) the production pair does not conflict', rootsConflict('NQ1', 'MNQZ6'), false),
+    // It failed against the MINI too. This was never a micro problem.
+    c('(10) nor does it against the mini', rootsConflict('NQ1', 'NQZ6'), false),
+  ]);
+}
+
+/** Noon on 19.10, the day of the trade that opened this investigation. */
+const QUEUED_NOW = Date.parse('2026-10-19T12:00:00.000Z');
+
+async function continuousContractGroup() {
+  // The trade from production, to the minute: a long on the micro Nasdaq
+  // entered at 11:16, against a plan submitted at 11:12 that said "NQ1".
+  const trade: BrokerTrade = {
+    ...TRADE,
+    brokerTradeKey: 'demo:91007',
+    symbol: 'MNQZ6',
+    direction: 'long',
+    openedAtMs: Date.parse('2026-10-19T11:16:00.000Z'),
+    closedAtMs: Date.parse('2026-10-19T11:20:00.000Z'),
+  };
+  const plan = (over: Partial<CandidatePlan> = {}): CandidatePlan => ({
+    id: 'plan-nq1',
+    status: 'open',
+    source: 'manual',
+    hidden: false,
+    submitted_at: '2026-10-19T11:12:00.000Z',
+    direction: 'long',
+    symbol: 'NQ1',
+    ...over,
+  });
+  const against = (plans: CandidatePlan[]) =>
+    matchBrokerTrade({ trade, plans, nowMs: QUEUED_NOW });
+
+  // Both sizes open at once, which is the one user-visible cost of widening:
+  // more queue, never a wrong automatic link.
+  const bothSizes = [
+    plan({ id: 'plan-mnq', symbol: 'MNQ', submitted_at: '2026-10-19T11:00:00.000Z' }),
+    plan({ id: 'plan-nq', symbol: 'NQ', submitted_at: '2026-10-19T11:12:00.000Z' }),
+  ];
+
+  group('the 19.10 trade finds the plan behind it (REF-107)', [
+    // THE WHOLE POINT. Seven of the eight conditions always passed for this
+    // trade; condition 7 alone refused it.
+    c('(1) plan "NQ1" long 11:12 + MNQZ6 long 11:16 is a unique match',
+      against([plan()]), { kind: 'unique', planId: 'plan-nq1' }),
+    c('(2) and the confirmation screen offers it too, which is what the trader sees',
+      planCandidates({ trade, plans: [plan()], nowMs: QUEUED_NOW }).map((row) => row.id),
+      ['plan-nq1']),
+
+    // Every spelling of the same intent, all of which a chart may show.
+    c('(3) every spelling of the same plan matches',
+      ['NQ1', 'NQ1!', 'NQ', '/NQ', 'MNQ', 'NQZ6', 'MNQZ6', 'nq1']
+        .map((symbol) => against([plan({ symbol })]).kind),
+      ['unique', 'unique', 'unique', 'unique', 'unique', 'unique', 'unique', 'unique']),
+
+    // §7's safety property. Widening can only ADD candidates, and the matcher
+    // auto-links on exactly one, so the worst it can do is send a row to the
+    // queue with both plans offered — nearest in time first.
+    c('(4) an NQ plan and an MNQ plan open together are ambiguous, never unique',
+      against(bothSizes), { kind: 'ambiguous', candidateIds: ['plan-nq', 'plan-mnq'] }),
+
+    // NON-REGRESSION, AND THE SABOTAGE CHECK. A symbol fix must not reach
+    // condition 4: a plan written after the entry is a note, not a plan.
+    c('(5) a plan written AFTER the entry is still refused, whatever its symbol',
+      ['NQ1', 'NQ', 'MNQ'].map((symbol) =>
+        against([plan({ symbol, submitted_at: '2026-10-19T11:17:00.000Z' })]).kind),
+      ['none', 'none', 'none']),
+    c('(6) the other instrument is still refused',
+      against([plan({ symbol: 'ES' })]), { kind: 'none' }),
+    c('(7) an unreadable symbol still sits out rather than refusing',
+      against([plan({ symbol: 'NQ/ES SPREAD' })]), { kind: 'unique', planId: 'plan-nq1' }),
+    c('(8) a plan on the other side is still refused',
+      against([plan({ direction: 'short' })]), { kind: 'none' }),
+  ]);
+}
+
 /** A manual plan as the database holds it, with intent columns filled in. */
 function storedPlan(over: Row = {}): Row {
   return {
@@ -3441,6 +3659,10 @@ async function main() {
 
   // Stage 3b — the matcher, the merge, the counter and the debrief gate.
   await matchRuleGroup();
+  // REF-107 — the two sides of a symbol, and the micro table between them.
+  await symbolRootGroup();
+  await microMiniGroup();
+  await continuousContractGroup();
   await linkWriteGroup();
   await linkCountGroup();
   await debriefGateGroup();

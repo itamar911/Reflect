@@ -272,6 +272,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
   // laid out inside the flex column these sit in without fighting its
   // default rendering — and the accessible result is the same.
   const symbolId = useId();
+  const symbolHelpId = useId();
   const directionLabelId = useId();
   const strategyLabelId = useId();
   const personalStrategyLabelId = useId();
@@ -1290,12 +1291,22 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                   id={symbolId}
                   ref={symbolRef}
                   type="text"
-                  placeholder="SPY, EURUSD, AAPL..."
+                  placeholder="NQ, MNQ, ES, AAPL, EURUSD"
                   value={form.symbol}
                   onChange={(e) => { setForm({ ...form, symbol: e.target.value.toUpperCase() }); setValidationResult(null); }}
+                  aria-describedby={symbolHelpId}
                   className="w-full h-10 px-3 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none focus:border-tg-primary transition-colors"
                   style={{ background: 'var(--color-tg-surface-2)' }}
                 />
+                {/* The placeholder used to offer a stock, a forex pair and
+                    another stock, so nothing in the form suggested futures
+                    notation at all — and the trader who wrote "NQ1" had no
+                    hint the matcher was reading it as another instrument
+                    (REF-107). lib/symbols.ts now reads all three forms, and
+                    this line is what tells the trader so. */}
+                <p id={symbolHelpId} className="text-[11px] text-tg-muted">
+                  בחוזים עתידיים אפשר לכתוב NQ, NQ1 או MNQ — רפלקט יזהה
+                </p>
               </div>
               <div ref={(el) => { fieldRefs.current.direction = el; }} style={fieldHighlightStyle('direction')} className="flex flex-col gap-1">
                 <span id={directionLabelId} className="text-xs font-medium text-tg-muted">כיוון עסקה</span>
