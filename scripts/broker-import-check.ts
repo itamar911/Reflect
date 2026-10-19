@@ -48,10 +48,20 @@
  *     `String()` is `'[object Object]'` against `'[object Object]'`, which is
  *     always equal, so the column would never be updated once written. The group
  *     fails if the kind is reverted to `exact`.
- *   - **Four columns are filled when empty and never restated.** A trader who
+ *   - **Two columns are filled when empty and never restated.** A trader who
  *     disagrees with "you moved your stop" and unticks the box must not find it
- *     ticked again an hour later, and E12 holds: a LINKED PLAN's `stop_loss` is
- *     not filled even when it is NULL.
+ *     ticked again an hour later.
+ *   - **AN UNPLANNED BROKER ROW SCORES EXACTLY 0/60 ON PLANNING.** The broker's
+ *     stop goes to `broker_stop_loss` and NEVER to `stop_loss`, because the
+ *     trader's column is SCORED: filling it paid 30 points for a plan that does
+ *     not exist, under a J1 line reading "לא הוגשה תוכנית", and one journal edit
+ *     then minted an `rr_ratio` from it and took the row to 100/100. Both
+ *     counterfactuals are computed in the group, so it says what it prevents
+ *     rather than only that it does not happen.
+ *   - **No broker figure reaches `proposeFlags` or `reachedStop`.** The one of
+ *     the three concerns that was already safe, pinned so that it stays safe: a
+ *     broker row is `closed` and not `manual`, so it can never arrive as the
+ *     `plan` argument.
  *   - **Only the two triggers that can see the orders ask for them.** A
  *     source-level group, because the claim is about a call that is NOT made.
  *
@@ -158,6 +168,7 @@ import {
   visibleLines,
 } from '../src/lib/rules/todayLines';
 import { formatMoney } from '../src/lib/money';
+import { calcRR } from '../src/lib/utils';
 
 // ── Harness ─────────────────────────────────────────────────────────────────
 
@@ -3789,10 +3800,13 @@ async function stopHistoryGroup() {
       row.stop_history, MOVED_HISTORY),
     c('(2) broker_stop_loss is the INITIAL stop and broker_take_profit the nearest target',
       [row.broker_stop_loss, row.broker_take_profit], [4504, 4525]),
-    // Decision 4 (17.10): the broker's measured prices fill the trader's own
-    // columns on a row that has no plan behind it.
-    c('(3) stop_loss and take_profit are filled on an unplanned broker row',
-      [row.stop_loss, row.take_profit], [4504, 4525]),
+    // THE REVERSAL OF DECISION 4. The broker's prices go to the two columns
+    // 038 added for them and NOWHERE ELSE: `stop_loss` and `take_profit` are
+    // scored, and paying for them on a row whose whole point is that it has no
+    // plan is worth 30 points of a plan that does not exist. See
+    // unplannedScoreGroup(), which is where the number is pinned.
+    c('(3) the trader\'s own stop_loss and take_profit are NOT filled',
+      [row.stop_loss ?? null, row.take_profit ?? null], [null, null]),
     c('(4) and the verdict reaches the self-report columns',
       [row.moved_sl, row.kept_sl], [true, false]),
 
@@ -3960,7 +3974,7 @@ async function stopSelfReportGroup() {
   const disagreedRow = disagreed.rows[0] ?? {};
 
   // The trader typed their own stop on the imported row. The broker's number
-  // does not replace it.
+  // does not replace it — and does not reach the column at all.
   const ownStop = new FakeDb([brokerRow({ stop_loss: 29_900, take_profit: 29_700 })]);
   await quietImport({
     client: ownStop.client(),
@@ -3971,11 +3985,12 @@ async function stopSelfReportGroup() {
     stopHistories: historyFor(TRADE, MOVED_HISTORY),
   });
   const ownStopRow = ownStop.rows[0] ?? {};
+  const ownStopWrite = ownStop.writes.find((s) => s.kind === 'update')?.values ?? {};
 
-  // E12: a LINKED PLAN. Its stop columns are never touched, even when NULL —
-  // a trader who planned without a stop planned without one, and filling it
-  // from the broker would make their plan claim a number they never typed and
-  // then feed it to rr_ratio, tradeScore's planning block and proposeFlags.
+  // A LINKED PLAN — E12's case, and now covered by the same unconditional rule
+  // rather than by a branch of its own. A trader who planned WITHOUT a stop
+  // planned without one; the broker's number must not make their plan claim
+  // something they never typed.
   const linkedPlan = new FakeDb([
     brokerRow({ unplanned: false, link_confirmed_at: '2026-10-19T12:00:00.000Z' }),
   ]);
@@ -4016,15 +4031,17 @@ async function stopSelfReportGroup() {
   });
   const keptRow = kept.rows[0] ?? {};
 
-  group('four columns are filled when empty and NEVER restated', [
+  group('two columns are filled when empty and NEVER restated', [
     c('(1) a trader who unticked "moved SL" does not find it ticked again',
       [disagreedRow.moved_sl, disagreedRow.kept_sl], [false, true]),
     c('(2) and the broker\'s evidence is still recorded beside their answer',
       (disagreedRow.stop_history as StopHistory)?.verdict, 'moved'),
     c('(3) a stop the trader typed themselves is not replaced',
       [ownStopRow.stop_loss, ownStopRow.take_profit], [29_900, 29_700]),
+    c('(3b) and no statement names either column, whatever is in them',
+      ['stop_loss', 'take_profit'].filter((column) => column in ownStopWrite), []),
 
-    // E12.
+    // E12, now reached by the unconditional rule rather than by a branch.
     c('(4) a LINKED PLAN\'s stop_loss is not filled even though it is NULL',
       [linkedRow.stop_loss, linkedRow.take_profit], [null, null]),
     c('(5) and no statement names either column on it',
@@ -4045,12 +4062,19 @@ async function stopSelfReportGroup() {
 
     c('(9) a stop that never moved fills false, not NULL',
       [keptRow.moved_sl, keptRow.kept_sl], [false, true]),
-    // The membership rule: these four are NOT the broker's to restate.
+    // The membership rule: none of the four is the broker's to restate, and the
+    // two price columns are not the broker's to write at all.
     c('(10) and none of the four is in EXECUTION_FACTS',
       EXECUTION_FACTS_FOR_TEST
         .map(({ column }) => column)
         .filter((column) => ['moved_sl', 'kept_sl', 'stop_loss', 'take_profit'].includes(column)),
       []),
+    c('(11) `stop_loss` and `take_profit` are named in NO statement of any run',
+      [disagreed, ownStop, linkedPlan, trailing, kept].flatMap((db) =>
+        db.writes.flatMap((s) =>
+          ['stop_loss', 'take_profit'].filter((column) => column in (s.values ?? {}))
+        )
+      ), []),
   ]);
 }
 
@@ -4123,6 +4147,226 @@ async function stopCandidateGroup() {
       [errorLines.length, errorLines[0]?.includes('42703'),
        errorLines[0]?.includes('undefined column')],
       [1, true, false]),
+  ]);
+}
+
+/**
+ * THE GROUP THAT KEEPS THE BROKER'S STOP FROM BECOMING A PLAN (REF-113 Stage 3).
+ *
+ * Decision 4 of 17.10 said to fill `stop_loss`/`take_profit` when they are NULL,
+ * and the design report asked for a dedicated test case because the risk was
+ * known. This is that test case. It FAILED against the first implementation, in
+ * two independent ways, and the decision was reversed rather than labelled
+ * around:
+ *
+ *   1. `tradeScore` paid 30 of 60 planning points for the broker's own
+ *      protective order, under a J1 line reading "לא הוגשה תוכנית" — a label
+ *      disagreeing with the number beside it — and the total went 40 → 70.
+ *   2. The journal's editor recomputes `rr_ratio = calcRR(entry, sl, tp)` on
+ *      save from the row's own stop and target, so ONE EDIT on an unplanned row
+ *      would mint a ratio the trader never planned and award the remaining 30
+ *      points, taking an impulse trade to 100/100.
+ *
+ * Both are pinned here by their numbers, and both counterfactuals are computed
+ * alongside, so the group says what it is preventing rather than only asserting
+ * that it does not happen.
+ */
+async function unplannedScoreGroup() {
+  // A real import, with the orders read, of a trade with no plan behind it.
+  const db = new FakeDb();
+  await quietImport({
+    client: db.client(),
+    userId: USER,
+    trades: [TRADE],
+    isTradeSource: true,
+    env: ON,
+    stopHistories: historyFor(TRADE, MOVED_HISTORY),
+  });
+  const row = db.rows[0] ?? {};
+
+  /** The score input exactly as src/app/api/ai-debrief/route.ts builds it. */
+  const scoreInputFor = (stored: Row): TradeScoreInput => ({
+    stop_loss: stored.stop_loss != null ? (stored.stop_loss as number) : null,
+    take_profit: stored.take_profit != null ? (stored.take_profit as number) : null,
+    rr_ratio: stored.rr_ratio != null ? (stored.rr_ratio as number) : null,
+    required_min_rr: null,
+    strategy_conditions_checked: null,
+    moved_sl: stored.moved_sl === true,
+    exited_early: stored.exited_early === true,
+    fomo_entry: stored.fomo_entry === true,
+    revenge_trade: stored.revenge_trade === true,
+    exit_price: stored.exit_price != null ? (stored.exit_price as number) : null,
+    entry_price: stored.entry_price != null ? (stored.entry_price as number) : null,
+    direction: (stored.direction as 'long' | 'short' | null) ?? null,
+    // J1: the trader confirmed this execution was not planned.
+    unplanned: true,
+  });
+
+  const scored = computeTradeScore(scoreInputFor(row));
+
+  // The same import, of a trade whose stop never moved. J1's own number, with
+  // nothing deducted: the baseline this group is measuring departures from.
+  const keptDb = new FakeDb();
+  await quietImport({
+    client: keptDb.client(),
+    userId: USER,
+    trades: [TRADE],
+    isTradeSource: true,
+    env: ON,
+    stopHistories: historyFor(TRADE, KEPT_HISTORY),
+  });
+  const keptScored = computeTradeScore(scoreInputFor(keptDb.rows[0] ?? {}));
+
+  // WHAT THE OLD BEHAVIOUR SCORED, computed here so the regression has a number
+  // and not an adjective.
+  const asIfFilled = computeTradeScore(
+    scoreInputFor({ ...row, stop_loss: 4504, take_profit: 4525 })
+  );
+  // And what one journal edit then made of it: the editor's own expression, run
+  // on a row whose stop and target came from the broker.
+  const asIfEdited = computeTradeScore(
+    scoreInputFor({
+      ...row,
+      stop_loss: 4504,
+      take_profit: 4525,
+      rr_ratio: calcRR(TRADE.entryPrice, 4504, 4525),
+    })
+  );
+
+  // The editor's recompute, on the row as it is actually stored. `sl` and `tp`
+  // are read straight off the row — JournalClient.tsx pre-populates both from it
+  // — so with the columns NULL the guard short-circuits and no ratio is minted.
+  // This is the expression itself, not a description of it.
+  const storedSl = row.stop_loss != null ? (row.stop_loss as number) : null;
+  const storedTp = row.take_profit != null ? (row.take_profit as number) : null;
+  const mintedOnEdit =
+    storedSl !== null && storedTp !== null ? calcRR(TRADE.entryPrice, storedSl, storedTp) : null;
+
+  group('an unplanned broker row scores 0/60 on planning, and keeps scoring it', [
+    // THE LOCK.
+    c('(1) planning is exactly zero out of sixty',
+      [scored.breakdown.planning.score, scored.breakdown.planning.max], [0, 60]),
+    c('(2) and the J1 line says so, in one sentence and with no partial credit',
+      scored.breakdown.planning.details, ['תכנון 0/60 — לא הוגשה תוכנית']),
+    // A stop that never moved scores J1's 40 exactly — planning zero, discipline
+    // whole. That is the baseline, and it is unchanged by this stage.
+    c('(3) a trade whose stop stayed put scores J1\'s 40, unchanged',
+      [keptScored.breakdown.planning.score, keptScored.breakdown.discipline.score,
+       keptScored.total],
+      [0, 40, 40]),
+    // THE ONE DEPARTURE FROM 40, AND IT IS THE POINT OF THE TICKET. This trade's
+    // stop WAS moved, the broker saw it, and the discipline block deducts its 12
+    // — on evidence, where before REF-113 an absent self-report collected the
+    // whole 12 for having nothing against it (tradeScore's own header).
+    c('(4) a stop the broker saw move costs 12, and only that 12',
+      [scored.breakdown.discipline.score, scored.total], [28, 28]),
+
+    // The regression, by its numbers. Both counterfactuals are computed on THIS
+    // row, so they carry the same 12 deduction and the planning delta is the
+    // whole of the difference.
+    c('(5) filling the trader\'s columns would have paid 30 for a plan that does not exist',
+      [asIfFilled.breakdown.planning.score, asIfFilled.total - scored.total], [30, 30]),
+    c('(6) and the label would have contradicted its own number',
+      asIfFilled.breakdown.planning.details, ['תכנון 30/60 — לא הוגשה תוכנית']),
+    c('(7) and one journal edit would then have paid the whole planning block',
+      [asIfEdited.breakdown.planning.score, asIfEdited.total - scored.total], [60, 60]),
+
+    // No rr_ratio, and none mintable.
+    c('(8) rr_ratio is NULL on the row and is named in no statement',
+      [row.rr_ratio ?? null, db.writes.some((s) => 'rr_ratio' in (s.values ?? {}))],
+      [null, false]),
+    c('(9) the editor\'s own recompute cannot mint one — no legs, no ratio',
+      mintedOnEdit, null),
+    // The guard is only worth anything if the expression could fire.
+    c('(10) and the expression DOES fire when the legs are a trader\'s own',
+      calcRR(TRADE.entryPrice, 29_900, 29_700) > 0, true),
+
+    // The broker's numbers are not lost — they are in the columns 038 added for
+    // them, which nothing scores. That is the whole reason those columns exist.
+    c('(11) the measured prices are still recorded, where nothing scores them',
+      [row.broker_stop_loss, row.broker_take_profit], [4504, 4525]),
+    c('(12) and the evidence is whole',
+      (row.stop_history as StopHistory)?.initialStop, 4504),
+    // `moved_sl` is the one column whose score effect is an improvement in both
+    // directions: an absent self-report already collected the whole 12 points
+    // for having no evidence against it, so this deducts ON EVIDENCE instead.
+    c('(13) the stop the broker SAW being moved costs discipline, on evidence',
+      [row.moved_sl, scored.breakdown.discipline.details.includes('הוזז Stop Loss (0/12)')],
+      [true, true]),
+  ]);
+}
+
+/**
+ * proposeFlags/reachedStop — reported, and pinned where it is already safe.
+ *
+ * MEASURED RATHER THAN ASSUMED, because this is the one of the three concerns
+ * that turned out NOT to be broken, and a group that only said so in prose would
+ * not notice the day it became broken. Two independent reasons, the first
+ * sufficient on its own:
+ *
+ *   - `proposeFlags(plan, facts)` reads the STOP OFF THE PLAN, and the plan is
+ *     always one of `planCandidates(...)` — which requires `source === 'manual'`
+ *     and `status === 'open'`. A broker row is `'tradovate'` and `'closed'`, so
+ *     it can never arrive as the `plan` argument.
+ *   - `facts` carries direction, entry, exit and quantity. It has never carried
+ *     a stop, so nothing the broker writes reaches `reachedStop` through it.
+ *
+ * So no discipline flag was ever proposed off a broker figure, and `followed_plan`
+ * is simply not offered for a plan with no stop. If a later change puts a broker
+ * row into the candidate pool, (1) fails.
+ */
+function proposeFlagsBoundaryGroup() {
+  const brokerRow = {
+    id: 'broker-1',
+    status: 'closed',
+    source: 'tradovate',
+    hidden: false,
+    submitted_at: new Date(OPENED - 60_000).toISOString(),
+    direction: 'short' as const,
+    symbol: SYMBOL,
+    // What the first implementation would have written here.
+    stop_loss: 4504,
+    take_profit: 4525,
+    link_confirmed_at: null,
+  };
+  const manualPlan = { ...brokerRow, id: 'plan-1', source: 'manual', status: 'open' };
+
+  const candidates = planCandidates({
+    trade: { openedAtMs: OPENED, direction: 'short', symbol: SYMBOL },
+    plans: [brokerRow, manualPlan] as unknown as CandidatePlan[],
+    nowMs: CLOSED + 60_000,
+  });
+
+  const facts = {
+    direction: 'short' as const,
+    entry_price: ENTRY,
+    exit_price: EXIT,
+    quantity: 2,
+  };
+
+  // A plan with no stop and no target: the two flags that need them are not
+  // offered at all. There is no "unknown" checkbox, by §E's decision.
+  const bare = proposeFlags(
+    { entry_price: ENTRY, stop_loss: null, take_profit: null, units: 2 },
+    facts
+  );
+  // A plan the trader DID write a stop on, so the group cannot pass by
+  // proposeFlags never proposing anything.
+  const planned = proposeFlags(
+    { entry_price: ENTRY, stop_loss: 29_900, take_profit: 29_700, units: 2 },
+    facts
+  );
+
+  group('a broker figure never reaches proposeFlags or reachedStop', [
+    c('(1) a broker row is not a candidate plan — closed, and not manual',
+      candidates.map((plan) => plan.id), ['plan-1']),
+    c('(2) the executed facts carry no stop, so reachedStop cannot see one',
+      Object.keys(facts).sort(), ['direction', 'entry_price', 'exit_price', 'quantity']),
+    c('(3) a plan with no stop is offered neither exited_early nor followed_plan',
+      bare.map((proposal) => proposal.column), ['proper_size']),
+    c('(4) and a plan that HAS one is offered both — so (3) is not vacuous',
+      planned.map((proposal) => proposal.column).sort(),
+      ['exited_early', 'followed_plan', 'proper_size']),
   ]);
 }
 
@@ -4211,6 +4455,8 @@ async function main() {
   await stopNotDeletedGroup();
   await stopSelfReportGroup();
   await stopCandidateGroup();
+  await unplannedScoreGroup();
+  proposeFlagsBoundaryGroup();
   stopTriggerGroup();
 
   // J1 — the unplanned row's score (REF-107 Stage 3b follow-up).

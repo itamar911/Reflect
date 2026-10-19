@@ -86,13 +86,19 @@
  * reason. Stage 3b's auto-link clears `unplanned`, and a re-import that set it
  * back to true would undo that link on the next pull.
  *
- * AND THERE IS NOW A THIRD CATEGORY — FOUR COLUMNS THE BROKER FILLS ONLY WHEN
- * THEY ARE EMPTY (REF-113 Stage 3). `moved_sl`, `kept_sl`, `stop_loss` and
- * `take_profit` are the trader's to own and the broker's to measure, and the
- * reconciliation is: written once, into a NULL, and never restated. A trader who
- * disagrees with "you moved your stop" and unticks the box must not find it
- * ticked again an hour later. See {@link fillWhenEmpty}, which is also where E12
- * lives: on a LINKED PLAN the two price columns are never touched at all.
+ * AND THERE IS NOW A THIRD CATEGORY — TWO COLUMNS THE BROKER FILLS ONLY WHEN
+ * THEY ARE EMPTY (REF-113 Stage 3). `moved_sl` and `kept_sl` are the trader's to
+ * own and the broker's to measure, and the reconciliation is: written once, into
+ * a NULL, and never restated. A trader who disagrees with "you moved your stop"
+ * and unticks the box must not find it ticked again an hour later.
+ *
+ * `stop_loss` AND `take_profit` ARE NOT IN THAT CATEGORY AND ARE NEVER WRITTEN
+ * BY THIS MODULE AT ALL. The broker's protective prices live in
+ * `broker_stop_loss` and `broker_take_profit`, which is what 038 adds them for:
+ * writing the trader's own two columns made an UNPLANNED row score 30/60 on
+ * planning under a J1 label reading "לא הוגשה תוכנית", and let one journal edit
+ * mint an `rr_ratio` from the broker's numbers. See {@link fillWhenEmpty}, which
+ * has both measurements.
  *
  *
  * THE MATCHING PASS, AND WHY A TRADE CAN ARRIVE WITHOUT A ROW OF ITS OWN
@@ -374,10 +380,15 @@ export const EXECUTION_FACTS_FOR_TEST: readonly { column: string }[] = EXECUTION
 /**
  * Every column the select has to bring back so a comparison is possible.
  *
- * THE FOUR AT THE END ARE NOT FACTS AND ARE NEVER RESTATED. They are read for
- * one question — "has the trader left this empty?" — which is the whole of
+ * THE TWO AT THE END ARE NOT FACTS AND ARE NEVER RESTATED. They are read for one
+ * question — "has the trader left this empty?" — which is the whole of
  * {@link fillWhenEmpty}. A column in this list is a column the comparison can
  * SEE; only {@link EXECUTION_FACTS} decides what may be written.
+ *
+ * `stop_loss`, `take_profit` and `unplanned` were in this list and are gone,
+ * which is the shape of the Stage 3 correction: nothing reads them here any
+ * more, because the broker no longer writes the first two on any row and so has
+ * no reason to ask whether they are empty or whose row it is.
  *
  * `stop_history` ARRIVES HERE THROUGH `EXECUTION_FACTS`, which makes this select
  * the reason migration 038 must be run BEFORE this code deploys: the flag it is
@@ -393,10 +404,6 @@ const EXISTING_COLUMNS = [
   // Read to be checked for emptiness, never to be restated (REF-113 Stage 3).
   'moved_sl',
   'kept_sl',
-  'stop_loss',
-  'take_profit',
-  // Whether this row is a plan the trader wrote, which is what E12 turns on.
-  'unplanned',
 ].join(', ');
 
 /**
@@ -516,7 +523,7 @@ function facts(trade: BrokerTrade, derived: Derived = {}): FactValues {
 }
 
 /**
- * The columns the broker fills ONLY WHEN THE TRADER LEFT THEM EMPTY
+ * The two columns the broker fills ONLY WHEN THE TRADER LEFT THEM EMPTY
  * (REF-113 Stage 3).
  *
  * NOT FACTS, AND DELIBERATELY NOT IN {@link EXECUTION_FACTS}. `moved_sl` and
@@ -528,11 +535,11 @@ function facts(trade: BrokerTrade, derived: Derived = {}): FactValues {
  * never restated.
  *
  * `restate()` ALREADY HOLDS `stored`, so this is a small special case rather than
- * a new mechanism. On an insert there is nothing stored and all four are free.
+ * a new mechanism. On an insert there is nothing stored and both are free.
  *
  *
- * THE FOUR RULES, AND WHY EACH ONE FAILS SILENT RATHER THAN LOUD
- * -------------------------------------------------------------
+ * THE THREE RULES, AND WHY EACH ONE FAILS SILENT RATHER THAN LOUD
+ * --------------------------------------------------------------
  *
  * 1. `moved_sl` is written for `'moved'` and `'kept'` and FOR NOTHING ELSE.
  *    `'none'` (no stop was placed) and `'unknown'` both leave it NULL, which is
@@ -551,19 +558,54 @@ function facts(trade: BrokerTrade, derived: Derived = {}): FactValues {
  *    column (§E) kept alive by the AI-debrief score formula, and REF-113 is not
  *    going to become its first real consumer.
  *
- * 4. `stop_loss`/`take_profit` ARE NEVER TOUCHED ON A LINKED PLAN — E12, and it
- *    is not about overwriting, because nothing here overwrites anything. A plan
- *    the trader submitted WITH NO STOP is a trader who planned without one, and
- *    filling it from the broker would make their plan claim something they never
- *    typed — and would then feed `rr_ratio`, the planning block of `tradeScore`
- *    and `reachedStop` in `proposeFlags` off a number they did not plan.
+ * NOTE THAT `moved_sl` IS THE ONE COLUMN WHOSE SCORE EFFECT IS AN IMPROVEMENT IN
+ * BOTH DIRECTIONS. `tradeScore` reads `moved_sl === true`, so an absent
+ * self-report already scored as "did not move" and collected the whole 12
+ * points for having no evidence against it — which the function's own header
+ * calls out and names REF-113 as the fix for. Writing `false` changes no number;
+ * writing `true` deducts 12 ON EVIDENCE rather than on silence.
  *
- * ON AN UNPLANNED BROKER ROW, FILLING `stop_loss` IS THE DECISION (17.10,
- * decision 4) AND IT IS NOT FREE. It arms exactly those three readers on a
- * broker figure for a row that has no plan behind it. That was weighed and
- * chosen — a journal row showing the risk the trader actually took beats a blank
- * — and it is why this is the one place in the module where the broker writes a
- * column the trader also owns.
+ *
+ * `stop_loss` AND `take_profit` ARE NOT HERE, AND THAT REVERSES DECISION 4
+ * -----------------------------------------------------------------------
+ *
+ * Decision 4 of 17.10 said to fill them when NULL, and the design report asked
+ * for a dedicated test case because the risk was known: filling `stop_loss` arms
+ * `rr_ratio`, the planning block of `tradeScore` and `reachedStop` in
+ * `proposeFlags` off a broker figure. THE TEST CASE WAS WRITTEN AND IT FAILED,
+ * so the decision goes the other way. Two measured breakages, neither of them
+ * recoverable by a label:
+ *
+ *   1. **`tradeScore` pays for a plan that does not exist.** The planning block
+ *      awards `stop_loss !== null` 20 points and `take_profit !== null` 10, so
+ *      an unplanned broker row scored 30/60 on planning and totalled 70 instead
+ *      of 40 — while the J1 line beside it read "תכנון 30/60 — לא הוגשה
+ *      תוכנית", which is a label disagreeing with its own number. J1's whole
+ *      argument is that ENTERING WITHOUT A PLAN IS THE DISCIPLINE FAILURE THIS
+ *      PRODUCT MEASURES; paying for the broker's own protective order as though
+ *      it were a plan measures nothing.
+ *
+ *   2. **One edit mints an `rr_ratio` the trader never planned.** The journal's
+ *      editor pre-populates its stop and target from the row and recomputes
+ *      `rr_ratio = calcRR(entry, sl, tp)` on save (JournalClient.tsx). So a
+ *      trader adding a note to an unplanned row would silently mint a ratio from
+ *      the broker's numbers, which awards the remaining 30 planning points and
+ *      takes the row to 100/100. The comment at that line already calls this
+ *      "the silent corruption REF-107 §0ג is about" — it was simply unreachable
+ *      until the import started filling the two columns it reads.
+ *
+ * SO THE BROKER'S NUMBERS LIVE IN `broker_stop_loss` AND `broker_take_profit`
+ * AND NOWHERE ELSE. Nothing scores those two columns, which is the whole reason
+ * 038 adds them rather than reusing the trader's. The number is stored, it is
+ * displayable beside the planned one (Stage 5, `LinkConfirm.tsx`), and it no
+ * longer impersonates a plan.
+ *
+ * E12 pointed the same way from the other end — on a LINKED PLAN the two
+ * columns were never to be touched, because a trader who planned without a stop
+ * planned without one. With the unplanned case ruled out too, there is no row
+ * left for which filling them is right, and the branch is gone rather than
+ * narrowed. That is the stronger shape: a rule with no exceptions cannot be
+ * re-widened by accident.
  */
 function fillWhenEmpty(params: {
   stop: StopHistory | undefined;
@@ -577,21 +619,12 @@ function fillWhenEmpty(params: {
   const empty = (column: string): boolean =>
     stored === undefined || stored[column] === null || stored[column] === undefined;
 
-  // Rules 1-3.
   const moved =
     stop.verdict === 'moved' && !stop.trailing ? true : stop.verdict === 'kept' ? false : null;
   if (moved !== null) {
     if (empty('moved_sl')) fills.moved_sl = moved;
     if (empty('kept_sl')) fills.kept_sl = !moved;
   }
-
-  // Rule 4. `unplanned === false` is what a link leaves behind — `linkOnto` and
-  // migration 035's merge both write it — and an imported row that was never
-  // linked carries `true` from its insert.
-  if (stored?.unplanned === false) return fills;
-
-  if (stop.initialStop !== null && empty('stop_loss')) fills.stop_loss = stop.initialStop;
-  if (stop.initialTarget !== null && empty('take_profit')) fills.take_profit = stop.initialTarget;
 
   return fills;
 }
@@ -681,17 +714,17 @@ function changedFacts(stored: Record<string, unknown>, wanted: FactValues): Fact
 /**
  * One row for a trade the journal has never seen.
  *
- * NOT ONE INTENT COLUMN IS INVENTED. 034 made all six nullable for exactly this
+ * NOT ONE INTENT COLUMN IS NAMED. 034 made all six nullable for exactly this
  * insert, and naming them with a placeholder is the thing E4 refused.
  *
- * TWO OF THEM ARE NAMED WHEN THE BROKER MEASURED THEM, and that is REF-113
- * Stage 3 rather than a loosening of E4. `stop_loss` and `take_profit` carry the
- * prices the trader's own protective orders stated — not a placeholder, not a
- * default, and present only when the orders were actually read. Every other
- * intent column is still absent and always will be: there is no broker field
- * that knows why somebody took a trade. See {@link fillWhenEmpty}, which is also
- * what keeps this to an insert — a row that already exists is only ever filled
- * into a NULL.
+ * REF-113 STAGE 3 DOES NOT CHANGE THAT, AND BRIEFLY DID. The broker's stop and
+ * target are real measurements rather than placeholders, so filling the trader's
+ * `stop_loss` and `take_profit` with them looked like it was inside E4's rule.
+ * It is not: those two columns are SCORED, and paying for them on a row whose
+ * whole point is that it carries no plan is worth 30 points of a plan that does
+ * not exist. They go to `broker_stop_loss` and `broker_take_profit` instead —
+ * which is what {@link facts} names, through the fact list, like any other thing
+ * the broker owns. {@link fillWhenEmpty} has the two measurements.
  *
  * `unplanned: true` is 032's column doing the job it was added for — its own
  * migration says so: "a trade that reaches the journal with no plan behind it…

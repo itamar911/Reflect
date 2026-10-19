@@ -82,9 +82,12 @@
 --      AND column_name IN ('broker_trade_key', 'broker_account_id', 'broker_host')
 --    ORDER BY column_name;
 --
---   -- 3. The four columns Stage 3 fills ONLY WHEN THEY ARE NULL, and which it
---   --    must never restate. All four must already exist and be NULLABLE —
---   --    `stop_loss` and `take_profit` were made nullable by 034 step 5.
+--   -- 3. The two columns Stage 3 fills ONLY WHEN THEY ARE NULL, and which it
+--   --    must never restate. Both must already exist and be NULLABLE.
+--   --    `stop_loss` and `take_profit` are in the list to be LOOKED AT, not
+--   --    because anything writes them: Stage 3 does not touch either, and the
+--   --    three columns below exist so that it does not have to — see the
+--   --    "WHY EACH CHANGE" note on broker_stop_loss.
 --   --    EXPECT four rows, all is_nullable = YES.
 --   SELECT column_name, data_type, is_nullable FROM information_schema.columns
 --    WHERE table_schema = 'public' AND table_name = 'trade_plans'
@@ -99,6 +102,12 @@
 --          count(*) FILTER (WHERE source = 'tradovate' AND stop_loss IS NOT NULL)
 --                                                                        AS broker_rows_with_a_stop
 --     FROM trade_plans;
+--
+--   -- 4b. A BASELINE WORTH WRITING DOWN BEFORE THE DEPLOY, and the reason is
+--   --    the reversal above: Stage 3 does not write `stop_loss` on any row, so
+--   --    `broker_rows_with_a_stop` must read the SAME number after the first
+--   --    sync as it does now. If it grows, something is filling the trader's
+--   --    column again and every unplanned row's score moved with it.
 --
 --
 -- WHY EACH CHANGE
@@ -115,6 +124,18 @@
 --    THERE IS DELIBERATELY NO `initial_stop` COLUMN. The investigation's first
 --    draft had both; they are the same number under two names, and the second
 --    name is how two readers end up disagreeing about which is authoritative.
+--
+--    AND THIS COLUMN IS WHY THE IMPORT DOES NOT WRITE `stop_loss`. The obvious
+--    shortcut — put the broker's stop in the trader's own column when it is
+--    empty, which decision 4 of 17.10 called for — was built, tested and
+--    reversed. `stop_loss` and `take_profit` are SCORED: `tradeScore`'s planning
+--    block pays 20 for a non-null stop and 10 for a non-null target, so an
+--    UNPLANNED broker row scored 30/60 on planning under a line reading
+--    "תכנון 30/60 — לא הוגשה תוכנית", and the journal's editor then recomputes
+--    `rr_ratio` from those two columns on any save, which would have awarded the
+--    remaining 30 and taken an impulse trade to 100/100. Nothing scores the
+--    three columns this file adds, which is the whole reason it adds them rather
+--    than reusing the trader's. Stage 5 shows this one BESIDE the planned stop.
 --
 -- 2. broker_take_profit — NUMERIC, the target NEAREST the entry.
 --
@@ -350,10 +371,13 @@ COMMIT;
 -- --------
 --
 -- Clean, and loses only what the import recorded. No trader-entered data lives
--- in any of the three: all three are written by the broker read alone, and the
--- two the trader owns — `moved_sl` and `stop_loss` — are NOT in this list and
--- must not be, because Stage 3 fills them only when they were NULL and from
--- that moment they are ordinary journal data.
+-- in any of the three: all three are written by the broker read alone.
+--
+-- `moved_sl` and `kept_sl` are NOT in this list and must not be. Stage 3 fills
+-- those two when they were NULL, and from that moment they are ordinary journal
+-- data indistinguishable from a trader's own answer. `stop_loss` and
+-- `take_profit` are not in it either, for the simpler reason that nothing in
+-- Stage 3 ever writes them — see the note on broker_stop_loss above.
 --
 --   BEGIN;
 --     ALTER TABLE trade_plans
