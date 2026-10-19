@@ -18,6 +18,7 @@
  */
 
 import { callEndpoint, reportOf, type CallResult } from './call';
+import { buildQ8, resolveTickSizes } from './q8';
 import {
   changedFields,
   depthDays,
@@ -41,6 +42,7 @@ export const ORDER_QUESTIONS = [
   'Q5  איך נראה טריילינג סטופ, והאם pegDifference גלוי?',
   'Q6  האם /command/list מפריד בין שינוי של סוחר לצעד טריילינג של השרת?',
   'Q7  האם ספירה כלשהי נוחתת על מספר עגול (נחתך, לא מוצה)?',
+  'Q8  (זמני, §4.2) מה הייתה כל פקודה של היום, ובאיזה צד של הכניסה ישבה כל גרסה?',
 ];
 
 /** The window the brief specifies. */
@@ -73,7 +75,14 @@ async function depsFor(
   path: string,
   masterIds: number[],
   options: { accessToken: string; apiUrl: string }
-): Promise<{ rows: Row[]; calls: Omit<CallResult, 'rows'>[]; capped: boolean; asked: number }> {
+): Promise<{
+  rows: Row[];
+  calls: Omit<CallResult, 'rows'>[];
+  capped: boolean;
+  asked: number;
+  /** WHICH masters were asked, not just how many — Q8 needs the set. See q8.ts. */
+  askedIds: number[];
+}> {
   const asked = masterIds.slice(0, MAX_DEPS_MASTERS);
   const rows: Row[] = [];
   const calls: Omit<CallResult, 'rows'>[] = [];
@@ -84,7 +93,13 @@ async function depsFor(
     rows.push(...result.rows);
   }
 
-  return { rows, calls, capped: masterIds.length > MAX_DEPS_MASTERS, asked: asked.length };
+  return {
+    rows,
+    calls,
+    capped: masterIds.length > MAX_DEPS_MASTERS,
+    asked: asked.length,
+    askedIds: asked,
+  };
 }
 
 /** Versions grouped by their order, oldest first. `id` breaks a tie. */
@@ -338,6 +353,19 @@ export async function probeOrdersHost(options: {
     commandReportEventTypes: enumValues(reportDeps.rows, 'eventType'),
   };
 
+  // ── /fill/list — Q8's base only (TEMPORARY, REF-113 §4.2) ────────────────
+  // One call, and the only thing read off it is the earliest fill per contract.
+  // The field survey is reported for the same reason every other endpoint's is;
+  // the prices themselves never leave ./q8.ts.
+  const fillCall = await callEndpoint('/fill/list', options);
+  const fills = fillCall.ok ? withinWindow(fillCall.rows, cutoffMs) : [];
+  endpoints['/fill/list'] = {
+    ...reportOf(fillCall),
+    inWindowCount: fillCall.ok ? fills.length : null,
+    looksTruncated: fillCall.ok ? looksTruncated(fillCall.rows.length) : null,
+    fields: fills.length ? fieldSurvey(fills) : null,
+  };
+
   // ── Q7 — truncation ──────────────────────────────────────────────────────
   answers['Q7'] = {
     question: 'האם ספירה כלשהי נוחתת על מספר עגול?',
@@ -352,6 +380,34 @@ export async function probeOrdersHost(options: {
       '/command/list': commandCall.ok ? looksTruncated(commandCall.rows.length) : null,
     },
   };
+
+  // ── Q8 — what each order WAS (TEMPORARY, REF-113 §4.2) ───────────────────
+  // Everything below is already in hand except the tick sizes, which are three
+  // reads for the one or two contracts the day touched. Deleted with ./q8.ts.
+  const contractIds = [
+    ...new Set(
+      orders.map((o) => o['contractId']).filter((id): id is number => typeof id === 'number' && id > 0)
+    ),
+  ];
+  const ticks = await resolveTickSizes(contractIds, options);
+  endpoints['/product/item'] = {
+    note: 'tickSize בלבד, דרך contract → contractMaturity → product. אין מחירים בפלט.',
+    contractsAvailable: ticks.contractsAvailable,
+    contractsAsked: ticks.contractsAsked,
+    capped: ticks.capped,
+    calls: ticks.calls,
+    tickSizesResolved: ticks.sizes.size,
+  };
+
+  answers['Q8'] = buildQ8({
+    orders,
+    versionsByOrder: byOrder,
+    versionsAskedFor: new Set(versionDeps.askedIds),
+    fills,
+    commands,
+    strategyLinks: linkDeps.rows,
+    ticks,
+  });
 
   return { endpoints, answers };
 }

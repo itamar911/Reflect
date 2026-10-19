@@ -41,6 +41,23 @@ export const PROBE_ENDPOINTS = [
   '/command/list',
   '/commandReport/deps',
   '/executionReport/deps',
+
+  // --- orders mode, Q8 (REF-113 §4.2) — TEMPORARY, deleted with ./q8.ts ---
+  //
+  // All four are reads, and the last three are the documented
+  // contract → maturity → product walk `src/lib/tradovate/fills.ts` already
+  // takes on every pull. Q8 needs `/fill/list` for the entry price its distances
+  // are measured from and the product's `tickSize` for the unit they are
+  // measured in; neither number is ever emitted. See ./q8.ts.
+  //
+  // Checked against the denylist below the same way the rest of this list was:
+  // none of the four contains `place`, `cancel`, `modify`, `create`, `update` or
+  // `delete`. `/contract/item` is not `/contract/create`, and `/product/item`
+  // reads a contract specification rather than anything of the trader's.
+  '/fill/list',
+  '/contract/item',
+  '/contractMaturity/item',
+  '/product/item',
 ] as const;
 
 export type ProbeEndpoint = (typeof PROBE_ENDPOINTS)[number];

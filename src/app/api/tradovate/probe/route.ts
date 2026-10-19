@@ -40,6 +40,11 @@
  * fixed vocabulary, and durations in seconds. See ./survey.ts, which owns that
  * rule and fails closed.
  *
+ * Plus, in `?mode=orders` only and TEMPORARILY, signed DISTANCES in ticks —
+ * ./q8.ts, which argues the case and whose base price is read server-side and
+ * never emitted. The same rule as `relativeSeconds`: an offset is a measurement,
+ * a level is an identifier.
+ *
  * It may NOT return ids, symbols, prices, quantities, account names, instants
  * or hostnames — the brief's list. Two mechanisms, in this order:
  *
@@ -112,36 +117,83 @@ export function isProbeUser(userId: string, env: NodeJS.ProcessEnv = process.env
 const SAFE_SAMPLE = /^(<(string|number|boolean|bigint|symbol|function|object|undefined)>|<array len=\d+>|null|true|false|[A-Za-z][A-Za-z0-9_-]{0,31})$/;
 
 /**
+ * The subtree every value of which is checked, not just its `sample` fields.
+ *
+ * Q8 (REF-113 §4.2, ./q8.ts) is the first block here that reports MEASUREMENTS
+ * rather than field shapes — signed tick distances and row counts — so it has no
+ * `sample` keys for the rule above to catch, and the rule above would wave the
+ * whole thing through. Under this key the grammar applies to every string, every
+ * object KEY (a key is a value in JSON, and a free-text `commandType` used as one
+ * would be emitted verbatim), and numbers must be INTEGERS.
+ *
+ * The integer rule is the one that has teeth: a tick distance is an integer by
+ * construction and a quarter-tick index price is not, so a raw `stopPrice` that
+ * reached this block would be named here rather than read as a measurement. It
+ * is also why ./q8.ts reports `null` instead of falling back to points.
+ */
+const STRICT_SUBTREE_KEY = 'perOrder';
+
+/**
  * Re-read the finished payload and confirm no raw value is in it.
  *
- * Walks every `fields` map and checks each `sample`. Returns the offending
- * paths rather than throwing: a probe that refuses to answer because its own
- * self-check tripped tells the owner less than one that answers and says so.
+ * Walks every `fields` map and checks each `sample`, plus every value inside
+ * {@link STRICT_SUBTREE_KEY}. Returns the offending paths rather than throwing: a
+ * probe that refuses to answer because its own self-check tripped tells the owner
+ * less than one that answers and says so.
  */
-export function scanForLeaks(payload: unknown): { ok: boolean; samplesChecked: number; offenders: string[] } {
+export function scanForLeaks(payload: unknown): {
+  ok: boolean;
+  samplesChecked: number;
+  strictValuesChecked: number;
+  offenders: string[];
+} {
   const offenders: string[] = [];
-  let checked = 0;
+  let samples = 0;
+  let strictValues = 0;
 
-  const walk = (node: unknown, path: string): void => {
-    if (Array.isArray(node)) {
-      node.forEach((item, i) => walk(item, `${path}[${i}]`));
+  /** A leaf inside the strict subtree. Booleans and nulls carry no measurement. */
+  const strictLeaf = (value: unknown, path: string): void => {
+    if (value === null || value === undefined || typeof value === 'boolean') return;
+    strictValues += 1;
+    if (typeof value === 'number') {
+      if (!Number.isInteger(value)) offenders.push(path);
       return;
     }
-    if (!node || typeof node !== 'object') return;
+    if (typeof value !== 'string' || !SAFE_SAMPLE.test(value)) offenders.push(path);
+  };
+
+  const walk = (node: unknown, path: string, strict: boolean): void => {
+    if (Array.isArray(node)) {
+      node.forEach((item, i) => walk(item, `${path}[${i}]`, strict));
+      return;
+    }
+    if (!node || typeof node !== 'object') {
+      if (strict) strictLeaf(node, path);
+      return;
+    }
 
     for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
       const here = path ? `${path}.${key}` : key;
       if (key === 'sample') {
-        checked += 1;
+        samples += 1;
         if (typeof value !== 'string' || !SAFE_SAMPLE.test(value)) offenders.push(here);
         continue;
       }
-      walk(value, here);
+      // Entering the strict subtree is one-way: everything nested below it is
+      // checked, so a block cannot opt its own children back out.
+      const strictHere = strict || key === STRICT_SUBTREE_KEY;
+      if (strictHere && !SAFE_SAMPLE.test(key)) offenders.push(`${here} <key>`);
+      walk(value, here, strictHere);
     }
   };
 
-  walk(payload, '');
-  return { ok: offenders.length === 0, samplesChecked: checked, offenders };
+  walk(payload, '', false);
+  return {
+    ok: offenders.length === 0,
+    samplesChecked: samples,
+    strictValuesChecked: strictValues,
+    offenders,
+  };
 }
 
 export async function GET(request: Request): Promise<NextResponse> {

@@ -61,8 +61,14 @@ const VOCABULARY = new Set([
   'status',
 ]);
 
-/** An enum member looks like this. Anything else is treated as free text. */
-const ENUM_SHAPED = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/;
+/**
+ * An enum member looks like this. Anything else is treated as free text.
+ *
+ * Exported for ./q8.ts, which applies the same test one value at a time. One
+ * definition and not two: a second copy that drifted wider is how a free-text
+ * value gets emitted by a module that believed it was testing for an enum.
+ */
+export const ENUM_SHAPED = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/;
 
 /** Flatten nested objects to dotted paths, recording type and raw sample. */
 function shapeOf(obj: unknown, prefix = ''): Record<string, { type: string; sample: unknown }> {
