@@ -138,6 +138,25 @@ export default async function TradesPage({ searchParams }: {
     // the truth about every row the import has written since 15.10.
     link_confirmed_at: (t.link_confirmed_at as string | null) ?? null,
     link_method:       (t.link_method as string | null) ?? null,
+    // ── The broker's stop, from migration 038 (REF-113 Stage 5) ───────────
+    //
+    // Same `?? null` rule, fourth time, same reason — and THIS MAP IS WHY THE
+    // RULE HAS TO BE RESTATED RATHER THAN ASSUMED. `select('*')` above returns
+    // every column the database has, but this object is built FIELD BY FIELD,
+    // so a column nobody names here never reaches the component. The detail
+    // modal's stop row and its sentence then read null and render nothing —
+    // which looks exactly like a database where 038 has not been run, so it is
+    // a feature silently missing rather than anything that fails. It cost a
+    // Playwright run to notice, which is the only way it could have been
+    // noticed: every unit assertion about those strings passes either way.
+    //
+    // `stop_history` IS PASSED THROUGH UNTYPED, deliberately. It is JSONB with
+    // no CHECK, and `readStopHistory` in lib/journal/stopHistory.ts validates
+    // every field it reads; a cast here would be a second, unchecked claim
+    // about the same document.
+    broker_stop_loss:   t.broker_stop_loss != null ? Number(t.broker_stop_loss) : null,
+    broker_take_profit: t.broker_take_profit != null ? Number(t.broker_take_profit) : null,
+    stop_history:       t.stop_history ?? null,
   }));
 
   const exportTrades = allTrades.map((t) => ({
