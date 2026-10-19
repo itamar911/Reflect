@@ -809,7 +809,16 @@ function fillAnchorGroup() {
       ordStatus: 'Filled',
       timestamp: new Date(FILL - 180_000).toISOString(),
     }),
-    order(STOP_ORDER, { timestamp: new Date(FILL - 180_000).toISOString() }),
+    // `ordStatus` AND THE EXIT ORDER ARE BOTH STATED RATHER THAN INHERITED,
+    // because together they ARE the premise of the exit cut: the trader dragged
+    // the stop onto the market and flattened, so the flatten is what filled and
+    // the stop is what the OCO then cancelled. A fixture that leaned on the
+    // `order()` default would assert the cut while narrating a stop that filled
+    // — a different case, and one the cut deliberately does not touch.
+    order(STOP_ORDER, {
+      ordStatus: 'Canceled',
+      timestamp: new Date(FILL - 180_000).toISOString(),
+    }),
     order(EXIT_ORDER, { ordStatus: 'Filled', timestamp: new Date(EXIT).toISOString() }),
   ];
 
@@ -936,6 +945,68 @@ function fillAnchorGroup() {
     commandTimes: { [STOP_ORDER]: [FILL + 10_000] },
   });
 
+  // ── (10) A list LONGER than the versions ─────────────────────────────────
+  // A cancel is a command that mints no version, and a cancel is LAST — so a
+  // cancelled order may carry exactly one spare and the pairing still holds.
+  // On an order that was not cancelled there is no cancel to explain the
+  // extra, so the only shapes left are a rejected modify in the middle or a
+  // version this module dropped, and both SHIFT every pair after them.
+  const oneSpare = derive({
+    ...base,
+    commandTimes: { [STOP_ORDER]: [...STAMPS, EXIT + 1_000] },
+  });
+  const spareButWorking = derive({
+    ...base,
+    orders: orders.map((row) =>
+      row.id === STOP_ORDER ? { ...row, ordStatus: 'Working' } : row
+    ),
+    commandTimes: { [STOP_ORDER]: [...STAMPS, EXIT + 1_000] },
+  });
+
+  // ── (11) Instants that go backwards ──────────────────────────────────────
+  // The command path is sorted, so this is the version path: ids are not
+  // guaranteed to be minted in time order. A window taken as an index suffix
+  // of a sequence that is not in time order would drop a real move out of the
+  // middle of it, so the clock is refused instead.
+  const backwards = derive({
+    ...base,
+    versions: versions.map((row) =>
+      row.orderId === STOP_ORDER
+        ? {
+            ...row,
+            timestamp: new Date(
+              row.id === 90_013 ? FILL - 300_000 : STAMPS[row.id - 90_010]
+            ).toISOString(),
+          }
+        : row
+    ),
+  });
+
+  // ── (12) A tie at the fill instant ───────────────────────────────────────
+  // Second-resolution stamps put the broker's fill re-pricing and the trader's
+  // first drag in the same second. The EARLIEST of the tie is the anchor: the
+  // later one is tighter, and anchoring on it would understate the risk the
+  // position opened under and swallow the drag.
+  // Three versions share the fill's second — the broker's re-pricing, the
+  // modify that restates it, and the trader's first drag. Taking the LAST
+  // would anchor on −211 and report one tightening; the earliest is −131.
+  const tied = derive({
+    ...base,
+    commandTimes: {
+      [STOP_ORDER]: [STAMPS[0], STAMPS[1], FILL, FILL, FILL, STAMPS[5], STAMPS[6]],
+    },
+  });
+
+  // ── (13) The exit cut needs the stop to have produced NO fill ────────────
+  // A stop that filled partially and had its remainder cancelled reads
+  // `Canceled`, and its last version is a price the trader was protected at
+  // and got out at — not one they pulled out of the way.
+  const stopPartlyFilled = derive({
+    ...base,
+    trade: { ...mnq, entryOrderIds: [ENTRY_ORDER, STOP_ORDER, EXIT_ORDER] },
+    commandTimes: { [STOP_ORDER]: STAMPS },
+  });
+
   group('the fill anchor: the stop the position OPENED under, not version one', [
     c('(1) REGRESSION, Q8 19.10: the anchor is the version minted at the fill',
       [anchored.initialStop, anchored.preFillVersions, anchored.anchoredAtFill],
@@ -981,6 +1052,26 @@ function fillAnchorGroup() {
     c('(9) the exit cut never empties the window',
       [onlyVersion.initialStop, onlyVersion.finalStop, onlyVersion.verdict],
       [at(-131), at(-131), 'kept']),
+    // One spare command is a cancel, and a cancel is last.
+    c('(10) a cancelled order may carry one spare command, and still pairs',
+      [oneSpare.initialStop, oneSpare.movedCount, oneSpare.anchoredAtFill],
+      [at(-131), 2, true]),
+    // THE HOLE A LENGTH-ONLY GUARD LEFT: a rejected modify is a command in the
+    // MIDDLE that minted no version, so it makes the list LONGER and shifts
+    // every pair after it. `commands.length >= versions.length` accepted that.
+    c('(10b) a spare on an order that was NOT cancelled is refused, not shifted',
+      [spareButWorking.anchoredAtFill, spareButWorking.initialStop, spareButWorking.preFillVersions],
+      [false, 29_701.25, 0]),
+    c('(11) instants that go backwards are refused',
+      [backwards.anchoredAtFill, backwards.initialStop], [false, 29_701.25]),
+    // The tie resolves to the earliest, so the drag at the same stamp is still
+    // a move and the anchor is still the broker's re-pricing.
+    c('(12) a tie at the fill instant anchors on the EARLIEST of it',
+      [tied.initialStop, tied.preFillVersions, tied.movedCount, tied.direction],
+      [at(-131), 2, 2, 'mixed']),
+    c('(13) a stop that produced a fill in this trade is never cut as an exit drag',
+      [stopPartlyFilled.finalStop, stopPartlyFilled.movedCount],
+      [at(1), 3]),
   ]);
 }
 
@@ -1460,6 +1551,57 @@ async function readerFailureGroup() {
     readStopHistories({ readers: { demo: clockDown.reader() }, trades: [TRADE] })
   );
 
+  // A command we could not TIME. Dropping it would shorten the list, which can
+  // land it exactly on the version count and have a SHIFTED pairing accepted as
+  // an exact one — so the order loses its clock instead of gaining a wrong one.
+  const untimedCommand = new StubReader(
+    bracketPlan({
+      commands: [
+        { id: 711, orderId: STOP_ORDER, timestamp: undefined },
+        ...BRACKET_COMMANDS,
+      ],
+    })
+  );
+  const { result: untimed } = await captureLogs(() =>
+    readStopHistories({ readers: { demo: untimedCommand.reader() }, trades: [TRADE] })
+  );
+
+  // A round count is the only trace a silent truncation leaves, and for the
+  // clock it is acted on rather than only logged: cutting an order's EARLIEST
+  // commands leaves a list that can still match the version count, so every
+  // version gets a later instant than it had and the anchor moves silently.
+  // EXACTLY 1,000 ROWS, of which only the three that pair with the stop's three
+  // versions are this trader's — so the count guard is satisfied and the
+  // truncation check is the only thing standing between a shifted clock and the
+  // row. Without it this reads `anchoredAtFill: true`.
+  const truncated = new StubReader(
+    bracketPlan({
+      commands: [
+        ...BRACKET_COMMANDS.filter((command) => command.orderId === STOP_ORDER),
+        ...Array.from({ length: 997 }, (_, i) => ({
+          id: 3_000 + i,
+          orderId: 81_900 + i,
+          timestamp: new Date(TRADE.openedAtMs + i).toISOString(),
+        })),
+      ],
+    })
+  );
+  const { result: cut, lines: cutLines } = await captureLogs(() =>
+    readStopHistories({ readers: { demo: truncated.reader() }, trades: [TRADE] })
+  );
+
+  // Every stop has ONE version, so no clock can move an anchor that is already
+  // version one — and "placed a stop and left it alone" is most days.
+  const untouched = new StubReader(
+    bracketPlan({
+      commands: BRACKET_COMMANDS,
+      versions: BRACKET.versions.filter((row) => row.id !== 90_003 && row.id !== 90_004),
+    })
+  );
+  await captureLogs(() =>
+    readStopHistories({ readers: { demo: untouched.reader() }, trades: [TRADE] })
+  );
+
   group('a read that fails costs one nullable column, and is retried', [
     c('(1) /order/list down: nothing answered, nothing thrown', none.size, 0),
     c('(2) and it was logged as a KIND, with the status', listLines.length, 1),
@@ -1487,6 +1629,18 @@ async function readerFailureGroup() {
     // to place and the request is not made rather than made and discarded.
     c('(9) a day with no candidate orders never asks for the commands',
       interdayStub.countOf('/command/list'), 0),
+    c('(10) nor does a day on which no stop has more than one version',
+      untouched.countOf('/command/list'), 0),
+    // The two shapes that would be accepted as an exact pairing while being
+    // shifted by one. Both give up the clock rather than guess with it.
+    c('(11) a command with no readable instant costs that order its clock',
+      [untimed.size, untimed.get(TRADE.brokerTradeKey)?.anchoredAtFill,
+       untimed.get(TRADE.brokerTradeKey)?.verdict],
+      [1, false, 'moved']),
+    c('(12) a round-count command list abandons the clock, and is logged',
+      [cut.get(TRADE.brokerTradeKey)?.anchoredAtFill,
+       cutLines.some((line) => line.includes('roundcount:1000'))],
+      [false, true]),
   ]);
 }
 

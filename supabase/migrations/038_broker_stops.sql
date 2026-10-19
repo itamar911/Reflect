@@ -168,6 +168,7 @@
 --        verdict:      'moved' | 'kept' | 'none' | 'unknown',
 --        reason:       'interday' | 'ambiguous' | 'capped' | 'failed' | null,
 --        initialStop:  number | null,
+--        initialStopSide: 'risk' | 'wrong' | null,
 --        finalStop:    number | null,
 --        initialTarget:number | null,
 --        movedCount:   number,
@@ -177,6 +178,8 @@
 --        noStopPlaced: boolean,
 --        source:       'linked' | 'inferred' | 'none',
 --        versions:     [{ stopPrice: number }],
+--        preFillVersions: number,
+--        anchoredAtFill:  boolean,
 --        otherTargets: number[],
 --        sharedWithTrades?: number,
 --        capped?:      true
@@ -185,6 +188,23 @@
 --    No CHECK on that shape. Postgres cannot usefully constrain a free-form
 --    object, and the one reader validates every field before using it — the
 --    same defensive-read rule 036 states for `debrief_ai`.
+--
+--    AND THE SHAPE HAS GROWN SINCE THIS FILE RAN, WHICH IS THE THING A READER
+--    OF THIS BLOCK MOST NEEDS TO KNOW. `initialStopSide` (REF-113 side fix) and
+--    `preFillVersions` / `anchoredAtFill` (REF-113 fill anchor) were added after
+--    it, and JSONB takes new keys with no migration — so ROWS WRITTEN EARLIER
+--    CARRY NONE OF THE THREE, and a reader gets `undefined` where the TypeScript
+--    type promises a value.
+--
+--    THERE IS NO BACKFILL AND THERE CANNOT BE ONE. The import's candidate filter
+--    is `stop_history IS NULL`, so a row that already holds a history is never
+--    re-derived, and `/order/list` is `depthDays = 0` — the orders those rows
+--    were derived from are gone. So: treat an absent `anchoredAtFill` as
+--    `false`, and an absent `preFillVersions` as UNKNOWN rather than as zero.
+--    Those rows took the initial stop from version ONE of the stop order, which
+--    on a trade whose entry order moved before it filled can be a price the
+--    position never opened under — measured on 19.10 as 11 ticks of risk stored
+--    against a trade that risked 131, with `movedCount` 5 against 2.
 --
 --
 -- WHAT THIS FILE DELIBERATELY DOES NOT DO
