@@ -122,6 +122,18 @@ export async function importBeforeSummary(
       // that matters is the one that just finished; a wider one would price
       // contracts the daily cron has already imported.
       windowStartMs: zonedDayStart(now).getTime(),
+      // THE STOP ORDERS, AND THIS IS ONE OF THE TWO PLACES THEY CAN BE READ AT
+      // ALL (REF-113 Stage 3). This job runs per user at the hour that user
+      // chose, which is inside the same trading day as the trades it is
+      // counting — and that day is the whole window `/order/list` has. The
+      // 03:30 nightly cron is four and a half hours too late and asks for
+      // nothing; see `readStops` in lib/tradovate/sync.ts.
+      //
+      // It is still EARLY for a trader whose day ends at 21:00 Israel — that is
+      // 13:00 CT, two hours before the American session closes, so the last two
+      // hours of trading are not covered here and the nightly job cannot save
+      // them. That gap is what Stage 4's dedicated cron exists for.
+      readStops: true,
     });
   } catch (error) {
     const kind = error instanceof Error ? error.name : 'unknown error';

@@ -39,18 +39,38 @@
  *   - **Nothing identifying reaches a log.** The import logs counts; this
  *     asserts that a symbol, a price, a fill id, an account id and a user id are
  *     absent from every line it emits.
+ *   - **A run that could not read the broker's orders never erases one that
+ *     could** (REF-113 Stage 3). The nightly cron ALWAYS has an empty stop
+ *     history to offer — it runs hours after Tradovate cleared the orders of the
+ *     day it imports — so the three columns are present-or-absent and the
+ *     absence is asserted as a property of the STATEMENTS, not of the rows.
+ *   - **`kind: 'json'` is a real comparison.** A JSONB column compared with
+ *     `String()` is `'[object Object]'` against `'[object Object]'`, which is
+ *     always equal, so the column would never be updated once written. The group
+ *     fails if the kind is reverted to `exact`.
+ *   - **Four columns are filled when empty and never restated.** A trader who
+ *     disagrees with "you moved your stop" and unticks the box must not find it
+ *     ticked again an hour later, and E12 holds: a LINKED PLAN's `stop_loss` is
+ *     not filled even when it is NULL.
+ *   - **Only the two triggers that can see the orders ask for them.** A
+ *     source-level group, because the claim is about a call that is NOT made.
  *
  * Usage: npm run test:broker-import
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+import fs from 'node:fs';
+import path from 'node:path';
+
 import {
   EXECUTION_FACTS_FOR_TEST,
   IMPORT_FLAG,
   importBrokerTrades,
   isImportEnabled,
+  tradesNeedingStopHistory,
 } from '../src/lib/tradovate/import';
+import type { StopHistory } from '../src/lib/tradovate/orders';
 import {
   BROKER_OWNED_FOR_TEST,
   syncBrokerAccounts,
@@ -215,6 +235,18 @@ const TRADE: BrokerTrade = {
 
 /** The same trade while the trader still holds one of the two contracts. */
 const STILL_OPEN: BrokerTrade = { ...TRADE, positionFlat: false };
+
+/**
+ * The facts that are named ONLY WHEN THE PULL RESOLVED THEM.
+ *
+ * Every other entry in `EXECUTION_FACTS` is on every statement. These four are
+ * present-or-absent, and the absence is load-bearing in both cases: `account_id`
+ * because `/api/tradovate/today` has no identity map (REF-110 Stage 2), and the
+ * three stop columns because neither `/today` nor the nightly cron can read the
+ * orders at all (REF-113 Stage 3). A pull that named them with NULL instead
+ * would erase, on every run, what a run that COULD resolve them had written.
+ */
+const CONDITIONAL_FACTS = ['account_id', 'broker_stop_loss', 'broker_take_profit', 'stop_history'];
 
 /** A second, unrelated trade. Different key, so a different row. */
 const SECOND: BrokerTrade = {
@@ -2346,20 +2378,20 @@ async function linkWriteGroup() {
     c('(3) and the bookkeeping says who linked it and when',
       [linked.unplanned, linked.link_method, typeof linked.link_confirmed_at],
       [false, 'auto', 'string']),
-    // REF-110 Stage 2 made this list fourteen, and the fourteenth is the only
-    // one that is CONDITIONAL: `account_id` is written when the pull could
-    // resolve an account and is not named at all when it could not. This call
-    // passed no identity map — the pre-REF-110 arrangement, and still exactly
-    // what /api/tradovate/today does — so its absence here is the property,
-    // not a gap. accountStampGroup() is where the resolved case is asserted,
-    // including the one that matters: that a later run WITHOUT a map does not
-    // clear what an earlier one with a map wrote.
+    // FOUR OF THE FACTS ARE CONDITIONAL, and that is the property rather than a
+    // gap. `account_id` (REF-110 Stage 2) is named when the pull could resolve
+    // an account; the three stop columns (REF-113 Stage 3) are named when it
+    // read the orders. This call passed neither map — which is exactly what
+    // /api/tradovate/today and the nightly cron do — so all four are absent.
+    // accountStampGroup() and stopHistoryGroup() assert the resolved cases,
+    // including the one that matters most: a later run WITHOUT a map does not
+    // clear what an earlier one wrote.
     c('(4) every unconditional execution fact moved',
       EXECUTION_FACTS_FOR_TEST
-        .filter(({ column }) => column !== 'account_id')
+        .filter(({ column }) => !CONDITIONAL_FACTS.includes(column))
         .filter(({ column }) => linked[column] === undefined), []),
-    c('(4b) and account_id was not named, because this pull could not resolve one',
-      'account_id' in linked, false),
+    c('(4b) and not one conditional fact was named, because this pull resolved none',
+      CONDITIONAL_FACTS.filter((column) => column in linked), []),
     c('(5) the broker\'s own figures, on the trader\'s row',
       [linked.source, linked.entry_price, linked.exit_price, linked.quantity, linked.actual_pnl, linked.status],
       ['tradovate', ENTRY, EXIT, 2, 270, 'closed']),
@@ -3627,6 +3659,504 @@ async function accountStampGroup() {
   ]);
 }
 
+// ── REF-113 Stage 3: the broker's stop, written ─────────────────────────────
+
+/**
+ * A stop history as ./orders.ts derives one. The measured 19.10 shape: a
+ * bracketed stop dragged twice, tightening.
+ */
+const MOVED_HISTORY: StopHistory = {
+  verdict: 'moved',
+  reason: null,
+  initialStop: 4504,
+  finalStop: 4512,
+  initialTarget: 4525,
+  movedCount: 2,
+  direction: 'tightened',
+  movedAtMs: null,
+  trailing: false,
+  noStopPlaced: false,
+  source: 'linked',
+  versions: [{ stopPrice: 4504 }, { stopPrice: 4508.5 }, { stopPrice: 4512 }],
+  otherTargets: [],
+};
+
+const KEPT_HISTORY: StopHistory = {
+  ...MOVED_HISTORY,
+  verdict: 'kept',
+  finalStop: 4504,
+  movedCount: 0,
+  direction: null,
+  versions: [{ stopPrice: 4504 }],
+};
+
+/** The trader placed no stop at all. A FINDING, not a failure. */
+const NONE_HISTORY: StopHistory = {
+  ...MOVED_HISTORY,
+  verdict: 'none',
+  initialStop: null,
+  finalStop: null,
+  initialTarget: null,
+  movedCount: 0,
+  direction: null,
+  noStopPlaced: true,
+  source: 'none',
+  versions: [],
+};
+
+/** We could not read the orders. NOT the same claim as NONE_HISTORY. */
+const UNKNOWN_HISTORY: StopHistory = {
+  ...NONE_HISTORY,
+  verdict: 'unknown',
+  reason: 'interday',
+  noStopPlaced: false,
+};
+
+/** A trailing stop: it moved, and the moves were the server's. */
+const TRAILING_HISTORY: StopHistory = { ...MOVED_HISTORY, trailing: true };
+
+const historyFor = (trade: BrokerTrade, history: StopHistory) =>
+  new Map([[trade.brokerTradeKey, history]]);
+
+async function stopHistoryGroup() {
+  // ── A fresh broker row, with the orders read ─────────────────────────────
+  const fresh = new FakeDb();
+  await quietImport({
+    client: fresh.client(),
+    userId: USER,
+    trades: [TRADE],
+    isTradeSource: true,
+    env: ON,
+    stopHistories: historyFor(TRADE, MOVED_HISTORY),
+  });
+  const row = fresh.rows[0] ?? {};
+
+  // ── The same run twice: the JSONB must not look changed every time ───────
+  const writesAfterFirst = fresh.writes.length;
+  const second = await quietImport({
+    client: fresh.client(),
+    userId: USER,
+    trades: [TRADE],
+    isTradeSource: true,
+    env: ON,
+    stopHistories: historyFor(TRADE, MOVED_HISTORY),
+  });
+
+  // The same document with its keys in Postgres's order rather than ours, and
+  // the two NUMERIC columns as the strings PostgREST sends back. If `kind` were
+  // `exact` this row would be reported as changed on every pull — and if the
+  // key order were compared, on every pull as well.
+  const reordered: StopHistory = JSON.parse(
+    JSON.stringify(
+      Object.fromEntries(Object.entries(MOVED_HISTORY).sort(([a], [b]) => (a > b ? -1 : 1)))
+    )
+  ) as StopHistory;
+  const wire = new FakeDb([
+    {
+      ...row,
+      broker_stop_loss: '4504',
+      broker_take_profit: '4525',
+      stop_history: reordered,
+    },
+  ]);
+  const onWire = await quietImport({
+    client: wire.client(),
+    userId: USER,
+    trades: [TRADE],
+    isTradeSource: true,
+    env: ON,
+    stopHistories: historyFor(TRADE, MOVED_HISTORY),
+  });
+
+  // ── A history that genuinely changed ────────────────────────────────────
+  // THE TRAP THIS GROUP EXISTS FOR. `String(obj) === String(obj)` is
+  // `'[object Object]' === '[object Object]'`, so with `kind: 'exact'` the
+  // column would compare equal to EVERY other object and never be updated once
+  // written. The two documents below are different in every field that matters
+  // and identical under `String()`.
+  const changed = new FakeDb([{ ...row }]);
+  const afterChange = await quietImport({
+    client: changed.client(),
+    userId: USER,
+    trades: [TRADE],
+    isTradeSource: true,
+    env: ON,
+    stopHistories: historyFor(TRADE, { ...MOVED_HISTORY, movedCount: 3, finalStop: 4515 }),
+  });
+
+  group('REF-113: the broker\'s stop history becomes three columns', [
+    c('(1) the JSONB document is written whole',
+      row.stop_history, MOVED_HISTORY),
+    c('(2) broker_stop_loss is the INITIAL stop and broker_take_profit the nearest target',
+      [row.broker_stop_loss, row.broker_take_profit], [4504, 4525]),
+    // Decision 4 (17.10): the broker's measured prices fill the trader's own
+    // columns on a row that has no plan behind it.
+    c('(3) stop_loss and take_profit are filled on an unplanned broker row',
+      [row.stop_loss, row.take_profit], [4504, 4525]),
+    c('(4) and the verdict reaches the self-report columns',
+      [row.moved_sl, row.kept_sl], [true, false]),
+
+    c('(5) a second identical run sends NO statement',
+      [fresh.writes.length - writesAfterFirst, second.unchanged, second.updated], [0, 1, 0]),
+    c('(6) nor does a row whose JSONB came back with Postgres\'s key order',
+      [onWire.unchanged, onWire.updated, wire.writes.length], [1, 0, 0]),
+
+    // The silent trap, caught.
+    c('(7) a CHANGED history IS written — `kind: json`, not `exact`',
+      [afterChange.updated, afterChange.unchanged], [1, 0]),
+    c('(8) and only the columns that moved',
+      Object.keys(changed.writes[0]?.values ?? {}).sort(), ['stop_history']),
+    c('(9) `stop_history` carries `kind: \'json\'` in the fact list',
+      EXECUTION_FACTS_FOR_TEST.length > 0 &&
+        ['broker_stop_loss', 'broker_take_profit', 'stop_history'].every((column) =>
+          EXECUTION_FACTS_FOR_TEST.some((fact) => fact.column === column)
+        ),
+      true),
+  ]);
+}
+
+async function stopNotDeletedGroup() {
+  // THE MOST DESTRUCTIVE THING THIS STAGE COULD HAVE SHIPPED. The nightly cron
+  // runs at 03:30 UTC, hours after Tradovate cleared `/order/list` of the day it
+  // imports, so it ALWAYS has an empty stop history to offer. If an absent
+  // history resolved to NULL, it would erase every evening what the end-of-day
+  // summary captured six hours earlier — silently, for every trader, forever.
+  const stored = new FakeDb([
+    {
+      id: 'trade-1',
+      user_id: USER,
+      source: 'tradovate',
+      status: 'closed',
+      hidden: false,
+      unplanned: true,
+      broker_trade_key: TRADE.brokerTradeKey,
+      broker_account_id: ACCOUNT_ID,
+      broker_host: 'demo',
+      symbol: SYMBOL,
+      direction: 'short',
+      entry_price: ENTRY,
+      exit_price: EXIT,
+      quantity: 2,
+      actual_pnl: 270,
+      pnl_currency: '$',
+      submitted_at: new Date(OPENED).toISOString(),
+      closed_at: new Date(CLOSED).toISOString(),
+      // What an earlier, order-reading run wrote.
+      broker_stop_loss: 4504,
+      broker_take_profit: 4525,
+      stop_history: MOVED_HISTORY,
+      stop_loss: 4504,
+      take_profit: 4525,
+      moved_sl: true,
+      kept_sl: false,
+    },
+  ]);
+  const nightly = await quietImport({
+    client: stored.client(),
+    userId: USER,
+    trades: [TRADE],
+    isTradeSource: true,
+    env: ON,
+    // No map at all: the cron's state, and /api/tradovate/today's.
+  });
+  const after = stored.rows[0] ?? {};
+
+  // An `'unknown'` is a real answer and IS stored — but it has no prices, and
+  // naming the price columns with NULL would be the same erasure in miniature.
+  const unknown = new FakeDb();
+  await quietImport({
+    client: unknown.client(),
+    userId: USER,
+    trades: [TRADE],
+    isTradeSource: true,
+    env: ON,
+    stopHistories: historyFor(TRADE, UNKNOWN_HISTORY),
+  });
+  const unknownRow = unknown.rows[0] ?? {};
+
+  const none = new FakeDb();
+  await quietImport({
+    client: none.client(),
+    userId: USER,
+    trades: [TRADE],
+    isTradeSource: true,
+    env: ON,
+    stopHistories: historyFor(TRADE, NONE_HISTORY),
+  });
+  const noneRow = none.rows[0] ?? {};
+
+  group('a run that could not read the orders never erases one that could', [
+    c('(1) a pull with no stop history sends ZERO statements', nightly.unchanged, 1),
+    c('(2) and the stored history is untouched',
+      [after.stop_history, after.broker_stop_loss, after.moved_sl],
+      [MOVED_HISTORY, 4504, true]),
+    c('(3) because not one statement names any of the three columns',
+      stored.writes.every((s) =>
+        !('stop_history' in (s.values ?? {})) &&
+        !('broker_stop_loss' in (s.values ?? {})) &&
+        !('broker_take_profit' in (s.values ?? {}))
+      ), true),
+
+    // `'unknown'` vs `'none'`: the distinction the whole ticket exists for.
+    c('(4) an `unknown` is stored, so the screen can say "we could not read it"',
+      [(unknownRow.stop_history as StopHistory)?.verdict,
+       (unknownRow.stop_history as StopHistory)?.reason],
+      ['unknown', 'interday']),
+    c('(5) but it names no price column and no flag',
+      ['broker_stop_loss', 'broker_take_profit', 'stop_loss', 'take_profit', 'moved_sl', 'kept_sl']
+        .filter((column) => column in unknownRow), []),
+    c('(6) a `none` is stored as the finding it is',
+      [(noneRow.stop_history as StopHistory)?.verdict,
+       (noneRow.stop_history as StopHistory)?.noStopPlaced],
+      ['none', true]),
+    // Decision 2: `moved_sl` stays NULL for `'none'` too. "You did not place a
+    // stop" is not an answer to "did you move it", and both big consumers
+    // already filter `!== null`.
+    c('(7) and `none` leaves moved_sl unnamed — NULL, not false',
+      ['moved_sl', 'kept_sl'].filter((column) => column in noneRow), []),
+  ]);
+}
+
+async function stopSelfReportGroup() {
+  const brokerRow = (over: Row = {}): Row => ({
+    id: 'trade-1',
+    user_id: USER,
+    source: 'tradovate',
+    status: 'closed',
+    hidden: false,
+    unplanned: true,
+    broker_trade_key: TRADE.brokerTradeKey,
+    broker_account_id: ACCOUNT_ID,
+    broker_host: 'demo',
+    symbol: SYMBOL,
+    direction: 'short',
+    entry_price: ENTRY,
+    exit_price: EXIT,
+    quantity: 2,
+    actual_pnl: 270,
+    pnl_currency: '$',
+    submitted_at: new Date(OPENED).toISOString(),
+    closed_at: new Date(CLOSED).toISOString(),
+    moved_sl: null,
+    kept_sl: null,
+    stop_loss: null,
+    take_profit: null,
+    stop_history: null,
+    ...over,
+  });
+
+  // THE INTERACTION THAT WOULD TEACH A TRADER TO DISTRUST THE FIGURES. They
+  // disagree with "you moved your stop" and untick the box. A sync must not
+  // tick it again.
+  const disagreed = new FakeDb([brokerRow({ moved_sl: false, kept_sl: true })]);
+  await quietImport({
+    client: disagreed.client(),
+    userId: USER,
+    trades: [TRADE],
+    isTradeSource: true,
+    env: ON,
+    stopHistories: historyFor(TRADE, MOVED_HISTORY),
+  });
+  const disagreedRow = disagreed.rows[0] ?? {};
+
+  // The trader typed their own stop on the imported row. The broker's number
+  // does not replace it.
+  const ownStop = new FakeDb([brokerRow({ stop_loss: 29_900, take_profit: 29_700 })]);
+  await quietImport({
+    client: ownStop.client(),
+    userId: USER,
+    trades: [TRADE],
+    isTradeSource: true,
+    env: ON,
+    stopHistories: historyFor(TRADE, MOVED_HISTORY),
+  });
+  const ownStopRow = ownStop.rows[0] ?? {};
+
+  // E12: a LINKED PLAN. Its stop columns are never touched, even when NULL —
+  // a trader who planned without a stop planned without one, and filling it
+  // from the broker would make their plan claim a number they never typed and
+  // then feed it to rr_ratio, tradeScore's planning block and proposeFlags.
+  const linkedPlan = new FakeDb([
+    brokerRow({ unplanned: false, link_confirmed_at: '2026-10-19T12:00:00.000Z' }),
+  ]);
+  await quietImport({
+    client: linkedPlan.client(),
+    userId: USER,
+    trades: [TRADE],
+    isTradeSource: true,
+    env: ON,
+    stopHistories: historyFor(TRADE, MOVED_HISTORY),
+  });
+  const linkedRow = linkedPlan.rows[0] ?? {};
+  const linkedWrite = linkedPlan.writes.find((s) => s.kind === 'update')?.values ?? {};
+
+  // A trailing stop moved, and the moves were the server's. The verdict is
+  // stored; the attribution is not made.
+  const trailing = new FakeDb([brokerRow()]);
+  await quietImport({
+    client: trailing.client(),
+    userId: USER,
+    trades: [TRADE],
+    isTradeSource: true,
+    env: ON,
+    stopHistories: historyFor(TRADE, TRAILING_HISTORY),
+  });
+  const trailingRow = trailing.rows[0] ?? {};
+
+  // And the empty case: a stop that never moved fills `false`, which is a
+  // genuine answer and the one that most needs to be right.
+  const kept = new FakeDb([brokerRow()]);
+  await quietImport({
+    client: kept.client(),
+    userId: USER,
+    trades: [TRADE],
+    isTradeSource: true,
+    env: ON,
+    stopHistories: historyFor(TRADE, KEPT_HISTORY),
+  });
+  const keptRow = kept.rows[0] ?? {};
+
+  group('four columns are filled when empty and NEVER restated', [
+    c('(1) a trader who unticked "moved SL" does not find it ticked again',
+      [disagreedRow.moved_sl, disagreedRow.kept_sl], [false, true]),
+    c('(2) and the broker\'s evidence is still recorded beside their answer',
+      (disagreedRow.stop_history as StopHistory)?.verdict, 'moved'),
+    c('(3) a stop the trader typed themselves is not replaced',
+      [ownStopRow.stop_loss, ownStopRow.take_profit], [29_900, 29_700]),
+
+    // E12.
+    c('(4) a LINKED PLAN\'s stop_loss is not filled even though it is NULL',
+      [linkedRow.stop_loss, linkedRow.take_profit], [null, null]),
+    c('(5) and no statement names either column on it',
+      ['stop_loss', 'take_profit'].filter((column) => column in linkedWrite), []),
+    c('(6) but the broker columns and the verdict still land on it',
+      [(linkedRow.stop_history as StopHistory)?.verdict, linkedRow.broker_stop_loss,
+       linkedRow.moved_sl],
+      ['moved', 4504, true]),
+
+    // §3's rule, applied to the one case that reaches it in v1.
+    c('(7) a TRAILING stop does not claim the trader moved anything',
+      ['moved_sl', 'kept_sl'].filter((column) => column in
+        (trailing.writes.find((s) => s.kind === 'update')?.values ?? {})), []),
+    c('(8) though the history records that it moved, and that it was trailing',
+      [(trailingRow.stop_history as StopHistory)?.verdict,
+       (trailingRow.stop_history as StopHistory)?.trailing],
+      ['moved', true]),
+
+    c('(9) a stop that never moved fills false, not NULL',
+      [keptRow.moved_sl, keptRow.kept_sl], [false, true]),
+    // The membership rule: these four are NOT the broker's to restate.
+    c('(10) and none of the four is in EXECUTION_FACTS',
+      EXECUTION_FACTS_FOR_TEST
+        .map(({ column }) => column)
+        .filter((column) => ['moved_sl', 'kept_sl', 'stop_loss', 'take_profit'].includes(column)),
+      []),
+  ]);
+}
+
+async function stopCandidateGroup() {
+  const flagOff = new FakeDb();
+  const offCandidates = await tradesNeedingStopHistory({
+    client: flagOff.client(),
+    userId: USER,
+    trades: [TRADE],
+    env: OFF,
+  });
+
+  const db = new FakeDb([
+    // Already answered on an earlier run of the same day: no request for it.
+    { id: 'a', user_id: USER, broker_trade_key: TRADE.brokerTradeKey, stop_history: MOVED_HISTORY, hidden: false },
+    // A row the trader deleted. Rule 2 (E12): not touched, not read for.
+    { id: 'b', user_id: USER, broker_trade_key: 'demo:hidden', stop_history: null, hidden: true },
+    // Imported, never answered. THE candidate.
+    { id: 'c', user_id: USER, broker_trade_key: 'demo:88500', stop_history: null, hidden: false },
+  ]);
+  const hiddenTrade: BrokerTrade = { ...TRADE, brokerTradeKey: 'demo:hidden' };
+  const neverSeen: BrokerTrade = { ...TRADE, brokerTradeKey: 'demo:99999' };
+
+  const { result: candidates } = await captureLogs(() =>
+    tradesNeedingStopHistory({
+      client: db.client(),
+      userId: USER,
+      // Five trades, and only two of them are worth a request.
+      trades: [TRADE, hiddenTrade, SECOND, neverSeen, STILL_OPEN],
+      env: ON,
+    })
+  );
+
+  // A failed read costs the run its annotations and nothing else.
+  const broken = {
+    from: () => ({
+      select: () => ({
+        eq: () => ({
+          in: () =>
+            Promise.resolve({ data: null, error: { code: '42703', message: 'undefined column' } }),
+        }),
+      }),
+    }),
+  } as unknown as SupabaseClient;
+  const { result: afterError, lines: errorLines } = await captureLogs(() =>
+    tradesNeedingStopHistory({ client: broken, userId: USER, trades: [TRADE], env: ON })
+  );
+
+  group('only the trades that still need an answer cost a request', [
+    // Before the select, not after: `stop_history` belongs to migration 038.
+    c('(1) the flag off reads NOTHING and asks about nobody',
+      [flagOff.statements.length, offCandidates.length], [0, 0]),
+    c('(2) a trade that already has a history is not a candidate',
+      candidates.some((trade) => trade.brokerTradeKey === TRADE.brokerTradeKey), false),
+    c('(3) a hidden row is not a candidate either (E12)',
+      candidates.some((trade) => trade.brokerTradeKey === 'demo:hidden'), false),
+    c('(4) a row with a NULL history IS one',
+      candidates.some((trade) => trade.brokerTradeKey === SECOND.brokerTradeKey), true),
+    // The case a `.is('stop_history', null)` predicate would have hidden: a
+    // trade with no row yet has no NULL to match, and it is the one that most
+    // needs asking about.
+    c('(5) and so is a trade the journal has never seen',
+      candidates.some((trade) => trade.brokerTradeKey === 'demo:99999'), true),
+    c('(6) a position that is not flat is not imported, so it is not asked about',
+      candidates.some((trade) => !trade.positionFlat), false),
+    c('(7) two candidates out of five, in one select',
+      [candidates.length, db.statements.length], [2, 1]),
+    c('(8) a failed read asks about nobody and does not throw', afterError.length, 0),
+    c('(9) and logs the SQLSTATE, not the message',
+      [errorLines.length, errorLines[0]?.includes('42703'),
+       errorLines[0]?.includes('undefined column')],
+      [1, true, false]),
+  ]);
+}
+
+function stopTriggerGroup() {
+  const source = (file: string) => fs.readFileSync(path.join(process.cwd(), file), 'utf8');
+
+  const sync = source('src/lib/tradovate/sync.ts');
+  const syncRoute = source('src/app/api/tradovate/sync/route.ts');
+  const alerts = source('src/app/api/cron/send-alerts/route.ts');
+  const nightly = source('src/lib/tradovate/import-cron.ts');
+  const today = source('src/app/api/tradovate/today/route.ts');
+
+  // A source-level group, for a claim about calls that are NOT made. The same
+  // shape accounts-check.ts uses for the AI routes, and for the same reason: no
+  // stub can prove the nightly cron never asks, because the proof is that the
+  // parameter is absent from the call.
+  group('only the two triggers that can see the orders ask for them', [
+    c('(1) the Sync button asks', syncRoute.includes('readStops: true'), true),
+    c('(2) the end-of-day summary asks', alerts.includes('readStops: true'), true),
+    // 03:30 UTC is four and a half hours after the trading day rolled over, so
+    // `/order/list` no longer holds the orders of the day being imported. It
+    // could never answer, and asking would be 7-9 requests per trader per night.
+    c('(3) the nightly cron does NOT', nightly.includes('readStops'), false),
+    // E9's free trigger stays free: it is on the critical path of opening the
+    // trade form.
+    c('(4) /api/tradovate/today does not read orders at all',
+      [today.includes('readStopHistories'), today.includes('stopHistories')], [false, false]),
+    c('(5) and the default is off, so a new caller cannot opt in by accident',
+      sync.includes('readStops = false'), true),
+    // The grep is only worth anything if it could fire.
+    c('(6) and the needle is a real one', sync.includes('readStops'), true),
+  ]);
+}
+
 async function main() {
   await flagGroup();
   await firstImportGroup();
@@ -3675,6 +4205,13 @@ async function main() {
   await accountBoundaryGroup();
   await accountClosureGroup();
   await accountStampGroup();
+
+  // REF-113 Stage 3 — the broker's stop, written.
+  await stopHistoryGroup();
+  await stopNotDeletedGroup();
+  await stopSelfReportGroup();
+  await stopCandidateGroup();
+  stopTriggerGroup();
 
   // J1 — the unplanned row's score (REF-107 Stage 3b follow-up).
   scoringGroup();

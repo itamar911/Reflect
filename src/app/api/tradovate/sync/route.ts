@@ -258,6 +258,12 @@ export async function POST(request: Request) {
         admin: createAdminClient(),
         dayStartMs: window.dayStartMs,
         windowStartMs: window.windowStartMs,
+        // The trader pressed the button, which means they are here on the
+        // trading day whose orders are still readable — the one condition
+        // REF-113 Stage 3 has (see `readStops` in lib/tradovate/sync.ts). It
+        // adds a handful of requests to a route somebody is already waiting on,
+        // and only for trades that do not have an answer yet.
+        readStops: true,
       }),
   });
 }

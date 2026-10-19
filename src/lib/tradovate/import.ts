@@ -86,6 +86,14 @@
  * reason. Stage 3b's auto-link clears `unplanned`, and a re-import that set it
  * back to true would undo that link on the next pull.
  *
+ * AND THERE IS NOW A THIRD CATEGORY — FOUR COLUMNS THE BROKER FILLS ONLY WHEN
+ * THEY ARE EMPTY (REF-113 Stage 3). `moved_sl`, `kept_sl`, `stop_loss` and
+ * `take_profit` are the trader's to own and the broker's to measure, and the
+ * reconciliation is: written once, into a NULL, and never restated. A trader who
+ * disagrees with "you moved your stop" and unticks the box must not find it
+ * ticked again an hour later. See {@link fillWhenEmpty}, which is also where E12
+ * lives: on a LINKED PLAN the two price columns are never touched at all.
+ *
  *
  * THE MATCHING PASS, AND WHY A TRADE CAN ARRIVE WITHOUT A ROW OF ITS OWN
  * ---------------------------------------------------------------------
@@ -173,6 +181,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { accountIdentity } from './accounts';
 import type { TradovateEnvironment } from './hosts';
 import type { BrokerTrade } from './fills';
+import type { StopHistory } from './orders';
 import {
   MATCH_WINDOW_MS,
   matchBrokerTrade,
@@ -299,6 +308,8 @@ const UNIQUE_VIOLATION = '23505';
  * forms would report every row as changed on every pull, which is idempotence
  * lost to a formatting difference.
  */
+type FactKind = 'exact' | 'number' | 'instant' | 'json';
+
 const EXECUTION_FACTS = [
   { column: 'source', kind: 'exact' },
   { column: 'broker_account_id', kind: 'number' },
@@ -327,7 +338,28 @@ const EXECUTION_FACTS = [
   { column: 'submitted_at', kind: 'instant' },
   { column: 'closed_at', kind: 'instant' },
   { column: 'status', kind: 'exact' },
-] as const satisfies readonly { column: string; kind: 'exact' | 'number' | 'instant' }[];
+  // REF-113 Stage 3, and all three are in this list for `account_id`'s reason
+  // rather than by analogy: they are derived from the broker's own orders, so a
+  // trader cannot be asserting anything about them that the broker contradicts.
+  //
+  // AND ALL THREE ARE PRESENT-OR-ABSENT, WHICH IS THE WHOLE SAFETY ARGUMENT.
+  // See {@link facts}: a pull that did not read the orders leaves the keys OUT
+  // of the wanted record, and {@link changedFacts} skips them rather than
+  // restating a NULL. Without that, the nightly 03:30 cron — which CANNOT see
+  // the orders of the day it imports, because Tradovate rolled the trading day
+  // over four and a half hours earlier — would overwrite with NULL every stop
+  // history the end-of-day summary captured six hours before. That is the most
+  // destructive thing this stage could have shipped, and the fix was already in
+  // the file.
+  { column: 'broker_stop_loss', kind: 'number' },
+  { column: 'broker_take_profit', kind: 'number' },
+  // `json` AND NOT `exact`. A JSONB column comes back from PostgREST as an
+  // OBJECT, and `String(obj) === String(obj)` is
+  // `'[object Object]' === '[object Object]'` — always true, so the column would
+  // be compared equal to everything and NEVER updated. A silent trap, and the
+  // reason this kind exists at all.
+  { column: 'stop_history', kind: 'json' },
+] as const satisfies readonly { column: string; kind: FactKind }[];
 
 /**
  * {@link EXECUTION_FACTS}, for the regression suite.
@@ -339,15 +371,58 @@ const EXECUTION_FACTS = [
  */
 export const EXECUTION_FACTS_FOR_TEST: readonly { column: string }[] = EXECUTION_FACTS;
 
-/** Every column the select has to bring back so a comparison is possible. */
+/**
+ * Every column the select has to bring back so a comparison is possible.
+ *
+ * THE FOUR AT THE END ARE NOT FACTS AND ARE NEVER RESTATED. They are read for
+ * one question — "has the trader left this empty?" — which is the whole of
+ * {@link fillWhenEmpty}. A column in this list is a column the comparison can
+ * SEE; only {@link EXECUTION_FACTS} decides what may be written.
+ *
+ * `stop_history` ARRIVES HERE THROUGH `EXECUTION_FACTS`, which makes this select
+ * the reason migration 038 must be run BEFORE this code deploys: the flag it is
+ * gated behind is already '1' in production, so without 038 every import answers
+ * PostgREST 42703 and nothing is imported at all. 038's header says so at the
+ * top, and this is the line it is talking about.
+ */
 const EXISTING_COLUMNS = [
   'id',
   'broker_trade_key',
   'hidden',
   ...EXECUTION_FACTS.map((fact) => fact.column),
+  // Read to be checked for emptiness, never to be restated (REF-113 Stage 3).
+  'moved_sl',
+  'kept_sl',
+  'stop_loss',
+  'take_profit',
+  // Whether this row is a plan the trader wrote, which is what E12 turns on.
+  'unplanned',
 ].join(', ');
 
-type FactValues = Record<string, string | number | null>;
+/**
+ * A value a statement may carry.
+ *
+ * `StopHistory` is in the union because one column is JSONB. `boolean` is in it
+ * for `moved_sl`/`kept_sl`, which are not facts — they travel in the same
+ * statement, never through {@link changedFacts}.
+ */
+type FactValue = string | number | boolean | null | StopHistory;
+type FactValues = Record<string, FactValue>;
+
+/**
+ * What the pull worked out BESIDE the trades, and what every writer below needs.
+ *
+ * One object rather than two trailing optional parameters on five functions. Both
+ * members are maps the pull built once, both are optional, and the absence of
+ * either is a supported state rather than a degraded one — which is exactly why
+ * they belong together: the rule for reading them is the same rule.
+ */
+interface Derived {
+  /** `${host}:${brokerAccountId}` → `accounts.id` (REF-110 Stage 2). */
+  accountIds?: ReadonlyMap<string, string>;
+  /** `brokerTradeKey` → the broker's stop history (REF-113 Stage 3). */
+  stopHistories?: ReadonlyMap<string, StopHistory>;
+}
 
 /**
  * The broker's facts about one trade, as column values.
@@ -387,9 +462,33 @@ type FactValues = Record<string, string | number | null>;
  * So the absence is load-bearing, and it is also what keeps the deploy honest:
  * with no map, every statement this module issues is byte-identical to the one
  * it issued before REF-110.
+ *
+ *
+ * AND THE THREE STOP COLUMNS TAKE EXACTLY THAT SHAPE (REF-113 Stage 3)
+ * -------------------------------------------------------------------
+ *
+ * For a harder reason than `account_id`'s. Two of this module's four triggers
+ * CANNOT EVER read the orders:
+ *
+ *   - the nightly cron runs at 03:30 UTC, four and a half hours after Tradovate
+ *     rolled the trading day over, so `/order/list` no longer holds the orders of
+ *     the day it is importing — not today, and not on any future run;
+ *   - `/api/tradovate/today` does not read them on purpose, because it is free
+ *     precisely by not making extra passes.
+ *
+ * If an unread history resolved to NULL, those two would ERASE, every night and
+ * every time a trader opened the trade form, what the Sync button and the
+ * end-of-day summary had captured hours earlier. The absence is what makes the
+ * four triggers safe to overlap, which is the property the whole module is built
+ * on.
+ *
+ * THE TWO PRICE COLUMNS ARE ABSENT WHENEVER THERE IS NO PRICE, even when the
+ * history itself is present. An `'unknown'` or a `'none'` has no stop to state,
+ * and naming the column with a NULL would be the same erasure in a smaller form.
  */
-function facts(trade: BrokerTrade, accountIds?: ReadonlyMap<string, string>): FactValues {
-  const accountId = accountIds?.get(accountIdentity(trade.host, trade.accountId));
+function facts(trade: BrokerTrade, derived: Derived = {}): FactValues {
+  const accountId = derived.accountIds?.get(accountIdentity(trade.host, trade.accountId));
+  const stop = derived.stopHistories?.get(trade.brokerTradeKey);
 
   return {
     source: 'tradovate',
@@ -406,14 +505,146 @@ function facts(trade: BrokerTrade, accountIds?: ReadonlyMap<string, string>): Fa
     submitted_at: new Date(trade.openedAtMs).toISOString(),
     closed_at: new Date(trade.closedAtMs).toISOString(),
     status: 'closed',
+    ...(stop === undefined
+      ? {}
+      : {
+          stop_history: stop,
+          ...(stop.initialStop === null ? {} : { broker_stop_loss: stop.initialStop }),
+          ...(stop.initialTarget === null ? {} : { broker_take_profit: stop.initialTarget }),
+        }),
   };
 }
 
+/**
+ * The columns the broker fills ONLY WHEN THE TRADER LEFT THEM EMPTY
+ * (REF-113 Stage 3).
+ *
+ * NOT FACTS, AND DELIBERATELY NOT IN {@link EXECUTION_FACTS}. `moved_sl` and
+ * `kept_sl` are self-report: `CloseTrade.tsx` is what writes them, from a
+ * checkbox. Putting them in the fact list would hand them to the broker forever
+ * — a trader who disagrees with the verdict and unticks the box would find it
+ * ticked again on the next sync, which is the one interaction that would teach
+ * them to stop trusting the figures. So these are written once, into a NULL, and
+ * never restated.
+ *
+ * `restate()` ALREADY HOLDS `stored`, so this is a small special case rather than
+ * a new mechanism. On an insert there is nothing stored and all four are free.
+ *
+ *
+ * THE FOUR RULES, AND WHY EACH ONE FAILS SILENT RATHER THAN LOUD
+ * -------------------------------------------------------------
+ *
+ * 1. `moved_sl` is written for `'moved'` and `'kept'` and FOR NOTHING ELSE.
+ *    `'none'` (no stop was placed) and `'unknown'` both leave it NULL, which is
+ *    how every consumer already reads "no answer": `stats/page.tsx` and
+ *    `DashboardClient.tsx` both filter `!== null` today, so decision 2 needed no
+ *    line of code in either of them.
+ *
+ * 2. A TRAILING STOP DOES NOT SET IT EITHER, even though its verdict is
+ *    `'moved'`. The steps of a trail are the server's, not a decision the trader
+ *    took mid-trade, and the stored history says so (`trailing: true`) for the
+ *    screen that explains it. This is §3's rule applied to the one case that
+ *    reaches it in v1: evidence of automation may only ever take attribution
+ *    away.
+ *
+ * 3. `kept_sl = !moved_sl`, for consistency and nothing more. It is a dead
+ *    column (§E) kept alive by the AI-debrief score formula, and REF-113 is not
+ *    going to become its first real consumer.
+ *
+ * 4. `stop_loss`/`take_profit` ARE NEVER TOUCHED ON A LINKED PLAN — E12, and it
+ *    is not about overwriting, because nothing here overwrites anything. A plan
+ *    the trader submitted WITH NO STOP is a trader who planned without one, and
+ *    filling it from the broker would make their plan claim something they never
+ *    typed — and would then feed `rr_ratio`, the planning block of `tradeScore`
+ *    and `reachedStop` in `proposeFlags` off a number they did not plan.
+ *
+ * ON AN UNPLANNED BROKER ROW, FILLING `stop_loss` IS THE DECISION (17.10,
+ * decision 4) AND IT IS NOT FREE. It arms exactly those three readers on a
+ * broker figure for a row that has no plan behind it. That was weighed and
+ * chosen — a journal row showing the risk the trader actually took beats a blank
+ * — and it is why this is the one place in the module where the broker writes a
+ * column the trader also owns.
+ */
+function fillWhenEmpty(params: {
+  stop: StopHistory | undefined;
+  /** The row as stored. Absent on an insert, where nothing is filled in. */
+  stored?: Record<string, unknown>;
+}): FactValues {
+  const { stop, stored } = params;
+  if (stop === undefined) return {};
+
+  const fills: FactValues = {};
+  const empty = (column: string): boolean =>
+    stored === undefined || stored[column] === null || stored[column] === undefined;
+
+  // Rules 1-3.
+  const moved =
+    stop.verdict === 'moved' && !stop.trailing ? true : stop.verdict === 'kept' ? false : null;
+  if (moved !== null) {
+    if (empty('moved_sl')) fills.moved_sl = moved;
+    if (empty('kept_sl')) fills.kept_sl = !moved;
+  }
+
+  // Rule 4. `unplanned === false` is what a link leaves behind — `linkOnto` and
+  // migration 035's merge both write it — and an imported row that was never
+  // linked carries `true` from its insert.
+  if (stored?.unplanned === false) return fills;
+
+  if (stop.initialStop !== null && empty('stop_loss')) fills.stop_loss = stop.initialStop;
+  if (stop.initialTarget !== null && empty('take_profit')) fills.take_profit = stop.initialTarget;
+
+  return fills;
+}
+
+/** JSON text as a value, or the text itself when it is not JSON. */
+function safeParse(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+/**
+ * A JSON value as a string whose KEY ORDER CANNOT DISAGREE.
+ *
+ * Needed because Postgres `jsonb` is stored decomposed and re-serialises its
+ * keys in its own order, so the object that comes back from PostgREST is equal
+ * to the one we sent and not identically ordered. `JSON.stringify` on both
+ * would then report every row as changed on every pull — the same idempotence-
+ * lost-to-a-formatting-difference that `kind: 'number'` and `kind: 'instant'`
+ * exist for, one level deeper.
+ *
+ * Recursive, because `stop_history.versions` is an array of objects. Arrays keep
+ * their order: an array's order is data, and `versions` is specifically ordered
+ * oldest-first.
+ */
+function stableJson(value: unknown): string {
+  if (value === null || value === undefined) return 'null';
+  if (typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+
+  const entries = Object.entries(value as Record<string, unknown>)
+    // An absent key and a key set to undefined are the same document. JSON.
+    // stringify would drop it too, and the sorted comparison has to agree.
+    .filter(([, entry]) => entry !== undefined)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+
+  return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${stableJson(entry)}`).join(',')}}`;
+}
+
 /** Whether a stored value already says what the broker is saying. */
-function alreadyStated(kind: 'exact' | 'number' | 'instant', stored: unknown, wanted: string | number | null): boolean {
+function alreadyStated(kind: FactKind, stored: unknown, wanted: FactValue): boolean {
   if (wanted === null) return stored === null || stored === undefined;
   if (stored === null || stored === undefined) return false;
 
+  if (kind === 'json') {
+    // Parsed when it arrives as text. supabase-js hands back a decomposed
+    // object today; a driver that handed back the document would otherwise make
+    // every row look changed forever.
+    const left = typeof stored === 'string' ? safeParse(stored) : stored;
+    return stableJson(left) === stableJson(wanted);
+  }
   if (kind === 'number') {
     const a = Number(stored);
     const b = Number(wanted);
@@ -431,11 +662,12 @@ function alreadyStated(kind: 'exact' | 'number' | 'instant', stored: unknown, wa
  * The subset of facts this row does not already state. Empty means no write.
  *
  * A COLUMN THE PULL DID NOT STATE IS SKIPPED, not compared against undefined.
- * Every fact but `account_id` is always present, so this branch exists for that
- * one — see {@link facts} on why "the broker did not say" and "the broker says
- * NULL" must not become the same statement. Written as a membership test on
- * `wanted` rather than as a check for `undefined` so that a future fact with a
- * legitimately undefined value cannot slip through it.
+ * `account_id` and the three stop columns are the ones that reach it — see
+ * {@link facts} on why "the broker did not say" and "the broker says NULL" must
+ * not become the same statement, and on why the nightly cron depends on that
+ * distinction to avoid erasing what the evening's summary captured. Written as a
+ * membership test on `wanted` rather than as a check for `undefined` so that a
+ * future fact with a legitimately undefined value cannot slip through it.
  */
 function changedFacts(stored: Record<string, unknown>, wanted: FactValues): FactValues {
   const changes: FactValues = {};
@@ -449,8 +681,17 @@ function changedFacts(stored: Record<string, unknown>, wanted: FactValues): Fact
 /**
  * One row for a trade the journal has never seen.
  *
- * NOT ONE INTENT COLUMN IS NAMED. 034 made all six nullable for exactly this
+ * NOT ONE INTENT COLUMN IS INVENTED. 034 made all six nullable for exactly this
  * insert, and naming them with a placeholder is the thing E4 refused.
+ *
+ * TWO OF THEM ARE NAMED WHEN THE BROKER MEASURED THEM, and that is REF-113
+ * Stage 3 rather than a loosening of E4. `stop_loss` and `take_profit` carry the
+ * prices the trader's own protective orders stated — not a placeholder, not a
+ * default, and present only when the orders were actually read. Every other
+ * intent column is still absent and always will be: there is no broker field
+ * that knows why somebody took a trade. See {@link fillWhenEmpty}, which is also
+ * what keeps this to an insert — a row that already exists is only ever filled
+ * into a NULL.
  *
  * `unplanned: true` is 032's column doing the job it was added for — its own
  * migration says so: "a trade that reaches the journal with no plan behind it…
@@ -465,17 +706,15 @@ function changedFacts(stored: Record<string, unknown>, wanted: FactValues): Fact
  * happened — and the honest reading of the column is the stronger one: this
  * row's facts came from the broker, not from somebody typing.
  */
-function newRow(
-  userId: string,
-  trade: BrokerTrade,
-  accountIds?: ReadonlyMap<string, string>
-): Record<string, unknown> {
+function newRow(userId: string, trade: BrokerTrade, derived: Derived): Record<string, unknown> {
   return {
     user_id: userId,
     broker_trade_key: trade.brokerTradeKey,
     unplanned: true,
     rule_context_source: 'broker_verified',
-    ...facts(trade, accountIds),
+    ...facts(trade, derived),
+    // No `stored`, because there is no row yet: every one of the four is free.
+    ...fillWhenEmpty({ stop: derived.stopHistories?.get(trade.brokerTradeKey) }),
   };
 }
 
@@ -526,6 +765,22 @@ export interface ImportRequest {
    * shape — the host is in it because Tradovate account ids are host-local.
    */
   accountIds?: ReadonlyMap<string, string>;
+  /**
+   * `brokerTradeKey` → what the broker's protective orders said (REF-113 Stage 3).
+   *
+   * OPTIONAL, AND ITS ABSENCE IS THE NORMAL STATE ON TWO OF THE FOUR TRIGGERS —
+   * the nightly cron, which cannot read orders at all, and `/api/tradovate/today`,
+   * which does not try. A key that is not in this map leaves all three stop
+   * columns UNNAMED in every statement, which is what stops those two from
+   * erasing what the Sync button and the end-of-day summary captured. See
+   * {@link facts}.
+   *
+   * Built by `readStopHistories` in ./orders.ts, which is also what decides what
+   * is worth storing: a trade whose history could not be read for a transient
+   * reason is simply not in here, so the row stays a candidate for the next run
+   * of the same trading day.
+   */
+  stopHistories?: ReadonlyMap<string, StopHistory>;
 }
 
 /**
@@ -626,7 +881,11 @@ export async function importBrokerTrades(request: ImportRequest): Promise<Broker
     env = process.env,
     nowMs = Date.now(),
     accountIds,
+    stopHistories,
   } = request;
+
+  // The two maps the pull built, carried as one thing from here down.
+  const derived: Derived = { accountIds, stopHistories };
 
   // Before anything else, and not an assertion about data: a falsy or
   // non-string user id reaching the cron's service-role client is the one bug
@@ -703,7 +962,7 @@ export async function importBrokerTrades(request: ImportRequest): Promise<Broker
         counts.skippedHidden += 1;
         continue;
       }
-      await restate(client, userId, String(stored.id), stored, trade, counts, refusals, accountIds);
+      await restate(client, userId, String(stored.id), stored, trade, counts, refusals, derived);
       continue;
     }
 
@@ -712,7 +971,7 @@ export async function importBrokerTrades(request: ImportRequest): Promise<Broker
     // refuses, so the trade reaches the journal either way.
     const decision = decisions.get(trade.brokerTradeKey);
     if (decision?.kind === 'unique') {
-      const written = await linkOnto(client, userId, decision.planId, trade, nowMs, refusals, accountIds);
+      const written = await linkOnto(client, userId, decision.planId, trade, nowMs, refusals, derived);
       if (written) {
         counts.linkedAuto += 1;
         continue;
@@ -721,7 +980,7 @@ export async function importBrokerTrades(request: ImportRequest): Promise<Broker
       counts.queued += 1;
     }
 
-    const { error } = await client.from('trade_plans').insert(newRow(userId, trade, accountIds));
+    const { error } = await client.from('trade_plans').insert(newRow(userId, trade, derived));
 
     if (!error) {
       counts.imported += 1;
@@ -734,7 +993,7 @@ export async function importBrokerTrades(request: ImportRequest): Promise<Broker
     // been had the read seen it. Re-read rather than trust the row we did not
     // see.
     if (error.code === UNIQUE_VIOLATION) {
-      await restateByKey(client, userId, trade, counts, refusals, accountIds);
+      await restateByKey(client, userId, trade, counts, refusals, derived);
       continue;
     }
 
@@ -783,12 +1042,12 @@ async function linkOnto(
   trade: BrokerTrade,
   nowMs: number,
   refusals: string[],
-  accountIds?: ReadonlyMap<string, string>
+  derived: Derived
 ): Promise<boolean> {
   const { error } = await client
     .from('trade_plans')
     .update({
-      ...facts(trade, accountIds),
+      ...facts(trade, derived),
       broker_trade_key: trade.brokerTradeKey,
       unplanned: false,
       link_confirmed_at: new Date(nowMs).toISOString(),
@@ -811,9 +1070,15 @@ async function restate(
   trade: BrokerTrade,
   counts: BrokerImportCounts,
   refusals: string[],
-  accountIds?: ReadonlyMap<string, string>
+  derived: Derived
 ): Promise<void> {
-  const changes = changedFacts(stored, facts(trade, accountIds));
+  const changes = {
+    ...changedFacts(stored, facts(trade, derived)),
+    // NOT facts, and NOT run through the comparison: these are only ever
+    // written into a NULL, so a second pull finds them non-null and sends
+    // nothing. Idempotence holds without them being compared at all.
+    ...fillWhenEmpty({ stop: derived.stopHistories?.get(trade.brokerTradeKey), stored }),
+  };
 
   // THE WHOLE OF IDEMPOTENCE, IN ONE BRANCH. A re-import of an unchanged trade
   // reaches here and returns without sending a statement.
@@ -853,7 +1118,7 @@ async function restateByKey(
   trade: BrokerTrade,
   counts: BrokerImportCounts,
   refusals: string[],
-  accountIds?: ReadonlyMap<string, string>
+  derived: Derived
 ): Promise<void> {
   const { data, error } = await client
     .from('trade_plans')
@@ -873,7 +1138,72 @@ async function restateByKey(
     counts.skippedHidden += 1;
     return;
   }
-  await restate(client, userId, String(stored.id), stored, trade, counts, refusals, accountIds);
+  await restate(client, userId, String(stored.id), stored, trade, counts, refusals, derived);
+}
+
+/**
+ * Which trades are worth reading the broker's orders for (REF-113 Stage 3).
+ *
+ * ONE SELECT, AND IT IS WHAT MAKES THE SECOND RUN OF A DAY NEARLY FREE. A trade
+ * that already carries a `stop_history` costs no upstream request at all, so the
+ * end-of-day summary, the Sync button and (from Stage 4) the dedicated cron can
+ * all run on the same day without reading the same orders three times.
+ *
+ * THE FILTER IS `stop_history IS NULL` AND IT IS EVALUATED IN JAVASCRIPT ON
+ * PURPOSE. The rows have to be read anyway to tell "no row yet" from "a row with
+ * no history", and a `.is('stop_history', null)` predicate would hide the first
+ * case inside the second: a trade the journal has never seen has no row to be
+ * null, and it is the one that most needs asking about.
+ *
+ * FOUR REASONS A TRADE IS NOT A CANDIDATE, and three of them are somebody else's
+ * rule restated:
+ *
+ *   - the import is switched off              → nothing may be SELECTed at all
+ *   - the position is not known to be flat    → rule 1 (§A3); it is not imported
+ *   - the row is hidden                       → rule 2 (E12); it is not touched
+ *   - the row already has a history           → asked and answered
+ *
+ * A FAILED READ RETURNS NOTHING, which costs the run its stop histories and
+ * nothing else. The same swallow ./orders.ts makes, for the same reason: an
+ * annotation must not be able to cost a trader their journal rows.
+ */
+export async function tradesNeedingStopHistory(params: {
+  client: SupabaseClient;
+  userId: string;
+  trades: readonly BrokerTrade[];
+  env?: NodeJS.ProcessEnv;
+}): Promise<BrokerTrade[]> {
+  const { client, userId, trades, env = process.env } = params;
+
+  // Before the select, not after: `stop_history` is a column migration 038
+  // adds, so without the flag there is nothing here that may be named.
+  if (!isImportEnabled(env)) return [];
+
+  const flat = trades.filter((trade) => trade.positionFlat);
+  if (flat.length === 0) return [];
+
+  const keys = [...new Set(flat.map((trade) => trade.brokerTradeKey))];
+  const { data, error } = await client
+    .from('trade_plans')
+    .select('broker_trade_key, stop_history, hidden')
+    .eq('user_id', userId)
+    .in('broker_trade_key', keys);
+
+  if (error) {
+    // The code, never the message: a PostgREST message can echo the row back.
+    console.info(redactSecrets(`[tradovate][import] stopcandidates:${error.code ?? 'none'}`));
+    return [];
+  }
+
+  const answered = new Set<string>();
+  for (const row of (data ?? []) as unknown as Record<string, unknown>[]) {
+    const key = row.broker_trade_key;
+    if (typeof key !== 'string') continue;
+    const hasHistory = row.stop_history !== null && row.stop_history !== undefined;
+    if (hasHistory || row.hidden === true) answered.add(key);
+  }
+
+  return flat.filter((trade) => !answered.has(trade.brokerTradeKey));
 }
 
 /**

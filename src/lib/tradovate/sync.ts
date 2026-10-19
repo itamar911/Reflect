@@ -3,10 +3,14 @@
  * Stage 2).
  *
  * SERVER ONLY. The one place that joins the halves of the import — the broker
- * read (./fills.ts), the accounts pass (./account-sync.ts) and the journal
- * write (./import.ts) — so that the two triggers which have to make a pull of
- * their own do not each assemble it: POST /api/tradovate/sync and the daily
- * /api/cron/tradovate-import.
+ * read (./fills.ts), the accounts pass (./account-sync.ts), the stop-order read
+ * (./orders.ts) and the journal write (./import.ts) — so that the two triggers
+ * which have to make a pull of their own do not each assemble it: POST
+ * /api/tradovate/sync and the daily /api/cron/tradovate-import.
+ *
+ * THE FOUR HALVES ARE NOT ALL RUN BY EVERY CALLER. `readStops` is off by
+ * default, because the nightly cron is structurally incapable of reading orders
+ * — see the field, which has the clock arithmetic.
  *
  * /api/tradovate/today deliberately does NOT go through here. That trigger is
  * free precisely because it already has a pull in hand, and routing it through
@@ -50,7 +54,13 @@ import { syncBrokerAccounts, type AccountSyncCounts } from './account-sync';
 import { tradovateGet } from './client';
 import { getUserTradingApi, readIsTradeSource } from './connections';
 import { loadBrokerDay, type TradovateReader } from './fills';
-import { importBrokerTrades, isImportEnabled, type BrokerImportCounts } from './import';
+import {
+  importBrokerTrades,
+  isImportEnabled,
+  tradesNeedingStopHistory,
+  type BrokerImportCounts,
+} from './import';
+import { readStopHistories } from './orders';
 
 export interface SyncRequest {
   userId: string;
@@ -70,6 +80,31 @@ export interface SyncRequest {
   windowStartMs: number;
   /** Test seam for the flag. Production reads process.env. */
   env?: NodeJS.ProcessEnv;
+  /**
+   * Whether to read the broker's protective orders too (REF-113 Stage 3).
+   *
+   * OFF BY DEFAULT, AND THE DEFAULT IS THE DECISION RATHER THAN THE SAFE
+   * CHOICE. Three callers reach this function and they are not equivalent:
+   *
+   *   POST /api/tradovate/sync        true  — the trader is here, now, today
+   *   the end-of-day summary          true  — same trading day, per user, at
+   *                                           the hour that user chose
+   *   /api/cron/tradovate-import      FALSE — and it could not be otherwise
+   *
+   * The nightly cron runs at 03:30 UTC. If the trading day rolls over at 17:00
+   * CT, that is 22:00 or 23:00 UTC, so the cron fires FOUR AND A HALF TO FIVE
+   * AND A HALF HOURS AFTER Tradovate has already cleared `/order/list` of the
+   * day it is importing. It cannot see those orders — not on that run, and not
+   * on any later one, because `/order/list` has no depth at all (`depthDays=0`,
+   * measured 19.10). Asking would be seven to nine requests per trader per
+   * night against a rate-limited third party, for an empty answer.
+   *
+   * So the cron does not ask, the trades it imports keep `stop_history = NULL`,
+   * and NULL is what leaves them candidates for a run that can actually see the
+   * orders. Stage 4 is the dedicated cron, timed to the trading day rather than
+   * to midnight, that closes the gap for a trader who never opens the app.
+   */
+  readStops?: boolean;
 }
 
 /** A pull and the import it fed. `asOf` is the pull's, for the caller to report. */
@@ -126,7 +161,15 @@ export interface SyncResult {
  * the one behavioural difference between the triggers.
  */
 export async function syncUserTrades(request: SyncRequest): Promise<SyncResult> {
-  const { userId, client, admin, dayStartMs, windowStartMs, env = process.env } = request;
+  const {
+    userId,
+    client,
+    admin,
+    dayStartMs,
+    windowStartMs,
+    env = process.env,
+    readStops = false,
+  } = request;
 
   const enabled = isImportEnabled(env);
   const isTradeSource = enabled ? await readIsTradeSource(userId, { admin }) : false;
@@ -191,6 +234,27 @@ export async function syncUserTrades(request: SyncRequest): Promise<SyncResult> 
     env,
   });
 
+  // THE STOP ORDERS, AND ONLY FOR THE TRADES THAT STILL NEED THEM (REF-113
+  // Stage 3). Two reads gate it and both matter: `tradesNeedingStopHistory` is
+  // one select that drops everything already answered, and `readStopHistories`
+  // returns only what is worth storing. A run with nothing new to ask about
+  // makes ZERO upstream requests here, which is what lets three triggers share
+  // a trading day without reading the same orders three times.
+  //
+  // It runs AFTER the pull and BEFORE the import, because the import is what
+  // writes the three columns and it writes them in the same statement as the
+  // facts. And it cannot throw: ./orders.ts swallows, so a broker that refuses
+  // the order endpoints costs this run its annotations and not its rows.
+  const stopHistories = readStops
+    ? await readStopHistories({
+        readers: {
+          live: readerFor(api.hosts.live.url),
+          demo: readerFor(api.hosts.demo.url),
+        },
+        trades: await tradesNeedingStopHistory({ client, userId, trades, env }),
+      })
+    : undefined;
+
   // `day` is used for its timestamp alone. The scalars are the rules' business
   // and no rule is being evaluated here; the rows are the point.
   const counts = await importBrokerTrades({
@@ -200,6 +264,7 @@ export async function syncUserTrades(request: SyncRequest): Promise<SyncResult> 
     isTradeSource,
     env,
     accountIds: identities,
+    stopHistories,
   });
 
   return { counts, accounts, asOf: day.asOf, isTradeSource, importEnabled: enabled };
