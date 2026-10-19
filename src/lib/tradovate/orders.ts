@@ -122,9 +122,10 @@
  *     {@link anchorStop} — and everything before it is reported as a count in
  *     {@link StopHistory.preFillVersions} rather than as a move.
  *   - **The exit drag**, by a status and a crossing. A trader who drags their
- *     stop onto the market to get out leaves a cancelled order whose last step
- *     crossed the price they got out at, and that is an exit and not a
- *     protective move. See {@link withoutExitDrag}.
+ *     stop onto the market to get out leaves a terminal order — filled, or
+ *     cancelled behind the flatten that beat it — whose last step crossed the
+ *     price they got out at, and that is an exit and not a protective move. See
+ *     {@link withoutExitDrag}.
  *
  * THE CLOCK IS THE EXPENSIVE HALF AND IT FAILS SAFE. A version carries no
  * instant (./types.ts measured it absent), so the instants come from
@@ -1129,12 +1130,34 @@ function rising(instants: readonly number[]): number[] | null {
  *
  * A SUBSTRING TEST, for the reason {@link isStopType} gives: the measured value
  * is `Canceled`, the spelling with two Ls exists in the wild, and the set cannot
- * be enumerated from one sample. Both readers fail SAFE on a status this does
- * not recognise — {@link withoutExitDrag} leaves the version counted, and
- * {@link versionInstants} allows the pairing no spare command.
+ * be enumerated from one sample. Fails SAFE on a status it does not recognise —
+ * {@link versionInstants} then allows the pairing no spare command.
+ *
+ * CANCELLED AND NOT TERMINAL, and the narrowness is the point: this one gates
+ * the SPARE COMMAND, and only a cancel is a command that mints no version. A
+ * fill is an execution and issues no command at all, so a filled order gets no
+ * spare. {@link terminalShaped} is the wider test and has the other reader.
  */
 const cancelShaped = (ordStatus: string | undefined): boolean =>
   ordStatus !== undefined && /cancel/i.test(ordStatus);
+
+/**
+ * Whether an order's status says it is DONE — cancelled or filled.
+ *
+ * {@link withoutExitDrag}'s gate. The two outcomes are one event seen from two
+ * sides, so they are tested together; what this excludes is a stop still
+ * `Working`, which nobody pulled out of the way.
+ *
+ * `PartiallyFilled` IS DELIBERATELY INCLUDED by the substring, because a stop
+ * that filled for part of the position is still a stop the trade got out
+ * through. A hypothetical `Unfilled`-shaped value would be read as filled by the
+ * same substring; the cost is one uncounted move, which is the direction this
+ * function already argues for at length, and the alternative — an enumerated
+ * union against a set one sample cannot enumerate — is the mistake
+ * {@link isStopType} exists to avoid.
+ */
+const terminalShaped = (ordStatus: string | undefined): boolean =>
+  ordStatus !== undefined && /cancel|fill/i.test(ordStatus);
 
 /**
  * One stop candidate's versions, cut at both ends. See the module header.
@@ -1231,26 +1254,31 @@ function anchorIndex(stated: readonly { atMs: number | null }[], fillMs: number)
  * did not make to their risk and throws away the ninety-tick stop they were
  * actually protected at.
  *
- * FOUR CONDITIONS, ALL OF THEM NECESSARY, AND THEY ARE NARROW ON PURPOSE:
+ * THREE CONDITIONS, ALL OF THEM NECESSARY, AND THEY ARE NARROW ON PURPOSE:
  *
  *   1. It is the LAST version. A drag to the market is the last thing that
  *      happens to a stop; one in the middle is a stop that was moved and then
  *      moved again, and that is two moves.
- *   2. The order is CANCEL-SHAPED. A stop that is still working, or that filled,
- *      is not a stop somebody pulled out of the way.
- *   3. IT PRODUCED NO FILL IN THIS TRADE — it is not in `entryOrderIds`, which
- *      ./fills.ts documents as every order that produced a fill in the group.
- *      This is the exact form of what (2) is reaching for, and it catches the
- *      case (2) cannot: a stop that filled PARTIALLY and had its remainder
- *      cancelled reads `Canceled`, and its last version is a price the trader
- *      was genuinely protected at — and got out at — rather than one they
- *      pulled away.
- *   4. The LAST STEP CROSSED THE EXIT: the version before it sits on the
+ *   2. The order is TERMINAL — cancelled or filled. Both are the same event seen
+ *      from two sides and the distinction was a mistake while it lasted: the
+ *      trader drags the stop onto the market, and then either it fills (the stop
+ *      IS the exit) or their flatten fills first and the OCO cancels it. A stop
+ *      still WORKING after the trade closed is neither, and is not a stop
+ *      somebody pulled out of the way.
+ *   3. The LAST STEP CROSSED THE EXIT: the version before it sits on the
  *      protective side of the price the trade actually got out at, and the last
  *      one sits at or past it. A long needs `before < exit <= after`, a short
  *      the mirror.
  *
- * AND (4) IS A CROSSING RATHER THAN A POSITION BECAUSE A POSITION IS NOT ENOUGH
+ * (2) ONCE READ `CANCELLED` ALONE, PLUS "AND PRODUCED NO FILL IN THIS GROUP".
+ * That pair was built to protect a stop that filled partially and had its
+ * remainder cancelled, on the reasoning that its last version was a price the
+ * trader was genuinely protected at. The reasoning was backwards: a stop that
+ * filled, wholly or partly, is a stop the trade got out THROUGH, and its last
+ * version is the price it got out at. So the fill test is gone and `Filled`
+ * joins `Canceled` instead of excluding.
+ *
+ * AND (3) IS A CROSSING RATHER THAN A POSITION BECAUSE A POSITION IS NOT ENOUGH
  * — this is the first thing the suite caught. "The last version is at or beyond
  * the exit" is also true of a stop that was tightened once and then cancelled
  * while the market ran past where it used to be: a long stopped at 95, tightened
@@ -1280,14 +1308,23 @@ function anchorIndex(stated: readonly { atMs: number | null }[], fillMs: number)
  * count; reaching the per-leg price is a change to ./fills.ts and is not this
  * one.
  *
- * **A STOP AT EXACTLY THE EXIT IS AMBIGUOUS AND IS CUT.** `after >= exitPrice`
- * takes equality, which it must — a drag onto the market lands AT the market,
- * and the measured trade is that case exactly. The cost is the trader who
- * tightened to break-even and then closed by hand at that same price: a real
- * move, cut. The direction of that error is the one the module already chose for
- * {@link StopEvidence.automated} — under-reporting a move mutes one rule, while
- * over-reporting one can arm `moved_sl_last_trade` and block a trader out of the
- * app over something they did not do. Between the two, mute.
+ * **A STOP AT EXACTLY THE EXIT IS AMBIGUOUS AND IS CUT**, and taking `Filled`
+ * widens that boundary rather than narrowing it. `after >= exitPrice` must take
+ * equality — a drag onto the market lands AT the market — and a stop that FILLED
+ * is at the exit by construction, because its fill is what the exit price is
+ * made of. So a stop that was trailed up and then hit reads as an exit through
+ * the stop and its last tightening is cut: a long trailed 95 → 98 and stopped
+ * out at 98 reports `kept`, `movedCount: 0`, `finalStop: 95`.
+ *
+ * THAT IS A DELIBERATE READING AND NOT AN OVERSIGHT, on two grounds. A trader
+ * stopped out at their stop DID honour it, which is what `kept_sl` is for. And
+ * the direction of the error is the one the module already chose for
+ * {@link StopEvidence.automated}: under-reporting a move mutes one rule, while
+ * over-reporting one can arm `moved_sl_last_trade`, which can be `block_day`,
+ * and lock a trader out of the app over something they did not do. Between the
+ * two, mute. What it costs is that a trailing stop's last tightening is not
+ * visible in `movedCount`; it is still in {@link StopHistory.versions}, which is
+ * why that field keeps every price rather than the counted window.
  */
 function withoutExitDrag(
   stated: readonly StatedStop[],
@@ -1295,8 +1332,7 @@ function withoutExitDrag(
   trade: BrokerTrade
 ): readonly StatedStop[] {
   if (stated.length < 2) return stated;
-  if (!cancelShaped(order.ordStatus)) return stated;
-  if (trade.entryOrderIds.includes(order.orderId)) return stated;
+  if (!terminalShaped(order.ordStatus)) return stated;
 
   const { exitPrice } = trade;
   const before = stated[stated.length - 2].price;

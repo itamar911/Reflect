@@ -997,14 +997,77 @@ function fillAnchorGroup() {
     },
   });
 
-  // ── (13) The exit cut needs the stop to have produced NO fill ────────────
-  // A stop that filled partially and had its remainder cancelled reads
-  // `Canceled`, and its last version is a price the trader was protected at
-  // and got out at — not one they pulled out of the way.
-  const stopPartlyFilled = derive({
-    ...base,
-    trade: { ...mnq, entryOrderIds: [ENTRY_ORDER, STOP_ORDER, EXIT_ORDER] },
+  // ── (13) The stop was dragged onto the market and FILLED ─────────────────
+  // The second real sequence, and the one `ref-113-direction-investigation.md`
+  // line 111 describes: the trader pulls the stop into the market and it is the
+  // stop itself that executes, rather than a flatten beating it to the fill. So
+  // there is no separate exit order, the stop is in `entryOrderIds` because it
+  // produced the closing fill, and its `ordStatus` is `Filled`. Same event as
+  // case (1) from the other side, and it must read the same.
+  const stopWasTheExit = derive({
+    trade: {
+      ...mnq,
+      entryOrderIds: [ENTRY_ORDER, STOP_ORDER],
+      exitPrice: at(1),
+    },
+    orders: [
+      order(ENTRY_ORDER, {
+        action: 'Buy',
+        ordStatus: 'Filled',
+        timestamp: new Date(FILL - 180_000).toISOString(),
+      }),
+      order(STOP_ORDER, {
+        ordStatus: 'Filled',
+        timestamp: new Date(FILL - 180_000).toISOString(),
+      }),
+    ],
+    versions: [
+      version(90_001, ENTRY_ORDER, { orderType: 'Stop', stopPrice: at(148), orderQty: 1 }),
+      ...PRICES.map((stopPrice, i) =>
+        version(90_010 + i, STOP_ORDER, { orderType: 'Stop', stopPrice, orderQty: 1 })
+      ),
+    ],
+    links: [ENTRY_ORDER, STOP_ORDER],
     commandTimes: { [STOP_ORDER]: STAMPS },
+  });
+
+  // The same drag, on a stop still WORKING. Nobody pulled this one out of the
+  // way — it is the one status the cut excludes, so the step stays counted.
+  const stillWorking = derive({
+    ...base,
+    orders: orders.map((row) =>
+      row.id === STOP_ORDER ? { ...row, ordStatus: 'Working' } : row
+    ),
+    commandTimes: { [STOP_ORDER]: STAMPS },
+  });
+
+  // A long trailed up and then hit: the last tightening equals the exit, so it
+  // is cut and the trade reads `kept`. DELIBERATE — a trader stopped out at
+  // their stop honoured it — and the uncounted price is still in `versions`.
+  const trailedAndHit = derive({
+    trade: {
+      ...mnq,
+      entryOrderIds: [ENTRY_ORDER, STOP_ORDER],
+      exitPrice: at(-90),
+    },
+    orders: [
+      order(ENTRY_ORDER, {
+        action: 'Buy',
+        ordStatus: 'Filled',
+        timestamp: new Date(FILL - 180_000).toISOString(),
+      }),
+      order(STOP_ORDER, {
+        ordStatus: 'Filled',
+        timestamp: new Date(FILL - 180_000).toISOString(),
+      }),
+    ],
+    versions: [
+      version(90_001, ENTRY_ORDER, { orderType: 'Market', orderQty: 1 }),
+      version(90_010, STOP_ORDER, { orderType: 'Stop', stopPrice: at(-131), orderQty: 1 }),
+      version(90_011, STOP_ORDER, { orderType: 'Stop', stopPrice: at(-90), orderQty: 1 }),
+    ],
+    links: [ENTRY_ORDER, STOP_ORDER],
+    commandTimes: { [STOP_ORDER]: [FILL, FILL + 90_000] },
   });
 
   group('the fill anchor: the stop the position OPENED under, not version one', [
@@ -1069,9 +1132,23 @@ function fillAnchorGroup() {
     c('(12) a tie at the fill instant anchors on the EARLIEST of it',
       [tied.initialStop, tied.preFillVersions, tied.movedCount, tied.direction],
       [at(-131), 2, 2, 'mixed']),
-    c('(13) a stop that produced a fill in this trade is never cut as an exit drag',
-      [stopPartlyFilled.finalStop, stopPartlyFilled.movedCount],
-      [at(1), 3]),
+    // The same event as (1) seen from the other side: the stop executed instead
+    // of a flatten beating it. `Filled` and `Canceled` must read alike.
+    c('(13) a stop dragged onto the market that FILLED reads the same as (1)',
+      [stopWasTheExit.initialStop, stopWasTheExit.finalStop, stopWasTheExit.movedCount,
+       stopWasTheExit.direction, stopWasTheExit.preFillVersions],
+      [at(-131), at(-90), 2, 'mixed', 2]),
+    c('(13b) and the stop that was the exit is attributed, not inferred',
+      [stopWasTheExit.verdict, stopWasTheExit.source, stopWasTheExit.anchoredAtFill],
+      ['moved', 'linked', true]),
+    // The one status the cut excludes.
+    c('(14) a stop still WORKING is not a stop anybody pulled away',
+      [stillWorking.finalStop, stillWorking.movedCount], [at(1), 3]),
+    // Documented consequence of taking `Filled`, pinned so it stays a decision.
+    c('(15) a stop trailed up and then HIT reads `kept`, with the price still kept',
+      [trailedAndHit.verdict, trailedAndHit.movedCount, trailedAndHit.finalStop,
+       trailedAndHit.versions.map((v) => v.stopPrice)],
+      ['kept', 0, at(-131), [at(-131), at(-90)]]),
   ]);
 }
 
