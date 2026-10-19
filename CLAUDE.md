@@ -46,7 +46,7 @@ Two consequences worth knowing without reading that file:
 - `notebook_pages`, `rule_violations` and `setups` are used by the app and no
   migration creates them, so the migrations cannot rebuild the database.
 
-Migration files are numbered (`001_…` through `037_…`, with two gaps: `021`
+Migration files are numbered (`001_…` through `038_…`, with two gaps: `021`
 lands on the `ai-usage-accounting` branch, and no branch has an `029`). The
 highest number is the newest file, not the state of production — see the caveat
 above. When a change needs schema work: write the migration file, then tell the

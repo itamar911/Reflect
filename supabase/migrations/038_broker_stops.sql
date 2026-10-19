@@ -1,0 +1,370 @@
+-- REF-113 Stage 1: the broker's protective orders become columns.
+--
+-- Adds THREE nullable columns to `trade_plans`. Creates no table, drops no
+-- column, writes no row, and adds no constraint, no index and no default.
+--
+-- RUN THIS BY HAND in the Supabase SQL Editor. Nothing in the repo applies
+-- migrations.
+--
+-- NUMBERING: 029 is reserved for rule_violations and setup_images_delete
+-- (REF-89) and still has no file; 021 is reserved for the
+-- `ai-usage-accounting` branch. 030-037 are applied — 037 is REF-110's
+-- `accounts`, which took the number REF-113's investigation had pencilled in
+-- for itself and said so in its own header. 038 is the next number that is
+-- neither taken nor reserved. Do not reuse 029 or 021.
+--
+--
+-- WHAT THIS IS FOR
+-- ----------------
+--
+-- Reflect asks a trader, by hand, whether they moved their stop (`moved_sl` on
+-- the close form). It is the one discipline question the product cannot check,
+-- and a custom rule can act on it — `moved_sl_last_trade` with `block_day`
+-- blocks a trader's next session. The broker knows the answer: Tradovate keeps
+-- an `orderVersion` per modification, so the version history of a stop order
+-- IS the history of the moves. Measured on 19.10 against a live bracket whose
+-- stop was dragged twice: three versions, three distinct `stopPrice` values.
+--
+-- So these three columns hold what the broker said, beside — never instead of —
+-- what the trader said.
+--
+--
+-- RUN THIS FILE **BEFORE** DEPLOYING THE STAGE 2-3 CODE
+-- -----------------------------------------------------
+--
+-- Same order as 036 and 037, and for the same reason: the gate on all three
+-- columns is `isImportEnabled()` — `TRADOVATE_IMPORT_ENABLED`, which is ALREADY
+-- '1' in production — so the gate is open the moment the deploy lands. There is
+-- no window in which the code is live and the flag is still off.
+--
+--   1. run this file     2. deploy the Stage 2-3 code
+--
+-- The other order breaks LOUDLY: `stop_history` is in the import's
+-- `EXISTING_COLUMNS` select (src/lib/tradovate/import.ts), so without this file
+-- every import — the trade form's pull, the Sync button, the nightly cron and
+-- the end-of-day summary — answers PostgREST 42703 and imports nothing. Loud is
+-- the point; it is still an outage of the import for however long it takes to
+-- notice.
+--
+-- AND THE SAME WARNING APPLIES TO ANY FUTURE UI READER. A component that names
+-- `stop_history` in a `select` unconditionally takes the journal's row list down
+-- in a deployment where this file has not run. The pattern that avoids it
+-- already exists and is one line — `withHidden(cols, isImportEnabled())` in
+-- src/lib/trades/visible.ts. Stage 5 is where that becomes live code; it is
+-- written here because this is the file somebody will be reading when they add
+-- the column to a select.
+--
+--
+-- BEFORE RUNNING IT — SURVEY
+-- --------------------------
+--
+-- supabase/migrations/ does not describe the live database: objects here have
+-- been created by hand in the dashboard and leave no trace in the repo (see
+-- CLAUDE.md and supabase/README.md). This file was written WITHOUT database
+-- access, from the repo's SQL only. Run all four first and read the output.
+--
+--   -- 1. Do the three columns already exist, under any shape? EXPECT zero
+--   --    rows on a first run. A non-zero answer means something was created by
+--   --    hand and the ADD COLUMN IF NOT EXISTS below will SKIP SILENTLY,
+--   --    leaving whatever type is already there in place.
+--   SELECT column_name, data_type, is_nullable, column_default
+--     FROM information_schema.columns
+--    WHERE table_schema = 'public' AND table_name = 'trade_plans'
+--      AND column_name IN ('broker_stop_loss', 'broker_take_profit', 'stop_history')
+--    ORDER BY column_name;
+--
+--   -- 2. The columns this change joins onto, to confirm 034 is applied. EXPECT
+--   --    three rows: broker_trade_key text, broker_account_id bigint,
+--   --    broker_host text. If this returns nothing, STOP — 034 has not run and
+--   --    there is no imported row for any of this to describe.
+--   SELECT column_name, data_type FROM information_schema.columns
+--    WHERE table_schema = 'public' AND table_name = 'trade_plans'
+--      AND column_name IN ('broker_trade_key', 'broker_account_id', 'broker_host')
+--    ORDER BY column_name;
+--
+--   -- 3. The four columns Stage 3 fills ONLY WHEN THEY ARE NULL, and which it
+--   --    must never restate. All four must already exist and be NULLABLE —
+--   --    `stop_loss` and `take_profit` were made nullable by 034 step 5.
+--   --    EXPECT four rows, all is_nullable = YES.
+--   SELECT column_name, data_type, is_nullable FROM information_schema.columns
+--    WHERE table_schema = 'public' AND table_name = 'trade_plans'
+--      AND column_name IN ('stop_loss', 'take_profit', 'moved_sl', 'kept_sl')
+--    ORDER BY column_name;
+--
+--   -- 4. How many rows the feature can eventually describe, and how many
+--   --    already carry a self-reported answer that Stage 3 must not overwrite.
+--   --    Purely informational — NOTHING IS BACKFILLED BY THIS FILE.
+--   SELECT count(*) FILTER (WHERE source = 'tradovate')                  AS broker_rows,
+--          count(*) FILTER (WHERE moved_sl IS NOT NULL)                  AS self_reported,
+--          count(*) FILTER (WHERE source = 'tradovate' AND stop_loss IS NOT NULL)
+--                                                                        AS broker_rows_with_a_stop
+--     FROM trade_plans;
+--
+--
+-- WHY EACH CHANGE
+-- ---------------
+--
+-- 1. broker_stop_loss — NUMERIC, and it is the INITIAL stop, not the final one.
+--
+--    The number the trader committed to when they entered is the one every
+--    other reader means by "the stop": it is what risk was, what R:R would be
+--    measured against, and what "the stop moved" is a move AWAY FROM. The final
+--    stop is in the JSON beside it, where the one reader that wants it can have
+--    it without a second column in eleven `select *` queries.
+--
+--    THERE IS DELIBERATELY NO `initial_stop` COLUMN. The investigation's first
+--    draft had both; they are the same number under two names, and the second
+--    name is how two readers end up disagreeing about which is authoritative.
+--
+-- 2. broker_take_profit — NUMERIC, the target NEAREST the entry.
+--
+--    A bracket can carry several targets (a scale-out). The nearest is the one
+--    a trader means by "my target" — a target is an EXPECTATION, and the first
+--    one is the one they expected to reach. The others are kept in the JSON as
+--    `otherTargets` rather than averaged or dropped.
+--
+--    THE ASYMMETRY WITH THE STOP IS DELIBERATE AND IS A DECISION, not an
+--    oversight (Imri, 19.10). Several stops resolve to the FURTHEST from entry,
+--    because a stop is a WORST CASE: a long of three contracts stopped at 99
+--    for one and 98 for two risked 98, and the nearer number would flatter both
+--    the risk and the R:R. Expectation takes the nearest, worst case takes the
+--    furthest.
+--
+-- 3. stop_history — JSONB, the evidence.
+--
+--    One column and not seven. `final_stop`, `moved_count`, the
+--    tightened/widened direction, the trailing flag, the per-version prices and
+--    the attribution source are all in it, and NO SQL QUERY FILTERS ON ANY OF
+--    THEM — the readers that exist (stats, dashboard, the rule engine) read
+--    `moved_sl`, which is a boolean column that already exists. A column per
+--    field would be six more migrations against a table eleven readers select
+--    `*` from, for fields whose set is still moving. Same argument 036 made for
+--    `debrief_ai`, and this file follows it deliberately.
+--
+--    ITS SHAPE, as src/lib/tradovate/orders.ts writes it:
+--
+--      {
+--        verdict:      'moved' | 'kept' | 'none' | 'unknown',
+--        reason:       'interday' | 'ambiguous' | 'capped' | 'failed' | null,
+--        initialStop:  number | null,
+--        finalStop:    number | null,
+--        initialTarget:number | null,
+--        movedCount:   number,
+--        direction:    'tightened' | 'widened' | 'mixed' | null,
+--        movedAtMs:    null,            -- always null in v1; see below
+--        trailing:     boolean,
+--        noStopPlaced: boolean,
+--        source:       'linked' | 'inferred' | 'none',
+--        versions:     [{ stopPrice: number }],
+--        otherTargets: number[],
+--        sharedWithTrades?: number,
+--        capped?:      true
+--      }
+--
+--    No CHECK on that shape. Postgres cannot usefully constrain a free-form
+--    object, and the one reader validates every field before using it — the
+--    same defensive-read rule 036 states for `debrief_ai`.
+--
+--
+-- WHAT THIS FILE DELIBERATELY DOES NOT DO
+-- ---------------------------------------
+--
+--   - NO `DEFAULT` ON `stop_history`, AND THAT IS THE MOST LOAD-BEARING
+--     OMISSION IN THE FILE. NULL must keep meaning "we have not looked", which
+--     is a different fact from `{"verdict":"none"}` = "we looked and the trader
+--     placed no stop". The import's candidate filter is literally
+--     `stop_history IS NULL` — a `DEFAULT '{}'` would make every row look
+--     already-answered and the feature would read nothing, ever, silently.
+--
+--   - NO CHECK ON THE PRICES. A stop sits above or below the entry depending on
+--     the direction, so any constraint anchored to one side is wrong for half
+--     the trades. The direction is a column on the same row; a CHECK that read
+--     it would be re-deriving a verdict the code already computed.
+--
+--   - NO INDEX. Nothing filters or sorts on any of the three. `stop_history IS
+--     NULL` is evaluated on a handful of rows already fetched by
+--     `broker_trade_key`, which has 034's unique index. An index here would be
+--     write cost for a read nobody makes.
+--
+--   - NO BACKFILL, AND IT COULD NOT HAVE ONE. `/order/list` returns the CURRENT
+--     TRADING DAY ONLY — measured on 19.10, `depthDays = 0`, and the evening
+--     before it returned nothing at all. Yesterday's orders are not retrievable
+--     at any price, so every row that exists before this file runs keeps
+--     `stop_history = NULL` forever, which reads correctly as "we never looked".
+--     This is also why the capture has to happen on the same trading day and why
+--     Stage 4 moves it to a dedicated cron.
+--
+--   - NO NEW SECURITY ASSERTION, and no GRANT. `trade_plans` uses no
+--     column-level grants — no migration and no part of supabase/schema.sql
+--     issues one against it — so these three are readable and writable by their
+--     owner under the table's existing RLS policy the moment they exist. 034
+--     step 7, 036 step 3 and 037 step 8 say the same thing at more length.
+--
+--     PRIVACY IS UNCHANGED BY THIS FILE. Stop prices and order ids are
+--     TRADE DATA, under the same RLS as `entry_price`, and they are not a new
+--     exposure class. src/lib/tradovate/redact.ts is NOT touched: it covers
+--     access credentials, these are not, and adding price keys to `SECRET_KEYS`
+--     would dilute what that list means.
+--
+--
+-- IDEMPOTENT. All three statements are `ADD COLUMN IF NOT EXISTS`. Safe to
+-- re-run. One transaction, so a failure anywhere leaves the table exactly as it
+-- was. READ SURVEY 1 BEFORE RE-RUNNING: `IF NOT EXISTS` skips on the NAME, so a
+-- column of the same name and a different type is left as it is.
+
+BEGIN;
+
+-- ---------------------------------------------------------------------------
+-- 1. trade_plans.broker_stop_loss
+--
+-- NUMERIC, matching `stop_loss` (DECIMAL, which is the same type) beside it, so
+-- the two can be compared without a cast — "the broker's stop versus the one I
+-- planned" is the comparison Stage 5 puts on the link-confirmation screen.
+--
+-- Nullable, and the NULL means one of three things that are deliberately not
+-- distinguished here: not looked at, looked at and no stop found, or looked at
+-- and not readable. `stop_history` is what tells those apart; this column is
+-- just the number.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE trade_plans
+  ADD COLUMN IF NOT EXISTS broker_stop_loss NUMERIC;
+
+
+-- ---------------------------------------------------------------------------
+-- 2. trade_plans.broker_take_profit
+--
+-- Same type and same nullability as above. The nearest target to the entry —
+-- see the header on why this one is nearest and the stop is furthest.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE trade_plans
+  ADD COLUMN IF NOT EXISTS broker_take_profit NUMERIC;
+
+
+-- ---------------------------------------------------------------------------
+-- 3. trade_plans.stop_history
+--
+-- JSONB and not JSON: stored decomposed, so a later `->>'verdict'` does not
+-- re-parse the document, and it is the type `debrief_ai` already uses.
+--
+-- NO DEFAULT. See the header — this is the omission the whole feature rests on.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE trade_plans
+  ADD COLUMN IF NOT EXISTS stop_history JSONB;
+
+
+COMMIT;
+
+
+-- ===========================================================================
+-- VERIFY (read-only, after COMMIT)
+-- ===========================================================================
+--
+-- 1. The three columns, nullable, NO DEFAULT. EXPECT three rows:
+--    broker_stop_loss numeric YES NULL, broker_take_profit numeric YES NULL,
+--    stop_history jsonb YES NULL. A non-null column_default on `stop_history`
+--    means something other than this file created it — see the header.
+--
+--      SELECT column_name, data_type, is_nullable, column_default
+--        FROM information_schema.columns
+--       WHERE table_schema = 'public' AND table_name = 'trade_plans'
+--         AND column_name IN ('broker_stop_loss', 'broker_take_profit', 'stop_history')
+--       ORDER BY column_name;
+--
+-- 2. No constraint and no index was added. EXPECT the same counts survey
+--    queries would have returned before — specifically, nothing naming any of
+--    the three. EXPECT zero rows from both.
+--
+--      SELECT c.conname, pg_get_constraintdef(c.oid) AS definition
+--        FROM pg_constraint c
+--       WHERE c.conrelid = 'public.trade_plans'::regclass
+--         AND pg_get_constraintdef(c.oid) ~ 'stop_history|broker_stop_loss|broker_take_profit';
+--
+--      SELECT indexname, indexdef FROM pg_indexes
+--       WHERE schemaname = 'public' AND tablename = 'trade_plans'
+--         AND indexdef ~ 'stop_history|broker_stop_loss|broker_take_profit';
+--
+-- 3. Nothing was written. EXPECT zero, zero, zero.
+--
+--      SELECT count(*) FILTER (WHERE broker_stop_loss   IS NOT NULL) AS stops,
+--             count(*) FILTER (WHERE broker_take_profit IS NOT NULL) AS targets,
+--             count(*) FILTER (WHERE stop_history       IS NOT NULL) AS histories
+--        FROM trade_plans;
+--
+-- 4. The self-reported answers are untouched. EXPECT the same number survey
+--    query 4 returned for `self_reported`.
+--
+--      SELECT count(*) AS still_self_reported FROM trade_plans WHERE moved_sl IS NOT NULL;
+--
+-- 5. NULL and '{}' are distinguishable, which is what the candidate filter
+--    rests on. Rolled back. EXPECT is_null = true then is_null = false, and
+--    the row is NOT returned by the IS NULL predicate the second time.
+--
+--      BEGIN;
+--        SELECT stop_history IS NULL AS is_null FROM trade_plans LIMIT 1;
+--        UPDATE trade_plans SET stop_history = '{}'::jsonb
+--         WHERE id = (SELECT id FROM trade_plans LIMIT 1);
+--        SELECT stop_history IS NULL AS is_null, stop_history::text AS body
+--          FROM trade_plans WHERE stop_history IS NOT NULL;
+--      ROLLBACK;
+--
+-- 6. JSONB round-trips as an object and the verdict is reachable. Rolled back.
+--    EXPECT should_be_moved = 'moved' and should_be_two = 2.
+--
+--      BEGIN;
+--        UPDATE trade_plans
+--           SET stop_history = '{"verdict":"moved","movedCount":2}'::jsonb
+--         WHERE id = (SELECT id FROM trade_plans LIMIT 1);
+--        SELECT stop_history ->> 'verdict'              AS should_be_moved,
+--               (stop_history ->> 'movedCount')::int    AS should_be_two
+--          FROM trade_plans WHERE stop_history IS NOT NULL;
+--      ROLLBACK;
+--
+-- 7. A stop on either side of the entry is accepted — the absence of a CHECK,
+--    stated as a test rather than as a sentence. Rolled back. EXPECT both
+--    UPDATEs to succeed.
+--
+--      BEGIN;
+--        UPDATE trade_plans SET broker_stop_loss = 4504.00
+--         WHERE id = (SELECT id FROM trade_plans LIMIT 1);
+--        UPDATE trade_plans SET broker_stop_loss = 99999.00
+--         WHERE id = (SELECT id FROM trade_plans LIMIT 1);
+--      ROLLBACK;
+--
+-- 8. The standing security assertions still come back clean. Run
+--    supabase/queries/security_assertions.sql. EXPECT the usual two query-9
+--    rows for setup-images and nothing new. (Three nullable columns on an
+--    existing table cannot move any of them; run it anyway, because the only
+--    cheap time to notice a drift is beside a change.)
+--
+--
+-- THEN deploy the Stage 2-3 code. `TRADOVATE_IMPORT_ENABLED` is already '1' in
+-- production, so stop histories start being recorded on the first Sync or
+-- end-of-day summary after the deploy — for trades closed on that same trading
+-- day, and only those. See the no-backfill note in the header.
+--
+--
+-- ROLLBACK
+-- --------
+--
+-- Clean, and loses only what the import recorded. No trader-entered data lives
+-- in any of the three: all three are written by the broker read alone, and the
+-- two the trader owns — `moved_sl` and `stop_loss` — are NOT in this list and
+-- must not be, because Stage 3 fills them only when they were NULL and from
+-- that moment they are ordinary journal data.
+--
+--   BEGIN;
+--     ALTER TABLE trade_plans
+--       DROP COLUMN IF EXISTS stop_history,
+--       DROP COLUMN IF EXISTS broker_take_profit,
+--       DROP COLUMN IF EXISTS broker_stop_loss;
+--   COMMIT;
+--
+-- NOT RE-APPLIABLE INTO THE SAME STATE, unlike 037's. Dropping these columns
+-- throws away the only copy of data that cannot be fetched again: the orders
+-- they were derived from are gone from `/order/list` the same evening. A
+-- re-apply gives empty columns that fill only for trades closed from then on.
+-- Read that sentence twice before running the rollback on a database that has
+-- been collecting for a while.
