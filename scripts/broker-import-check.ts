@@ -98,6 +98,21 @@ import { readBrokerDayResponse } from '../src/lib/rules/brokerDayContext';
 import { GET as cronImport } from '../src/app/api/cron/tradovate-import/route';
 import { GET as cronOrders } from '../src/app/api/cron/tradovate-orders/route';
 import { ORDERS_LOOKBACK_MS, runStopCapture } from '../src/lib/tradovate/orders-cron';
+import {
+  brokerStopToShow,
+  readStopHistory,
+  stopDirectionOf,
+  stopMoveSentence,
+  stopWasWidened,
+} from '../src/lib/journal/stopHistory';
+import {
+  CONDITION_LABELS,
+  conditionNeedsThreshold,
+  describeCustomRule,
+  evaluateCustomRuleCondition,
+  type CustomRuleCheckContext,
+} from '../src/lib/validators/RulesetValidator';
+import type { ConditionType, CustomRule } from '../src/lib/types';
 import { respondToSyncRequest, type SyncRouteDeps } from '../src/app/api/tradovate/sync/route';
 import { syncUserTrades } from '../src/lib/tradovate/sync';
 import {
@@ -142,6 +157,7 @@ import {
   LINK_STATE_COPY,
   linkState,
   proposeFlags,
+  proposeStopMoveFlag,
   queueBannerText,
   resetLinkGuard,
   UNLINK_WARNING,
@@ -4472,6 +4488,328 @@ function stopTriggerGroup() {
   ]);
 }
 
+// ── REF-113 Stage 5: the reading, the score, the rule and the sentence ──────
+//
+// Four groups over one document. The reader is pure and browser-safe, which is
+// what lets the trade card, the link panel, the rule engine and the debrief
+// prompt all branch on the same four answers — and what makes every assertion
+// below a plain function call.
+//
+// THE PROPERTY THEY ALL EXIST FOR: `'unknown'` must not read like `'kept'`. A
+// trader told "the stop was not moved" on the strength of a read that failed
+// has been handed a claim about their own discipline made out of our missing
+// data, and that is the failure this ticket was opened for.
+
+/** A stored document, with the measured 19.10 numbers as the default. */
+function stopDoc(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    verdict: 'moved',
+    reason: null,
+    initialStop: 29_671.25,
+    initialStopSide: 'risk',
+    finalStop: 29_681.5,
+    initialTarget: 29_790,
+    movedCount: 2,
+    direction: 'mixed',
+    movedAtMs: null,
+    trailing: false,
+    noStopPlaced: false,
+    source: 'linked',
+    versions: [{ stopPrice: 29_671.25 }],
+    preFillVersions: 2,
+    anchoredAtFill: true,
+    otherTargets: [],
+    ...over,
+  };
+}
+
+const sentenceOf = (value: unknown): string | null =>
+  stopMoveSentence(readStopHistory(value))?.text ?? null;
+const toneOf = (value: unknown): string | null =>
+  stopMoveSentence(readStopHistory(value))?.tone ?? null;
+
+function stopSentenceGroup() {
+  const tightened = stopDoc({ direction: 'tightened', movedCount: 1, finalStop: 29_690 });
+  const widened = stopDoc({ direction: 'widened', movedCount: 1, finalStop: 29_651.25 });
+
+  group('the four answers about a stop are four different sentences', [
+    // NULL IS THE ONE THAT MUST SAY NOTHING. A reader that renders a label with
+    // a dash for it is announcing a feature on every manual trade ever logged.
+    c('(1) no document shows nothing at all', [
+      sentenceOf(null),
+      sentenceOf(undefined),
+      sentenceOf({}),
+      sentenceOf('not a document'),
+      sentenceOf([]),
+    ], [null, null, null, null, null]),
+
+    // THE PAIR THAT MATTERS. Different words, so one cannot be read as the
+    // other.
+    c('(2) kept and unknown do not say the same thing', [
+      sentenceOf(stopDoc({ verdict: 'kept', movedCount: 0, direction: null })),
+      sentenceOf(stopDoc({ verdict: 'unknown', reason: 'interday', movedCount: 0, direction: null })),
+    ], ['הסטופ לא הוזז', 'לא הצלחנו לקרוא את פקודות הסטופ']),
+    c('(3) and "no stop at all" is a third thing, and a warning',
+      [sentenceOf(stopDoc({ verdict: 'none', movedCount: 0, direction: null })),
+       toneOf(stopDoc({ verdict: 'none', movedCount: 0, direction: null }))],
+      ['לא הוצב סטופ בעסקה הזו', 'warning']),
+
+    // TIGHTENING IS NEUTRAL AND WIDENING IS A WARNING (Imri, 19.10).
+    c('(4) a tightening is a fact, with the range',
+      sentenceOf(tightened), 'הסטופ הודק לכיוון הרווח (מ-29671.25 ל-29690.00)'),
+    c('(5) and it is not coloured as a failing', toneOf(tightened), 'neutral'),
+    c('(6) a widening says the risk grew, and warns',
+      [sentenceOf(widened), toneOf(widened)],
+      ['הסטופ הורחק מנקודת הכניסה — הסיכון גדל (מ-29671.25 ל-29651.25)', 'warning']),
+    // The measured trade. Two prices cannot describe a stop that went both
+    // ways, so this one counts instead.
+    c('(7) mixed counts the moves rather than quoting two prices',
+      [sentenceOf(stopDoc()), toneOf(stopDoc())],
+      ['הסטופ הוזז 2 פעמים — גם הורחק וגם הודק', 'warning']),
+
+    // A trailing stop's steps are the SERVER'S, and `moved_sl` is deliberately
+    // not written for one either (lib/tradovate/import.ts).
+    c('(8) a trailing stop is not described as the trader moving it',
+      sentenceOf(stopDoc({ trailing: true })), 'סטופ נגרר אוטומטית'),
+
+    // THE 19.10 DEFECT, AS A RENDERING RULE. A long stored an initial stop 148
+    // ticks ABOVE its entry; this panel is where that number would have been
+    // printed beside the stop the trader typed.
+    c('(9) a wrong-side stop still gets a sentence, with NO prices in it',
+      sentenceOf(stopDoc({ direction: 'widened', movedCount: 1, initialStopSide: 'wrong' })),
+      'הסטופ הורחק מנקודת הכניסה — הסיכון גדל'),
+    c('(10) and no price is offered for it',
+      brokerStopToShow(readStopHistory(stopDoc({ initialStopSide: 'wrong' })), 29_671.25), null),
+    c('(11) nor for a trade that had no stop',
+      brokerStopToShow(readStopHistory(stopDoc({ verdict: 'none' })), 29_671.25), null),
+    c('(12) nor when there is no document',
+      brokerStopToShow(null, 29_671.25), null),
+    c('(13) but a readable one is offered, from the column',
+      brokerStopToShow(readStopHistory(stopDoc()), 29_671.25), 29_671.25),
+
+    // PostgREST returns NUMERIC as a STRING, and these prices came back through
+    // it. A `typeof value === 'number'` guard would silently lose the range.
+    c('(14) a price that arrives as a string still reads as a number',
+      sentenceOf(stopDoc({
+        direction: 'tightened', movedCount: 1,
+        initialStop: '29671.25', finalStop: '29690',
+      })),
+      'הסטופ הודק לכיוון הרווח (מ-29671.25 ל-29690.00)'),
+    c('(15) and the column arriving as a string is still a price',
+      brokerStopToShow(readStopHistory(stopDoc()), '29671.25'), 29_671.25),
+
+    // A document whose verdict cannot be read is one whose other fields we have
+    // no reason to trust either.
+    c('(16) an unrecognised verdict is no document',
+      sentenceOf(stopDoc({ verdict: 'probably' })), null),
+    // The two directions a rule and the score both read.
+    c('(17) widened and mixed are both "a widening happened"', [
+      stopWasWidened(stopDoc({ direction: 'widened' })),
+      stopWasWidened(stopDoc({ direction: 'mixed' })),
+      stopWasWidened(stopDoc({ direction: 'tightened' })),
+      stopWasWidened(null),
+    ], [true, true, false, false]),
+  ]);
+}
+
+function stopScoreGroup() {
+  // A closed manual trade with a plan, scoring 100 before any stop moved.
+  const BASE: TradeScoreInput = {
+    stop_loss: 29_650,
+    take_profit: 29_900,
+    rr_ratio: 2.5,
+    required_min_rr: 2,
+    strategy_conditions_checked: null,
+    moved_sl: false,
+    exited_early: false,
+    fomo_entry: false,
+    revenge_trade: false,
+    exit_price: 29_800,
+    entry_price: 29_704,
+    direction: 'long',
+  };
+
+  const untouched = computeTradeScore(BASE);
+  // The behaviour before this stage, which EVERY manual close and every broker
+  // row from before Stage 3 still gets: one boolean, twelve points.
+  const movedNoDocument = computeTradeScore({ ...BASE, moved_sl: true });
+  const tightened = computeTradeScore({ ...BASE, moved_sl: true, stopDirection: 'tightened' });
+  const widened = computeTradeScore({ ...BASE, moved_sl: true, stopDirection: 'widened' });
+  const mixed = computeTradeScore({ ...BASE, moved_sl: true, stopDirection: 'mixed' });
+  // A document saying "tightened" on a row whose column says the stop never
+  // moved. The column is checked first, so there is nothing for the document
+  // to decide.
+  const notMovedButTightened = computeTradeScore({ ...BASE, stopDirection: 'tightened' });
+
+  const disciplineOf = (r: ReturnType<typeof computeTradeScore>) => r.breakdown.discipline.score;
+  const stopLine = (r: ReturnType<typeof computeTradeScore>) => r.breakdown.discipline.details[0];
+
+  group('a tightening does not cost twelve points, and a widening does', [
+    c('(1) an untouched stop is 40/40 on discipline and 100 overall',
+      [disciplineOf(untouched), untouched.total], [40, 100]),
+    // THE NUMBERS, SO THE DECISION IS LOCKED AND NOT DESCRIBED.
+    c('(2) a tightening keeps the twelve',
+      [disciplineOf(tightened), tightened.total], [40, 100]),
+    c('(3) a widening loses them', [disciplineOf(widened), widened.total], [28, 88]),
+    // Mixed means at least one step widened, and the first step is the one that
+    // mattered.
+    c('(4) and so does mixed', [disciplineOf(mixed), mixed.total], [28, 88]),
+    // UNCHANGED BEHAVIOUR FOR EVERY ROW WITH NO DOCUMENT. There is no backfill
+    // and there cannot be one, so this is most of the table forever.
+    c('(5) a move with no document still costs twelve, exactly as before',
+      [disciplineOf(movedNoDocument), movedNoDocument.total], [28, 88]),
+    c('(6) and `moved_sl === false` makes the document irrelevant',
+      [disciplineOf(notMovedButTightened), notMovedButTightened.total], [40, 100]),
+
+    // The number is only half of it: a trader reading "+12" beside "הוזז Stop
+    // Loss" would be reading a contradiction.
+    c('(7) the tightening line says why the points were kept',
+      stopLine(tightened), 'הסטופ הודק לכיוון הרווח — לא נחשב הפרת משמעת (+12)'),
+    c('(8) the widening line says why they were not',
+      stopLine(widened), 'הסטופ הורחק מנקודת הכניסה — הסיכון גדל (0/12)'),
+    c('(9) the undocumented move keeps the sentence it always had',
+      stopLine(movedNoDocument), 'הוזז Stop Loss (0/12)'),
+    c('(10) and an untouched stop keeps its own',
+      stopLine(untouched), 'לא הוזז Stop Loss (+12)'),
+
+    // The reader and the score must agree about which directions are a
+    // widening, or a trader sees a warning beside a full twelve points.
+    c('(11) the score and the sentence agree about the two directions', [
+      disciplineOf(computeTradeScore({
+        ...BASE, moved_sl: true, stopDirection: stopDirectionOf(stopDoc({ direction: 'tightened' })),
+      })),
+      disciplineOf(computeTradeScore({
+        ...BASE, moved_sl: true, stopDirection: stopDirectionOf(stopDoc({ direction: 'widened' })),
+      })),
+    ], [40, 28]),
+  ]);
+}
+
+function stopRuleGroup() {
+  const rule = (condition_type: ConditionType): CustomRule => ({
+    id: 'r1',
+    user_id: USER,
+    name: describeCustomRule({ condition_type, threshold_value: null }),
+    is_active: true,
+    condition_type,
+    threshold_value: null,
+    action_type: 'block_day',
+    cooldown_minutes: null,
+    created_at: new Date().toISOString(),
+  });
+
+  const ctx = (over: Partial<CustomRuleCheckContext> = {}): CustomRuleCheckContext => ({
+    todayLossAmount: 0,
+    todayLossPercent: null,
+    todayTradeCount: 1,
+    lossStreak: 0,
+    currentHour: 12,
+    lastTradeFomo: false,
+    lastTradeExitedEarly: false,
+    lastTradeMovedSl: false,
+    ...over,
+  });
+
+  const broad = rule('moved_sl_last_trade');
+  const narrow = rule('moved_sl_widened_last_trade');
+
+  // A tightening: the column says the stop moved, the document says which way.
+  const tightening = ctx({ lastTradeMovedSl: true, lastTradeStopWidened: false });
+  const widening = ctx({ lastTradeMovedSl: true, lastTradeStopWidened: true });
+  // A trader who unticked the box on a trade the broker says widened. The two
+  // inputs are independent on purpose — see the field.
+  const disputed = ctx({ lastTradeMovedSl: false, lastTradeStopWidened: true });
+
+  group('the widened-only rule is an option, and the default did not move', [
+    // THE EXISTING RULE IS UNCHANGED. A trader who created it asked for every
+    // move, in those words, and it can be `block_day`.
+    c('(1) the broad condition still fires on a tightening',
+      evaluateCustomRuleCondition(broad, tightening), true),
+    c('(2) and on a widening', evaluateCustomRuleCondition(broad, widening), true),
+    c('(3) and not when nothing moved', evaluateCustomRuleCondition(broad, ctx()), false),
+
+    c('(4) the narrow one does NOT fire on a tightening',
+      evaluateCustomRuleCondition(narrow, tightening), false),
+    c('(5) it fires on a widening', evaluateCustomRuleCondition(narrow, widening), true),
+    // Independent inputs: the self-report is the trader's and this is the
+    // broker's evidence.
+    c('(6) and on a widening the trader unticked',
+      evaluateCustomRuleCondition(narrow, disputed), true),
+
+    // ABSENT IS FALSE, which is the permissive direction. A wrong `true` on a
+    // `block_day` rule locks a trader out over something they did not do.
+    c('(7) absent evidence does not fire — a manual close, or no migration 038',
+      evaluateCustomRuleCondition(narrow, ctx({ lastTradeMovedSl: true })), false),
+
+    // The editor builds its dropdown from Object.keys(CONDITION_LABELS), so an
+    // entry there is creatable; a threshold box on a yes/no condition is not.
+    c('(8) it is offered in the editor and needs no threshold',
+      [narrow.condition_type in CONDITION_LABELS, conditionNeedsThreshold('moved_sl_widened_last_trade')],
+      [true, false]),
+    // RulesEditor SAVES this string into `custom_rules.name`, so the broad
+    // one's description must not move — only the dropdown label did.
+    c('(9) the two rules describe themselves differently', [
+      describeCustomRule({ condition_type: 'moved_sl_last_trade', threshold_value: null }),
+      describeCustomRule({ condition_type: 'moved_sl_widened_last_trade', threshold_value: null }),
+    ], [
+      'הזזתי Stop Loss בעסקה האחרונה',
+      'הרחקתי את ה-Stop Loss מנקודת הכניסה בעסקה האחרונה',
+    ]),
+    // The CHECK is extended by migration 039 step 1 and nothing in the repo
+    // runs it. Without that file a rule saved with this condition is a 23514 —
+    // loud, and for one person.
+    c('(10) and the migration that lets it be stored exists',
+      fs.existsSync(path.join(process.cwd(), 'supabase/migrations/039_stop_direction.sql')), true),
+  ]);
+}
+
+function stopFlagProposalGroup() {
+  const offered = (doc: unknown) => proposeStopMoveFlag(doc);
+
+  const mixed = offered(stopDoc());
+  const tightened = offered(stopDoc({ direction: 'tightened', movedCount: 1, finalStop: 29_690 }));
+  const kept = offered(stopDoc({ verdict: 'kept', movedCount: 0, direction: null }));
+
+  group('the confirmation screen can finally propose moved_sl', [
+    // The note at the head of `proposeFlags` said these were absent because
+    // "the order history is not in the pull at all, which is REF-113". It is.
+    c('(1) a move is proposed, as the fact it is',
+      [mixed?.column, mixed?.value], ['moved_sl', true]),
+    c('(2) a stop that was never moved is proposed as false',
+      [kept?.column, kept?.value], ['moved_sl', false]),
+
+    // THE PRODUCT DECISION: `moved_sl` is a fact and stays true for a
+    // tightening. What changes is the sentence and the colour.
+    c('(3) a tightening is still a move', tightened?.value, true),
+    c('(4) but it is not flagged as a failing', tightened?.tone, 'neutral'),
+    c('(5) while a widening is', offered(stopDoc({ direction: 'widened', movedCount: 1 }))?.tone, 'warning'),
+    c('(6) and the reason quotes the broker rather than asserting it',
+      tightened?.reason, 'לפי פקודות הברוקר: הסטופ הודק לכיוון הרווח (מ-29671.25 ל-29690.00)'),
+
+    // NO "UNKNOWN" CHECKBOX — §E's rule, restated. Offering an unchecked box
+    // with "we could not tell" invites the trader to confirm a false that means
+    // nothing.
+    c('(7) nothing is proposed when we could not tell', [
+      offered(null),
+      offered(undefined),
+      offered(stopDoc({ verdict: 'unknown', reason: 'interday' })),
+    ], [null, null, null]),
+    // `'none'` would be `moved_sl = false`, which is TRUE and completely
+    // misleading: it reads as "I held my stop" about a trade that never had one.
+    c('(8) and nothing for a trade with no stop at all',
+      offered(stopDoc({ verdict: 'none', movedCount: 0, direction: null })), null),
+    // The steps were the server's. The import declines to write `moved_sl` for
+    // a trailing stop and so does this.
+    c('(9) nor for a trailing stop', offered(stopDoc({ trailing: true })), null),
+
+    // The proposal is written onto the PLAN by `confirmLink`, which is what
+    // survives `link_broker_trade` deleting the broker row. Migration 039 step
+    // 2 is what carries the rest.
+    c('(10) the column it writes is one the link cannot lose',
+      mixed?.column, 'moved_sl'),
+  ]);
+}
+
 async function ordersCronGroup() {
   const SECRET = 'cron-secret-for-the-test';
   const previous = process.env.CRON_SECRET;
@@ -4670,6 +5008,12 @@ async function main() {
   // REF-113 Stage 4 — the two triggers that do not need the trader.
   await ordersCronGroup();
   await ordersCronWindowGroup();
+
+  // REF-113 Stage 5 — the reading, the score, the rule and the sentence.
+  stopSentenceGroup();
+  stopScoreGroup();
+  stopRuleGroup();
+  stopFlagProposalGroup();
 
   // J1 — the unplanned row's score (REF-107 Stage 3b follow-up).
   scoringGroup();

@@ -36,15 +36,17 @@
  */
 
 import { useState } from 'react';
-import { Check, Link2, Lock, SkipForward } from 'lucide-react';
+import { AlertTriangle, Check, Link2, Lock, SkipForward, X } from 'lucide-react';
 
 import { createClient } from '@/lib/supabase/client';
 import {
   confirmLink,
   declineLink,
   proposeFlags,
+  proposeStopMoveFlag,
   type FlagProposal,
 } from '@/lib/journal/link';
+import { brokerStopToShow, readStopHistory } from '@/lib/journal/stopHistory';
 import { planCandidates, type CandidatePlan } from '@/lib/tradovate/match';
 import { formatMoney } from '@/lib/money';
 
@@ -77,6 +79,19 @@ export interface QueuedBrokerRow {
   actual_pnl: number | null;
   pnl_amount: number | null;
   status: string;
+
+  // ── What the broker said about the stop (REF-113 Stage 5) ─────────────────
+  //
+  // Optional: the columns arrive with migration 038 and the journal reads
+  // `select('*')`, so on a database without that file they are simply not
+  // there. `readStopHistory` answers null for an absent key, the row below is
+  // not rendered and the proposal is not offered — which is the panel exactly
+  // as it was before this stage.
+
+  /** The initial stop the broker reported. NOT a plan — see migration 038. */
+  broker_stop_loss?: number | null;
+  /** The evidence, as JSONB. Read only through `readStopHistory`. */
+  stop_history?: unknown;
 }
 
 /** A plan as the panel reads it: the match's fields plus the intent it shows. */
@@ -211,7 +226,26 @@ export default function LinkConfirm({
     exit_price: trade.exit_price,
     quantity: trade.quantity,
   };
-  const proposals: FlagProposal[] = chosen ? proposeFlags(chosen, facts) : [];
+
+  // The broker's stop, for the row beside the planned one. Suppressed for the
+  // three cases `brokerStopToShow` names — no document, no stop placed, or an
+  // order that cannot have been a protective stop. A `'wrong'` side is the one
+  // worth having in mind here: on 19.10 a long stored an initial stop 148 ticks
+  // ABOVE its entry, and this panel is precisely where that number would have
+  // been printed next to the stop the trader typed.
+  const stops = readStopHistory(trade.stop_history);
+  const brokerStop = brokerStopToShow(stops, trade.broker_stop_loss);
+
+  // APPENDED RATHER THAN RETURNED BY `proposeFlags`, so a panel with no
+  // document renders the list it rendered before Stage 5. It does not need a
+  // chosen plan — it is the broker's verdict about the broker's own orders —
+  // but it is only offered WITH one, because the flags are written onto the
+  // plan the trader is about to confirm and there is nothing to write them to
+  // otherwise.
+  const stopProposal = chosen ? proposeStopMoveFlag(trade.stop_history) : null;
+  const proposals: FlagProposal[] = chosen
+    ? [...proposeFlags(chosen, facts), ...(stopProposal ? [stopProposal] : [])]
+    : [];
 
   async function handleLink() {
     if (!chosen) return;
@@ -285,6 +319,14 @@ export default function LinkConfirm({
           <Row label="כמות" value={trade.quantity != null ? String(trade.quantity) : '—'} locked />
           <Row label="שעות" value={`${timeOf(trade.submitted_at)} – ${timeOf(trade.closed_at)}`} locked ltr />
           <Row label="תוצאה" value={money != null ? formatMoney(Number(money)) : '—'} locked />
+          {/* THE BROKER'S STOP, ON THE BROKER'S SIDE OF THE PANEL, so that it
+              reads across from `סטופ` in the plan rather than inside it
+              (REF-113 Stage 5). It is a fact about what was held, like every
+              other row in this column, and nothing scores it — which is the
+              whole reason migration 038 added its own column instead of filling
+              the trader's `stop_loss`. Absent entirely when there is no
+              document, rather than a locked dash on every trade. */}
+          {brokerStop !== null && <Row label="סטופ בברוקר" value={price(brokerStop)} locked />}
         </div>
 
         {/* The intent, from the plan under consideration. */}
@@ -336,34 +378,54 @@ export default function LinkConfirm({
       )}
 
       {/* The proposed flags. Checked, with the comparison beside each one —
-          §E's decision, and the reason it is a proposal: two of the three are
-          judgements, and the trader is the one who gets to make them. */}
+          §E's decision, and the reason it is a proposal: most of them are
+          judgements, and the trader is the one who gets to make them.
+
+          THE CHECKBOX MEANS "WRITE THIS", NOT "YES", AND IT USED TO BE READ THE
+          OTHER WAY. Every proposal arrives checked — including one whose value
+          is `false` — so `יציאה מוקדמת: לא` rendered beside a ticked turquoise
+          box, and a turquoise tick in this product means yes. A trader scanning
+          the panel read "yes, I exited early" off a row that says the opposite.
+          The value now carries its OWN icon: a check for כן, an × for לא, in
+          the colour each of those deserves. The box keeps its one job, which is
+          agreeing or disagreeing with us. */}
       {proposals.length > 0 && (
         <fieldset className="flex flex-col gap-1.5 pt-1 border-t" style={{ borderColor: BORDER }}>
           <legend className="text-[11px] font-semibold mb-1" style={{ color: MUTED }}>
             מה שחישבנו מההשוואה
           </legend>
-          {proposals.map((proposal) => (
-            <label key={proposal.column} className="flex items-start gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={!unchecked.has(proposal.column)}
-                onChange={() => setUnchecked((prev) => {
-                  const next = new Set(prev);
-                  if (next.has(proposal.column)) next.delete(proposal.column);
-                  else next.add(proposal.column);
-                  return next;
-                })}
-                style={{ accentColor: GOLD, marginTop: 2 }}
-              />
-              <span className="flex flex-col">
-                <span className="text-[11px] font-semibold" style={{ color: TEXT }}>
-                  {proposal.label}: {proposal.value ? 'כן' : 'לא'}
+          {proposals.map((proposal) => {
+            // A warning is the proposed value costing the trader something — a
+            // stop widened mid-trade, today. It colours the VALUE and not the
+            // label, because what is being flagged is the answer.
+            const warn = proposal.tone === 'warning';
+            const valueColor = warn ? RED : proposal.value ? GOLD : MUTED;
+            const ValueIcon = proposal.value ? Check : X;
+            return (
+              <label key={proposal.column} className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={!unchecked.has(proposal.column)}
+                  onChange={() => setUnchecked((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(proposal.column)) next.delete(proposal.column);
+                    else next.add(proposal.column);
+                    return next;
+                  })}
+                  style={{ accentColor: GOLD, marginTop: 2 }}
+                />
+                <span className="flex flex-col">
+                  <span className="text-[11px] font-semibold flex items-center gap-1" style={{ color: TEXT }}>
+                    {proposal.label}:
+                    <ValueIcon aria-hidden="true" size={12} style={{ color: valueColor }} />
+                    <span style={{ color: valueColor }}>{proposal.value ? 'כן' : 'לא'}</span>
+                    {warn && <AlertTriangle aria-hidden="true" size={11} style={{ color: RED }} />}
+                  </span>
+                  <span className="text-[10px]" style={{ color: warn ? RED : MUTED }}>{proposal.reason}</span>
                 </span>
-                <span className="text-[10px]" style={{ color: MUTED }}>{proposal.reason}</span>
-              </span>
-            </label>
-          ))}
+              </label>
+            );
+          })}
         </fieldset>
       )}
 

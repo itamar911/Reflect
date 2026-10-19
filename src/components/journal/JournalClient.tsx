@@ -16,6 +16,11 @@ import {
   UNLINK_WARNING,
   unlinkPlan,
 } from '@/lib/journal/link';
+import {
+  brokerStopToShow,
+  readStopHistory,
+  stopMoveSentence,
+} from '@/lib/journal/stopHistory';
 import { startOfTodayIso } from '@/lib/rules/tradeRuleContext';
 import { DAY_START_PARAM, MAX_SINCE_AGE_MS, SINCE_PARAM } from '@/lib/tradovate/trading-day';
 import EmotionalStateSlider from '@/components/trade/EmotionalStateSlider';
@@ -125,6 +130,27 @@ interface Trade {
   link_confirmed_at?: string | null;
   /** 'auto', 'confirmed' or 'declined'. Who decided, for an audit of §F1. */
   link_method?: string | null;
+
+  // ── What the broker said about the stop (REF-113 Stage 5) ─────────────────
+  //
+  // Optional for the FOURTH time and the fourth identical reason: the columns
+  // arrive with migration 038, and `select('*')` on a database without it
+  // returns no key at all. `readStopHistory` answers null for a missing key, so
+  // the modal shows nothing — which is the truth about every row on such a
+  // database and about every row that existed before Stage 3 wrote one.
+  //
+  // THERE IS NO `withHidden`-STYLE GATE HERE AND NONE IS NEEDED, which is worth
+  // saying because migration 038's own header warns about exactly this: a
+  // component that NAMES `stop_history` in a `select` takes the journal's row
+  // list down on a deployment where that file has not run. app/(app)/trades
+  // reads `select('*')`, so the columns arrive for free or not at all.
+
+  /** The initial stop the broker reported. NOT scored — see migration 038. */
+  broker_stop_loss?: number | null;
+  /** The target nearest the entry, as the broker reported it. */
+  broker_take_profit?: number | null;
+  /** The evidence, as JSONB. Read only through `readStopHistory`. */
+  stop_history?: unknown;
 }
 
 /**
@@ -1651,6 +1677,26 @@ function TradeDetailModal({ trade, plans, onClose, onLinkResolved, onUnlink, deb
     }
   }
 
+  // ── The broker's stop, beside the one the trader planned (REF-113 Stage 5) ─
+  //
+  // Both halves come off the same document so they cannot disagree: the number
+  // is suppressed for the three cases `brokerStopToShow` names (no document, no
+  // stop placed, an order that cannot have been a protective stop), and the
+  // sentence is suppressed only by the first.
+  //
+  // A ROW WITH NO DOCUMENT ADDS NOTHING AT ALL — not a label with a dash. The
+  // modal's rows are a fixed list and a `סטופ בברוקר —` on every manual trade
+  // the trader ever logged would be a column announcing a feature that does not
+  // apply to it.
+  const stops = readStopHistory(trade.stop_history);
+  const brokerStop = brokerStopToShow(stops, trade.broker_stop_loss);
+  const stopSentence = stopMoveSentence(stops);
+  // Whichever of the two stop rows comes LAST, so the sentence sits under both
+  // when there is a price and under the planned stop when there is not — which
+  // is the `'none'` and `'unknown'` case, and exactly where a trader looking
+  // for "what happened to my stop" is already looking.
+  const stopSentenceAfter = brokerStop !== null ? 'סטופ בברוקר' : 'Stop Loss';
+
   const rows: [string, string | number | null][] = [
     // Where the row came from, FIRST, because it changes how every row under it
     // should be read: an imported trade's prices are the broker's and its
@@ -1673,6 +1719,12 @@ function TradeDetailModal({ trade, plans, onClose, onLinkResolved, onUnlink, deb
     ['כיוון', dir === 'long' ? 'לונג ↑' : 'שורט ↓'],
     ['מחיר כניסה', trade.entry_price.toFixed(2)],
     ['Stop Loss', fmtPriceCell(trade.stop_loss)],
+    // DIRECTLY UNDER THE PLANNED STOP, because the comparison is the whole
+    // point: "this is the stop I wrote down, and this is the one the broker
+    // actually held". Absent entirely when there is no document.
+    ...(brokerStop !== null
+      ? ([['סטופ בברוקר', brokerStop.toFixed(2)]] as [string, string][])
+      : []),
     ['Take Profit', fmtPriceCell(trade.take_profit)],
     ['יחס R:R', trade.rr_ratio ?? '—'],
     ['מצב רגשי', trade.emotional_state != null ? `${trade.emotional_state}/5` : '—'],
@@ -1722,6 +1774,30 @@ function TradeDetailModal({ trade, plans, onClose, onLinkResolved, onUnlink, deb
               <span className="text-xs font-semibold shrink-0" style={{ color: 'var(--color-tg-muted)', minWidth: 90 }}>{label}</span>
               <span className="text-xs text-right" style={{ color: 'var(--color-tg-text)', wordBreak: 'break-word' }}>{String(value ?? '—')}</span>
             </div>
+            {/* WHAT THE BROKER SAW HAPPEN TO THE STOP, in one sentence
+                (REF-113 Stage 5). Prose and not a column, because the four
+                answers are not comparable figures: "no stop was placed" and
+                "we could not read the orders" are findings about the trade and
+                about our own reading, and a `—` in a numeric row says neither.
+                lib/journal/stopHistory.ts holds the sentences and the tone. */}
+            {label === stopSentenceAfter && stopSentence !== null && (
+              <div className="flex items-start gap-1.5 pb-2.5 -mt-1">
+                {stopSentence.tone === 'warning' && (
+                  <AlertTriangle
+                    aria-hidden="true"
+                    size={12}
+                    style={{ color: '#ef4444', marginTop: 2, flexShrink: 0 }}
+                  />
+                )}
+                <span
+                  className="text-[11px] leading-relaxed"
+                  style={{
+                    color: stopSentence.tone === 'warning' ? '#ef4444' : 'var(--color-tg-muted)',
+                  }}>
+                  {stopSentence.text}
+                </span>
+              </div>
+            )}
             {/* DIRECTLY UNDER THE מקור ROW, which is §C's whole argument: that
                 row is first in this modal because it changes how every row
                 beneath it reads, and the decision about it belongs with it

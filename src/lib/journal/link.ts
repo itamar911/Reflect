@@ -45,6 +45,8 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+import { readStopHistory, stopMoveSentence } from './stopHistory';
+
 /** Which of the three things a broker row can be. */
 export type LinkState = 'linked' | 'queued' | 'declined';
 
@@ -133,13 +135,23 @@ export function deleteWarningText(row: LinkableRow): string {
 /** One flag, the value proposed for it, and why — shown beside the checkbox. */
 export interface FlagProposal {
   /** The `trade_plans` column. Written only if the trader leaves it checked. */
-  column: 'proper_size' | 'exited_early' | 'followed_plan';
+  column: 'proper_size' | 'exited_early' | 'followed_plan' | 'moved_sl';
   /** The Hebrew label beside the checkbox. */
   label: string;
   /** What we think, from the comparison. The checkbox's initial state. */
   value: boolean;
   /** The comparison itself, in one line. This is what makes it a proposal. */
   reason: string;
+  /**
+   * `'warning'` when the proposed value is the one that cost the trader
+   * something, so the panel can say so (REF-113 Stage 5).
+   *
+   * Absent on the three flags that predate it, and absent reads as neutral.
+   * Only `moved_sl` sets it, and only for a WIDENING: a tightening is a fact
+   * about good risk management and colouring it red would contradict both the
+   * score and the sentence the trade card shows.
+   */
+  tone?: 'neutral' | 'warning';
 }
 
 /** The plan's side of the comparison: what the trader committed to. */
@@ -158,6 +170,21 @@ export interface ExecutedFacts {
   entry_price?: number | null;
   exit_price?: number | null;
   quantity?: number | null;
+  /**
+   * The broker's `stop_history` document, raw (REF-113 Stage 5).
+   *
+   * THIS IS NOT A STOP PRICE AND MUST NOT BECOME ONE. The note above
+   * {@link proposeFlags} records that `facts` has never carried a stop, and the
+   * reason is `reachedStop` further down: it reads the stop from the PLAN, and
+   * a broker figure reaching it would decide `followed_plan` from a number the
+   * trader never committed to. That stays true — nothing below reads a price
+   * out of this. What it carries is a VERDICT about whether the stop moved,
+   * which is a different question and the one `moved_sl` asks.
+   *
+   * Optional, and absent on every caller that has not been given one — which
+   * is every caller on a database without migration 038.
+   */
+  stop_history?: unknown;
 }
 
 /**
@@ -195,9 +222,39 @@ const versus = (a: number, b: number): string => `${a} מול ${b}`;
  * A FLAG THAT CANNOT BE COMPUTED IS NOT RETURNED. There is no "unknown"
  * checkbox: a plan with no target cannot say whether the exit was early, and
  * offering an unchecked box with "we could not tell" invites the trader to
- * confirm a `false` that means nothing. `kept_sl`/`moved_sl` are absent from
- * this list for the harder version of the same reason — §E found the order
- * history is not in the pull at all, which is REF-113.
+ * confirm a `false` that means nothing.
+ *
+ *
+ * `moved_sl` IS THE FOURTH NOW, AND REF-113 IS WHY (Stage 5)
+ * ---------------------------------------------------------
+ *
+ * This list used to say `kept_sl`/`moved_sl` were absent "for the harder
+ * version of the same reason — §E found the order history is not in the pull at
+ * all, which is REF-113". It is in the pull. Tradovate keeps an `orderVersion`
+ * per modification, so the version history of a stop order IS the history of
+ * the moves, and `stop_history` on the broker row carries the verdict.
+ *
+ * AND THERE IS A SECOND REASON TO OFFER IT HERE, WHICH IS THE ONE THAT MAKES IT
+ * URGENT RATHER THAN NICE. `link_broker_trade` (migration 035) copies the
+ * thirteen execution facts onto the plan and DELETES the broker row — and the
+ * three columns migration 038 added are not among the thirteen. So a confirmed
+ * link throws the stop evidence away: the merged row reads `stop_history IS
+ * NULL`, which puts it back in the candidate pool, and if the link happens on a
+ * LATER trading day the next sync derives `'interday'` and stores a permanent
+ * `'unknown'` over an answer we already had. This checkbox is what survives
+ * that, because it writes onto the plan. Migration 039 step 2 closes the hole
+ * properly; until it is run, this is the whole of it.
+ *
+ * `kept_sl` IS STILL ABSENT and stays absent. It is a dead column (§E) and
+ * REF-113 is not going to become its first consumer.
+ *
+ * ONLY A DEFINITE VERDICT IS OFFERED. `'unknown'` and a missing document are
+ * both "we could not tell", which is the case the no-unknown-checkbox rule
+ * above was written for. `'none'` is NOT offered either, and that one is worth
+ * stating: a trade with no protective stop has no stop to have moved, so
+ * `moved_sl = false` would be true and completely misleading — it reads as "I
+ * held my stop" about a trade that never had one. The trade card says the
+ * finding in words instead.
  */
 export function proposeFlags(plan: PlanIntent, facts: ExecutedFacts): FlagProposal[] {
   const proposals: FlagProposal[] = [];
@@ -273,6 +330,50 @@ export function proposeFlags(plan: PlanIntent, facts: ExecutedFacts): FlagPropos
   }
 
   return proposals;
+}
+
+/**
+ * The `moved_sl` proposal, from the broker's own order history, or null.
+ *
+ * SEPARATE FROM {@link proposeFlags} BECAUSE IT IS NOT A COMPARISON. The other
+ * three are two numbers and a predicate over the plan and the execution; this
+ * one is a verdict somebody else computed, and the plan has no side of it at
+ * all — a trader cannot plan not to move their stop. Keeping it out of that
+ * function is also what keeps `PlanIntent` out of this: the caller hands over
+ * the document and nothing else.
+ *
+ * APPENDED BY THE CALLER, so that a panel which has no document renders exactly
+ * the list it rendered before Stage 5.
+ *
+ * THE VALUE IS `verdict === 'moved'` AND NOT "a widening happened", which is
+ * the product decision stated as code (Imri, 19.10): `moved_sl` is a FACT about
+ * what the trader did and stays true for a tightening. What changes with the
+ * direction is the sentence beside the checkbox and the tone it is shown in —
+ * and, elsewhere, whether the score charges for it
+ * (lib/scoring/tradeScore.ts) and whether the widened-only rule fires
+ * (lib/validators/RulesetValidator.ts).
+ *
+ * A TRAILING STOP IS NOT OFFERED, and that matches the import: its steps are
+ * the server's, `lib/tradovate/import.ts` declines to write `moved_sl` for one,
+ * and a checkbox saying "I moved my stop" over a server's decision is an
+ * attribution the trader would be right to reject.
+ */
+export function proposeStopMoveFlag(stopHistory: unknown): FlagProposal | null {
+  const history = readStopHistory(stopHistory);
+  if (history === null) return null;
+  if (history.verdict === 'unknown' || history.verdict === 'none') return null;
+  if (history.trailing) return null;
+
+  const sentence = stopMoveSentence(history);
+  if (sentence === null) return null;
+
+  return {
+    column: 'moved_sl',
+    label: 'הזזתי את הסטופ',
+    value: history.verdict === 'moved',
+    reason: `לפי פקודות הברוקר: ${sentence.text}`,
+    tone: sentence.tone,
+  };
 }
 
 // ── The two writes (§C) ─────────────────────────────────────────────────────
