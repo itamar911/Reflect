@@ -17,6 +17,7 @@
     "test:null-safety": "tsx scripts/features-null-safety-check.ts",
     "test:broker-day": "tsx scripts/tradovate-today-check.ts",
     "test:broker-import": "tsx scripts/broker-import-check.ts",
+    "test:broker-orders": "tsx scripts/broker-orders-check.ts",
     "test:spike-orders": "node scripts/spike/orders-selfcheck.mjs",
     "test:accounts": "tsx scripts/accounts-check.ts"
   },

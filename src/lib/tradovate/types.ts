@@ -463,3 +463,145 @@ export interface TradovateCurrency {
   id: number;
   name: string;
 }
+
+// ── Order entities (REF-113) ─────────────────────────────────────────────────
+//
+// THESE FOUR ARE TYPED FROM A MEASUREMENT, NOT FROM THE REFERENCE, and that is
+// the opposite of the rule stated above the trading entities. The reason is in
+// scripts/spike/FINDINGS.md §7: "nothing in the repository describes the
+// `order` or `orderVersion` entity at field level — not vendored, not in
+// src/lib/tradovate/types.ts, not probed", and the investigation refused to
+// widen a type from a recalled reading of the public reference.
+//
+// So they were MEASURED instead, on 19.10, against a real bracketed trade on a
+// live account whose stop was dragged twice by hand
+// (GET /api/tradovate/probe?mode=orders, reported on REF-113). Every field
+// below was either present on every row of that sample or is marked optional
+// here BECAUSE the measurement found it absent or partial. The field survey
+// that produced them names no value — see src/app/api/tradovate/probe/survey.ts.
+//
+// WHAT THE MEASUREMENT SAID, in the four sentences that shaped these types:
+//
+//   1. `stopPrice` IS ON THE VERSION, NOT THE ORDER. The version history of a
+//      stop order IS the history of its moves, which is the finding the whole
+//      ticket rests on.
+//   2. `orderType` IS ALSO ONLY ON THE VERSION. The order's own field list is
+//      exactly: accountId, action, admin, archived, contractId,
+//      executionProviderId, external, id, ordStatus, timestamp. So "is this a
+//      stop order" cannot be answered without reading its versions.
+//   3. A VERSION HAS NO TIMESTAMP. The fields that change between versions are
+//      `id` and `stopPrice` and nothing else, so `id` ascending is the only
+//      ordering available — and it is enough, because a verdict needs the ORDER
+//      of the moves and not the clock.
+//   4. `orderStrategyId`, `ocoId` AND `parentId` ARE NOT ON THE ORDER. The only
+//      route from an order to the bracket it belongs to is
+//      /orderStrategyLink/deps, keyed the other way round — from the strategy to
+//      its orders. ./orders.ts builds the reverse map.
+
+/**
+ * An order. GET /v1/order/list.
+ *
+ * READ FOR THE FIVE FIELDS THAT MAKE ATTRIBUTION POSSIBLE, and it carries no
+ * terms at all: no price, no stop price, no order type, no quantity. Those are
+ * on {@link TradovateOrderVersion}.
+ *
+ * THE RESPONSE IS THE CURRENT TRADING DAY AND NOTHING ELSE — measured as
+ * `depthDays = 0`, and the evening before the measurement it returned zero rows.
+ * That is the single most consequential fact about this endpoint: a trade that
+ * opened yesterday has no readable orders today, at any price, so its stop
+ * history is permanently `'unknown'` rather than `'none'` (./orders.ts).
+ *
+ * `timestamp` IS THE SUBMISSION INSTANT, and it is what the attribution window
+ * is anchored on. §B of the investigation's correction turns on it: a bracket is
+ * submitted WITH its entry order, so a window opened at the entry FILL would
+ * miss every protective order placed behind a resting limit entry.
+ */
+export interface TradovateOrder {
+  id: number;
+  accountId: number;
+  contractId: number;
+  /** Which side. The protective order of a long is a `Sell`. */
+  action?: 'Buy' | 'Sell';
+  /**
+   * The order's state. Terminal values are visible — a stop cancelled when the
+   * trader closed by hand is still returned, which is why a cancellation has to
+   * be told apart from a move rather than simply not seen.
+   */
+  ordStatus?: string;
+  /** ISO 8601 instant: when the order was SUBMITTED. See the note above. */
+  timestamp?: string;
+}
+
+/**
+ * One revision of an order. GET /v1/orderVersion/deps?masterid=&lt;orderId&gt;
+ *
+ * EVERY MODIFICATION IS A NEW ROW HERE ON THE SAME `orderId`, which is what
+ * makes "did the trader move their stop" answerable from a read rather than from
+ * a WebSocket subscription. The measured bracket's stop had three versions and
+ * three distinct `stopPrice` values: the `New` plus the two drags.
+ *
+ * ORDER BY `id` ASCENDING, NEVER BY TIME. There is no timestamp on this entity —
+ * measured, not assumed — and `id` was the only field besides `stopPrice` that
+ * changed between versions, so it is monotonic and it is the whole ordering.
+ *
+ * `price` is the limit price and `stopPrice` the trigger: a target is a `Limit`
+ * and reads the first, a stop is a `Stop`/`StopLimit` and reads the second.
+ *
+ * `pegDifference` is declared because the trailing-stop decision needs it and is
+ * marked optional because THE MEASUREMENT DID NOT FIND IT — there was no
+ * trailing stop in the sample (Q5, unanswered). ./orders.ts therefore treats a
+ * trailing stop by its `orderType` alone and uses this field only when a host
+ * actually sends one.
+ */
+export interface TradovateOrderVersion {
+  id: number;
+  orderId: number;
+  /**
+   * `Limit`, `Market`, `Stop`, `StopLimit`, `TrailingStop`, `TrailingStopLimit`
+   * — typed as a string because the measured sample cannot enumerate the set and
+   * a union that is missing a value would silently classify a real stop as not
+   * one. ./orders.ts matches on substrings and fails to `'unknown'`.
+   */
+  orderType?: string;
+  /** The trigger price. A stop's, and the number this whole ticket is about. */
+  stopPrice?: number;
+  /** The limit price. A target's. */
+  price?: number;
+  orderQty?: number;
+  /** The trail distance. Optional because it was never measured — see above. */
+  pegDifference?: number;
+}
+
+/**
+ * A bracket. GET /v1/orderStrategy/list.
+ *
+ * Read for its `id` alone, which is the `masterid` the links below are fetched
+ * by. Nothing else on it is relied on: the measurement found one row for the
+ * real bracket and the fields it carries are not what the attribution needs.
+ */
+export interface TradovateOrderStrategy {
+  id: number;
+  accountId?: number;
+  contractId?: number;
+}
+
+/**
+ * One order's membership of a bracket.
+ * GET /v1/orderStrategyLink/deps?masterid=&lt;orderStrategyId&gt;
+ *
+ * THE DIRECTION OF THIS JOIN IS THE WHOLE COST OF LAYER B. It is reachable only
+ * from the strategy, and the order carries no `orderStrategyId` (measured:
+ * `present: false`), so going from an order to its siblings means listing the
+ * day's strategies and building the reverse map. That is one call per strategy,
+ * which is why ./orders.ts caps it.
+ *
+ * `orderStrategyId` IS DELIBERATELY NOT DECLARED even though it is the obvious
+ * field to read: the rows come back from a `masterid` query, so the strategy is
+ * already known from the request, and a field the measurement did not confirm is
+ * a field this module must not depend on. `label` is not declared either — it
+ * can be the trader's own name for a strategy, and nothing here needs it.
+ */
+export interface TradovateOrderStrategyLink {
+  id: number;
+  orderId?: number;
+}
