@@ -238,7 +238,16 @@ export const CONDITION_LABELS: Record<ConditionType, string> = {
   hour_after: 'השעה עברה (24h)',
   fomo_last_trade: 'הרגשתי FOMO בעסקה האחרונה',
   exited_early_last_trade: 'יצאתי מוקדם מהעסקה האחרונה',
-  moved_sl_last_trade: 'הזזתי Stop Loss בעסקה האחרונה',
+  moved_sl_last_trade: 'הזזתי Stop Loss בעסקה האחרונה (כל הזזה)',
+  // REF-113 Stage 5. Offered BESIDE the broad one rather than replacing it, and
+  // the two labels have to say which is which in the dropdown — "(כל הזזה)" is
+  // the only reason the line above changed, and it changes no behaviour.
+  //
+  // THIS ONE NEEDS THE BROKER. It reads `stop_history.direction`, which only a
+  // Tradovate row carries, so on a manually closed trade it can never fire —
+  // and that is the honest outcome rather than a gap: a self-report is one
+  // boolean and cannot say which way the stop went.
+  moved_sl_widened_last_trade: 'הרחקתי את ה-Stop Loss בעסקה האחרונה (לפי הברוקר)',
 };
 
 // NOT IN THIS PASS: block_timer is a label with no timer when it comes from a
@@ -256,6 +265,7 @@ const CONDITIONS_WITHOUT_THRESHOLD: ConditionType[] = [
   'fomo_last_trade',
   'exited_early_last_trade',
   'moved_sl_last_trade',
+  'moved_sl_widened_last_trade',
 ];
 
 export function conditionNeedsThreshold(conditionType: ConditionType): boolean {
@@ -280,7 +290,13 @@ export function describeCustomRule(rule: Pick<CustomRule, 'condition_type' | 'th
     case 'hour_after': return `השעה עברה ${t} (פורמט 24h)`;
     case 'fomo_last_trade': return 'הרגשתי FOMO בעסקה האחרונה';
     case 'exited_early_last_trade': return 'יצאתי מוקדם מהעסקה האחרונה';
+    // DELIBERATELY UNCHANGED, where the dropdown label above gained "(כל
+    // הזזה)". RulesEditor SAVES this string into `custom_rules.name` (see the
+    // note on this function), so editing it would make every rule created from
+    // now on carry a different name from every rule created before — for a
+    // distinction that only matters while CHOOSING between the two.
     case 'moved_sl_last_trade': return 'הזזתי Stop Loss בעסקה האחרונה';
+    case 'moved_sl_widened_last_trade': return 'הרחקתי את ה-Stop Loss מנקודת הכניסה בעסקה האחרונה';
     default: return '';
   }
 }
@@ -299,6 +315,25 @@ export interface CustomRuleCheckContext {
   lastTradeFomo: boolean;
   lastTradeExitedEarly: boolean;
   lastTradeMovedSl: boolean;
+  /**
+   * The broker's orders say the last trade's stop was moved AWAY from the entry
+   * (REF-113 Stage 5). `stop_history.direction` is `'widened'` or `'mixed'`.
+   *
+   * OPTIONAL, AND ABSENT IS FALSE, which is the permissive direction and is
+   * chosen rather than defaulted. A wrong `true` arms a rule that can be
+   * `block_day` and locks a trader out of the app over something they did not
+   * do; a wrong `false` silences one rule quietly. The whole of REF-113's error
+   * policy is that asymmetry, and it is why this is false on a database without
+   * migration 038, on a manual close, and on any row whose document could not
+   * be read.
+   *
+   * It is NOT `lastTradeMovedSl && direction === 'widened'`: the two are
+   * independent inputs, because `moved_sl` is a self-report that a trader can
+   * uncheck and this is the broker's evidence. A trader who unticked the box
+   * has still widened their stop, and a rule they wrote about widening should
+   * still fire.
+   */
+  lastTradeStopWidened?: boolean;
 }
 
 export function evaluateCustomRuleCondition(rule: CustomRule, ctx: CustomRuleCheckContext): boolean {
@@ -319,6 +354,10 @@ export function evaluateCustomRuleCondition(rule: CustomRule, ctx: CustomRuleChe
       return ctx.lastTradeExitedEarly;
     case 'moved_sl_last_trade':
       return ctx.lastTradeMovedSl;
+    // REF-113 Stage 5. The broad condition above is unchanged and still fires
+    // on a tightening; this is the narrow one a trader opts into.
+    case 'moved_sl_widened_last_trade':
+      return ctx.lastTradeStopWidened === true;
     default:
       return false;
   }

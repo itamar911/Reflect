@@ -16,7 +16,21 @@ export type ConditionType =
   | 'hour_after'
   | 'fomo_last_trade'
   | 'exited_early_last_trade'
-  | 'moved_sl_last_trade';
+  | 'moved_sl_last_trade'
+  // REF-113 Stage 5. "I moved my stop AWAY from the entry on the last trade" —
+  // the half of `moved_sl_last_trade` that is a discipline failure, since a
+  // tightening is risk management (Imri, 19.10). The broad condition above
+  // STAYS, AND STAYS THE DEFAULT: a trader who created it asked for every move,
+  // and changing what their existing rule means would be a silent behaviour
+  // change on a rule that can block their day.
+  //
+  // THE SET IS PINNED BY A `CHECK` CONSTRAINT (supabase/schema.sql, migration
+  // 015), so this line is half a change: migration 039 step 1 extends that
+  // constraint, and until the owner runs it a rule saved with this condition is
+  // refused with a 23514. The editor offers it either way — its dropdown is
+  // `Object.keys(CONDITION_LABELS)` — which is the loud failure rather than the
+  // quiet one.
+  | 'moved_sl_widened_last_trade';
 export type ActionType = 'block_day' | 'block_timer' | 'warn';
 export type ValidationStatus = 'valid' | 'warning' | 'blocked';
 export type EmotionalPattern = 'FOMO' | 'REVENGE' | 'FEAR' | 'OVERCONFIDENCE' | 'NONE';

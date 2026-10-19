@@ -69,6 +69,11 @@ export async function fetchActiveRuleViolation(
     lastTradeFomo: history.lastTradeFomo,
     lastTradeExitedEarly: history.lastTradeExitedEarly,
     lastTradeMovedSl: history.lastTradeMovedSl,
+    // REF-113 Stage 5. The broker's own reading of WHICH WAY the stop went, for
+    // the `moved_sl_widened_last_trade` condition. False on a manual close and
+    // on a database without migration 038 — the permissive direction, chosen
+    // because the action can be `block_day`.
+    lastTradeStopWidened: history.lastTradeStopWidened,
   });
 
   if (customViolation) {

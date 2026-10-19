@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/client';
+import { stopWasWidened } from '@/lib/journal/stopHistory';
 import { hasMoneyPnl, tradeMoneyPnl } from '@/lib/pnl';
 import { visibleTrades } from '@/lib/trades/visible';
 import type { RuleContextSource } from '@/lib/types';
@@ -58,6 +59,15 @@ interface ClosedTradeRow {
   fomo_entry?: boolean | null;
   exited_early?: boolean | null;
   moved_sl?: boolean | null;
+  /**
+   * The broker's order history for this row, raw JSONB (REF-113 Stage 5).
+   *
+   * Selected only on the broker branch below, for the same reason `source` and
+   * `hidden` are: it is a column migration 038 adds, and naming it on a
+   * database without that file is a PostgREST 42703 that takes the whole rule
+   * check down. Read through `stopWasWidened`, never directly.
+   */
+  stop_history?: unknown;
   /**
    * Which source produced this row (REF-107 Stage 2).
    *
@@ -151,6 +161,18 @@ export interface TradeRuleContext {
   lastTradeFomo: boolean;
   lastTradeExitedEarly: boolean;
   lastTradeMovedSl: boolean;
+  /**
+   * The broker's orders say the last trade's stop was moved AWAY from the entry
+   * (REF-113 Stage 5), for the `moved_sl_widened_last_trade` condition.
+   *
+   * NOT A SELF-REPORT, which is what separates it from the three above: those
+   * three are written by a trader answering four questions in CloseTrade.tsx,
+   * and this is read off `stop_history.direction`. So it is FALSE on every
+   * manual close and on every database without migration 038 — see the field on
+   * `CustomRuleCheckContext` for why false rather than unknown is the right
+   * failure.
+   */
+  lastTradeStopWidened: boolean;
 
   // ── Not rule inputs: what the day looked like, for the form to say so ──────
 
@@ -433,8 +455,12 @@ export async function loadTradeRuleContext(
     client
       .from('trade_plans')
       .select(
+        // `stop_history` rides the broker branch (REF-113 Stage 5). It is a
+        // column migration 038 adds, so it may only be named where `source`
+        // and `hidden` may be — the condition that reads it needs a Tradovate
+        // row anyway, and that branch is exactly where one can exist.
         brokerIsSource
-          ? `${MONEY_FIELDS}, closed_at, fomo_entry, exited_early, moved_sl, source, hidden`
+          ? `${MONEY_FIELDS}, closed_at, fomo_entry, exited_early, moved_sl, stop_history, source, hidden`
           : `${MONEY_FIELDS}, closed_at, fomo_entry, exited_early, moved_sl`
       )
       .eq('user_id', userId)
@@ -507,6 +533,11 @@ export async function loadTradeRuleContext(
     lastTradeFomo: !!lastTrade?.fomo_entry,
     lastTradeExitedEarly: !!lastTrade?.exited_early,
     lastTradeMovedSl: !!lastTrade?.moved_sl,
+    // OFF THE SAME ROW AS THE THREE ABOVE, which is `recentAll[0]` and is
+    // deliberately unfiltered by source — see the note there. On a manual close
+    // there is no document and this is false, which is the permissive answer
+    // and the one REF-113's error policy picks.
+    lastTradeStopWidened: stopWasWidened(lastTrade?.stop_history),
     source: broker.source,
     todayClosed: summariseTodayCloses(closedToday),
   };
