@@ -32,6 +32,7 @@ import { tradeMoneyPnl, hasMoneyPnl, tradeDirection } from '@/lib/pnl';
 import { PLAIN_HEBREW_PROSE_CLAUSE } from '@/lib/ai/prompts';
 import { hasStoredDebrief, readStoredDebrief, type StoredDebrief } from '@/lib/journal/debrief';
 import { linkState } from '@/lib/journal/link';
+import { readStopHistory, stopDirectionOf } from '@/lib/journal/stopHistory';
 import { isImportEnabled } from '@/lib/tradovate/import';
 
 /**
@@ -191,6 +192,11 @@ export async function respondToDebriefRequest(
     strategy_conditions_checked:
       (trade.strategy_conditions_checked as TradeScoreInput['strategy_conditions_checked']) ?? null,
     moved_sl: trade.moved_sl === true,
+    // REF-113 Stage 5. `select('*')` returns no `stop_history` key at all on a
+    // database where migration 038 has not run, and the reader answers null for
+    // that — so there is no flag to gate this on and no 42703 to avoid. A
+    // tightening keeps the twelve discipline points; see the field.
+    stopDirection: stopDirectionOf(trade.stop_history),
     exited_early: trade.exited_early === true,
     fomo_entry: trade.fomo_entry === true,
     revenge_trade: trade.revenge_trade === true,
@@ -475,6 +481,56 @@ function buildDebriefPrompt(
     ? trade.post_trade_notes.trim()
     : null;
 
+  // ── What the BROKER says about the stop (REF-113 Stage 5) ────────────────
+  //
+  // `- Moved Stop Loss: כן/לא` is the self-report, and on a broker row it is
+  // now derived from the order history rather than typed by the trader — which
+  // makes it the one line in this prompt whose single bit throws away most of
+  // what we know. The block below adds the three fields that change what a
+  // coach would say, and ONLY those three.
+  //
+  // NO RAW PRICES, AND THAT IS A DELIBERATE LINE RATHER THAN CAUTION. The stop
+  // prices are already in the prompt where they belong — `Stop Loss` is the one
+  // the trader PLANNED — and adding the broker's two would invite the model to
+  // compute a risk figure and present it as fact, which is the same class of
+  // mistake as letting it restate the score. The direction and the count are
+  // the behaviour; the prices are evidence for a human.
+  //
+  // THE EARLY-TIGHTENING INSTRUCTION IS THE POINT OF THE WHOLE BLOCK. A
+  // tightening costs no discipline points (lib/scoring/tradeScore.ts) and is
+  // still worth a sentence when it is what ended the trade: a stop dragged to
+  // breakeven twenty minutes before the price reached the target is good risk
+  // management that cost the trader the trade, and that is exactly the kind of
+  // thing a deterministic score cannot say and a coach can.
+  const stops = readStopHistory(trade.stop_history);
+  const stopBlock = (() => {
+    if (stops === null) return '';
+    if (stops.verdict === 'unknown') {
+      return '\n- Broker stop orders: COULD NOT BE READ. Do not say anything about whether the stop was moved — the self-report line above is the only thing known, and it is not evidence either way.';
+    }
+    if (stops.verdict === 'none') {
+      return '\n- Broker stop orders: NO PROTECTIVE STOP WAS EVER PLACED on this trade (read from the broker). This is a fact about the execution and worth addressing directly.';
+    }
+    if (stops.trailing) {
+      return '\n- Broker stop orders: a TRAILING stop. Its steps were the server\'s, not decisions the trader took mid-trade, so do not describe them as the trader moving their stop.';
+    }
+    if (stops.verdict === 'kept') {
+      return '\n- Broker stop orders: the stop was placed and NEVER MOVED (read from the broker, not self-reported).';
+    }
+    const which =
+      stops.direction === 'tightened'
+        ? 'TOWARD the entry/profit (tightened — risk reduced). This is risk management and NOT a discipline failure; do not criticise it as one.'
+        : stops.direction === 'widened'
+          ? 'AWAY from the entry (widened — the risk the trader committed to GREW mid-trade). This is the discipline failure the score measures.'
+          : stops.direction === 'mixed'
+            ? 'BOTH ways — at least one move widened the risk and at least one tightened it. The widening is the part that matters.'
+            : 'in a direction we could not determine.';
+    return (
+      `\n- Broker stop orders: the stop was MOVED ${stops.movedCount} time(s), ${which}` +
+      '\n  If a tightening plausibly ENDED the trade early — a stop pulled to breakeven on a trade that then reached its target — say so as an observation, not as a rule violation.'
+    );
+  })();
+
   const traderNotesBlock = traderNotes
     ? `
 The trader wrote these notes about how the trade unfolded (their own account, in their words):
@@ -509,7 +565,7 @@ Trade data:
 - Exit reason: ${trade.exit_reason ?? '—'}
 - R:R ratio: ${trade.rr_ratio ?? '—'}
 - Entry reason (the plan): ${trade.trade_reason ?? '—'}
-- Moved Stop Loss: ${trade.moved_sl === true ? 'כן' : 'לא'}
+- Moved Stop Loss: ${trade.moved_sl === true ? 'כן' : 'לא'}${stopBlock}
 - Exited early: ${trade.exited_early === true ? 'כן' : 'לא'}
 - FOMO entry: ${trade.fomo_entry === true ? 'כן' : 'לא'}
 - Revenge trade: ${trade.revenge_trade === true ? 'כן' : 'לא'}

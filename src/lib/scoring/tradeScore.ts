@@ -40,6 +40,41 @@ export interface TradeScoreInput {
   required_min_rr: number | null; // strategy min_rr if set, else preset_rules min_rr, else null
   strategy_conditions_checked: { condition: string; checked: boolean }[] | null;
   moved_sl: boolean;
+  /**
+   * Which way the broker says the stop moved, from `stop_history.direction`
+   * (REF-113 Stage 5).
+   *
+   * THE PRODUCT DECISION IS THAT TIGHTENING IS NOT A DISCIPLINE FAILURE (Imri,
+   * 19.10). A trader who drags a stop TOWARD the profit — to breakeven, or to
+   * lock part of a move in — is managing risk, which is the behaviour this
+   * product is for. A trader who moves it AWAY has increased the risk they
+   * committed to, and that is the thing the twelve points measure. Until this
+   * field existed there was no way to tell the two apart: `moved_sl` is one
+   * boolean and it is true for both.
+   *
+   * SO `'tightened'` KEEPS THE TWELVE POINTS AND THE OTHER TWO DO NOT.
+   * `'mixed'` costs them, because it means at least one step widened — a trader
+   * who gave themselves more room and later took some back still gave
+   * themselves more room, and the step that mattered is the first one.
+   *
+   * OPTIONAL, AND ABSENT IS THE OLD BEHAVIOUR EXACTLY. Three populations reach
+   * this function and only one of them can carry a direction:
+   *
+   *   a manual close             `moved_sl` is the trader's own answer and
+   *                              there is no `stop_history` — scored as before
+   *   a broker row from before   no `stop_history`, because there is no
+   *   REF-113 Stage 3            backfill and there cannot be one
+   *   a broker row since         carries the direction, and a tightening stops
+   *                              costting the trader twelve points
+   *
+   * NOTHING IS RESCORED RETROACTIVELY by this. `plan_score` is stored, and a
+   * row is only rescored when its debrief is regenerated.
+   *
+   * `moved_sl === false` MAKES THIS FIELD IRRELEVANT and that is checked first
+   * below: a stop that never moved has no direction, and a document that
+   * disagreed with the column would not get to decide the question.
+   */
+  stopDirection?: 'tightened' | 'widened' | 'mixed' | null;
   exited_early: boolean;
   fomo_entry: boolean;
   revenge_trade: boolean;
@@ -194,17 +229,34 @@ export function computeTradeScore(input: TradeScoreInput): TradeScoreResult {
   //
   // REF-113 is what changes that: it reads the orders behind a trade's
   // fills, so `moved_sl` in particular stops being a question the trader
-  // answers and becomes something the broker can be asked. When it lands,
-  // revisit whether an absent self-report should still default to
-  // "not violated" or to "unknown" — an unknown that awards no points is a
-  // different and arguably more honest block, and it is a product decision
-  // rather than this function's to make unilaterally.
+  // answers and becomes something the broker can be asked. It has landed for
+  // the DIRECTION of a move (see `stopDirection` and the branch below) and NOT
+  // for the three-valued question: an absent self-report still defaults to
+  // "not violated" and still awards the points, because that is a product
+  // decision about every historical row's score and is deliberately a separate
+  // card (Stage 6).
   const disciplineDetails: string[] = [];
   let disciplineScore = 0;
 
-  if (!moved_sl) {
+  // TIGHTENING DOES NOT COST TWELVE POINTS (REF-113 Stage 5, Imri 19.10). See
+  // `stopDirection`: the column says a stop moved, the document says which way,
+  // and only a move AWAY from the entry is the failure the block measures.
+  //
+  // The sentence changes with it, because a number without its reason is a
+  // number a trader disputes. "הודק לכיוון הרווח" beside a +12 says why the
+  // points were kept; "הורחק מנקודת הכניסה" beside a 0/12 says why they were
+  // not — and the plain "הוזז Stop Loss" survives for every row that has no
+  // document, which is every manual close and every broker row from before
+  // Stage 3.
+  const tightenedOnly = moved_sl && input.stopDirection === 'tightened';
+
+  if (!moved_sl || tightenedOnly) {
     disciplineScore += 12;
-    disciplineDetails.push('לא הוזז Stop Loss (+12)');
+    disciplineDetails.push(
+      tightenedOnly ? 'הסטופ הודק לכיוון הרווח — לא נחשב הפרת משמעת (+12)' : 'לא הוזז Stop Loss (+12)'
+    );
+  } else if (input.stopDirection === 'widened' || input.stopDirection === 'mixed') {
+    disciplineDetails.push('הסטופ הורחק מנקודת הכניסה — הסיכון גדל (0/12)');
   } else {
     disciplineDetails.push('הוזז Stop Loss (0/12)');
   }
