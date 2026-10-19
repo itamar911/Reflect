@@ -1679,6 +1679,76 @@ async function readerFailureGroup() {
     readStopHistories({ readers: { demo: untouched.reader() }, trades: [TRADE] })
   );
 
+  // ── The DERIVATION throwing, not a read ──────────────────────────────────
+  // `syncUserTrades` states that this module cannot throw. For three stages
+  // that was true of the reads and true-by-inspection of the pure half, and an
+  // unwrapped throw here takes the whole sync down — the trader's journal rows
+  // with it — over an annotation.
+  //
+  // THE THROW IS REACHED THROUGH THE READER rather than by injecting evidence,
+  // so the path under test is the production one. A version whose `stopPrice` is
+  // a getter that throws is what malformed wire data looks like from inside:
+  // `readHostEvidence` validates `id` and nothing else, so the row reaches
+  // `deriveStopHistory`, which reads the price while classifying candidates.
+  const poisoned = Object.defineProperty(
+    { id: 95_001, orderId: 82_001, orderType: 'Stop', orderQty: 1 } as TradovateOrderVersion,
+    'stopPrice',
+    {
+      get(): number {
+        throw new TypeError('stopPrice is not readable');
+      },
+      enumerable: true,
+    }
+  );
+
+  // A SECOND trade, on ANOTHER contract so it cannot read as ambiguous against
+  // the first. Its stop is the poisoned one; the bracket trade beside it is
+  // untouched and must still come back answered.
+  const poisonedTrade: BrokerTrade = {
+    ...TRADE,
+    brokerTradeKey: 'demo:88600',
+    fillIds: [11, 12],
+    entryOrderIds: [82_000, 82_002],
+  };
+  const poisonStub = new StubReader(
+    bracketPlan({
+      orders: [
+        ...BRACKET.orders,
+        order(82_000, { action: 'Buy', ordStatus: 'Filled', contractId: OTHER_CONTRACT }),
+        order(82_001, { contractId: OTHER_CONTRACT }),
+        order(82_002, { ordStatus: 'Filled', contractId: OTHER_CONTRACT }),
+      ],
+      versions: [
+        ...BRACKET.versions,
+        version(95_000, 82_000, { orderType: 'Market', orderQty: 1 }),
+        poisoned,
+        version(95_002, 82_002, { orderType: 'Market', orderQty: 1 }),
+      ],
+    })
+  );
+  let derivationThrew = false;
+  let survived = new Map<string, StopHistory>();
+  let poisonLines: string[] = [];
+  try {
+    const run = await captureLogs(() =>
+      readStopHistories({
+        readers: { demo: poisonStub.reader() },
+        trades: [TRADE, poisonedTrade],
+      })
+    );
+    survived = run.result;
+    poisonLines = run.lines;
+  } catch {
+    derivationThrew = true;
+  }
+
+  // ── Zero candidates still reports ────────────────────────────────────────
+  // The one outcome that used to leave no trace at all, which is what
+  // ref-113-why-no-write.md had to be written to recover.
+  const { lines: emptyLines } = await captureLogs(() =>
+    readStopHistories({ readers: { demo: new StubReader(bracketPlan()).reader() }, trades: [] })
+  );
+
   group('a read that fails costs one nullable column, and is retried', [
     c('(1) /order/list down: nothing answered, nothing thrown', none.size, 0),
     c('(2) and it was logged as a KIND, with the status', listLines.length, 1),
@@ -1718,6 +1788,24 @@ async function readerFailureGroup() {
       [cut.get(TRADE.brokerTradeKey)?.anchoredAtFill,
        cutLines.some((line) => line.includes('roundcount:1000'))],
       [false, true]),
+    // (c) of ref-113-why-no-write.md. The whole sync, journal rows included,
+    // is on the other side of this.
+    c('(13) a derivation that THROWS does not take the run down with it',
+      derivationThrew, false),
+    c('(13b) the trade that threw is dropped, so its row stays a candidate',
+      survived.has(poisonedTrade.brokerTradeKey), false),
+    c('(13c) and every other trade of the run is still answered',
+      [survived.size, survived.get(TRADE.brokerTradeKey)?.verdict], [1, 'moved']),
+    c('(13d) the throw is logged as a KIND, never as a message',
+      [poisonLines.some((line) => line.includes('derive:TypeError')),
+       poisonLines.some((line) => line.includes('not readable'))],
+      [true, false]),
+    // (a) of the same report. Zero candidates used to return before `report`,
+    // which made the one outcome that most needs explaining the only silent one.
+    c('(14) a run with no candidates reports anyway, in counts',
+      [emptyLines.length,
+       emptyLines.some((line) => /candidates=0 commands=0 deps=0/.test(line))],
+      [1, true]),
   ]);
 }
 

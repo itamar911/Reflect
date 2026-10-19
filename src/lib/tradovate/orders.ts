@@ -1573,7 +1573,6 @@ export async function readStopHistories(params: {
   const { readers, trades, maxDeps = MAX_ORDER_DEPS_PER_RUN } = params;
 
   const histories = new Map<string, StopHistory>();
-  if (trades.length === 0) return histories;
 
   const tally: ReadTally = {
     orders: 0,
@@ -1588,6 +1587,27 @@ export async function readStopHistories(params: {
     capped: false,
     failures: [],
   };
+
+  // NO CANDIDATES STILL REPORTS, AND THE LINE IS WORTH WHAT IT COSTS. This used
+  // to return BEFORE {@link report}, which made "the run asked about nothing"
+  // the one outcome that left no trace — and it is the outcome that most needs
+  // one, because every other reason a column stays empty is already in that
+  // line. It cost an investigation to rediscover on 19.10
+  // (~/Desktop/reflect-reports/ref-113-why-no-write.md): a row was reset, Sync
+  // said "everything up to date", and nothing anywhere said the trade had been
+  // dropped upstream for holding an open position on the same contract.
+  //
+  // THE ZERO LINE DOES NOT SAY WHY, AND IT CANNOT. The filtering is
+  // `tradesNeedingStopHistory`'s (./import.ts), which refuses a trade whose
+  // position is not flat, a row already answered, and a row hidden — and this
+  // function is handed the survivors with no account of the rest. The import's
+  // own line carries `skippedOpen`, which separates the first from the other
+  // two. `candidates=0` here beside `skippedOpen` there is the pair that
+  // answers it, and that is why neither line needed a new field.
+  if (trades.length === 0) {
+    report(tally);
+    return histories;
+  }
 
   // ONE BUDGET FOR THE WHOLE RUN, shared across hosts and across both deps
   // shapes. The thing being protected is the request count.
@@ -1613,7 +1633,32 @@ export async function readStopHistories(params: {
     if (!evidence) continue;
 
     for (const trade of hostTrades) {
-      const history = deriveStopHistory({ trade, trades: hostTrades, evidence });
+      // THE PURE HALF IS WRAPPED TOO, AND THE CLAIM IT MAKES HONEST IS IN
+      // ./sync.ts: "it cannot throw: ./orders.ts swallows". That was true of
+      // every READ and merely true-by-inspection of the derivation, which has
+      // no I/O and therefore no obvious way to fail — and which has grown
+      // branches with every stage of this ticket. An unwrapped throw here takes
+      // `syncUserTrades` down whole, which costs the trader THE JOURNAL ROWS OF
+      // THEIR DAY over an annotation: the exact trade this module's error
+      // policy refuses to make everywhere else it is written down.
+      //
+      // THE TRADE GETS `'failed'`, WHICH MEANS IT IS DROPPED RATHER THAN
+      // STORED, so the row keeps `stop_history IS NULL` and the next run of the
+      // same trading day asks again. A derivation that threw on this evidence
+      // will probably throw on the next read of it too, and that is the right
+      // trade anyway: `'failed'` is the honest answer and a retry costs a
+      // handful of requests, while STORING it would take the row out of scope
+      // for every later run that day.
+      let history: StopHistory;
+      try {
+        history = deriveStopHistory({ trade, trades: hostTrades, evidence });
+      } catch (error) {
+        // `kindOf` AND NOT THE MESSAGE, for the usual reason sharpened: a
+        // TypeError's message quotes the value it choked on, and the values
+        // here are the trader's stop prices.
+        tally.failures.push(`derive:${kindOf(error)}`);
+        history = unknownHistory('failed');
+      }
 
       if (history.verdict === 'moved') tally.moved += 1;
       else if (history.verdict === 'kept') tally.kept += 1;

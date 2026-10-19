@@ -319,6 +319,41 @@ export interface BrokerTrade {
    * journal until the next pull, while importing early is a duplicate row in it
    * that nothing removes. The quiet absence is recoverable; the duplicate is
    * not.
+   *
+   *
+   * AND RE-ENTERING THE SAME CONTRACT TURNS THIS FALSE ON A TRADE THAT HAS
+   * ALREADY CLOSED, WHICH IS THE CONSEQUENCE NOBODY HAD WRITTEN DOWN
+   * --------------------------------------------------------------------------
+   *
+   * A Position is one row PER CONTRACT PER TRADING DAY (./types.ts) and its
+   * `netPos` is live. So a trader who finishes a round trip on a contract and
+   * then takes a NEW position on the same contract the same day puts that one
+   * Position row back to non-zero — and the fill pairs of the round trip that
+   * already finished point at the SAME `positionId`. Every closed trade on that
+   * contract therefore reads `positionFlat: false` again, for as long as the new
+   * position is open.
+   *
+   * FOR THE IMPORT THAT IS HARMLESS AND IS NOT TOO STRICT. The row is already
+   * written, `importBrokerTrades` counts the skip as `skippedOpen` and restates
+   * nothing — and the hazard this field exists for is genuinely still live: a
+   * later fill pair can bridge two groups and move the key the next pull
+   * derives.
+   *
+   * WHAT IT COSTS IS THE STOP HISTORY, AND THAT COST HAS A DEADLINE.
+   * `tradesNeedingStopHistory` (./import.ts) filters on this field, so an open
+   * position on a contract withholds REF-113's annotation from the day's
+   * earlier trades on that same contract — and `/order/list` is `depthDays = 0`
+   * with no backfill. If the position is still open when the trading day rolls,
+   * those orders are GONE: the trade is then derived as `'interday'` →
+   * `'unknown'`, which is stored, and its real `initialStop`, `movedCount` and
+   * direction are lost permanently. Measured on 19.10 and written up in
+   * ~/Desktop/reflect-reports/ref-113-why-no-write.md.
+   *
+   * The trader this bites is the one who rolls positions on one contract all
+   * day, which is not an edge case. REF-113 Stage 4 is where it is addressed —
+   * by reading when a position GOES FLAT rather than at a fixed hour — and the
+   * note is here because this field is what somebody will be standing on when
+   * they ask why an annotation never arrived.
    */
   positionFlat: boolean;
 }

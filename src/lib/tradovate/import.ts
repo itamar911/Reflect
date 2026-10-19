@@ -1196,6 +1196,18 @@ async function restateByKey(
  *   - the row is hidden                       → rule 2 (E12); it is not touched
  *   - the row already has a history           → asked and answered
  *
+ * AND THE FLAT RULE REFUSES TRADES THAT CLOSED HOURS AGO, WHICH IS NOT OBVIOUS
+ * FROM THE LINE ABOVE. A Position is one row per contract per trading day and
+ * its `netPos` is live, so RE-ENTERING A CONTRACT puts that row back to
+ * non-zero and every trade already closed on it reads `positionFlat: false`
+ * again. This then returns an empty list, `readStopHistories` makes no request,
+ * and the columns stay NULL with nothing but `skippedOpen` in the import's own
+ * line to explain it. Waiting is not free either: `/order/list` is
+ * `depthDays = 0`, so a position still open when the trading day rolls takes
+ * the orders with it and the trade degrades to `'interday'` for good. The full
+ * argument and the measurement are on `BrokerTrade.positionFlat` in ./fills.ts;
+ * REF-113 Stage 4 is where it is addressed.
+ *
  * A FAILED READ RETURNS NOTHING, which costs the run its stop histories and
  * nothing else. The same swallow ./orders.ts makes, for the same reason: an
  * annotation must not be able to cost a trader their journal rows.

@@ -243,8 +243,16 @@ export async function syncUserTrades(request: SyncRequest): Promise<SyncResult> 
   //
   // It runs AFTER the pull and BEFORE the import, because the import is what
   // writes the three columns and it writes them in the same statement as the
-  // facts. And it cannot throw: ./orders.ts swallows, so a broker that refuses
-  // the order endpoints costs this run its annotations and not its rows.
+  // facts. And it cannot throw: ./orders.ts swallows every READ and wraps the
+  // DERIVATION, so a broker that refuses the order endpoints — or evidence the
+  // derivation chokes on — costs this run its annotations and not its rows.
+  // The derivation half of that was true by inspection for three stages and is
+  // true by construction now; what sits on the other side of the bet is this
+  // whole function, the journal rows of the trader's day included.
+  //
+  // A RUN WITH NOTHING TO ASK ABOUT NOW SAYS SO IN THE LOG rather than passing
+  // in silence, which is the other half of the same lesson — see the zero-
+  // candidate branch in `readStopHistories`.
   const stopHistories = readStops
     ? await readStopHistories({
         readers: {
