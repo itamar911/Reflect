@@ -74,8 +74,29 @@ import { discoverHostAccounts, type TradovateReader } from './fills';
 import type { TradovateEnvironment } from './hosts';
 import type { TradovateContract, TradovatePosition } from './types';
 
-/** One open position, as the browser receives it. No price. See the header. */
+/** One open position. SERVER-SIDE SHAPE — see `contractId`. No price. */
 export interface LivePosition {
+  /**
+   * The broker's contract id. SERVER-SIDE ONLY, AND IT MUST NOT REACH THE WIRE.
+   *
+   * It is here for one reader: the flat-transition check in
+   * app/api/tradovate/live/route.ts (REF-113 Stage 4b), which has to decide
+   * whether a contract that was held on the previous poll is held on this one.
+   * {@link contractName} cannot do that job — it is null whenever
+   * `/contract/item` refused, and two unnamed contracts in one account would
+   * collapse into one key and hide a transition.
+   *
+   * THE ROUTE PROJECTS THIS SHAPE ONTO ITS OWN `LivePositionLine` RATHER THAN
+   * PASSING IT THROUGH, which is the only reason this is safe. Before Stage 4b
+   * the route did pass it through, so the two shapes had to be identical; it
+   * now names the three fields the browser gets, and
+   * scripts/tradovate-today-check.ts asserts the response's EXACT KEY SET, so a
+   * change that re-introduces the spread fails there rather than in
+   * production. The browser has no use for a contract id once the account is
+   * resolved to our UUID, and a numeric broker identifier is not worth
+   * publishing for nothing.
+   */
+  contractId: number;
   /**
    * The contract's name, or null when `/contract/item` said nothing usable.
    *
@@ -226,14 +247,12 @@ export async function loadOpenPositions(
 
     const positions = (await reader.get<TradovatePosition[]>('/position/list')) ?? [];
 
-    // The contract id is carried on the row until the names are in hand, so
-    // each position is named by ITS OWN contract. Resolving names first and
-    // zipping them onto the list afterwards is the shape that silently
-    // mislabels a two-contract account, and a mislabelled holding is worse
-    // than an unlabelled one.
-    interface HeldRow extends LivePosition {
-      contractId: number;
-    }
+    // The contract id is carried on the row — and as of Stage 4b it STAYS on
+    // it (see {@link LivePosition.contractId}) — so each position is named by
+    // ITS OWN contract. Resolving names first and zipping them onto the list
+    // afterwards is the shape that silently mislabels a two-contract account,
+    // and a mislabelled holding is worse than an unlabelled one.
+    type HeldRow = LivePosition;
 
     const byAccount = new Map<number, HeldRow[]>();
     const contractIds = new Set<number>();
@@ -263,9 +282,9 @@ export async function loadOpenPositions(
       accounts.push({
         brokerAccountId: accountId,
         host,
-        positions: list.map(({ contractId, ...rest }) => ({
-          ...rest,
-          contractName: names.get(contractId) ?? null,
+        positions: list.map((row) => ({
+          ...row,
+          contractName: names.get(row.contractId) ?? null,
         })),
       });
     }

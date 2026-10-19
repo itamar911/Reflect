@@ -81,10 +81,50 @@
  * lapsed" is an ANSWER the client renders, not a fault of the request. 401 for
  * a caller with no session. There is no 400 — this route takes no parameters,
  * which is itself a small privacy property.
+ *
+ *
+ * IT WRITES NOW, AND ONLY ON A TRANSITION (REF-113 Stage 4b)
+ * ---------------------------------------------------------
+ *
+ * This was a read-only route and is not one any more, so the reason has to be
+ * written down where somebody will read it before they undo it.
+ *
+ * REF-113 records what the broker says about a trader's stop by reading
+ * `/order/list`, and that endpoint has NO DEPTH AT ALL — `depthDays = 0`,
+ * measured 19.10. The orders behind today's trades exist until the trading day
+ * rolls at ~17:00 CT and then they are gone at any price. On top of that, a
+ * trade is only a candidate for the read while its position is FLAT
+ * (`BrokerTrade.positionFlat`, §A3 rule 1), and a Position is one row per
+ * contract per trading day with a live `netPos` — so RE-ENTERING a contract
+ * puts that row back to non-zero and withholds the annotation from every trade
+ * already closed on it.
+ *
+ * Put those two together and the trader who loses the most is the one who rolls
+ * positions on one contract all day: at 21:30, when
+ * /api/cron/tradovate-orders fires, they are still holding, every earlier trade
+ * on the contract reads `positionFlat: false`, the job skips them, and an hour
+ * later the orders are destroyed. A FIXED HOUR CANNOT COVER THEM. The only
+ * instant that can is the moment the position goes flat — and this route, which
+ * reads `/position/list` every fifteen seconds, is the only thing in the
+ * product that is looking at that moment. That is decision ד of
+ * ~/Desktop/reflect-reports/ref-113-why-no-write.md.
+ *
+ * SO THE WRITE IS BOUNDED BY A TRANSITION AND NOT BY THE POLL. {@link
+ * CAPTURE_MIN_GAP_MS} and the `pending` flag beside it are the whole
+ * mechanism: a contract that was held on the previous poll and is not held on
+ * this one fires ONE capture, a second transition inside the cool-down is
+ * remembered rather than dropped, and a quiet poll — which is almost every poll
+ * — does exactly what it did before this stage. A failure cannot reach the
+ * response: the capture runs after it, through `after()`, and swallows
+ * everything.
+ *
+ * /api/tradovate/today is already a GET that writes and its header argues the
+ * case; this is the second, with a narrower trigger and a harder deadline.
  */
 
-import { NextResponse } from 'next/server';
+import { after, NextResponse } from 'next/server';
 
+import { createAdminClient } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 import {
   classifyDayPullFailure,
@@ -95,8 +135,14 @@ import { tradovateGet } from '@/lib/tradovate/client';
 import { getUserTradingApi } from '@/lib/tradovate/connections';
 import type { TradovateReader } from '@/lib/tradovate/fills';
 import { isImportEnabled } from '@/lib/tradovate/import';
-import { loadOpenPositions, type OpenPositionsPull } from '@/lib/tradovate/positions';
+import { ORDERS_LOOKBACK_MS } from '@/lib/tradovate/orders-cron';
+import {
+  loadOpenPositions,
+  type HostAccountPositions,
+  type OpenPositionsPull,
+} from '@/lib/tradovate/positions';
 import { redactSecrets } from '@/lib/tradovate/redact';
+import { syncUserTrades } from '@/lib/tradovate/sync';
 import { portfolioLabel } from '@/lib/portfolios/portfolio';
 import { readPortfolios } from '@/lib/portfolios/read';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -116,6 +162,30 @@ export const BROKER_LIVE_PATH = '/api/tradovate/live';
  * correctness concern and not a performance one.
  */
 export const FRESH_MS = 10_000;
+
+/**
+ * The shortest gap between two stop captures for one trader (REF-113 Stage 4b).
+ *
+ * ONE MINUTE, AND NOTHING IS DROPPED BY IT. A capture is a day pull plus the
+ * order read — on the order of fifteen to twenty upstream requests — and a
+ * trader scaling out of three contracts produces three flat transitions inside
+ * a minute. The second and third would ask the same question: the candidate
+ * read is `stop_history IS NULL` over the WHOLE DAY, so the first capture has
+ * already answered for every trade the later ones would have found.
+ *
+ * A TRANSITION SEEN INSIDE THE GAP IS REMEMBERED, NOT DISCARDED — the `pending`
+ * flag on {@link flatWatch}. That matters and it is the part that is easy to get
+ * wrong: contract A goes flat at 10:00:00 and contract B at 10:00:20, and if the
+ * second were simply dropped, B's trades would wait for the 21:30 cron and lose
+ * their annotation if the trader is holding something by then. Instead the next
+ * poll past the minute fires for it.
+ *
+ * It is a guard against FLAPPING and not a rate limit. A trader who genuinely
+ * round-trips one contract twenty times in a day gets twenty captures, which is
+ * a few hundred requests against a documented five thousand an hour — and each
+ * one is buying an annotation that is destroyed at 17:00 CT.
+ */
+export const CAPTURE_MIN_GAP_MS = 60_000;
 
 /** One open position, as the browser receives it. No price — see the header. */
 export interface LivePositionLine {
@@ -171,10 +241,58 @@ function stateless(source: Exclude<RuleContextSource, 'broker_verified'>): Broke
 let cached: { userId: string; at: number; pull: BrokerLivePull } | null = null;
 let inFlight: { userId: string; work: Promise<BrokerLivePull> } | null = null;
 
-/** Drop the held answer. Test seam, and nothing else. */
+/**
+ * What this trader was holding on the previous pull, so that a contract leaving
+ * the list can be noticed (REF-113 Stage 4b).
+ *
+ * KEYED BY USER AND REPLACED RATHER THAN MERGED, which is {@link cached}'s rule
+ * and has the same consequence: two traders polling through one serverless
+ * instance take turns, and each turn starts with no previous holdings and
+ * therefore cannot see a transition. That is an UNDER-FIRE — the 21:30 cron is
+ * still there — and it is the direction to fail in. The alternative, a map
+ * keyed by user, is a map of one trader's live exposure held across another
+ * trader's request, which is the one thing this route's privacy note refuses.
+ *
+ * `held` IS ONLY EVER WRITTEN FROM A VERIFIED PULL. A broker that refused us
+ * knows nothing about what is open, and treating "we could not ask" as "nothing
+ * is held" would fabricate a transition for every contract on the next
+ * successful poll.
+ */
+let flatWatch: {
+  userId: string;
+  /** `${host}:${brokerAccountId}:${contractId}` for every contract held. */
+  held: Set<string>;
+  /** A transition has been seen and no capture has run for it yet. */
+  pending: boolean;
+  /** When a capture last STARTED. Zero means never, for this user. */
+  lastCaptureAtMs: number;
+} | null = null;
+
+/** Drop the held answer and the holdings. Test seam, and nothing else. */
 export function forgetLivePull(): void {
   cached = null;
   inFlight = null;
+  flatWatch = null;
+}
+
+/**
+ * One key per contract held, across every host and account.
+ *
+ * FROM THE PULL AND NOT FROM THE RESPONSE, which is the load-bearing half. The
+ * response drops positions on accounts the sync has not recorded yet (see
+ * `unresolved` below), and a position going flat on an unrecorded account is
+ * exactly as much of a deadline as one on a named portfolio — the trade rows are
+ * written either way. Reading the response would have made the trigger depend
+ * on whether a portfolio card exists.
+ */
+function heldKeys(accounts: readonly HostAccountPositions[]): Set<string> {
+  const keys = new Set<string>();
+  for (const account of accounts) {
+    for (const position of account.positions) {
+      keys.add(`${account.host}:${account.brokerAccountId}:${position.contractId}`);
+    }
+  }
+  return keys;
 }
 
 /**
@@ -193,6 +311,28 @@ export interface LiveRouteDeps {
   /** `(broker_account_id, host) → { accountId, displayName }`, under RLS. */
   resolveAccounts: (userId: string) => Promise<Map<string, { accountId: string; displayName: string }>>;
   now: () => number;
+  /**
+   * Read the broker's protective orders for this trader's unanswered trades,
+   * because a position just went flat (REF-113 Stage 4b).
+   *
+   * MUST NOT THROW AND MUST NOT BE AWAITED BY THE RESPONSE. It is the whole
+   * import — a day pull, the accounts pass, the order read and a batch of
+   * statements — and this route is on a fifteen-second timer. {@link GET}
+   * supplies one that swallows everything and reports counts; omitting it
+   * disables the trigger entirely, which is what the groups that are not about
+   * it do.
+   */
+  captureStops?: (userId: string) => Promise<void>;
+  /**
+   * Run work after the response has been sent. Production is Next's `after()`.
+   *
+   * A SEAM BECAUSE `after()` IS NOT CALLABLE OUTSIDE A REQUEST SCOPE, and the
+   * regression suite drives this handler as a plain function. The suite passes
+   * one that collects the work so it can await it and assert on what ran; the
+   * default here is `after()` itself, so a caller that forgets the seam still
+   * gets production behaviour rather than silence.
+   */
+  schedule?: (work: () => Promise<void>) => void;
 }
 
 /** The join key, host-qualified — `accounts`' own identity (migration 037). */
@@ -271,9 +411,27 @@ async function buildPull(userId: string, deps: LiveRouteDeps): Promise<BrokerLiv
       accounts.push({
         accountId: known.accountId,
         displayName: known.displayName,
-        positions: account.positions,
+        // NAMED RATHER THAN SPREAD, and this is the line that keeps the broker's
+        // contract id off the wire. `LivePosition` carries it from Stage 4b for
+        // the flat-transition check; `LivePositionLine` is the browser's shape
+        // and has three fields. `openedAtMs` stays optional — the field is
+        // absent when `position.timestamp` did not parse, and absent is a
+        // different claim from a zero.
+        positions: account.positions.map((position) => ({
+          contractName: position.contractName,
+          netPos: position.netPos,
+          ...(position.openedAtMs === undefined ? {} : { openedAtMs: position.openedAtMs }),
+        })),
       });
     }
+
+    // ── A position went flat (REF-113 Stage 4b) ──────────────────────────────
+    //
+    // See the header on why a fifteen-second poll is the right place for this
+    // and why a fixed hour cannot replace it. Everything below is decided from
+    // the PULL rather than from `accounts`, so an unrecorded portfolio still
+    // counts.
+    noticeFlatTransition(userId, pull.accounts, deps);
 
     // COUNTS ONLY, and only when there is something to say. A quiet poll is
     // the common case and 240 log lines an hour of "nothing open" is noise
@@ -302,6 +460,65 @@ async function buildPull(userId: string, deps: LiveRouteDeps): Promise<BrokerLiv
     );
     return stateless(source);
   }
+}
+
+/**
+ * Compare this pull's holdings with the previous one and, if a contract has
+ * left the list, fire one stop capture (REF-113 Stage 4b).
+ *
+ * CALLED ONLY FROM THE VERIFIED BRANCH, and only once per actual upstream pull:
+ * {@link respondToLiveRequest} holds its answer for {@link FRESH_MS} and shares
+ * an in-flight promise, so three mounted consumers on a fifteen-second timer
+ * reach this at most once every ten seconds — and almost always with nothing to
+ * say.
+ *
+ * THE FIRST PULL FOR A TRADER NEVER FIRES, and that is right rather than a gap.
+ * With no previous holdings there is no transition to see; a trader who closed
+ * a position and then opened the app is covered by the Sync button's own
+ * auto-trigger, which already asks for the orders (`shouldAutoSync` in
+ * lib/tradovate/syncClock.ts, and `readStops: true` on POST /api/tradovate/sync).
+ *
+ * IT CANNOT THROW INTO THE PULL. The capture is handed to {@link
+ * LiveRouteDeps.schedule} and never awaited, and the one supplied by {@link GET}
+ * swallows everything. Nothing here reaches the response.
+ */
+function noticeFlatTransition(
+  userId: string,
+  accounts: readonly HostAccountPositions[],
+  deps: LiveRouteDeps
+): void {
+  const keys = heldKeys(accounts);
+  const watching = flatWatch && flatWatch.userId === userId ? flatWatch : null;
+
+  // A key that was held and is not any more. ONE IS ENOUGH: the candidate read
+  // is `stop_history IS NULL` over the whole day, so a single capture answers
+  // for every contract, and counting them would only change a log line.
+  const wentFlat = watching !== null && [...watching.held].some((key) => !keys.has(key));
+
+  const pending = (watching?.pending ?? false) || wentFlat;
+  const lastCaptureAtMs = watching?.lastCaptureAtMs ?? 0;
+  const now = deps.now();
+  const cooled = now - lastCaptureAtMs >= CAPTURE_MIN_GAP_MS;
+  const fire = pending && cooled && deps.captureStops !== undefined;
+
+  // WRITTEN BEFORE THE CAPTURE IS SCHEDULED, so that a capture which is still
+  // running when the next poll arrives cannot be started a second time. The
+  // clock is stamped at the START for the same reason `shareBrokerSync` stamps
+  // its own in `finally`: what has to be rate-limited is the asking.
+  flatWatch = {
+    userId,
+    held: keys,
+    pending: fire ? false : pending,
+    lastCaptureAtMs: fire ? now : lastCaptureAtMs,
+  };
+
+  if (!fire) return;
+
+  const capture = deps.captureStops;
+  if (!capture) return;
+
+  const schedule = deps.schedule ?? ((work: () => Promise<void>) => after(work));
+  schedule(() => capture(userId));
 }
 
 export async function GET() {
@@ -357,6 +574,65 @@ export async function GET() {
         });
       }
       return byIdentity;
+    },
+
+    /**
+     * A contract just went flat, so read the orders behind the day's trades
+     * before Tradovate destroys them (REF-113 Stage 4b).
+     *
+     * SWALLOWS EVERYTHING. It runs through `after()`, so nothing it does can
+     * reach the response — but a rejection there is an unhandled one, and on a
+     * route that runs 240 times an hour that is a log full of stack traces for
+     * an annotation. The failure costs one nullable column and the 21:30 cron
+     * is still behind it.
+     *
+     * THE SESSION CLIENT WRITES AND THE SERVICE ROLE READS, which is
+     * lib/tradovate/sync.ts' documented split and the same arrangement POST
+     * /api/tradovate/sync uses: the rows go in under the trader's own RLS, and
+     * only the token, the hosts and the declaration need the service role.
+     * Better than the crons, which have no session to write as. The client is
+     * BUILT BEFORE `after()` is reached, inside this closure's `supabase()` —
+     * the cookie store is readable from `after()` but a write is not, and
+     * lib/supabase/server.ts already swallows a refused `setAll` for exactly
+     * that case.
+     */
+    captureStops: async (userId) => {
+      try {
+        const now = Date.now();
+        const { counts } = await syncUserTrades({
+          userId,
+          client: await supabase(),
+          admin: createAdminClient(),
+          // UTC midnight, like both crons. This route takes no parameters, on
+          // purpose (see the header), so the trader's own midnight is not
+          // available here — and it does not matter: `syncUserTrades` discards
+          // the scalars cut at this instant, and `windowStartMs` below is what
+          // decides which trades are reached.
+          dayStartMs: new Date(now).setUTCHours(0, 0, 0, 0),
+          // The same day the dedicated cron reaches, and the same constant, so
+          // the two triggers cannot disagree about what "today's trades" means.
+          windowStartMs: now - ORDERS_LOOKBACK_MS,
+          // The reason the whole branch exists.
+          readStops: true,
+        });
+
+        // COUNTS ONLY, and the line is worth its noise because this trigger
+        // fires a handful of times a day rather than on a timer: without it
+        // there is nothing anywhere that says the transition was noticed.
+        console.info(
+          redactSecrets(
+            '[tradovate][live] a position went flat, so the stop orders were read ' +
+              `(updated=${counts.updated} unchanged=${counts.unchanged} ` +
+              `imported=${counts.imported} skippedOpen=${counts.skippedOpen})`
+          )
+        );
+      } catch (error) {
+        // The KIND and nothing else, for this route's own reason: a message
+        // from this chain can name a contract or a product id, and one from
+        // PostgREST can echo a row.
+        const kind = error instanceof Error ? error.name : 'non-Error throw';
+        console.warn(`[tradovate][live] the flat-transition stop read failed (${kind})`);
+      }
     },
   });
 }

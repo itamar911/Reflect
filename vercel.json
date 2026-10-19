@@ -107,6 +107,10 @@
     {
       "path": "/api/cron/tradovate-import",
       "schedule": "30 3 * * *"
+    },
+    {
+      "path": "/api/cron/tradovate-orders",
+      "schedule": "30 21 * * *"
     }
   ]
 }

@@ -75,6 +75,7 @@ import {
 } from '../src/lib/tradovate/trading-day';
 import { respondToTradesRequest, type TradesRouteDeps } from '../src/app/api/tradovate/trades/route';
 import {
+  CAPTURE_MIN_GAP_MS,
   FRESH_MS,
   forgetLivePull,
   respondToLiveRequest,
@@ -2315,6 +2316,7 @@ async function main() {
   await liveLoaderGroup();
   await liveRouteGroup();
   await liveCacheGroup();
+  await liveFlatTransitionGroup();
   await liveClockGroup();
   liveNeverReachesRulesGroup();
 
@@ -3526,6 +3528,9 @@ function liveReaders(data: Scene) {
 
 const LIVE_UUID = 'aaaaaaaa-0000-4000-8000-000000000001';
 
+/** The contract id the loader carries from Stage 4b. Never on the wire. */
+const LIVE_CONTRACT = 2_765_111;
+
 function liveDeps(over: Partial<LiveRouteDeps> = {}): LiveRouteDeps {
   return {
     currentUserId: async () => 'user-1',
@@ -3534,7 +3539,11 @@ function liveDeps(over: Partial<LiveRouteDeps> = {}): LiveRouteDeps {
     now: () => NOW,
     loadPositions: async () => ({
       accounts: [
-        { brokerAccountId: ACCOUNT.id, host: 'live', positions: [{ contractName: 'ESZ6', netPos: 2 }] },
+        {
+          brokerAccountId: ACCOUNT.id,
+          host: 'live',
+          positions: [{ contractId: LIVE_CONTRACT, contractName: 'ESZ6', netPos: 2 }],
+        },
       ],
       asOf: new Date(NOW).toISOString(),
     }),
@@ -3680,8 +3689,16 @@ async function liveRouteGroup() {
     liveDeps({
       loadPositions: async () => ({
         accounts: [
-          { brokerAccountId: 7001, host: 'live', positions: [{ contractName: 'ESZ6', netPos: 1 }] },
-          { brokerAccountId: 7002, host: 'demo', positions: [{ contractName: 'MNQZ6', netPos: -2 }] },
+          {
+            brokerAccountId: 7001,
+            host: 'live',
+            positions: [{ contractId: 1, contractName: 'ESZ6', netPos: 1 }],
+          },
+          {
+            brokerAccountId: 7002,
+            host: 'demo',
+            positions: [{ contractId: 2, contractName: 'MNQZ6', netPos: -2 }],
+          },
         ],
         asOf: new Date(NOW).toISOString(),
       }),
@@ -3805,6 +3822,190 @@ async function liveCacheGroup() {
     c('(3) past the window it pulls again', afterExpiry, 2),
     c('(4) another trader is never served this one\'s answer', otherUser, 2),
     c('(5) the window is ten seconds', FRESH_MS, 10_000),
+  ]);
+
+  forgetLivePull();
+}
+
+// ── REF-113 Stage 4b: a position going flat fires the stop read ────────────
+//
+// The gate on recording a stop history is `BrokerTrade.positionFlat`, and a
+// Position is one row per contract per trading day with a live `netPos` — so
+// re-entering a contract withholds the annotation from every trade already
+// closed on it, and `/order/list` is `depthDays = 0`, so a position still open
+// when the day rolls takes those orders with it. A trader who rolls positions
+// all day is therefore invisible to the 21:30 cron, and this poll is the only
+// thing in the product watching the instant that fixes it.
+//
+// What is asserted here is the TRIGGER and not the capture: `captureStops` is
+// a stub that records the user id, because what it does in production is the
+// import, which has its own suite.
+
+/** One held contract, as the loader reports it. The id is what keys the watch. */
+function heldPosition(contractId: number, netPos: number, contractName: string | null = 'ESZ6') {
+  return { contractId, contractName, netPos };
+}
+
+async function liveFlatTransitionGroup() {
+  let nowMs = NOW;
+  let held: ReturnType<typeof heldPosition>[] = [];
+  let broken = false;
+  let captured: string[] = [];
+  const scheduled: (() => Promise<void>)[] = [];
+  let lastBody: Record<string, unknown> = {};
+
+  const deps = liveDeps({
+    now: () => nowMs,
+    loadPositions: async () => {
+      if (broken) throw new TradovateNotConnectedError('user-1', 'expired');
+      return {
+        // An account with no positions is not an account, which is what the
+        // real loader does — so an empty list is an empty `accounts`.
+        accounts:
+          held.length === 0
+            ? []
+            : [{ brokerAccountId: ACCOUNT.id, host: 'live' as const, positions: [...held] }],
+        asOf: new Date(nowMs).toISOString(),
+      };
+    },
+    captureStops: async (userId) => {
+      captured.push(userId);
+    },
+    // Collected rather than run, which is the structural proof that the
+    // response does not wait for it: `captured` is still empty when
+    // respondToLiveRequest resolves.
+    schedule: (work) => void scheduled.push(work),
+  });
+
+  /**
+   * One poll past the route's hold, then run whatever it scheduled.
+   *
+   * The clock has to move by more than {@link FRESH_MS} or the route serves its
+   * held answer and never pulls — which would make every assertion below pass
+   * for the wrong reason.
+   */
+  const poll = async (extraMs = 0): Promise<number> => {
+    nowMs += FRESH_MS + 1 + extraMs;
+    const response = await respondToLiveRequest(deps);
+    lastBody = (await response.json()) as Record<string, unknown>;
+    const pending = scheduled.splice(0);
+    // Deliberately not awaited inside the response — see `schedule`.
+    const waitingBefore = captured.length;
+    for (const work of pending) await work();
+    return captured.length - waitingBefore;
+  };
+
+  // ── The sequence ──────────────────────────────────────────────────────────
+  forgetLivePull();
+  captured = [];
+
+  held = [heldPosition(1, 2)];
+  const firstPoll = await poll();
+  const bodyKeys = [...allKeys(lastBody)].sort();
+
+  held = [];
+  const afterFlat = await poll();
+
+  held = [heldPosition(2, -1)];
+  const afterOpening = await poll();
+
+  // Flat again, 20 seconds after the capture that answered the first one. The
+  // gap is a minute, so this must be REMEMBERED rather than fired.
+  held = [];
+  const insideGap = await poll();
+
+  // And now past it. Nothing new went flat on this poll — the `pending` flag is
+  // the only reason it fires, which is the whole point of having one.
+  const pastGap = await poll(CAPTURE_MIN_GAP_MS);
+
+  // ── Scaling out is not going flat ─────────────────────────────────────────
+  forgetLivePull();
+  captured = [];
+  held = [heldPosition(1, 3)];
+  await poll();
+  held = [heldPosition(1, 1)];
+  const afterScaling = await poll();
+
+  // ── A broker that refused us knows nothing about what is held ────────────
+  forgetLivePull();
+  captured = [];
+  held = [heldPosition(1, 2)];
+  await poll();
+  broken = true;
+  const whileBroken = await liveLogsOf(() => poll());
+  const firedWhileBroken = captured.length;
+  broken = false;
+  // The contract is gone NOW. If the failed poll had written an empty holding
+  // set, this transition would be invisible.
+  held = [];
+  const afterRecovery = await poll();
+
+  // ── Two unnamed contracts in one account are two keys ────────────────────
+  //
+  // THE REASON `contractId` IS CARRIED AT ALL. `/contract/item` can refuse, and
+  // a key built from `contractName` would collapse these two into one — so
+  // closing the first would leave the key present and the transition unseen.
+  forgetLivePull();
+  captured = [];
+  held = [heldPosition(11, 1, null), heldPosition(12, 1, null)];
+  await poll();
+  held = [heldPosition(12, 1, null)];
+  const afterOneOfTwoUnnamed = await poll();
+
+  // ── No trigger supplied: the route behaves exactly as it did before ──────
+  forgetLivePull();
+  const noTrigger = liveDeps({ now: () => nowMs, captureStops: undefined, schedule: (w) => void scheduled.push(w) });
+  held = [heldPosition(1, 1)];
+  nowMs += FRESH_MS + 1;
+  await respondToLiveRequest(noTrigger);
+  held = [];
+  nowMs += FRESH_MS + 1;
+  const quiet = await respondToLiveRequest(noTrigger);
+  const quietBody = (await quiet.json()) as Record<string, unknown>;
+  const scheduledWithNoTrigger = scheduled.length;
+  scheduled.length = 0;
+
+  group('REF-113: a position going flat is what fires the stop read', [
+    // No previous holdings means no transition. A trader who closed a position
+    // and THEN opened the app is the Sync button's auto-trigger's job.
+    c('(1) the first poll of a session never fires', firstPoll, 0),
+    c('(2) a contract leaving the list fires exactly one capture', afterFlat, 1),
+    c('(3) for the signed-in user and nobody else', captured, ['user-1']),
+    // The set GROWING is not a transition. This is the common case on a polled
+    // route and it must cost nothing.
+    c('(4) opening a position fires nothing', afterOpening, 0),
+    c('(5) a second transition inside the gap does not fire a second capture', insideGap, 0),
+    // AND IS NOT DROPPED. Without the pending flag, contract B's trades would
+    // wait for 21:30 and lose their annotation if anything is held by then.
+    c('(6) but it is remembered, and fires past the gap', pastGap, 1),
+    c('(7) the gap is one minute', CAPTURE_MIN_GAP_MS, 60_000),
+    // Still held, so still not a candidate. netPos moving is not netPos zero.
+    c('(8) scaling out of a position fires nothing', afterScaling, 0),
+    // "We could not ask" is not "nothing is held".
+    c('(9) a failed poll fires nothing', firedWhileBroken, 0),
+    c('(10) and does not forget what was held — the transition survives it',
+      afterRecovery, 1),
+    c('(11) closing one of two UNNAMED contracts is still a transition',
+      afterOneOfTwoUnnamed, 1),
+
+    // THE WIRE IS UNCHANGED. `contractId` exists for the watch above and the
+    // route projects it away; liveRouteGroup's exact-key-set assertion is the
+    // other half of this.
+    c('(12) the contract id never reaches the browser', bodyKeys.includes('contractId'), false),
+    c('(13) and the body is the three-field position line it always was',
+      bodyKeys,
+      ['accountId', 'accounts', 'asOf', 'contractName', 'displayName', 'netPos', 'positions', 'source']),
+
+    // With no `captureStops` the route is read-only again, which is what every
+    // other group in this file drives.
+    c('(14) with no trigger supplied nothing is scheduled', scheduledWithNoTrigger, 0),
+    c('(15) and the answer is still a verified pull', quietBody.source, 'broker_verified'),
+
+    // The failed poll logs its own kind, counts-only, as it did before.
+    c('(16) the failed poll still logs a kind and no identifier', [
+      whileBroken.some((line) => line.includes('did not answer')),
+      whileBroken.some((line) => line.includes('user-1')),
+    ], [true, false]),
   ]);
 
   forgetLivePull();

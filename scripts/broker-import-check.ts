@@ -96,6 +96,8 @@ import { loadTradeRuleContext } from '../src/lib/rules/tradeRuleContext';
 import type { BrokerDayPull } from '../src/lib/rules/brokerDayContext';
 import { readBrokerDayResponse } from '../src/lib/rules/brokerDayContext';
 import { GET as cronImport } from '../src/app/api/cron/tradovate-import/route';
+import { GET as cronOrders } from '../src/app/api/cron/tradovate-orders/route';
+import { ORDERS_LOOKBACK_MS, runStopCapture } from '../src/lib/tradovate/orders-cron';
 import { respondToSyncRequest, type SyncRouteDeps } from '../src/app/api/tradovate/sync/route';
 import { syncUserTrades } from '../src/lib/tradovate/sync';
 import {
@@ -208,6 +210,38 @@ const OTHER_USER = 'b8e4d2e3-0000-4000-8000-000000000002';
 const ON: NodeJS.ProcessEnv = { [IMPORT_FLAG]: '1' } as unknown as NodeJS.ProcessEnv;
 /** The flag OFF, as every deployment is until the owner sets it. */
 const OFF: NodeJS.ProcessEnv = {} as unknown as NodeJS.ProcessEnv;
+
+/**
+ * A `syncUserTrades` result with nothing in it, for the groups that stub the
+ * pull and assert on what the LOOP asked for rather than on what came back.
+ *
+ * Spelled out rather than imported: `NOTHING` in both modules is private, and a
+ * local literal is what makes a group fail to compile when a count is added —
+ * which is the moment to decide whether the new one should be totalled.
+ */
+const EMPTY_COUNTS = Object.freeze({
+  ran: false,
+  offered: 0,
+  imported: 0,
+  linkedAuto: 0,
+  queued: 0,
+  updated: 0,
+  unchanged: 0,
+  skippedOpen: 0,
+  skippedHidden: 0,
+  failed: 0,
+});
+
+const EMPTY_ACCOUNT_COUNTS = Object.freeze({
+  ran: false,
+  accountsSeen: 0,
+  inserted: 0,
+  updated: 0,
+  unchanged: 0,
+  accountsClosed: 0,
+  backfilled: 0,
+  failed: 0,
+});
 
 const SYMBOL = 'MNQZ6';
 const ENTRY = 29834.75;
@@ -4386,12 +4420,19 @@ function stopTriggerGroup() {
   const alerts = source('src/app/api/cron/send-alerts/route.ts');
   const nightly = source('src/lib/tradovate/import-cron.ts');
   const today = source('src/app/api/tradovate/today/route.ts');
+  const ordersCron = source('src/lib/tradovate/orders-cron.ts');
+  const live = source('src/app/api/tradovate/live/route.ts');
+  const vercel = JSON.parse(source('vercel.json')) as {
+    crons: { path: string; schedule: string }[];
+  };
+  const schedulesFor = (routePath: string) =>
+    vercel.crons.filter((entry) => entry.path === routePath).map((entry) => entry.schedule);
 
   // A source-level group, for a claim about calls that are NOT made. The same
   // shape accounts-check.ts uses for the AI routes, and for the same reason: no
   // stub can prove the nightly cron never asks, because the proof is that the
   // parameter is absent from the call.
-  group('only the two triggers that can see the orders ask for them', [
+  group('only the triggers that can see the orders ask for them', [
     c('(1) the Sync button asks', syncRoute.includes('readStops: true'), true),
     c('(2) the end-of-day summary asks', alerts.includes('readStops: true'), true),
     // 03:30 UTC is four and a half hours after the trading day rolled over, so
@@ -4406,6 +4447,165 @@ function stopTriggerGroup() {
       sync.includes('readStops = false'), true),
     // The grep is only worth anything if it could fire.
     c('(6) and the needle is a real one', sync.includes('readStops'), true),
+
+    // ── Stage 4 — the two triggers that do not need the trader ──────────────
+    c('(7) the dedicated cron asks', ordersCron.includes('readStops: true'), true),
+    // THE HOUR IS THE FEATURE. Anything else and the job is either before the
+    // American session closes or after Tradovate has cleared `/order/list`.
+    c('(8) and it is scheduled at 21:30 UTC, once',
+      schedulesFor('/api/cron/tradovate-orders'), ['30 21 * * *']),
+    // It must not land in the nightly import's slot: this is the most
+    // request-hungry scheduled work in the product and its summer margin is
+    // thirty minutes.
+    c('(9) which is not the nightly import\'s slot',
+      schedulesFor('/api/cron/tradovate-import'), ['30 3 * * *']),
+    c('(10) the flat-transition trigger asks too', live.includes('readStops: true'), true),
+    // The live route is polled 240 times an hour. If it captured on every poll
+    // rather than on a transition, that is the shape it would have.
+    c('(11) and it is a transition rather than a poll',
+      live.includes('wentFlat'), true),
+    // A day whose orders are already gone is not worth a second day of pricing,
+    // and a window that cannot cross the roll would say nothing about the hours
+    // just after it. See the constant.
+    c('(12) the cron reaches one day back and no further',
+      ORDERS_LOOKBACK_MS, 24 * 60 * 60_000),
+  ]);
+}
+
+async function ordersCronGroup() {
+  const SECRET = 'cron-secret-for-the-test';
+  const previous = process.env.CRON_SECRET;
+  process.env.CRON_SECRET = SECRET;
+  const previousFlag = process.env[IMPORT_FLAG];
+  delete process.env[IMPORT_FLAG];
+
+  const url = 'https://example.test/api/cron/tradovate-orders';
+  const noAuth = await cronOrders(new Request(url));
+  const wrongAuth = await cronOrders(
+    new Request(url, { headers: { authorization: 'Bearer not-the-secret' } })
+  );
+  const authed = await cronOrders(
+    new Request(url, { headers: { authorization: `Bearer ${SECRET}` } })
+  );
+  const authedBody = await authed.json();
+
+  // With no secret configured at all, fail-closed: a correct-looking header
+  // must not be accepted. This route holds the service-role client.
+  delete process.env.CRON_SECRET;
+  const unconfigured = await cronOrders(
+    new Request(url, { headers: { authorization: 'Bearer ' } })
+  );
+
+  process.env.CRON_SECRET = previous;
+  if (previousFlag === undefined) delete process.env[IMPORT_FLAG];
+  else process.env[IMPORT_FLAG] = previousFlag;
+
+  // The loop with the flag off: it must not even LIST, because `is_trade_source`
+  // is a column 034 adds and `stop_history` one that 038 adds. The admin client
+  // throws, so a read would surface as an exception.
+  const throwingAdmin = {
+    from() {
+      throw new Error('the orders cron must not read anything with the flag off');
+    },
+  } as unknown as SupabaseClient;
+  const { result: offRun } = await captureLogs(() =>
+    runStopCapture({ admin: throwingAdmin, env: OFF })
+  );
+
+  group('the orders cron refuses an unauthorized caller', [
+    c('(1) no Authorization header: 401', noAuth.status, 401),
+    c('(2) wrong secret: 401', wrongAuth.status, 401),
+    c('(3) and the 401 body is empty', await noAuth.text(), ''),
+    c('(4) an unset CRON_SECRET rejects even a well-formed header', unconfigured.status, 401),
+    c('(5) the right secret gets in', authed.status, 200),
+    c('(6) and with the flag off it reports ran=false',
+      [authedBody.ok, authedBody.ran, authedBody.reason], [true, false, 'import_disabled']),
+    c('(7) the loop reads NOTHING with the flag off',
+      [offRun.found, offRun.attempted, offRun.imported], [0, 0, 0]),
+  ]);
+}
+
+async function ordersCronWindowGroup() {
+  // Two connections, both allowlisted, one of which declined to be a trade
+  // source. The pull is a stub, so this group is about WHAT THE LOOP ASKS FOR
+  // rather than about a broker.
+  const admin = {
+    from: (table: string) => {
+      if (table !== 'tradovate_connections') throw new Error(`unexpected table ${table}`);
+      const rows = [
+        { user_id: USER, is_trade_source: true },
+        { user_id: OTHER_USER, is_trade_source: false },
+      ];
+      const q = {
+        select: () => q,
+        eq: () => q,
+        order: () => q,
+        returns: () => q,
+        then: (resolve: (v: { data: unknown; error: unknown }) => unknown) =>
+          Promise.resolve({ data: rows, error: null }).then(resolve),
+      };
+      return q;
+    },
+  } as unknown as SupabaseClient;
+
+  const NOW = Date.parse('2026-10-19T21:30:00.000Z');
+  const asked: Parameters<typeof syncUserTrades>[0][] = [];
+  const stubSync = (async (request) => {
+    asked.push(request);
+    return {
+      counts: {
+        ...EMPTY_COUNTS,
+        ran: true,
+        offered: 1,
+        updated: 1,
+        skippedOpen: 2,
+      },
+      accounts: EMPTY_ACCOUNT_COUNTS,
+      asOf: new Date(NOW).toISOString(),
+      isTradeSource: true,
+      importEnabled: true,
+    };
+  }) as typeof syncUserTrades;
+
+  const { result: run, lines } = await captureLogs(() =>
+    runStopCapture({
+      admin,
+      now: NOW,
+      env: {
+        [IMPORT_FLAG]: '1',
+        TRADOVATE_OAUTH_ALLOWED_USER_IDS: `${USER},${OTHER_USER}`,
+      } as unknown as NodeJS.ProcessEnv,
+      sync: stubSync,
+    })
+  );
+
+  const only = asked[0];
+  const windowStart = only ? new Date(only.windowStartMs).toISOString() : null;
+  const line = lines.find((entry) => entry.includes('[tradovate][orders-cron]')) ?? '';
+
+  group('the orders cron asks for the trading day that is about to roll', [
+    c('(1) both connections found, one attempted', [run.found, run.attempted], [2, 1]),
+    // E7 is read off the row already in hand, so the declining user costs no
+    // pull at all.
+    c('(2) the declining user was skipped before the pull',
+      [run.skippedUsers, asked.length], [1, 1]),
+    c('(3) and it asked for the orders', only?.readStops, true),
+    // 21:30 UTC minus 24h. The trading day began at 22:00 (summer) or 23:00
+    // (winter) UTC the previous calendar day, so this covers all of it — and
+    // reaches 30-90 minutes past the roll, where the honest answer is
+    // 'interday'. See ORDERS_LOOKBACK_MS.
+    c('(4) the window is one day, ending now', windowStart, '2026-10-18T21:30:00.000Z'),
+    c('(5) and it starts BEFORE the earliest possible roll of this trading day',
+      only !== undefined && only.windowStartMs < Date.parse('2026-10-18T22:00:00.000Z'), true),
+    c('(6) the day boundary is UTC midnight, like the nightly job',
+      only ? new Date(only.dayStartMs).toISOString() : null, '2026-10-19T00:00:00.000Z'),
+    c('(7) the counts are totalled', [run.updated, run.skippedOpen], [1, 2]),
+    // THE NUMBER TO WATCH. A trader still holding at 21:30 has every earlier
+    // trade on that contract dropped before an order is read.
+    c('(8) and skippedOpen is in the log line', line.includes('skippedOpen=2'), true),
+    // Counts only. A nightly job over every connected trader is the wrong place
+    // to start writing identifiers into Vercel's logs.
+    c('(9) with no user id in it', line.includes(USER), false),
   ]);
 }
 
@@ -4466,6 +4666,10 @@ async function main() {
   await unplannedScoreGroup();
   proposeFlagsBoundaryGroup();
   stopTriggerGroup();
+
+  // REF-113 Stage 4 — the two triggers that do not need the trader.
+  await ordersCronGroup();
+  await ordersCronWindowGroup();
 
   // J1 — the unplanned row's score (REF-107 Stage 3b follow-up).
   scoringGroup();
