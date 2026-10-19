@@ -375,8 +375,24 @@ function cancellationGroup() {
 
   // A short's stop is above the entry, so DOWN is toward it. This is the
   // comparison family the rule context's header records shipping backwards once.
+  //
+  // THE ORDERS ARE MIRRORED TOO, AND THEY HAVE TO BE. A short is ENTERED with a
+  // sell and PROTECTED with a buy, so reusing the long BRACKET's actions under
+  // `direction: 'short'` describes a state no broker can produce — which is
+  // what this fixture did until the side test started reading `action`, and the
+  // incoherence was invisible precisely because nothing read it.
   const short = derive({
     ...BRACKET,
+    orders: [
+      order(ENTRY_ORDER, { action: 'Sell', ordStatus: 'Filled' }),
+      order(STOP_ORDER, { action: 'Buy' }),
+      order(TARGET_ORDER, { action: 'Buy' }),
+      order(EXIT_ORDER, {
+        action: 'Buy',
+        ordStatus: 'Filled',
+        timestamp: new Date(CLOSED - 1_000).toISOString(),
+      }),
+    ],
     trade: { ...TRADE, direction: 'short', entryPrice: 4510.25 },
     versions: [
       version(90_001, ENTRY_ORDER, { orderType: 'Market' }),
@@ -451,6 +467,225 @@ function severalOrdersGroup() {
       [targetOnly.initialStop, targetOnly.finalStop, targetOnly.direction, targetOnly.movedCount],
       [null, null, null, 0]),
     c('(6) and still reports the target it did find', targetOnly.initialTarget, TARGET),
+  ]);
+}
+
+/**
+ * The side of the entry, in both places that test it. REF-113 follow-up.
+ *
+ * EVERY CASE HERE IS A REGRESSION AND THE FIRST ONE IS THE PRODUCTION ROW. On
+ * 19.10, MNQZ6 long, entry 29704.00: the trade stored `broker_stop_loss =
+ * 29741` — 148 ticks ABOVE the entry, where a long's sell stop fills on arrival
+ * — with `direction = 'widened'`, while the trader's actual stop had gone from
+ * 29671.25 out to 29650 and then up to break-even, which is `'mixed'`. Two
+ * independent defects had to line up to produce it, so the cases below pin them
+ * separately and then together:
+ *
+ *   - ADMISSION. Layers A and B offered candidates without testing `action`, so
+ *     a breakout entry — a BUY stop on a long — was eligible to be the
+ *     protective stop it opened the position against.
+ *   - SELECTION. "The furthest from entry" was `Math.abs`, which has no side,
+ *     so a wrong-side price won whenever it was further out. 37.00 > 32.75.
+ *
+ * AND THE SUITE MISSED IT BY ONE FIXTURE FIELD. `severalOrdersGroup` had always
+ * tested two stops against each other, but both were below the entry, where an
+ * absolute distance gives the right answer for the wrong reason; and every
+ * fixture in this file made the entry a `Market` order, which no side test can
+ * fail. Case (7) is here to keep the fix from over-reaching in the other
+ * direction.
+ */
+function wrongSideGroup() {
+  // ── The production row, as a fixture ──────────────────────────────────────
+  const MNQ_ENTRY = 29_704.0;
+  const PLAN_STOP = 29_671.25; // 131 ticks below the entry
+  const WIDENED = 29_650.0; // the drag that increased risk
+  const GHOST = 29_741.0; // what was stored: 148 ticks ABOVE the entry
+  const MNQ_TARGET = 29_790.0;
+  const SECOND_STOP = STOP_ORDER + 3;
+
+  const mnq: BrokerTrade = {
+    ...TRADE,
+    symbol: 'MNQZ6',
+    entryPrice: MNQ_ENTRY,
+    exitPrice: 29_714.75,
+  };
+
+  // The 19.10 shape, reconstructed: the entry is a BUY STOP whose trigger the
+  // trader walked down twice before it filled (seven versions, three distinct
+  // prices, the rest qty/TIF modifies), beside the real protective stop with
+  // the two drags they remember.
+  const breakoutEntry = derive({
+    trade: mnq,
+    orders: [
+      order(ENTRY_ORDER, { action: 'Buy', ordStatus: 'Filled' }),
+      order(STOP_ORDER),
+      order(TARGET_ORDER),
+      order(EXIT_ORDER, {
+        ordStatus: 'Filled',
+        timestamp: new Date(CLOSED - 1_000).toISOString(),
+      }),
+    ],
+    versions: [
+      version(90_001, ENTRY_ORDER, { orderType: 'Stop', stopPrice: GHOST, orderQty: 1 }),
+      version(90_002, ENTRY_ORDER, { orderType: 'Stop', stopPrice: GHOST, orderQty: 1 }),
+      version(90_003, ENTRY_ORDER, { orderType: 'Stop', stopPrice: 29_720.0, orderQty: 1 }),
+      version(90_004, ENTRY_ORDER, { orderType: 'Stop', stopPrice: 29_720.0, orderQty: 1 }),
+      version(90_005, ENTRY_ORDER, { orderType: 'Stop', stopPrice: MNQ_ENTRY, orderQty: 1 }),
+      version(90_006, ENTRY_ORDER, { orderType: 'Stop', stopPrice: MNQ_ENTRY, orderQty: 1 }),
+      version(90_007, ENTRY_ORDER, { orderType: 'Stop', stopPrice: MNQ_ENTRY, orderQty: 1 }),
+      version(90_010, STOP_ORDER, { orderType: 'Stop', stopPrice: PLAN_STOP, orderQty: 1 }),
+      version(90_011, STOP_ORDER, { orderType: 'Stop', stopPrice: WIDENED, orderQty: 1 }),
+      version(90_012, STOP_ORDER, { orderType: 'Stop', stopPrice: MNQ_ENTRY, orderQty: 1 }),
+      version(90_020, TARGET_ORDER, { orderType: 'Limit', price: MNQ_TARGET, orderQty: 1 }),
+      version(90_021, TARGET_ORDER, { orderType: 'Limit', price: MNQ_TARGET, orderQty: 1 }),
+      version(90_030, EXIT_ORDER, { orderType: 'Market', orderQty: 1 }),
+    ],
+    links: [ENTRY_ORDER, STOP_ORDER, TARGET_ORDER],
+  });
+
+  // The same breakout entry with NO protective stop behind it. The entry order
+  // is a stop order and it is the only one — and the honest answer is the
+  // FINDING, not a verdict derived from the trigger. Decision 2.
+  const breakoutNoStop = derive({
+    trade: mnq,
+    orders: [
+      order(ENTRY_ORDER, { action: 'Buy', ordStatus: 'Filled' }),
+      order(EXIT_ORDER, {
+        ordStatus: 'Filled',
+        timestamp: new Date(CLOSED - 1_000).toISOString(),
+      }),
+    ],
+    versions: [
+      version(90_001, ENTRY_ORDER, { orderType: 'Stop', stopPrice: GHOST, orderQty: 1 }),
+      version(90_002, ENTRY_ORDER, { orderType: 'Stop', stopPrice: MNQ_ENTRY, orderQty: 1 }),
+      version(90_030, EXIT_ORDER, { orderType: 'Market', orderQty: 1 }),
+    ],
+    links: [ENTRY_ORDER],
+  });
+
+  // Two SELL stops — both honestly on the closing side, so the admission test
+  // cannot separate them — and the wrong-side one is FURTHER from the entry.
+  // This is the case `Math.abs` lost and the only one `riskOf` can win.
+  const twoSellStops = derive({
+    trade: mnq,
+    orders: [
+      order(ENTRY_ORDER, { action: 'Buy', ordStatus: 'Filled' }),
+      order(STOP_ORDER),
+      order(SECOND_STOP),
+      order(EXIT_ORDER, { ordStatus: 'Filled' }),
+    ],
+    versions: [
+      version(90_001, ENTRY_ORDER, { orderType: 'Market', orderQty: 1 }),
+      version(90_002, STOP_ORDER, { orderType: 'Stop', stopPrice: PLAN_STOP, orderQty: 1 }),
+      version(90_010, SECOND_STOP, { orderType: 'Stop', stopPrice: GHOST, orderQty: 1 }),
+      version(90_030, EXIT_ORDER, { orderType: 'Market', orderQty: 1 }),
+    ],
+    links: [ENTRY_ORDER, STOP_ORDER, SECOND_STOP, TARGET_ORDER],
+  });
+
+  // EVERY candidate on the wrong side. The partition has nothing good to
+  // prefer, and what it must not do is empty the set — an empty set is `'none'`,
+  // which would tell a coach this trader had no stop at all.
+  const allWrongSide = derive({
+    trade: mnq,
+    orders: [
+      order(ENTRY_ORDER, { action: 'Buy', ordStatus: 'Filled' }),
+      order(STOP_ORDER),
+      order(EXIT_ORDER, { ordStatus: 'Filled' }),
+    ],
+    versions: [
+      version(90_001, ENTRY_ORDER, { orderType: 'Market', orderQty: 1 }),
+      version(90_002, STOP_ORDER, { orderType: 'Stop', stopPrice: GHOST, orderQty: 1 }),
+      version(90_030, EXIT_ORDER, { orderType: 'Market', orderQty: 1 }),
+    ],
+    links: [ENTRY_ORDER, STOP_ORDER],
+  });
+
+  // The target's twin defect, and the fixture OMITS `action` on the entry order
+  // on purpose: the admission test is fail-open on an absent side, so this case
+  // reaches the selection test and nothing else can save it. A resting BUY
+  // LIMIT entry is `isTargetType` and sits at distance zero from the fill it
+  // produced, so under "nearest the entry" it outranked the real target.
+  const limitEntry = derive({
+    trade: mnq,
+    orders: [
+      order(ENTRY_ORDER, { action: undefined, ordStatus: 'Filled' }),
+      order(STOP_ORDER),
+      order(TARGET_ORDER),
+      order(EXIT_ORDER, { ordStatus: 'Filled' }),
+    ],
+    versions: [
+      version(90_001, ENTRY_ORDER, { orderType: 'Limit', price: MNQ_ENTRY, orderQty: 1 }),
+      version(90_002, STOP_ORDER, { orderType: 'Stop', stopPrice: PLAN_STOP, orderQty: 1 }),
+      version(90_020, TARGET_ORDER, { orderType: 'Limit', price: MNQ_TARGET, orderQty: 1 }),
+      version(90_030, EXIT_ORDER, { orderType: 'Market', orderQty: 1 }),
+    ],
+    links: [ENTRY_ORDER, STOP_ORDER, TARGET_ORDER],
+  });
+
+  // ── The mirror, on a short ────────────────────────────────────────────────
+  // A short is entered with a sell and protected with a buy, and its stop is
+  // ABOVE the entry — so every sign in both tests has to invert. Two stops,
+  // the wrong-side one further out, and a sell-stop entry to be excluded.
+  const shortTrade: BrokerTrade = { ...mnq, direction: 'short' };
+  const shortTwoStops = derive({
+    trade: shortTrade,
+    orders: [
+      order(ENTRY_ORDER, { action: 'Sell', ordStatus: 'Filled' }),
+      order(STOP_ORDER, { action: 'Buy' }),
+      order(SECOND_STOP, { action: 'Buy' }),
+      order(EXIT_ORDER, { action: 'Buy', ordStatus: 'Filled' }),
+    ],
+    versions: [
+      // The entry: a SELL stop breakdown trigger, walked UP twice. Admissible
+      // under the old code, and further from the entry than the real stop.
+      version(90_001, ENTRY_ORDER, { orderType: 'Stop', stopPrice: 29_667.0, orderQty: 1 }),
+      version(90_002, ENTRY_ORDER, { orderType: 'Stop', stopPrice: MNQ_ENTRY, orderQty: 1 }),
+      // The real stop, above the entry, and a wrong-side sibling below it.
+      version(90_010, STOP_ORDER, { orderType: 'Stop', stopPrice: 29_736.75, orderQty: 1 }),
+      version(90_020, SECOND_STOP, { orderType: 'Stop', stopPrice: 29_663.0, orderQty: 1 }),
+      version(90_030, EXIT_ORDER, { orderType: 'Market', orderQty: 1 }),
+    ],
+    links: [ENTRY_ORDER, STOP_ORDER, SECOND_STOP],
+  });
+
+  // The measured 19.10 bracket, unchanged, as the guard against over-reach:
+  // STOP_3 (4512.00) is ABOVE the 4510.25 entry because the trader dragged the
+  // stop into profit, which is the healthiest thing in the fixture set. A side
+  // test anchored to the LAST version instead of the first would call it a
+  // defect and throw the number away.
+  const draggedIntoProfit = derive({ ...BRACKET });
+
+  group('the side of the entry: an entry order is never a protective stop', [
+    c('(1) REGRESSION, 19.10 MNQZ6: the stop is the trader\'s, not the breakout trigger',
+      [breakoutEntry.initialStop, breakoutEntry.finalStop, breakoutEntry.direction],
+      [PLAN_STOP, MNQ_ENTRY, 'mixed']),
+    c('(2) and the whole row the production bug wrote is gone',
+      [breakoutEntry.movedCount, breakoutEntry.initialStopSide, breakoutEntry.initialTarget,
+       breakoutEntry.verdict],
+      [2, 'risk', MNQ_TARGET, 'moved']),
+    c('(3) a breakout entry with no protective stop is the FINDING `none`',
+      [breakoutNoStop.verdict, breakoutNoStop.noStopPlaced, breakoutNoStop.initialStop,
+       breakoutNoStop.reason],
+      ['none', true, null, null]),
+    c('(4) two sell stops: the one on the RISK side wins, not the further one',
+      [twoSellStops.initialStop, twoSellStops.initialStopSide],
+      [PLAN_STOP, 'risk']),
+    c('(5) all candidates wrong-side is reported and flagged, NEVER `none`',
+      [allWrongSide.verdict, allWrongSide.initialStop, allWrongSide.initialStopSide,
+       allWrongSide.noStopPlaced],
+      ['kept', GHOST, 'wrong', false]),
+    c('(6) a resting LIMIT ENTRY does not become the target, even with no `action`',
+      [limitEntry.initialTarget, limitEntry.otherTargets],
+      [MNQ_TARGET, [MNQ_ENTRY]]),
+    c('(7) a short mirrors both tests: its stop is ABOVE the entry',
+      [shortTwoStops.initialStop, shortTwoStops.initialStopSide, shortTwoStops.verdict],
+      [29_736.75, 'risk', 'kept']),
+    // The guard. See the comment above `draggedIntoProfit`.
+    c('(8) a stop dragged INTO PROFIT is still a risk-side stop — only v1 is tested',
+      [draggedIntoProfit.initialStop, draggedIntoProfit.finalStop,
+       draggedIntoProfit.initialStopSide],
+      [STOP_1, STOP_3, 'risk']),
   ]);
 }
 
@@ -638,9 +873,14 @@ function layerGroup() {
       [rejected.verdict, rejected.initialStop], ['none', null]),
     c('(4) a bracket stop beats a window candidate that is further out',
       [linkWins.initialStop, linkWins.source], [STOP_1, 'linked']),
-    c('(5) the candidate set is the trade\'s own orders plus its bracket siblings',
+    // THREE AND NOT FOUR, AND THE FOURTH IS THE 19.10 DEFECT. This assertion
+    // used to expect ENTRY_ORDER in the set, which is a `Buy` on a long — an
+    // order that cannot protect the position it opened. The entry is still what
+    // anchors the window and what carries the bracket link; it is simply no
+    // longer offered as something that might be the stop.
+    c('(5) the candidate set is the trade\'s CLOSING-side orders and bracket siblings',
       candidates.map((entry) => entry.orderId).sort((a, b) => a - b),
-      [ENTRY_ORDER, STOP_ORDER, TARGET_ORDER, EXIT_ORDER].sort((a, b) => a - b)),
+      [STOP_ORDER, TARGET_ORDER, EXIT_ORDER].sort((a, b) => a - b)),
     c('(6) and names the layer each came from',
       candidates.filter((entry) => entry.layer === 'strategy').map((entry) => entry.orderId),
       [STOP_ORDER, TARGET_ORDER]),
@@ -838,12 +1078,14 @@ async function readerGroup() {
       [histories.size, histories.get(TRADE.brokerTradeKey)?.verdict], [1, 'moved']),
     c('(2) one /order/list and one /orderStrategy/list, whatever the trade count',
       [stub.countOf('/order/list'), stub.countOf('/orderStrategy/list')], [1, 1]),
-    // Four: the trade's own two orders plus the two bracket siblings. Not one
-    // per TRADE, and not one per version.
+    // Three: the exit order plus the two bracket siblings. Not one per TRADE,
+    // and not one per version. WAS FOUR BEFORE THE SIDE TEST — the entry order
+    // is no longer a candidate, so the run is one request cheaper as well as
+    // one answer more honest. The ceiling spends on fewer orders too.
     c('(3) one /orderVersion/deps per candidate order',
-      stub.countOf('/orderVersion/deps'), 4),
+      stub.countOf('/orderVersion/deps'), 3),
     c('(4) two trades on one bracket: both answered, and the deps are not doubled',
-      [both.size, sharedStub.countOf('/orderVersion/deps')], [2, 4]),
+      [both.size, sharedStub.countOf('/orderVersion/deps')], [2, 3]),
     c('(5) a host with no trades in the run is never asked', liveStub.calls.length, 0),
     c('(6) another account\'s order is never fetched',
       scoped.calls.some((call) => call.masterid === 81_200), false),
@@ -950,6 +1192,7 @@ async function main() {
   measuredCaseGroup();
   cancellationGroup();
   severalOrdersGroup();
+  wrongSideGroup();
   automatedGroup();
   trailingGroup();
   layerGroup();

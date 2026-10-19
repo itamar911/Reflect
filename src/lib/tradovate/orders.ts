@@ -49,8 +49,9 @@
  *
  *   A. **The stop IS the exit.** `BrokerTrade.entryOrderIds` holds every order
  *      that produced a fill in the group — entry and exit both — so if one of
- *      them is a stop order, it is this trade's stop and it is the order that
- *      closed it. Zero inference, zero extra cost, `source: 'linked'`.
+ *      them is a stop order ON THE CLOSING SIDE, it is this trade's stop and it
+ *      is the order that closed it. Zero inference, zero extra cost,
+ *      `source: 'linked'`.
  *
  *   B. **The bracket.** An OCO's orders are siblings under one `orderStrategy`.
  *      The join is only reachable FROM the strategy — the order carries no
@@ -65,6 +66,34 @@
  *
  * LINKAGE UPGRADES CONFIDENCE AND IS NEVER A PRECONDITION. That sentence is from
  * the investigation and it is why C exists at all.
+ *
+ *
+ * AND EVERY LAYER TESTS THE SIDE, WHICH IT DID NOT AT FIRST
+ * --------------------------------------------------------
+ *
+ * A protective order is on the side that CLOSES the position, and an entry
+ * order is not a protective order however it is typed. Layers A and B tested no
+ * side for the first three stages of this ticket, and the cost was measured in
+ * production on 19.10: a long whose entry was a BUY STOP had that entry
+ * attributed to it as its protective stop, stored `broker_stop_loss` 148 ticks
+ * ABOVE the entry, and described the trader walking the breakout trigger down to
+ * the market as a stop being `'widened'`.
+ *
+ * So the side is tested in two independent places, because one test was never
+ * enough for a number this load-bearing:
+ *
+ *   1. **At admission**, per order, off `TradovateOrder.action` — in
+ *      {@link candidateOrders}. FAIL-OPEN in A and B, fail-closed in C; the
+ *      asymmetry is argued where it is written.
+ *   2. **At selection**, per price, off `BrokerTrade.direction` — {@link riskOf}
+ *      for stops and `gainOf` for targets. This one needs no field to be
+ *      present, and it is what catches a wrong-side candidate whose `action`
+ *      is honestly a `Sell` — a second stop order, say, or a cancel/replace
+ *      leftover, neither of which (1) can see.
+ *
+ * Both are PARTITIONS and neither is a filter. A side test that could empty the
+ * candidate set could manufacture a `'none'`, and `'none'` is the one wrong
+ * answer this module must never give.
  *
  *
  * THE FOUR WAYS THIS ANSWERS "I DO NOT KNOW", AND WHY TWO OF THEM ARE NOT STORED
@@ -172,6 +201,33 @@ export interface StopHistory {
   reason: 'interday' | 'ambiguous' | 'capped' | 'failed' | null;
   /** The stop as first submitted. This is what `broker_stop_loss` holds. */
   initialStop: number | null;
+  /**
+   * Which side of the entry {@link initialStop} sat on. REF-113 follow-up.
+   *
+   *   `'risk'`  below the entry for a long, above it for a short — the only
+   *             side a protective stop can be SUBMITTED on, because the other
+   *             one fills the instant it reaches the book.
+   *   `'wrong'` the other side, which is not a thing a broker can really do
+   *             and therefore says this number is not a protective stop.
+   *   `null`    there is no stop to have a side.
+   *
+   * MEASURED, NOT HYPOTHETICAL: on 19.10 a long stored an initial stop 148
+   * ticks above its entry, and nothing in the shape said so. The selection now
+   * prefers the risk side (see the reduce in {@link deriveStopHistory}), so
+   * `'wrong'` survives only when EVERY candidate was on the wrong side — which
+   * is a statement about our attribution, not about the trader.
+   *
+   * SO ANY READER THAT PUTS THIS NUMBER IN FRONT OF A TRADER MUST BRANCH ON
+   * THIS FIELD. Stage 5 shows `broker_stop_loss` beside the planned stop; a
+   * `'wrong'` is the signal to show nothing rather than to show a number that
+   * disagrees with the trade it describes.
+   *
+   * ONLY THE FIRST VERSION IS TESTED, AND THAT IS NOT AN OVERSIGHT. A long's
+   * stop dragged into profit ends ABOVE the entry legitimately — the measured
+   * 19.10 bracket does exactly that — so a side test anchored to
+   * {@link finalStop} would call the healthiest case a defect.
+   */
+  initialStopSide: 'risk' | 'wrong' | null;
   /** The stop as last submitted. In the JSON only — no column holds it. */
   finalStop: number | null;
   /** The target nearest the entry. This is what `broker_take_profit` holds. */
@@ -379,6 +435,13 @@ export function candidateOrders(params: {
   const own = ownOrders(trade, evidence.orders);
   if (own.length === 0) return [];
 
+  // EVERY OWN ORDER, INCLUDING THE ENTRY, AND THAT IS NOT WHAT `protective`
+  // BELOW FILTERS. `own` and `ownIds` answer three questions that need the
+  // entry order specifically — the window's anchor, the contract, and WHICH
+  // STRATEGY THIS TRADE BELONGS TO. In a bracket the entry order is the leg
+  // that carries the `orderStrategy` link, so narrowing this set would cut
+  // layer B off from the bracket it exists to walk. The side test gates what is
+  // OFFERED as a candidate, never what is known about the trade.
   const ownIds = new Set(own.map((order) => order.id));
   const candidates: Candidate[] = [];
   const seen = new Set<number>();
@@ -389,10 +452,44 @@ export function candidateOrders(params: {
     candidates.push({ orderId, layer });
   };
 
+  const closes = closingAction(trade.direction);
+
+  /**
+   * Whether an order is on the side that could protect this position.
+   *
+   * REF-113 FOLLOW-UP, AND THE DEFECT IT CLOSES WAS MEASURED IN PRODUCTION on
+   * 19.10: a long whose ENTRY was a buy stop had that entry order attributed to
+   * it as the protective stop, because `isStopType('Stop')` is true of a
+   * breakout trigger and layers A and B tested no side at all. The trade's
+   * stored `broker_stop_loss` was then the entry trigger's first version —
+   * 148 ticks ABOVE the entry, a price at which a long's sell stop would have
+   * filled instantly — and its `direction` described the trader walking that
+   * trigger down to the market rather than anything they did to their stop.
+   *
+   * The rule was already stated twice and enforced in neither place that
+   * decides: {@link TradovateOrder.action}'s own doc comment says "the
+   * protective order of a long is a `Sell`", and layer C has tested it since
+   * the first commit. This lifts it to A and B, where a LINKED order — the
+   * strongest evidence this module has — was being trusted about a question it
+   * disqualifies itself from.
+   *
+   * FAIL-OPEN ON AN ABSENT `action`, AND THAT ASYMMETRY WITH LAYER C IS THE
+   * POINT. `action` is optional on the entity. Rejecting an order that does not
+   * state a side would turn a real stop into no candidate, which reads as
+   * `'none'` — "the trader traded without a stop" — and that is the one wrong
+   * answer this module must never give (see the header on {@link isStopType}).
+   * Layer C rejects an absent side because C is an INFERENCE and a missing
+   * field there means the window cannot argue its case; A and B hold a FACT
+   * about linkage and only lose the side of it.
+   */
+  const protective = (order: TradovateOrder): boolean =>
+    order.action === undefined || order.action === closes;
+
   // ── Layer A ───────────────────────────────────────────────────────────────
   // Every order that produced a fill in this group. One of them may BE the
-  // stop, in which case nothing has to be inferred at all.
-  for (const order of own) offer(order.id, 'own');
+  // stop, in which case nothing has to be inferred at all. The entry order is
+  // in here too and is exactly what `protective` is keeping out.
+  for (const order of own) if (protective(order)) offer(order.id, 'own');
 
   // ── Layer B ───────────────────────────────────────────────────────────────
   // The siblings of any own order that belongs to a strategy. Walked through
@@ -405,7 +502,11 @@ export function candidateOrders(params: {
   if (strategies.size > 0) {
     for (const [orderId, strategyId] of evidence.strategyByOrder) {
       if (!strategies.has(strategyId)) continue;
-      if (!evidence.orders.has(orderId)) continue;
+      const order = evidence.orders.get(orderId);
+      if (order === undefined) continue;
+      // An OSO's entry leg is a sibling of its own bracket, so the side test
+      // belongs here for the same reason it belongs in A.
+      if (!protective(order)) continue;
       offer(orderId, ownIds.has(orderId) ? 'own' : 'strategy');
     }
   }
@@ -418,7 +519,6 @@ export function candidateOrders(params: {
   if (anchor !== null && contractId !== null) {
     const from = anchor - WINDOW_TOLERANCE_MS;
     const until = trade.closedAtMs + WINDOW_TOLERANCE_MS;
-    const closes = closingAction(trade.direction);
 
     for (const order of evidence.orders.values()) {
       if (ownIds.has(order.id)) continue;
@@ -426,6 +526,8 @@ export function candidateOrders(params: {
       if (order.contractId !== contractId) continue;
       // A protective order sits on the side that CLOSES the position. An order
       // on the entry side inside the same window is a scale-in, not a stop.
+      // STRICTER THAN `protective` ON PURPOSE: an absent side is fatal to an
+      // inference and survivable for a link. See `protective` above.
       if (order.action !== closes) continue;
       const submitted = instant(order.timestamp);
       if (submitted === null || submitted < from || submitted > until) continue;
@@ -516,6 +618,7 @@ function unknownHistory(
     verdict: 'unknown',
     reason,
     initialStop: null,
+    initialStopSide: null,
     finalStop: null,
     initialTarget: null,
     movedCount: 0,
@@ -629,11 +732,12 @@ export function deriveStopHistory(params: {
       return unknownHistory(transient, { ...capped, ...sharedWith });
     }
 
-    const chosenTarget = nearestTarget(targetOrders, trade.entryPrice);
+    const chosenTarget = nearestTarget(targetOrders, trade);
     return {
       verdict: 'none',
       reason: null,
       initialStop: null,
+      initialStopSide: null,
       finalStop: null,
       initialTarget: chosenTarget.initialTarget,
       movedCount: 0,
@@ -649,17 +753,34 @@ export function deriveStopHistory(params: {
     };
   }
 
-  // ── The stop: the FURTHEST from entry, deliberately ───────────────────────
+  // ── The stop: the MOST RISK, which is not the same as the furthest ────────
   // A stop is a worst case. A long of three contracts stopped at 99 for one and
   // 98 for two risked 98, and taking the nearer number would flatter both the
   // risk and the R:R the planning block compares against. The mirror decision
   // for targets is below and is the opposite on purpose: a target is an
   // expectation, so the nearest is "my target" (Imri, 19.10).
-  const stop = stopOrders.reduce((furthest, order) => {
-    const a = Math.abs(stopPrices(order.versions)[0] - trade.entryPrice);
-    const b = Math.abs(stopPrices(furthest.versions)[0] - trade.entryPrice);
-    return a > b ? order : furthest;
-  });
+  //
+  // THIS WAS `Math.abs` AND THAT IS THE SECOND HALF OF THE 19.10 DEFECT. An
+  // absolute distance has no side, so a price on the WRONG side of the entry
+  // won whenever it happened to be further away — and the production row that
+  // started this was exactly that: a candidate 148 ticks above a long's entry
+  // beat the real stop 131 ticks below it, 37.00 > 32.75, and the trade stored
+  // a "stop" it could never have had. Note how narrowly the old test suite
+  // missed it: its two-stop case had BOTH stops below the entry, where an
+  // absolute distance gives the right answer for the wrong reason.
+  //
+  // A PARTITION AND NOT A FILTER, and that is the fail-safe. Discarding
+  // wrong-side candidates outright would leave `stopOrders` empty on a trade
+  // where every candidate is wrong-side, and an empty list is `'none'` — "the
+  // trader traded without a stop", the one wrong answer this module must never
+  // give. So the risk side merely OUTRANKS the wrong side: as long as one real
+  // stop is present it wins outright, and when none is, the best of a bad set
+  // is still reported and {@link StopHistory.initialStopSide} says it is bad.
+  const onRiskSide = stopOrders.filter((order) => riskOf(order, trade) > 0);
+  const ranked = onRiskSide.length > 0 ? onRiskSide : stopOrders;
+  const stop = ranked.reduce((worst, order) =>
+    riskOf(order, trade) > riskOf(worst, trade) ? order : worst
+  );
 
   const prices = stopPrices(stop.versions);
   const steps = countMoves({
@@ -669,12 +790,13 @@ export function deriveStopHistory(params: {
     automated: evidence.automated,
   });
 
-  const chosenTarget = nearestTarget(targetOrders, trade.entryPrice);
+  const chosenTarget = nearestTarget(targetOrders, trade);
 
   return {
     verdict: steps.movedCount > 0 ? 'moved' : 'kept',
     reason: null,
     initialStop: prices[0],
+    initialStopSide: riskOf(stop, trade) > 0 ? 'risk' : 'wrong',
     finalStop: prices[prices.length - 1],
     initialTarget: chosenTarget.initialTarget,
     movedCount: steps.movedCount,
@@ -709,6 +831,30 @@ function stopPrices(versions: readonly TradovateOrderVersion[]): number[] {
   return prices;
 }
 
+/**
+ * The risk this stop's FIRST version states, signed. Positive is a real stop.
+ *
+ * The number "furthest from entry" was always reaching for and never had: a
+ * long risks `entry - stop` and a short risks `stop - entry`, so one subtraction
+ * read off {@link BrokerTrade.direction} both ORDERS the candidates and TELLS
+ * THE SIDE, and a negative value is a candidate that cannot be a protective
+ * stop at all. Read off the trade and never from whether the price happens to
+ * sit above or below the entry — the same rule {@link countMoves} states at
+ * more length, and for the same reason.
+ *
+ * THE FIRST VERSION AND NOTHING ELSE. A stop dragged into profit ends on the
+ * wrong side legitimately, which is a healthy trade and not a defect; what
+ * cannot happen is a protective stop SUBMITTED there, because the book would
+ * have filled it on arrival.
+ *
+ * Safe to index: every caller has already filtered to orders with at least one
+ * stated stop price (`stopPrices(...).length > 0` in {@link deriveStopHistory}).
+ */
+function riskOf(order: ProtectiveOrder, trade: BrokerTrade): number {
+  const first = stopPrices(order.versions)[0];
+  return trade.direction === 'long' ? trade.entryPrice - first : first - trade.entryPrice;
+}
+
 /** A target's price: the limit price of its first version. */
 function targetPrice(versions: readonly TradovateOrderVersion[]): number | null {
   for (const version of versions) {
@@ -718,15 +864,47 @@ function targetPrice(versions: readonly TradovateOrderVersion[]): number | null 
   return null;
 }
 
-/** The target nearest the entry, and the ones that lost. Decision 3. */
+/**
+ * The target nearest the entry, and the ones that lost. Decision 3.
+ *
+ * SIDED SINCE THE REF-113 FOLLOW-UP, and this is the stop defect's twin rather
+ * than a precaution. A long's target is ABOVE its entry, and "nearest the
+ * entry" without a side is won by whatever sits closest to it on either — so a
+ * resting BUY LIMIT entry order, which is `isTargetType` and is at distance
+ * zero from the fill it produced, outranked every real target in the bracket.
+ * Measured: `broker_take_profit` came back as the entry price itself with the
+ * planned target demoted into {@link StopHistory.otherTargets}.
+ *
+ * The side test in {@link candidateOrders} keeps that particular order out
+ * whenever Tradovate states its `action`, so this is the second of two locks on
+ * one door — deliberately, because that test is fail-open on an absent side and
+ * this one needs no field to be present to work.
+ *
+ * WITHIN A SIDE, STILL THE NEAREST, AND STILL BY ABSOLUTE DISTANCE. The
+ * ordering is what `otherTargets` means by "nearest first", and keeping it
+ * absolute is what makes the wrong-side group fall back to exactly the old
+ * behaviour instead of to a new one.
+ */
 function nearestTarget(
   orders: readonly ProtectiveOrder[],
-  entryPrice: number
+  trade: BrokerTrade
 ): { initialTarget: number | null; otherTargets: number[]; source: 'linked' | 'inferred' } {
+  const { entryPrice } = trade;
+  /** What reaching this target would have paid. Negative is the wrong side. */
+  const gainOf = (price: number): number =>
+    trade.direction === 'long' ? price - entryPrice : entryPrice - price;
+
   const priced = orders
     .map((order) => ({ price: targetPrice(order.versions), layer: order.layer }))
     .filter((entry): entry is { price: number; layer: Layer } => entry.price !== null)
-    .sort((a, b) => Math.abs(a.price - entryPrice) - Math.abs(b.price - entryPrice));
+    .sort(
+      (a, b) =>
+        // The side first, as a partition and not as a weight — a wrong-side
+        // target never outranks a real one however close it sits. Then the
+        // nearest within the group.
+        Number(gainOf(b.price) > 0) - Number(gainOf(a.price) > 0) ||
+        Math.abs(a.price - entryPrice) - Math.abs(b.price - entryPrice)
+    );
 
   if (priced.length === 0) return { initialTarget: null, otherTargets: [], source: 'linked' };
 

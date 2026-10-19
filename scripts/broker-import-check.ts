@@ -3680,6 +3680,9 @@ const MOVED_HISTORY: StopHistory = {
   verdict: 'moved',
   reason: null,
   initialStop: 4504,
+  // Below the 4510.25 entry, which is the only side a long's stop is submitted
+  // on. The 4512 final is above it and is the legitimate drag into profit.
+  initialStopSide: 'risk',
   finalStop: 4512,
   initialTarget: 4525,
   movedCount: 2,
