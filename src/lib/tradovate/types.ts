@@ -264,7 +264,27 @@ export interface TradovateFill {
   qty: number;
   price: number;
   active?: boolean;
-  finallyPaired?: boolean;
+  /**
+   * A NUMBER, NOT A BOOLEAN — measured, 20.10 (REF-117 Stage 0).
+   *
+   * It was declared `boolean?` here from the first commit, on the strength of
+   * the name and of nothing else: no reader has ever existed, so nothing
+   * exercised the claim. `probe?mode=fills` surveyed it on every fill of a real
+   * day and reported `number` on all of them.
+   *
+   * What the number MEANS is still unmeasured — plausibly the matched quantity,
+   * plausibly a flag the API serialises as 0/1 — so nothing reads it yet and
+   * this is typed for the wire rather than for the guess. If it is the matched
+   * quantity it is a cheaper way to find a position's open tail than the netPos
+   * walk in ./cycles.ts, which is why REF-117 §13 keeps it on the list.
+   *
+   * The correction matters beyond tidiness: a `boolean?` declaration invites
+   * `if (fill.finallyPaired)`, which is true for every non-zero number and
+   * false for `0` — so a quantity of zero and an absent field would read alike,
+   * and a quantity of two would read as "yes". Typed honestly, that line does
+   * not compile.
+   */
+  finallyPaired?: number;
 }
 
 /**
