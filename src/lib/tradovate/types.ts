@@ -342,6 +342,53 @@ export interface TradovatePosition {
 }
 
 /**
+ * The account's cash-balance snapshot. POST /v1/cashBalance/getcashbalancesnapshot,
+ * body `{ accountId }` (REF-108 Stage 4a).
+ *
+ *
+ * TWO FIELDS DECLARED OUT OF EIGHTEEN, AND THE OMISSION IS THE DESIGN
+ * -------------------------------------------------------------------
+ *
+ * The endpoint also returns `netLiq`, `totalCashValue`, `totalPnL`,
+ * `realizedPnL`, `weekRealizedPnL`, `initialMargin`, `maintenanceMargin`,
+ * `netLiqSOD`, `totalCashValueSOD`, `cashUSD`, `cashSODUSD`, `fullInitialMargin`,
+ * `fullInitialMarginSOD`, `autoLiqLevel`, `currencyCashAvailWithdrawalUSD` and
+ * `withdrawalRejectReason` — every one of them documented, so leaving them out
+ * is NOT this file's "do not widen from guesswork" rule. It is a separate and
+ * stronger one:
+ *
+ * **`netLiq` and `totalCashValue` ARE THE TRADER'S ACCOUNT BALANCE.** A field
+ * that is not declared cannot be read by accident, cannot be spread into a
+ * response, and cannot reach a log through an error message. REF-110 §F had to
+ * remove a leak of account NAMES retrospectively; this is the same class of
+ * value and considerably more sensitive. Permission to call one endpoint is not
+ * permission to carry out whatever it happens to return.
+ *
+ * So if a later ticket needs one of those figures, it declares that field and
+ * argues for it in the same change. Adding them "for completeness" is how a
+ * balance ends up on a wire nobody meant to put it on.
+ *
+ * `openPnL` IS OPTIONAL BECAUSE THE DOCUMENTATION SAYS SO. Every field on this
+ * entity is `double, Optional`, and the documentation gives NO definition for
+ * any of them — in particular it does not say whether `openPnL` is net of
+ * commissions, and ./fills.ts §A1 already records the same silence about
+ * `realizedPnL`. Read it through a finiteness check and treat absence as "no
+ * figure", NEVER as zero: see `readOpenPnl` in ./positions.ts, where that one
+ * distinction is the whole function.
+ *
+ * `errorText` IS WHY A TYPE CHECK ALONE CANNOT DO IT. This endpoint can answer
+ * 200 with `errorText` set and no figures at all — a shape no `/list` read in
+ * this integration has.
+ *   https://partner.tradovate.com/api/rest-api-endpoints/accounting/get-cash-balance-snapshot
+ */
+export interface TradovateCashBalanceSnapshot {
+  /** Unrealised P&L on open positions. ACCOUNT-LEVEL — there is no per-position figure. */
+  openPnL?: number;
+  /** Set when the call answered 200 and carries no figures. See the header. */
+  errorText?: string;
+}
+
+/**
  * A trading account. GET /v1/account/list.
  *
  * The list is everything in the user's visible scope, which for a funded or

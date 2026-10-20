@@ -7,21 +7,33 @@
  * do today" but "what are you in, right now, and in which portfolio".
  *
  *
- * THERE IS NO P&L IN THIS RESPONSE, AND THE SUITE ENFORCES IT
- * -----------------------------------------------------------
+ * ONE P&L FIELD, THE BROKER'S, AND THE SUITE STILL ENFORCES THE REST
+ * ------------------------------------------------------------------
  *
- * REF-108 asked for an unrealised figure in dollars and we cannot produce one:
- * a mark price needs the Market Data feed, which is **Denied in our OAuth
- * registration** and needs CME sub-vendor registration Reflect does not have.
- * See the header on lib/tradovate/positions.ts for why the plausible fallback
- * — pricing against the trader's own last fill — was rejected rather than
- * labelled.
+ * REF-108 asked for an unrealised figure in dollars and we still cannot
+ * COMPUTE one: a mark price needs the Market Data feed, which is **Denied in
+ * our OAuth registration** and needs CME sub-vendor registration Reflect does
+ * not have. See the header on lib/tradovate/positions.ts for why the plausible
+ * fallback — pricing against the trader's own last fill — was rejected rather
+ * than labelled.
  *
- * So the body carries no price, no average entry and no P&L field of any kind,
- * and `scripts/tradovate-today-check.ts` asserts that over the EXACT KEY SET
- * rather than by spot-checking a few names. A later change that adds one has
- * to delete that assertion on purpose — the same device /today uses to keep
- * trade rows out of the rule engine's route.
+ * Stage 4a adds a figure that is not ours. `/cashBalance/getcashbalancesnapshot`
+ * returns an `openPnL` the broker computes, measured 19.10 with Market Data
+ * still denied, and {@link LiveAccountLine.openPnl} carries exactly that one
+ * field — **per account, because that is the only shape the endpoint offers.**
+ * The body still carries no price, no average entry and no arithmetic of ours.
+ *
+ * `scripts/tradovate-today-check.ts` asserts the EXACT KEY SET rather than
+ * spot-checking a few names, in two places, so this stage had to edit both on
+ * purpose — which is the whole point of pinning a key set, and the same device
+ * /today uses to keep trade rows out of the rule engine's route. The assertions
+ * that did NOT change are the ones that matter now: no price-shaped key beyond
+ * this one, and **no `netLiq` or `totalCashValue`** — the same snapshot body
+ * carries the trader's account balance, and three independent things keep it
+ * off this wire (lib/tradovate/types.ts declares neither, `readOpenPnl` returns
+ * a number rather than an object, and the projection below names one field).
+ *
+ * NOTHING RENDERS IT YET. Stage 4a ships alone, exactly as Stage 1 did.
  *
  *
  * THE CACHE IS NOT AN OPTIMISATION
@@ -131,14 +143,14 @@ import {
   describeDayPullFailureKind,
 } from '@/lib/rules/brokerDayContext';
 import { isUserAllowed } from '@/lib/tradovate/allowlist';
-import { tradovateGet } from '@/lib/tradovate/client';
+import { tradovateGet, tradovatePost } from '@/lib/tradovate/client';
 import { getUserTradingApi } from '@/lib/tradovate/connections';
-import type { TradovateReader } from '@/lib/tradovate/fills';
 import { isImportEnabled } from '@/lib/tradovate/import';
 import { ORDERS_LOOKBACK_MS } from '@/lib/tradovate/orders-cron';
 import {
   loadOpenPositions,
   type HostAccountPositions,
+  type LiveReader,
   type OpenPositionsPull,
 } from '@/lib/tradovate/positions';
 import { redactSecrets } from '@/lib/tradovate/redact';
@@ -201,6 +213,21 @@ export interface LiveAccountLine {
   /** `nickname ?? display_name`, resolved under the trader's own RLS. */
   displayName: string;
   positions: LivePositionLine[];
+  /**
+   * The broker's own unrealised P&L for this portfolio, in dollars, or null
+   * (REF-108 Stage 4a).
+   *
+   * ON THE ACCOUNT LINE AND NOT ON A POSITION, because that is the only shape
+   * the broker offers: `/cashBalance/getcashbalancesnapshot` takes an
+   * `accountId` and answers with an account-level aggregate, so a portfolio
+   * holding ES and NQ has ONE figure covering both. See the header on
+   * lib/tradovate/positions.ts.
+   *
+   * **`null` IS NOT `0`.** Break-even is an answer; "we could not get one" is
+   * not. Nothing in this stage renders either — Stage 4b decides what a null
+   * looks like, and the floor it starts from is the line without a number.
+   */
+  openPnl: number | null;
 }
 
 /**
@@ -284,6 +311,16 @@ export function forgetLivePull(): void {
  * exactly as much of a deadline as one on a named portfolio — the trade rows are
  * written either way. Reading the response would have made the trigger depend
  * on whether a portfolio card exists.
+ *
+ * **AND FROM `positions` ALONE — `openPnl` IS NOT READ HERE AND MUST NOT BE
+ * (Stage 4a).** The pull now carries the broker's open figure beside the
+ * holdings, and it is a tempting second signal: a figure that went to zero
+ * looks like a position that closed. It is not one. `readOpenPnl` answers null
+ * for a refused snapshot and zero for a genuine break-even, so letting either
+ * one into this set would fabricate a flat transition — which fires a full
+ * import through `after()` (REF-113 Stage 4b) on a trader who never left their
+ * position. The holdings are decided by `/position/list` and by nothing else,
+ * exactly as they were before this stage.
  */
 function heldKeys(accounts: readonly HostAccountPositions[]): Set<string> {
   const keys = new Set<string>();
@@ -422,6 +459,15 @@ async function buildPull(userId: string, deps: LiveRouteDeps): Promise<BrokerLiv
           netPos: position.netPos,
           ...(position.openedAtMs === undefined ? {} : { openedAtMs: position.openedAtMs }),
         })),
+        // ONE FIELD OFF THE SNAPSHOT, NAMED, FOR THE SAME REASON (Stage 4a).
+        // The snapshot body also carries `netLiq` and `totalCashValue` — the
+        // trader's account BALANCE — and the defence against those reaching the
+        // browser is in three independent places: they are not declared on
+        // `TradovateCashBalanceSnapshot`, `readOpenPnl` returns a number rather
+        // than an object, and this line names the one field instead of
+        // spreading. scripts/tradovate-today-check.ts asserts the response's
+        // exact key set over all three.
+        openPnl: account.openPnl,
       });
     }
 
@@ -544,8 +590,16 @@ export async function GET() {
       // invariant lib/tradovate/client.ts enforces in the type system. Both
       // are built because both are asked: `environment` is the token's mint
       // server and says nothing about where the trader's accounts live.
-      const readerFor = (apiUrl: string): TradovateReader => ({
+      //
+      // A `LiveReader` rather than a `TradovateReader` from Stage 4a: the
+      // cash-balance snapshot is a POST. The extra verb is declared on the
+      // loader's own interface rather than on `TradovateReader`, so this is the
+      // only place in the product that supplies one — see the note on
+      // `LiveReader` in lib/tradovate/positions.ts for why the shared type did
+      // not move.
+      const readerFor = (apiUrl: string): LiveReader => ({
         get: (path, query) => tradovateGet(path, query, { accessToken: api.accessToken, apiUrl }),
+        post: (path, body) => tradovatePost(path, body, { accessToken: api.accessToken, apiUrl }),
       });
 
       return loadOpenPositions({

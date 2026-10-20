@@ -4,15 +4,15 @@
  * SERVER ONLY. Driven from GET /api/tradovate/live and nothing else.
  *
  *
- * THERE IS NO PRICE IN THIS FILE, AND THAT IS THE DESIGN
- * ------------------------------------------------------
+ * THERE IS STILL NO PRICE IN THIS FILE — THE FIGURE IS THE BROKER'S
+ * -----------------------------------------------------------------
  *
- * REF-108 asked for an unrealised P&L in dollars. We cannot produce one: a
+ * REF-108 asked for an unrealised P&L in dollars and we cannot COMPUTE one: a
  * mark price needs the Market Data feed, **Market Data is Denied in our OAuth
  * registration**, and the feed itself needs CME sub-vendor registration
  * Reflect does not have (./types.ts:66, ./api-hosts.ts:181). That is an
  * entitlement and not an endpoint we have not found, so no REST path and no
- * WebSocket changes it.
+ * WebSocket changes it. Nothing below multiplies anything by anything.
  *
  * The investigation weighed the three fallbacks and rejected two. The one that
  * looks reasonable — price the position against the trader's own last fill —
@@ -23,24 +23,36 @@
  * fifteen seconds from an event that happened an hour ago looks live and is
  * not**, on a screen whose entire purpose is to say what is happening now.
  *
- * So this module answers the question it can answer honestly — WHAT ARE YOU
- * HOLDING — and carries no price, no average entry and no P&L field of any
- * kind. The regression suite asserts the absence over the route's exact key
- * set, so a later change cannot add one by accident.
+ * WHAT STAGE 4A ADDS IS NOT THAT. `/cashBalance/getcashbalancesnapshot` returns
+ * an `openPnL` the BROKER computes, measured 19.10 with Market Data still
+ * denied, and {@link readOpenPnl} reads that one field and no other. So this
+ * module still carries no price, no average entry and no arithmetic of ours —
+ * it carries one number somebody else computed, per account.
  *
- * If `--live` (REF-108 Stage 0) finds that the broker computes an open figure
- * per account, that figure arrives here as one more field and still needs no
- * mark price from us. Until it is measured, there is nothing to add.
+ * **ACCOUNT-LEVEL, NOT PER POSITION, AND THERE IS NO WAY TO ASK OTHERWISE.**
+ * The request body takes `accountId` and nothing else. That is why `openPnl`
+ * sits on {@link HostAccountPositions} and not on {@link LivePosition}: an
+ * account holding ES and NQ has ONE figure covering both, and a copy of it on
+ * each position would be read as two.
  *
  *
  * WHAT IT COSTS, AND WHY THAT IS THE CONSTRAINT
  * ---------------------------------------------
  *
  * Per poll: `/account/list` + `/position/list` PER HOST — four requests — plus
- * one `/contract/item` per open contract, warm-cached by host-qualified id.
- * The pricing chain is NOT walked: `loadContractUnits` would add
+ * one `/contract/item` per open contract, warm-cached by host-qualified id,
+ * plus **one snapshot per account that is actually holding something**. The
+ * pricing chain is still NOT walked: `loadContractUnits` would add
  * `/contractMaturity/item` and `/product/item` to reach a `valuePerPoint` that
  * nothing here multiplies by.
+ *
+ * **THE SNAPSHOT IS ASKED ONLY AFTER WE KNOW WHO IS HOLDING, AND THAT ORDER IS
+ * THE RATE LIMIT.** A flat account is never asked, so a flat poll costs exactly
+ * what it cost before Stage 4a — zero extra requests, which is most of the day
+ * for most traders. One account in a position is four requests becoming five.
+ * Issuing the snapshot concurrently with `/position/list` to save a round trip
+ * would ask for every account the trader has, which is the one shape that turns
+ * a prop trader with forty accounts into forty requests every poll.
  *
  * Four requests sounds free and is not, because this runs on a timer. The
  * vendor FAQ is explicit that there is no hard cap and that limits vary by
@@ -72,7 +84,30 @@
 
 import { discoverHostAccounts, type TradovateReader } from './fills';
 import type { TradovateEnvironment } from './hosts';
-import type { TradovateContract, TradovatePosition } from './types';
+import type {
+  TradovateCashBalanceSnapshot,
+  TradovateContract,
+  TradovatePosition,
+} from './types';
+
+/**
+ * A {@link TradovateReader} that can also POST a read (REF-108 Stage 4a).
+ *
+ * DECLARED HERE RATHER THAN WIDENING `TradovateReader`, and that is a decision
+ * about twelve call sites. The cash-balance snapshot is the only POST read in
+ * the integration, and `TradovateReader` is implemented or consumed by the three
+ * routes, ./sync.ts, ./orders.ts (four places), this module, ./index.ts and the
+ * regression suite. Adding a REQUIRED `post` breaks all of them for one caller;
+ * adding an OPTIONAL one makes every existing caller branch on "maybe there is
+ * no post", which is a seam that erodes the first time somebody is in a hurry.
+ *
+ * So the extra verb lives in the one module that needs it, and
+ * `/api/tradovate/live` — the only route that builds these — is the only place
+ * that has to supply it. `tradovateGet` and `TradovateReader` do not move.
+ */
+export interface LiveReader extends TradovateReader {
+  post<T>(path: string, body: unknown): Promise<T>;
+}
 
 /** One open position. SERVER-SIDE SHAPE — see `contractId`. No price. */
 export interface LivePosition {
@@ -125,6 +160,27 @@ export interface HostAccountPositions {
   brokerAccountId: number;
   host: TradovateEnvironment;
   positions: LivePosition[];
+  /**
+   * The broker's own unrealised P&L for this ACCOUNT, in dollars, or null
+   * (REF-108 Stage 4a).
+   *
+   * ON THE ACCOUNT BECAUSE THAT IS WHERE THE BROKER PUTS IT — see the header.
+   * One figure covers every contract the account holds.
+   *
+   * **`null` IS NOT `0`, AND CONFLATING THEM IS THE BUG THIS FIELD IS MOST
+   * LIKELY TO GROW.** A position can genuinely sit at break-even, so zero is an
+   * answer a trader can act on; null means we could not get one. Four
+   * independent ways to arrive at null, all of them in {@link readOpenPnl}: the
+   * call failed, the body carried `errorText`, `openPnL` was absent or
+   * non-finite. A zero substituted for any of them is a number the trader reads
+   * as fact.
+   *
+   * Dollars by the same assumption every amount in this product makes (REF-99,
+   * lib/money.ts) — the snapshot carries no `currencyId` for this field, and
+   * ./fills.ts' pricing note records the same gap. True for the CME futures
+   * accounts this integration serves.
+   */
+  openPnl: number | null;
 }
 
 export interface OpenPositionsPull {
@@ -195,8 +251,66 @@ async function loadContractNames(
   return names;
 }
 
+/** The one endpoint Stage 4a adds. A POST, and a read — see ./client.ts. */
+const SNAPSHOT_PATH = '/cashBalance/getcashbalancesnapshot';
+
+/**
+ * The broker's own `openPnL` for one account, or null (REF-108 Stage 4a).
+ *
+ * EVERY FAILURE PATH RETURNS NULL AND NONE OF THEM THROWS, which is the whole
+ * contract. The failure rule is {@link loadContractNames}' and NOT
+ * `discoverHostAccounts`': a name that cannot be read costs the name and not the
+ * position, and the figure is in the same category. The day pull takes the
+ * opposite line and throws, because there a missing contract means a missing
+ * `valuePerPoint` and the figure would be in points against a dollar threshold —
+ * nothing of the sort is at stake here.
+ *
+ * The direction that matters: **silence about a position the trader IS holding
+ * is the failure this feature exists to prevent; silence about what it is worth
+ * is not.** So a snapshot that refuses must not take the position line down with
+ * it, and must not take the OTHER accounts' figures down either — hence per
+ * account, inside the loop, rather than one `Promise.all` that one rejection
+ * spoils.
+ *
+ * FOUR WAYS TO NULL, AND `0` IS NOT ONE OF THEM:
+ *
+ * 1. the call threw — a refusal, a penalty, a host that does not expose it;
+ * 2. `errorText` is set — this endpoint can answer 200 with no figures at all,
+ *    a shape no `/list` read in this integration has;
+ * 3. `openPnL` is absent — every field on the entity is documented `Optional`;
+ * 4. `openPnL` is present and not finite — a type is a claim about the
+ *    documentation, not about the wire.
+ *
+ * A finite zero is returned AS zero. A position sitting at break-even is a
+ * fact, and `null` would hide it behind "we could not say".
+ *
+ * NOTHING IS LOGGED HERE, not even a count. This runs up to 240 times an hour
+ * per trader, the common outcome is success, and the one thing a line could
+ * carry — which account, holding what, worth how much — is the subject matter
+ * the route's privacy note refuses. A figure that silently stops arriving shows
+ * up as a missing number on the screen, which is where the trader is looking.
+ */
+async function readOpenPnl(reader: LiveReader, brokerAccountId: number): Promise<number | null> {
+  try {
+    const snapshot = await reader.post<TradovateCashBalanceSnapshot>(SNAPSHOT_PATH, {
+      accountId: brokerAccountId,
+    });
+
+    // `errorText` is checked BEFORE the figure, because a body can carry both
+    // and the error is the more specific claim.
+    if (typeof snapshot?.errorText === 'string' && snapshot.errorText !== '') return null;
+
+    const openPnl = snapshot?.openPnL;
+    if (typeof openPnl !== 'number' || !Number.isFinite(openPnl)) return null;
+    return openPnl;
+  } catch {
+    return null;
+  }
+}
+
 export interface OpenPositionsRequest {
-  readers: Record<TradovateEnvironment, TradovateReader>;
+  /** {@link LiveReader} rather than `TradovateReader`: the snapshot is a POST. */
+  readers: Record<TradovateEnvironment, LiveReader>;
   /** The connection's mint host. Its failure is fatal; the other host's is not. */
   environment: TradovateEnvironment;
   /** From the connection row. Decides whose accounts these are (./accounts.ts). */
@@ -279,6 +393,20 @@ export async function loadOpenPositions(
     const names = await loadContractNames(reader, host, contractIds);
 
     for (const [accountId, list] of byAccount) {
+      // ONE SNAPSHOT PER HOLDING ACCOUNT, AND ONLY HERE (REF-108 Stage 4a).
+      //
+      // `byAccount` is already the accounts with a non-zero `netPos` on this
+      // host, so reaching the snapshot from inside this loop is what makes "a
+      // flat account is never asked" a property of the control flow rather than
+      // a condition somebody has to remember. See the header on why that
+      // ordering IS the rate limit.
+      //
+      // SEQUENTIAL, like the contract-name walk above it. A trader holding in
+      // three accounts at once is three requests either way; firing them
+      // together only makes the burst sharper against a limit the FAQ measures
+      // per SECOND as well as per hour.
+      const openPnl = await readOpenPnl(reader, accountId);
+
       accounts.push({
         brokerAccountId: accountId,
         host,
@@ -286,6 +414,7 @@ export async function loadOpenPositions(
           ...row,
           contractName: names.get(row.contractId) ?? null,
         })),
+        openPnl,
       });
     }
   }

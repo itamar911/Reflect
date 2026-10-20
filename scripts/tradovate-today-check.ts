@@ -81,7 +81,11 @@ import {
   respondToLiveRequest,
   type LiveRouteDeps,
 } from '../src/app/api/tradovate/live/route';
-import { forgetContractNames, loadOpenPositions } from '../src/lib/tradovate/positions';
+import {
+  forgetContractNames,
+  loadOpenPositions,
+  type LiveReader,
+} from '../src/lib/tradovate/positions';
 import type { BrokerLivePull } from '../src/app/api/tradovate/live/route';
 import {
   FLAT_MS,
@@ -286,7 +290,25 @@ interface Scene {
    * change in meaning. A scene that wants the join sets it explicitly.
    */
   permissions: PermissionRow[] | null;
+  /**
+   * The cash-balance snapshot per broker account id (REF-108 Stage 4a).
+   *
+   * **THE DEFAULT CARRIES `netLiq` AND `totalCashValue` ON PURPOSE.** Those are
+   * the trader's account balance — the thing that must never reach the wire or
+   * a log — and an assertion that it does not is worth nothing if no fixture
+   * ever supplied one. With them here, replacing the named projection in
+   * lib/tradovate/positions.ts or app/api/tradovate/live/route.ts with a spread
+   * FAILS the leak assertion instead of passing quietly.
+   *
+   * Typed `unknown` rather than `TradovateCashBalanceSnapshot` for the same
+   * reason: the declared type deliberately does not have those fields, so a
+   * typed fixture could not express the leak it exists to catch.
+   */
+  snapshots: Record<number, unknown>;
 }
+
+/** What the snapshot answers for the shared fixture account. See {@link Scene}. */
+const SNAPSHOT_OPEN_PNL = 125.5;
 
 function scene(overrides: Partial<Scene> = {}): Scene {
   return {
@@ -299,6 +321,16 @@ function scene(overrides: Partial<Scene> = {}): Scene {
     products: [PRODUCT],
     currencies: [USD],
     permissions: null,
+    snapshots: {
+      [ACCOUNT.id]: {
+        openPnL: SNAPSHOT_OPEN_PNL,
+        // The two that must not escape. See the field comment above.
+        netLiq: 51_234.75,
+        totalCashValue: 50_000,
+        realizedPnL: 310.25,
+        weekRealizedPnL: 980.5,
+      },
+    },
     ...overrides,
   };
 }
@@ -470,11 +502,40 @@ function handScene(
  */
 const allCalls: string[] = [];
 
-/** The reader seam, answering from a scene. Records the paths it was asked for. */
-function reader(data: Scene): TradovateReader & { calls: string[] } {
+/**
+ * The reader seam, answering from a scene. Records the paths it was asked for.
+ *
+ * A {@link LiveReader} — `get` AND `post` — since REF-108 Stage 4a, even though
+ * only `loadOpenPositions` asks for the second verb. One helper rather than two
+ * because a `LiveReader` is accepted everywhere a `TradovateReader` is, so every
+ * day-pull group above keeps using this unchanged; the alternative was a second
+ * near-identical fixture whose scene could drift from this one's.
+ *
+ * **`post` RECORDS INTO THE SAME `calls` LIST**, which is what makes "a flat
+ * account is never asked for a snapshot" assertable as an exact call sequence
+ * rather than as a count of something.
+ */
+function reader(data: Scene): LiveReader & { calls: string[] } {
   const calls: string[] = [];
   return {
     calls,
+    post<T>(path: string, body: unknown): Promise<T> {
+      calls.push(path);
+      allCalls.push(path);
+      if (path !== '/cashBalance/getcashbalancesnapshot') {
+        return Promise.reject(new Error(`unexpected POST ${path}`));
+      }
+      const accountId = Number((body as { accountId?: unknown } | null)?.accountId);
+      const answer = data.snapshots[accountId];
+      // An `Error` VALUE MEANS THE CALL FAILS, which is how a scene expresses
+      // a refused snapshot without a second fixture helper. Everything else is
+      // returned as the body — including `undefined` for an account with no
+      // entry, which is how a scene says "the snapshot answered with no
+      // `openPnL`". That is a documented shape: every field on the entity is
+      // Optional.
+      if (answer instanceof Error) return Promise.reject(answer);
+      return Promise.resolve(answer as T);
+    },
     get<T>(path: string, query?: Record<string, string | number | boolean | undefined>): Promise<T> {
       calls.push(path);
       allCalls.push(path);
@@ -2362,6 +2423,7 @@ async function main() {
   // ── REF-108: live positions ───────────────────────────────────────────────
 
   await liveLoaderGroup();
+  await liveOpenPnlGroup();
   await liveRouteGroup();
   await liveCacheGroup();
   await liveFlatTransitionGroup();
@@ -3674,6 +3736,7 @@ function liveDeps(over: Partial<LiveRouteDeps> = {}): LiveRouteDeps {
           brokerAccountId: ACCOUNT.id,
           host: 'live',
           positions: [{ contractId: LIVE_CONTRACT, contractName: 'ESZ6', netPos: 2 }],
+          openPnl: SNAPSHOT_OPEN_PNL,
         },
       ],
       asOf: new Date(NOW).toISOString(),
@@ -3754,8 +3817,12 @@ async function liveLoaderGroup() {
   });
 
   // Failure rule 1: the non-mint host is forgiven, the mint host is not.
-  const broken: TradovateReader = {
+  //
+  // `post` rejects too, and it is never reached: discovery fails first, so the
+  // host is dropped (or fatal) before any account is known to be holding.
+  const broken: LiveReader = {
     get: () => Promise.reject(new TradovateRequestError('/account/list', 403, 'nope')),
+    post: () => Promise.reject(new TradovateRequestError('/account/list', 403, 'nope')),
   };
   forgetContractNames();
   const demoDown = await loadOpenPositions({
@@ -3770,7 +3837,7 @@ async function liveLoaderGroup() {
     })
   );
 
-  group('REF-108: what is open, and nothing about what it is worth', [
+  group('REF-108: what is open, and the one figure that is not ours', [
     // A FLAT POSITION IS NOT A POSITION. The row survives the whole trading
     // day with netPos 0, and telling a trader who has gone flat that they are
     // still holding something is the one wrong statement here that would
@@ -3784,25 +3851,161 @@ async function liveLoaderGroup() {
       [heldPull.accounts[0].brokerAccountId, heldPull.accounts[0].host], [ACCOUNT.id, 'live']),
     c('(7) asOf is the instant of the pull', heldPull.asOf, new Date(NOW).toISOString()),
 
-    // THE ABSENCE. No price reaches this shape, because there is none to have.
-    c('(8) a position carries no price-shaped key',
-      [...allKeys(heldPull.accounts)].filter((k) => /price|pnl|value|avg|mark/i.test(k)),
-      []),
+    // THE ABSENCE, NARROWED BY ONE KEY IN STAGE 4A AND NOT WIDENED.
+    //
+    // This used to assert that NO price-shaped key existed. `openPnl` is now
+    // one, by decision, so the assertion names it and keeps catching
+    // everything else — `netPrice`, `avgPrice`, `netLiq`, `totalCashValue`,
+    // `realizedPnL` and anything a future spread would drag in. Listing the
+    // permitted key explicitly is the point: a second one cannot arrive without
+    // this line being edited again.
+    c('(8) the only price-shaped key is the one we meant to add',
+      [...allKeys(heldPull.accounts)].filter((k) => /price|pnl|value|avg|mark|liq|cash/i.test(k)),
+      ['openPnl']),
 
     c('(9) a stranger\'s position is not reported', strangerPull.accounts.length, 1),
     c('(10) and what is reported is the trader\'s own account',
       strangerPull.accounts[0].brokerAccountId, ACCOUNT.id),
 
-    // THE PRICING CHAIN IS NOT WALKED. A name costs /contract/item; a
+    // THE PRICING CHAIN IS STILL NOT WALKED. A name costs /contract/item; a
     // valuePerPoint would cost two more reads for a number nothing multiplies.
-    c('(11) the reads are the three a name needs — no maturity, no product',
-      held.live.calls, ['/account/list', '/position/list', '/contract/item']),
-    c('(12) a second pull reuses the cached name',
-      again.live.calls, ['/account/list', '/position/list']),
+    // The snapshot is the fourth read and it is a POST — see the Stage 4a group
+    // for the assertion that a FLAT account never reaches it.
+    c('(11) the reads are a name, a position list and the snapshot — no maturity, no product',
+      held.live.calls,
+      ['/account/list', '/position/list', '/contract/item', '/cashBalance/getcashbalancesnapshot']),
+    c('(12) a second pull reuses the cached name but asks for the figure again',
+      again.live.calls,
+      ['/account/list', '/position/list', '/cashBalance/getcashbalancesnapshot']),
 
     c('(13) the non-mint host failing is forgiven', demoDown.accounts.length, 1),
     c('(14) the mint host failing is fatal', mintDown, 'TradovateRequestError'),
   ]);
+}
+
+// ── REF-108 Stage 4a: the broker's own open figure ─────────────────────────
+//
+// One group, and more than half of it is about the difference between `null`
+// and `0`. That is not padding: the figure is read off an endpoint where every
+// field is documented Optional, with four independent ways to arrive at "no
+// answer", and a zero substituted for any of them is a number the trader reads
+// as a fact about their money.
+//
+// The other half is the rate limit, asserted as a call SEQUENCE rather than a
+// count — a flat account must never be asked at all, and that is a property of
+// `loadOpenPositions`' control flow rather than a condition anyone remembers.
+
+/** `loadOpenPositions` against one scene, cold, on the `live` host alone. */
+async function openWith(data: Scene) {
+  forgetContractNames();
+  const readers = { live: reader(data), demo: reader(scene({ accounts: [], positions: [] })) };
+  const pull = await loadOpenPositions({
+    readers, environment: 'live', tradovateUserId: ACCOUNT.userId, nowMs: NOW,
+  });
+  return { pull, calls: readers.live.calls };
+}
+
+const SNAPSHOT_CALL = '/cashBalance/getcashbalancesnapshot';
+
+async function liveOpenPnlGroup() {
+  const held = [openPosition(2)];
+
+  // The happy path, and the figure is the fixture's.
+  const ok = await openWith(scene({ positions: held }));
+
+  // ── The four ways to null ────────────────────────────────────────────────
+  const threw = await openWith(
+    scene({
+      positions: held,
+      snapshots: { [ACCOUNT.id]: new TradovateRequestError(SNAPSHOT_CALL, 403, 'nope') },
+    })
+  );
+  // 200 with an error and no figures — a shape no /list read in this
+  // integration has, and the reason a type check alone cannot do this job.
+  const errored = await openWith(
+    scene({ positions: held, snapshots: { [ACCOUNT.id]: { errorText: 'No data', openPnL: 999 } } })
+  );
+  const absent = await openWith(scene({ positions: held, snapshots: {} }));
+  const notFinite = await openWith(
+    scene({ positions: held, snapshots: { [ACCOUNT.id]: { openPnL: Number.NaN } } })
+  );
+  const notANumber = await openWith(
+    scene({ positions: held, snapshots: { [ACCOUNT.id]: { openPnL: '125.5' } } })
+  );
+
+  // ── And the one way to zero ──────────────────────────────────────────────
+  const breakEven = await openWith(
+    scene({ positions: held, snapshots: { [ACCOUNT.id]: { openPnL: 0 } } })
+  );
+  const loss = await openWith(
+    scene({ positions: held, snapshots: { [ACCOUNT.id]: { openPnL: -240.75 } } })
+  );
+
+  // ── Flat: never asked ────────────────────────────────────────────────────
+  const flat = await openWith(scene({ positions: [POSITION] }));
+
+  // ── One account refusing does not cost the other its figure ──────────────
+  const SECOND = { id: 7102, name: 'SECOND', userId: ACCOUNT.userId, accountType: 'Customer' as const };
+  const twoAccounts = await openWith(
+    scene({
+      accounts: [ACCOUNT, SECOND],
+      positions: [openPosition(1), openPosition(3, { id: 9981, accountId: SECOND.id })],
+      snapshots: {
+        [ACCOUNT.id]: new TradovateRequestError(SNAPSHOT_CALL, 500, 'boom'),
+        [SECOND.id]: { openPnL: 88.5 },
+      },
+    })
+  );
+  const byAccount = new Map(twoAccounts.pull.accounts.map((a) => [a.brokerAccountId, a.openPnl]));
+
+  group('REF-108 Stage 4a: the broker\'s open figure, and null is not zero', [
+    c('(1) the figure is carried, per account', ok.pull.accounts[0].openPnl, SNAPSHOT_OPEN_PNL),
+    c('(2) and the position line beside it is untouched',
+      [ok.pull.accounts[0].positions.length, ok.pull.accounts[0].positions[0].netPos], [1, 2]),
+
+    // FOUR WAYS TO NULL. None of them is an exception that escapes, and none of
+    // them is a zero.
+    c('(3) a refused snapshot is null, not zero', threw.pull.accounts[0].openPnl, null),
+    c('(4) and it does not take the position down with it',
+      threw.pull.accounts[0].positions.length, 1),
+    c('(5) errorText wins over a figure in the same body',
+      errored.pull.accounts[0].openPnl, null),
+    c('(6) an absent openPnL is null', absent.pull.accounts[0].openPnl, null),
+    c('(7) a non-finite openPnL is null', notFinite.pull.accounts[0].openPnl, null),
+    c('(8) a string that looks like a number is null',
+      notANumber.pull.accounts[0].openPnl, null),
+
+    // THE OPPOSITE DIRECTION, and it is the one a "safe" refactor breaks: a
+    // position sitting at break-even is a fact the trader can act on.
+    c('(9) a real zero is zero, not null', breakEven.pull.accounts[0].openPnl, 0),
+    c('(10) a loss keeps its sign', loss.pull.accounts[0].openPnl, -240.75),
+
+    // THE RATE LIMIT, as a call sequence. This is the assertion that makes the
+    // flat poll free, and it is the whole reason the snapshot is read from
+    // inside the per-account loop rather than beside /position/list.
+    c('(11) a flat account is never asked for a snapshot',
+      flat.calls.includes(SNAPSHOT_CALL), false),
+    c('(12) and a flat pull is the two reads it always was',
+      flat.calls, ['/account/list', '/position/list']),
+    c('(13) one holding account is asked exactly once',
+      ok.calls.filter((p) => p === SNAPSHOT_CALL).length, 1),
+    c('(14) two holding accounts are asked twice and no more',
+      twoAccounts.calls.filter((p) => p === SNAPSHOT_CALL).length, 2),
+
+    // Per account, inside the loop — not one Promise.all a single rejection
+    // spoils.
+    c('(15) one account\'s refusal is the other\'s business',
+      [byAccount.get(ACCOUNT.id), byAccount.get(SECOND.id)], [null, 88.5]),
+
+    // THE BALANCE NEVER LEAVES THE SNAPSHOT. The fixture supplies netLiq,
+    // totalCashValue, realizedPnL and weekRealizedPnL (see `Scene.snapshots`),
+    // so this can fail — which is the only reason it is worth asserting.
+    c('(16) no balance-shaped key reaches the loader\'s shape',
+      [...allKeys(ok.pull.accounts)].filter((k) => /liq|cash|realiz|total|margin|withdraw/i.test(k)),
+      []),
+  ]);
+
+  forgetContractNames();
 }
 
 async function liveRouteGroup() {
@@ -3824,11 +4027,16 @@ async function liveRouteGroup() {
             brokerAccountId: 7001,
             host: 'live',
             positions: [{ contractId: 1, contractName: 'ESZ6', netPos: 1 }],
+            openPnl: 40,
           },
+          // A SECOND PORTFOLIO WITH ITS OWN FIGURE, and the two differ so an
+          // assertion can tell them apart. One account's number landing on
+          // another's card is the Stage 4b failure this fixture guards against.
           {
             brokerAccountId: 7002,
             host: 'demo',
             positions: [{ contractId: 2, contractName: 'MNQZ6', netPos: -2 }],
+            openPnl: -17.25,
           },
         ],
         asOf: new Date(NOW).toISOString(),
@@ -3857,7 +4065,7 @@ async function liveRouteGroup() {
   });
   const verifiedKeys = [...allKeys(verified)].sort();
 
-  group('REF-108: the route answers with positions and never with a figure', [
+  group('REF-108: the route answers with positions and the broker\'s own figure', [
     c('(1) a signed-out caller gets 401', noSession.status, 401),
     c('(2) outside the allowlist is reflect_only, not a 403', notAllowed, { source: 'reflect_only' }),
     c('(3) without migration 037 it is reflect_only too', noMigration, { source: 'reflect_only' }),
@@ -3871,8 +4079,16 @@ async function liveRouteGroup() {
     // THE LEAK ASSERTION, over the EXACT key set rather than a spot check. A
     // later change that adds a price has to edit this line on purpose — the
     // same device /today uses to keep trade rows out of the rule engine.
+    //
+    // STAGE 4A EDITED IT, WHICH IS THE MECHANISM WORKING RATHER THAN FAILING:
+    // `openPnl` is here by decision, and it is ONE key. The snapshot body that
+    // produced it also carries `netLiq`, `totalCashValue`, `realizedPnL` and
+    // `weekRealizedPnL` — the fixture supplies all four (see `Scene.snapshots`)
+    // precisely so that this line is what fails if anyone replaces the named
+    // projection with a spread.
     c('(7) the body has exactly these keys and no others', verifiedKeys,
-      ['accountId', 'accounts', 'asOf', 'contractName', 'displayName', 'netPos', 'positions', 'source']),
+      ['accountId', 'accounts', 'asOf', 'contractName', 'displayName', 'netPos',
+       'openPnl', 'positions', 'source']),
     c('(8) no broker host reaches the browser', verifiedKeys.includes('host'), false),
     c('(9) no broker account id reaches the browser', verifiedKeys.includes('brokerAccountId'), false),
 
@@ -3986,6 +4202,10 @@ async function liveFlatTransitionGroup() {
   const scheduled: (() => Promise<void>)[] = [];
   let lastBody: Record<string, unknown> = {};
 
+  // Moved independently of `held`, so the group can ask what the FIGURE does to
+  // the trigger — which must be nothing at all (REF-108 Stage 4a).
+  let openPnl: number | null = SNAPSHOT_OPEN_PNL;
+
   const deps = liveDeps({
     now: () => nowMs,
     loadPositions: async () => {
@@ -3996,7 +4216,14 @@ async function liveFlatTransitionGroup() {
         accounts:
           held.length === 0
             ? []
-            : [{ brokerAccountId: ACCOUNT.id, host: 'live' as const, positions: [...held] }],
+            : [
+                {
+                  brokerAccountId: ACCOUNT.id,
+                  host: 'live' as const,
+                  positions: [...held],
+                  openPnl,
+                },
+              ],
         asOf: new Date(nowMs).toISOString(),
       };
     },
@@ -4084,6 +4311,27 @@ async function liveFlatTransitionGroup() {
   held = [heldPosition(12, 1, null)];
   const afterOneOfTwoUnnamed = await poll();
 
+  // ── The FIGURE moving is not the POSITION moving (REF-108 Stage 4a) ──────
+  //
+  // The pull now carries `openPnl` beside the holdings, and it is a tempting
+  // second signal: a figure that fell to zero looks like a position that
+  // closed. It is not one — `readOpenPnl` answers 0 for a genuine break-even
+  // and null for a refused snapshot — and either one reaching `heldKeys` would
+  // fire a full import through `after()` on a trader who never left their
+  // position. `held` does not change across any of these three polls.
+  // `captured` is deliberately NOT reset here: assertion (3) below reads it as
+  // a whole-sequence record, and these three polls are asserted on `poll()`'s
+  // own delta instead. Clearing it would empty the evidence (3) is about.
+  forgetLivePull();
+  held = [heldPosition(1, 2)];
+  openPnl = SNAPSHOT_OPEN_PNL;
+  await poll();
+  openPnl = 0;
+  const afterFigureZero = await poll();
+  openPnl = null;
+  const afterFigureNull = await poll();
+  openPnl = SNAPSHOT_OPEN_PNL;
+
   // ── No trigger supplied: the route behaves exactly as it did before ──────
   forgetLivePull();
   const noTrigger = liveDeps({ now: () => nowMs, captureStops: undefined, schedule: (w) => void scheduled.push(w) });
@@ -4120,13 +4368,20 @@ async function liveFlatTransitionGroup() {
     c('(11) closing one of two UNNAMED contracts is still a transition',
       afterOneOfTwoUnnamed, 1),
 
+    // REF-108 Stage 4a: the figure is not a holding and must not be read as one.
+    // Both of these fire an import on a trader who is still in their position
+    // if `openPnl` ever reaches `heldKeys`.
+    c('(11a) the open figure falling to zero is not a transition', afterFigureZero, 0),
+    c('(11b) nor is the figure becoming unavailable', afterFigureNull, 0),
+
     // THE WIRE IS UNCHANGED. `contractId` exists for the watch above and the
     // route projects it away; liveRouteGroup's exact-key-set assertion is the
     // other half of this.
     c('(12) the contract id never reaches the browser', bodyKeys.includes('contractId'), false),
-    c('(13) and the body is the three-field position line it always was',
+    c('(13) and the body is the position line plus the account\'s own figure',
       bodyKeys,
-      ['accountId', 'accounts', 'asOf', 'contractName', 'displayName', 'netPos', 'positions', 'source']),
+      ['accountId', 'accounts', 'asOf', 'contractName', 'displayName', 'netPos',
+       'openPnl', 'positions', 'source']),
 
     // With no `captureStops` the route is read-only again, which is what every
     // other group in this file drives.
@@ -4157,6 +4412,10 @@ function verifiedPull(positions: number[]): BrokerLivePull {
       accountId: `uuid-${i}`,
       displayName: `Portfolio ${i}`,
       positions: netPos === 0 ? [] : [{ contractName: 'ESZ6', netPos }],
+      // The clock reads `positions` and nothing else, so the figure here is
+      // arbitrary — and a flat account carries null rather than 0, because the
+      // real loader never asks a flat account for a snapshot at all.
+      openPnl: netPos === 0 ? null : SNAPSHOT_OPEN_PNL,
     })),
   };
 }
@@ -4254,16 +4513,20 @@ async function liveClockGroup() {
       positionLines(openAccounts(verifiedPull([2]))), ['פוזיציה פתוחה · שני חוזים ESZ6']),
     // Several: the name IS the point (REF-108, 16.10) — a trader with two
     // evaluations needs to know which one they are in.
+    // `openPnl: null` THROUGHOUT THIS GROUP, AND THAT IS THE POINT OF STAGE 4A.
+    // The figure is on the wire and `positionLines` does not read it, so every
+    // assertion below is unchanged in meaning — which is the evidence that this
+    // stage did not touch the display. Stage 4b is where these grow a number.
     c('(7) two portfolios are both named',
       positionLines([
-        { accountId: 'a', displayName: 'Eval One', positions: [{ contractName: 'ESZ6', netPos: 1 }] },
-        { accountId: 'b', displayName: 'Eval Two', positions: [{ contractName: 'MNQZ6', netPos: -2 }] },
+        { accountId: 'a', displayName: 'Eval One', positions: [{ contractName: 'ESZ6', netPos: 1 }], openPnl: null },
+        { accountId: 'b', displayName: 'Eval Two', positions: [{ contractName: 'MNQZ6', netPos: -2 }], openPnl: null },
       ]),
       ['פוזיציה פתוחה · חוזה אחד ESZ6 · Eval One', 'פוזיציה פתוחה · שני חוזים MNQZ6 · Eval Two']),
     c('(8) several positions are one line each',
       positionLines([
         {
-          accountId: 'a', displayName: 'Solo', positions: [
+          accountId: 'a', displayName: 'Solo', openPnl: null, positions: [
             { contractName: 'ESZ6', netPos: 1 },
             { contractName: 'MNQZ6', netPos: 4 },
           ],
@@ -4271,7 +4534,7 @@ async function liveClockGroup() {
       ]).length, 2),
     // A contract we could not name still says how much is held.
     c('(9) an unnamed contract still reports the size',
-      positionLines([{ accountId: 'a', displayName: 'Solo', positions: [{ contractName: null, netPos: 1 }] }]),
+      positionLines([{ accountId: 'a', displayName: 'Solo', positions: [{ contractName: null, netPos: 1 }], openPnl: null }]),
       ['פוזיציה פתוחה · חוזה אחד']),
     c('(10) flat renders no line', positionLines(openAccounts(verifiedPull([0]))), []),
 
