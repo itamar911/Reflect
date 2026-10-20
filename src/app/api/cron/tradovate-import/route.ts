@@ -3,21 +3,49 @@
  * trades for every connected user (REF-107 Stage 2, E9).
  *
  * The third of E9's three triggers and the only one that does not need the
- * trader to show up. Once a day, from vercel.json, at 03:30 UTC — THIRTY
- * MINUTES AFTER THE KEEP-ALIVE at 03:00, and the order matters: this job reads
- * on every connected user's behalf, and /api/cron/tradovate-keepalive is what
- * guarantees those credentials are alive when it does (REF-100). Running it
- * first would have this one discover expired tokens and report `failedUsers`
- * for connections that were about to be renewed.
+ * trader to show up. Once a day, from vercel.json, at **20:00 UTC**.
  *
  * The work is in lib/tradovate/import-cron.ts; this route is the cron secret,
  * the service-role client, and a response made of counts. Same split as the
  * keep-alive's route, and for the reason stated there.
  *
- * IT SHARES ITS SLOT WITH /api/cron/security-assertions (`30 3 * * *`). That is
- * fine and is worth saying so nobody "fixes" it: the two touch nothing in
- * common, Vercel runs crons concurrently, and the alternative — moving one of
- * them — would make the 30-minute gap after the keep-alive arbitrary.
+ *
+ * IT RAN AT 03:30 UTC UNTIL REF-117 STAGE 2b, AND AT THAT HOUR IT IMPORTED
+ * NOTHING
+ * -----------------------------------------------------------------------
+ *
+ * Measured, 20.10: `/fill/list`, `/fillPair/list` AND `/position/list` are all
+ * `depthDays = 0`. Tradovate clears them at the daily reset, exactly as it
+ * clears `/order/list` — which REF-113 measured and acted on, for the ORDERS,
+ * while nobody applied the same reasoning to the FILLS. 03:30 UTC is 22:30 CT
+ * the previous day, five and a half hours after the 17:00 CT roll, so this job
+ * woke every night, asked for the day it was meant to import, and was handed
+ * three empty lists. `IMPORT_LOOKBACK_MS` reaching 48 hours back made no
+ * difference: `windowStartMs` widens what gets PRICED, and there is nothing to
+ * price in an empty response.
+ *
+ * Every row that has ever reached a journal got there from a trigger that runs
+ * DURING the session — the trade form, the Sync button, the end-of-day summary,
+ * or REF-113's 21:30 stop-capture cron. Which is why the import only ever
+ * appeared to work when the trader pressed the button.
+ *
+ * 20:00 UTC is 15:00 CDT and 14:00 CST, so it is before the roll in both
+ * regimes with hours to spare rather than the thirty minutes
+ * /api/cron/tradovate-orders has to live with. It is also ninety minutes BEFORE
+ * that job, which is deliberate — see lib/tradovate/import-cron.ts on why two
+ * pre-roll passes is the point rather than a duplicate.
+ *
+ * WHAT MOVING IT GAVE UP, AND WHY THAT IS FINE. The old slot was thirty minutes
+ * after /api/cron/tradovate-keepalive at 03:00, so that this job never met an
+ * expired token. That was never a precondition: `getUserAccessToken`
+ * (lib/tradovate/connections.ts) renews on demand and redeems a due refresh
+ * token on the same path, which is why the 21:30 stop-capture cron has always
+ * run seventeen hours from the keep-alive without trouble. A connection idle
+ * past the 26-hour refresh-token life is dead at any hour.
+ *
+ * It no longer shares a slot with /api/cron/security-assertions (`30 3 * * *`),
+ * which needed no coordination either way — Vercel runs crons concurrently and
+ * the two touch nothing in common.
  *
  *
  * AUTHORIZATION

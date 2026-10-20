@@ -4451,10 +4451,14 @@ function stopTriggerGroup() {
   group('only the triggers that can see the orders ask for them', [
     c('(1) the Sync button asks', syncRoute.includes('readStops: true'), true),
     c('(2) the end-of-day summary asks', alerts.includes('readStops: true'), true),
-    // 03:30 UTC is four and a half hours after the trading day rolled over, so
-    // `/order/list` no longer holds the orders of the day being imported. It
-    // could never answer, and asking would be 7-9 requests per trader per night.
-    c('(3) the nightly cron does NOT', nightly.includes('readStops'), false),
+    // The import cron still does not ask, and the reason changed with REF-117
+    // Stage 2b. It used to be "03:30 UTC is hours after the roll, so
+    // `/order/list` cannot answer"; now the job runs at 20:00 UTC, BEFORE the
+    // roll, so it could. It still must not: the stop read is 7-9 requests per
+    // trader and /api/cron/tradovate-orders at 21:30 already makes them, closer
+    // to the deadline and for exactly that purpose. Two jobs asking would double
+    // the most request-hungry work in the product for one answer.
+    c('(3) the import cron does NOT', nightly.includes('readStops'), false),
     // E9's free trigger stays free: it is on the critical path of opening the
     // trade form.
     c('(4) /api/tradovate/today does not read orders at all',
@@ -4470,11 +4474,35 @@ function stopTriggerGroup() {
     // American session closes or after Tradovate has cleared `/order/list`.
     c('(8) and it is scheduled at 21:30 UTC, once',
       schedulesFor('/api/cron/tradovate-orders'), ['30 21 * * *']),
-    // It must not land in the nightly import's slot: this is the most
-    // request-hungry scheduled work in the product and its summer margin is
-    // thirty minutes.
-    c('(9) which is not the nightly import\'s slot',
-      schedulesFor('/api/cron/tradovate-import'), ['30 3 * * *']),
+    // (9) REWRITTEN ON PURPOSE (REF-117 Stage 2b). This pinned `['30 3 * * *']`
+    // and its comment read "which is not the nightly import's slot" — true, and
+    // it was asserting the wrong property. 03:30 UTC is 22:30 CT, five and a
+    // half hours PAST the 17:00 CT roll, and REF-117 Stage 0 measured
+    // /fill/list, /fillPair/list and /position/list all at `depthDays = 0`. So
+    // the import cron ran every night against three empty lists and imported
+    // nothing, for the same reason this suite already knew it could not read
+    // orders. The fills do not survive the roll either; that was an assumption.
+    //
+    // What matters about the hour is therefore not "a different slot from the
+    // stop cron" but BEFORE THE ROLL, so that is what these two assert.
+    c('(9) the import cron runs at 20:00 UTC, once',
+      schedulesFor('/api/cron/tradovate-import'), ['0 20 * * *']),
+    // 20:00 UTC is 15:00 CDT / 14:00 CST and 21:30 UTC is 16:30 / 15:30, so
+    // both are before the 17:00 CT roll in both DST regimes, and the cheaper
+    // job runs first. A schedule that put either one after the roll would be
+    // importing empty responses, which is the bug Stage 2b fixed.
+    c('(9b) both broker crons are before the 17:00 CT roll, import first',
+      [
+        ...schedulesFor('/api/cron/tradovate-import'),
+        ...schedulesFor('/api/cron/tradovate-orders'),
+      ].map((schedule) => {
+        const [minute, hour] = schedule.split(' ');
+        const utcMinutes = Number(hour) * 60 + Number(minute);
+        // The roll in UTC: 17:00 CT is 22:00 in summer (CDT) and 23:00 in
+        // winter (CST), so the summer figure is the binding one.
+        return utcMinutes < 22 * 60;
+      }),
+      [true, true]),
     c('(10) the flat-transition trigger asks too', live.includes('readStops: true'), true),
     // The live route is polled 240 times an hour. If it captured on every poll
     // rather than on a transition, that is the shape it would have.

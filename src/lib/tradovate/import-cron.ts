@@ -30,6 +30,66 @@
  * deferred.
  *
  *
+ * §A2 IS ANSWERED NOW, AND THE ANSWER MOVED THIS JOB (REF-117 Stage 2b)
+ * --------------------------------------------------------------------
+ *
+ * `/fill/list` reaches back NO DISTANCE AT ALL. Measured 20.10: it,
+ * `/fillPair/list` and `/position/list` are every one of them `depthDays = 0`,
+ * cleared at Tradovate's daily reset exactly as `/order/list` is. The narrowing
+ * variants reach nothing further — `/fillPair/deps` and `/fill/items` were asked
+ * and returned precisely what the lists returned.
+ *
+ * SO THIS JOB RAN AT 03:30 UTC AND IMPORTED NOTHING, every night, since REF-107
+ * Stage 2. 03:30 UTC is 22:30 CT the previous day, five and a half hours past
+ * the 17:00 CT roll. It woke, asked for the day it was built to capture, and
+ * got three empty lists. The argument above — that a day we are never asked
+ * about may be gone — was right, and this job was not the thing collecting it.
+ * Every row in a journal today arrived from a trigger that runs during the
+ * session.
+ *
+ * It is a measurement nobody had to take: `./orders-cron.ts` spends a whole
+ * header on the fact that 03:30 is "FOUR AND A HALF TO FIVE AND A HALF HOURS
+ * AFTER Tradovate has already cleared `/order/list`", and then says "The fills
+ * survive; the orders do not." The first half was reasoned carefully and the
+ * second half was an assumption.
+ *
+ *
+ * TWO PRE-ROLL PASSES, AND THE SECOND ONE IS NOT THIS FILE
+ * -------------------------------------------------------
+ *
+ * This job now runs at **20:00 UTC** — 15:00 CDT, 14:00 CST — and
+ * `/api/cron/tradovate-orders` still runs at 21:30 UTC. Both are before the
+ * roll, ninety minutes apart, and the second one ALREADY DOES EVERYTHING THIS
+ * ONE DOES: `./orders-cron.ts` calls the same `syncUserTrades`, which always
+ * calls `importBrokerTrades`; its own header says every field is "./import-cron.ts'
+ * with a narrower window" plus the one flag that asks for the orders.
+ *
+ * (That flag's NAME is deliberately not written here. `scripts/broker-import-check.ts`
+ * asserts this file does not contain it — a source-level grep is the only way to
+ * prove a call is never made — so naming it in a comment would fail a real
+ * check for a prose reason. The flag is on `syncUserTrades` in ./sync.ts.)
+ *
+ * SO WHY KEEP BOTH. Because the data is destroyed at the roll and there is no
+ * backfill at any price, which is the one situation where an idempotent second
+ * attempt is worth its cost. The import is idempotence-by-measurement — a
+ * re-import of unchanged trades issues ZERO writes, not "the same writes again"
+ * (./import.ts) — so the later pass costs one day pull per trader and writes
+ * nothing it does not have to. If 21:30 fails for a trader, 20:00 already has
+ * their day; if 20:00 fails, 21:30 gets it.
+ *
+ * The order is the useful one, too. 20:00 is the cheaper job (no `/order/list`
+ * fan-out), so the expensive one runs second and closest to the deadline, where
+ * the thirty-minute summer margin `./orders-cron.ts` documents actually matters.
+ *
+ * WHAT IS STILL LOST, AND IT HAS TO BE SAID PLAINLY: a trader whose session ran
+ * past 21:30 UTC and who never opened the app loses the trades they took after
+ * it. The American close is 15:00 CT and the roll is 17:00 CT, so that is the
+ * evening and overnight session — and for those trades there is no later trigger
+ * that can reach them. REF-117 Stage 6 is where the trader gets told; a third
+ * cron cannot fix it, because any hour before the roll has the same two hours
+ * behind it.
+ *
+ *
  * THE WINDOW, AND WHY IT IS 48 HOURS AND NOT A DAY
  * ------------------------------------------------
  *
@@ -66,13 +126,26 @@ import { redactSecrets } from './redact';
 import { syncUserTrades } from './sync';
 
 /**
- * How far back each nightly run reaches. Two days — see the header.
+ * How far back each run reaches. Two days — see the header.
  *
  * Deliberately NOT `MAX_SINCE_AGE_MS` (seven days, ./trading-day.ts). That
  * bound is what a SYNCHRONOUS ROUTE can promise somebody who is waiting; this
- * is a nightly job whose job is the day that just ended, and seven days of
- * pricing per user per night would be six days of contract lookups for trades
- * that were imported six nights ago.
+ * is a scheduled job whose job is the day in progress, and seven days of
+ * pricing per user per run would be six days of contract lookups for trades
+ * that were imported six days ago.
+ *
+ * AND SINCE REF-117 STAGE 2b IT IS A NO-OP, KEPT RATHER THAN CORRECTED. Every
+ * list this reaches through is `depthDays = 0`, so there is nothing older than
+ * the current trading day to widen to: 48 hours and 24 hours and ten minutes
+ * all return the same three responses. `windowStartMs` only ever widened what
+ * gets PRICED and RETURNED, never what the pull asks for — ./fills.ts'
+ * `BrokerDayRequest` says so — so this cannot resurrect a row the API dropped.
+ *
+ * It stays at 48 hours because changing it would be a change with no effect,
+ * and because the day the depth question is reopened — a new endpoint, a
+ * narrowing variant that works, a vendor change — this is the number that
+ * should already be generous. The suite pins it, so a future reader meets this
+ * comment rather than the constant alone.
  */
 export const IMPORT_LOOKBACK_MS = 48 * 60 * 60_000;
 
