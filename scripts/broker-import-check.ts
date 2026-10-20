@@ -1919,7 +1919,7 @@ async function debriefDedupeGroup() {
   const bare = debriefRow({ id: 'trade-1' });
   const { deps: bareDeps, state: bareState } = debriefDeps(bare);
   bareDeps.persist = async () => null; // the flag is off; nothing is written
-  await respondToDebriefRequest(debriefRequest(), bareDeps);
+  const bareBody = await (await respondToDebriefRequest(debriefRequest(), bareDeps)).json();
   await respondToDebriefRequest(debriefRequest(), bareDeps);
 
   group('a second debrief of the same trade costs nothing', [
@@ -1939,6 +1939,24 @@ async function debriefDedupeGroup() {
       typeof secondBody.score === 'number' && secondBody.breakdown != null, true),
     c('(10) a row that was never stored calls the model every time',
       bareState.modelCalls, 2),
+
+    // ── THE CONTRACT THE JOURNAL'S SCORE RING NOW READS (20.10) ───────────
+    //
+    // JournalClient patches `plan_score` onto the row from this answer,
+    // because a refresh cannot: the component seeds `useState` from its prop
+    // and trades/page.tsx only changes its `key` when the row COUNT moves,
+    // which a decline does not. So these two fields are an interface and not
+    // an implementation detail, and the component's rule is "the score
+    // always, the prose only when the server says it stored it".
+    c('(11) a fresh answer carries the score and the timestamp it stored',
+      [typeof firstBody.score, typeof firstBody.generatedAt],
+      ['number', 'string']),
+    // The flag is off, so nothing was written — and `generatedAt: null` is how
+    // the route says so. Patching the prose on this answer would leave the
+    // journal showing a debrief that is not in the database.
+    c('(12) and reports null when it stored nothing, with the score intact',
+      [typeof bareBody.score, bareBody.generatedAt],
+      ['number', null]),
   ]);
 }
 

@@ -597,26 +597,91 @@ export default function JournalClient({
   }, [trades]);
 
   /**
-   * Ask for the debrief of a row that has just been decided about.
+   * Ask for the debrief of a row that has just been decided about, and put the
+   * score it answers with onto that row.
    *
    * ONLY THE ID IS SENT. The route re-reads the authoritative row for the
    * score and the prompt — it has done since Stage 3a — so a payload built
    * here would be ignored for everything except `id`, and sending the
    * client's idea of the row would be the one way to make the two disagree.
    *
-   * FIRE AND FORGET, deliberately. The modal is closing and, on a link, the
-   * row's id has changed under it, so there is nothing left on screen to put
-   * the answer into. The route STORES it (Stage 3a), so it is there the next
-   * time the trader opens the row, and the dedupe gate means this request is
-   * the only one that will ever be paid for.
+   *
+   * THE SCORE HAD TO BE REFRESHED BY HAND, AND THIS IS WHY (finding of 20.10)
+   * ------------------------------------------------------------------------
+   *
+   * `plan_score` is written by this route and by nothing else, and a queued row
+   * is never scored at all (J1) — so the figure beside a trade appears for the
+   * first time the moment it is linked or declined. This request was fire and
+   * forget, on the argument that "the modal is closing and there is nothing
+   * left on screen to put the answer into". Both halves of that were wrong:
+   *
+   *   - On a DECLINE the row stays exactly where it is. `router.refresh()`
+   *     re-renders trades/page.tsx, but this component seeds `useState` from
+   *     its prop and only re-reads it when that file's `key` changes — and
+   *     nothing the key is built from moved, because the row count did not.
+   *     So the score written a few seconds later reached the database and
+   *     stopped there, and the ring went on reading `—` until F5.
+   *   - On a LINK the count does change and the component does remount, but
+   *     the refresh happens immediately while the model call takes seconds, so
+   *     the server render it triggers reads `plan_score IS NULL`. The sweep
+   *     below then asks again from the fresh mount, which is the request whose
+   *     answer this patches.
+   *
+   * ONE PLACE, BOTH CALLERS. The resolution handler and the sweep go through
+   * here, so neither has to know how a score arrives — which also means the
+   * cron's own auto-links light up on the next journal visit rather than on
+   * the one after it.
+   *
+   * WHAT IS PATCHED IS WHAT THE SERVER STORED. `generatedAt` is non-null only
+   * when the four paragraphs were actually written (migration 036, gated by
+   * the import flag), so the prose and its timestamp move together or not at
+   * all — `storedDebriefResult` demands both, and half a debrief in local
+   * state would read as a row with a timestamp and nothing to show for it.
+   * The score is patched either way: it is recomputed deterministically on
+   * every request and is not gated by anything.
    */
   function requestDebrief(tradeId: string) {
     const body = new FormData();
     body.append('trade', JSON.stringify({ id: tradeId }));
-    void fetch('/api/ai-debrief', { method: 'POST', body }).catch(() => {
-      // The sweep below picks it up on the next load. A failed coaching note
-      // is not something to interrupt the trader about.
-    });
+    void fetch('/api/ai-debrief', { method: 'POST', body })
+      .then(async (response) => {
+        // 409 is a queued row the route refuses to debrief (§D case ג), 401
+        // and 404 are not this trader's row. None of them carries a score.
+        if (!response.ok) return;
+        const answer = (await response.json()) as {
+          score?: unknown;
+          generatedAt?: unknown;
+          summary?: unknown;
+          worked?: unknown;
+          improve?: unknown;
+          lesson?: unknown;
+        };
+        if (typeof answer.score !== 'number') return;
+        const score = answer.score;
+        const generatedAt = typeof answer.generatedAt === 'string' ? answer.generatedAt : null;
+
+        setTrades(prev => prev.map(t => t.id !== tradeId ? t : {
+          ...t,
+          plan_score: score,
+          ...(generatedAt
+            ? {
+                // `readStoredDebrief` is what validates this on the way out,
+                // so only the fields the route reported are put in.
+                debrief_ai: {
+                  summary: answer.summary,
+                  worked: answer.worked,
+                  improve: answer.improve,
+                  lesson: answer.lesson,
+                },
+                debrief_generated_at: generatedAt,
+              }
+            : {}),
+        }));
+      })
+      .catch(() => {
+        // The sweep below picks it up on the next load. A failed coaching note
+        // is not something to interrupt the trader about.
+      });
   }
 
   /**
@@ -680,6 +745,11 @@ export default function JournalClient({
    *   would go on saying "ממתינה לשיוך" about a question already answered.
    *
    * The refresh is what updates the banner's count in both cases.
+   *
+   * NEITHER OUTCOME CARRIES A SCORE YET, and that is not a gap here. A queued
+   * row is not scored at all; the figure is written by the debrief request
+   * below, seconds later, and {@link requestDebrief} is what puts it on the
+   * row when it comes back. See the note there on why a refresh could not.
    */
   function handleLinkResolved(
     rowId: string,
