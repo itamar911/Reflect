@@ -3411,8 +3411,10 @@ async function accountRecordGroup() {
 
   // `archived` is not on TradovateAccount and must not be — ./types.ts forbids
   // widening from guesswork — so the fixture carries it the same way the
-  // reader reads it: off the body, undeclared. If the spike shows the field
-  // does not exist, this case and the branch it covers go together.
+  // reader reads it: off the body, undeclared. If a reading of a live account
+  // ever shows the field does not exist, this case and the branch it covers go
+  // together — see `saysArchived` on why nothing is pointed at that question
+  // any more.
   const archived = await statusOf({ archived: true } as Partial<TradovateAccount>);
 
   // ── The flag ─────────────────────────────────────────────────────────────

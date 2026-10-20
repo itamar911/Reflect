@@ -100,8 +100,10 @@
  * ---------------------------------------------------------------------
  *
  * MEASURED ON THE SAME 19.10 TRADE, and it is the second defect that one row
- * held. Q8 of the probe reported the protective stop's seven versions as signed
- * tick distances from the entry:
+ * held. The probe's Q8 reported the protective stop's seven versions as signed
+ * tick distances from the entry — REF-113 §4.2 asked for that mode and said to
+ * delete it afterwards, which happened on 21.10, so these seven numbers are now
+ * the whole of the record:
  *
  *     -11   -132   -131   -131   -211   -90   +1
  *

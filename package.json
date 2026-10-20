@@ -19,7 +19,6 @@
     "test:broker-import": "tsx scripts/broker-import-check.ts",
     "test:broker-orders": "tsx scripts/broker-orders-check.ts",
     "test:broker-cycles": "tsx scripts/broker-cycles-check.ts",
-    "test:spike-orders": "node scripts/spike/orders-selfcheck.mjs",
     "test:accounts": "tsx scripts/accounts-check.ts"
   },
   "dependencies": {

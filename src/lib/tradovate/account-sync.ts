@@ -200,10 +200,15 @@ function didNotRun(): AccountSyncResult {
  * `true`, the trader gets the more precise word for what happened. Nothing
  * reads it as false, nothing requires it, and no other code can reach it.
  *
- * `scripts/spike/FINDINGS.md` §2 settles this for free on the next spike run —
- * it dumps a verbatim `/account/list` row. If the field turns out not to exist,
- * delete this function and the 'archived' branch; if it exists with different
- * semantics, this is the one place to change.
+ * `docs/tradovate-measurements.md` §2 is where the answer would be: it is the
+ * section that dumps a verbatim `/account/list` row, and the question is still
+ * `[PENDING]` there. IT NO LONGER SETTLES ITSELF FOR FREE — the spike that
+ * would have filled it in was deleted on 21.10 (REF-107 small fixes), so
+ * answering this now costs a deliberate read against a live account rather than
+ * the next run of something that was going to run anyway. The decision it feeds
+ * is unchanged: if the field turns out not to exist, delete this function and
+ * the 'archived' branch; if it exists with different semantics, this is the one
+ * place to change.
  */
 function saysArchived(account: TradovateAccount): boolean {
   return (account as { archived?: unknown }).archived === true;

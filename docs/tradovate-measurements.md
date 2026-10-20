@@ -1,7 +1,23 @@
 # Tradovate API spike — findings
 
 Throwaway exploration for the NinjaTrader Vendor Program trial (username `RReflect`).
-Nothing in `scripts/spike/` is wired into the app.
+Nothing here was ever wired into the app.
+
+> **THE INSTRUMENTS ARE GONE, AND THE FINDINGS ARE WHY THIS FILE IS NOT.**
+> `scripts/spike/` and the `/api/tradovate/probe` route — the throwaway script
+> and the authenticated read-only route that produced everything below — were
+> deleted on 21.10 (REF-107 small fixes), and this document moved out of
+> `scripts/spike/` with them. It stays because four files in
+> `src/lib/tradovate/` cite it as the evidence behind their field-level types:
+> `types.ts` (§7, the `order` and `orderVersion` entities), `account-sync.ts`
+> (§2), `cycles.ts` and `orders.ts`.
+>
+> So read it as A RECORD OF WHAT WAS MEASURED and not as a thing to run. The
+> commands below, the `[PENDING]` markers and the `scripts/spike/out/` paths all
+> describe a tool that no longer exists: a `[PENDING]` section is now an open
+> question with no instrument pointed at it, and answering one means writing a
+> new probe rather than finding this one. Both are in the git history at
+> `d02dd2f` if they are ever wanted back.
 
 **Environment:** demo only. There is no sandbox — `demo.tradovateapi.com` is
 simulated trading on real market data.

@@ -263,14 +263,19 @@ export function tradovateGet<T>(
  *
  * ONE CALLER, AND THE VERB IS NOT THE POINT. Tradovate exposes
  * `/cashBalance/getcashbalancesnapshot` as a POST taking `{ accountId }`, and it
- * reads — it is the only non-auth POST anywhere in this integration. The probe's
- * read-only guard already says this in the one place it could be misread
- * (app/api/tradovate/probe/guard.ts:33), and the sentence there carries over:
- * **this must not become a precedent for "it went through tradovatePost, so it
- * must be a read".** A verb says nothing about what an endpoint does. The only
- * reason this helper exists rather than a bare `tradovateRequest` call at the
- * one call site is that the cast below is subtle and should live in exactly one
- * place — the same argument {@link tradovateGet} makes.
+ * reads — it is the only non-auth POST anywhere in this integration.
+ *
+ * **THIS MUST NOT BECOME A PRECEDENT FOR "IT WENT THROUGH `tradovatePost`, SO
+ * IT MUST BE A READ".** A verb says nothing about what an endpoint does, and
+ * this is now the only place that sentence is written down: the probe's
+ * read-only guard said it first, about the same endpoint passing the same
+ * mutation denylist, and that route was deleted on 21.10 (REF-107 small fixes).
+ * An endpoint added here is read because somebody checked the vendor
+ * documentation, and for no other reason.
+ *
+ * The only reason this helper exists rather than a bare `tradovateRequest` call
+ * at the one call site is that the cast below is subtle and should live in
+ * exactly one place — the same argument {@link tradovateGet} makes.
  *
  * A caller that wants to MUTATE trading state does not belong in this file at
  * all; nothing in this product places, modifies or cancels an order, and that is

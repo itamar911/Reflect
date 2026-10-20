@@ -150,11 +150,13 @@ export interface CyclePosition {
   /**
    * What was held when the trading day opened, when the row states it.
    *
-   * OPTIONAL BECAUSE NOTHING HAS MEASURED IT. `probe?mode=live` asks for it
-   * (Q9's `POSITION_PRICE_FIELDS`) and Stage 0 did not report an answer, so this
-   * is written to work either way: present and non-zero marks an interday cycle;
-   * absent turns an overnight carry into a HELD group rather than a guess. See
-   * the header.
+   * OPTIONAL BECAUSE NOTHING HAS MEASURED IT, AND NOW NOTHING IS POINTED AT IT.
+   * The probe's live mode asked for it — Q9 of docs/tradovate-measurements.md —
+   * and REF-108 Stage 0 did not report an answer; the route itself was deleted
+   * on 21.10 (REF-107 small fixes), so the question is open rather than
+   * pending. This is written to work either way regardless: present and
+   * non-zero marks an interday cycle; absent turns an overnight carry into a
+   * HELD group rather than a guess. See the header.
    */
   prevPos?: number;
 }

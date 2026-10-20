@@ -269,7 +269,7 @@ export interface TradovateFill {
    *
    * It was declared `boolean?` here from the first commit, on the strength of
    * the name and of nothing else: no reader has ever existed, so nothing
-   * exercised the claim. `probe?mode=fills` surveyed it on every fill of a real
+   * exercised the claim. The probe's fill survey ran over every fill of a real
    * day and reported `number` on all of them.
    *
    * What the number MEANS is still unmeasured — plausibly the matched quantity,
@@ -535,17 +535,18 @@ export interface TradovateCurrency {
 //
 // THESE FOUR ARE TYPED FROM A MEASUREMENT, NOT FROM THE REFERENCE, and that is
 // the opposite of the rule stated above the trading entities. The reason is in
-// scripts/spike/FINDINGS.md §7: "nothing in the repository describes the
+// docs/tradovate-measurements.md §7: "nothing in the repository describes the
 // `order` or `orderVersion` entity at field level — not vendored, not in
 // src/lib/tradovate/types.ts, not probed", and the investigation refused to
 // widen a type from a recalled reading of the public reference.
 //
 // So they were MEASURED instead, on 19.10, against a real bracketed trade on a
-// live account whose stop was dragged twice by hand
-// (GET /api/tradovate/probe?mode=orders, reported on REF-113). Every field
-// below was either present on every row of that sample or is marked optional
-// here BECAUSE the measurement found it absent or partial. The field survey
-// that produced them names no value — see src/app/api/tradovate/probe/survey.ts.
+// live account whose stop was dragged twice by hand — by the probe route, which
+// has since been deleted (REF-107 small fixes, 21.10); what it found is the
+// document above, and REF-113 is where it was reported. Every field below was
+// either present on every row of that sample or is marked optional here BECAUSE
+// the measurement found it absent or partial, and the survey that produced them
+// printed field names and types only, never a value.
 //
 // WHAT THE MEASUREMENT SAID, in the four sentences that shaped these types:
 //
