@@ -125,13 +125,25 @@
  * THE THREE RULES THAT DECIDE WHETHER A TRADE IS IMPORTED
  * ------------------------------------------------------
  *
- * 1. **The position must be flat.** `BrokerTrade.positionFlat`, and the reason
- *    is §A3: the key is the group's lowest fill id, and a group can still GROW
- *    while the trader holds contracts. Write a key mid-position and the next
- *    sync writes a SECOND row under a different key — a duplicate the partial
- *    UNIQUE cannot catch, because both keys are genuinely distinct. This is the
- *    one rule that costs a visible absence: a trade scaled out of in pieces
- *    does not appear until the last piece is gone. That is the right trade — an
+ * 1. **The logical position must have closed.** `BrokerTrade.cycleClosed`
+ *    (REF-117 Stage 2), which replaced `positionFlat` and narrowed what this
+ *    rule claims. The old field asked whether the CONTRACT was flat right now,
+ *    so re-entering it turned the rule against trades that had already finished
+ *    and withheld them from the journal — the 19.10 case where the trader
+ *    concluded something had broken. The new one asks whether THIS CYCLE closed,
+ *    which no later trade can undo.
+ *
+ *    The rule survives the rename because the reason changed rather than
+ *    disappeared. §A3's hazard was a key that could MOVE: a later pair could
+ *    bridge two union-find groups and the merged group's lowest fill id might be
+ *    the other group's. Cycles cannot do that — a closed cycle ends at
+ *    `netPos = 0` and nothing after it can join. What remains is simpler: an
+ *    OPEN cycle's quantity, exit price and P&L all still move, so a row written
+ *    mid-cycle would be restated on every pull. The gate is now "is this row
+ *    finished" rather than "is this key stable".
+ *
+ *    It still costs a visible absence — a trade scaled out of in pieces does not
+ *    appear until the last piece is gone — and that is still the right trade: an
  *    absence corrects itself on the next pull, a duplicate does not.
  * 2. **A hidden row is left alone.** E12 made "delete" a flag rather than a
  *    DELETE, because a DELETE comes back on the next sync. So a key whose row is
@@ -939,7 +951,7 @@ export async function importBrokerTrades(request: ImportRequest): Promise<Broker
 
   // Rule 1 (§A3). Done first and counted, so a pull that imported nothing can
   // be told apart from a pull that found nothing.
-  const flat = trades.filter((trade) => trade.positionFlat);
+  const flat = trades.filter((trade) => trade.cycleClosed);
   counts.skippedOpen = trades.length - flat.length;
   if (flat.length === 0) {
     report(counts, refusals);
@@ -1192,21 +1204,30 @@ async function restateByKey(
  * rule restated:
  *
  *   - the import is switched off              → nothing may be SELECTed at all
- *   - the position is not known to be flat    → rule 1 (§A3); it is not imported
+ *   - the cycle has not closed                → rule 1; it is not imported
  *   - the row is hidden                       → rule 2 (E12); it is not touched
  *   - the row already has a history           → asked and answered
  *
- * AND THE FLAT RULE REFUSES TRADES THAT CLOSED HOURS AGO, WHICH IS NOT OBVIOUS
- * FROM THE LINE ABOVE. A Position is one row per contract per trading day and
- * its `netPos` is live, so RE-ENTERING A CONTRACT puts that row back to
- * non-zero and every trade already closed on it reads `positionFlat: false`
- * again. This then returns an empty list, `readStopHistories` makes no request,
- * and the columns stay NULL with nothing but `skippedOpen` in the import's own
- * line to explain it. Waiting is not free either: `/order/list` is
- * `depthDays = 0`, so a position still open when the trading day rolls takes
- * the orders with it and the trade degrades to `'interday'` for good. The full
- * argument and the measurement are on `BrokerTrade.positionFlat` in ./fills.ts;
- * REF-113 Stage 4 is where it is addressed.
+ * AND THE SECOND LINE USED TO REFUSE TRADES THAT HAD CLOSED HOURS EARLIER,
+ * WHICH REF-117 STAGE 2 FIXED HERE WITHOUT TOUCHING THIS FUNCTION. The filter
+ * was `positionFlat`, a question about whether the CONTRACT was flat right now:
+ * a Position is one row per contract per trading day with a live `netPos`, so
+ * re-entering a contract put that row back to non-zero and every trade already
+ * closed on it dropped out of this list again. It returned empty,
+ * `readStopHistories` made no request, and the columns stayed NULL with nothing
+ * but `skippedOpen` in the import's own log line to explain it — and waiting was
+ * not free, because `/order/list` is `depthDays = 0`, so a position still open
+ * when the trading day rolled took the orders with it and the trade degraded to
+ * `'interday'` permanently (measured 19.10,
+ * ~/Desktop/reflect-reports/ref-113-why-no-write.md).
+ *
+ * The filter is now `cycleClosed`, which is a property of the trade rather than
+ * of the contract, so a closed cycle is a candidate the moment the trader is out
+ * and stays one. **That is decision ד of the why-no-write report, delivered as a
+ * side effect of the grouping change rather than as REF-113 Stage 4 work.** The
+ * Stage 4b watcher in app/api/tradovate/live/route.ts is still what fires the
+ * capture before 17:00 CT destroys the orders; its trigger — "a contract went
+ * flat" — is now exactly "a cycle closed".
  *
  * A FAILED READ RETURNS NOTHING, which costs the run its stop histories and
  * nothing else. The same swallow ./orders.ts makes, for the same reason: an
@@ -1224,7 +1245,7 @@ export async function tradesNeedingStopHistory(params: {
   // adds, so without the flag there is nothing here that may be named.
   if (!isImportEnabled(env)) return [];
 
-  const flat = trades.filter((trade) => trade.positionFlat);
+  const flat = trades.filter((trade) => trade.cycleClosed);
   if (flat.length === 0) return [];
 
   const keys = [...new Set(flat.map((trade) => trade.brokerTradeKey))];

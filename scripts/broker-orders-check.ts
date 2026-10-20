@@ -161,7 +161,7 @@ const TRADE: BrokerTrade = {
   // The entry order and the order that closed it. The stop is NOT here: it was
   // cancelled, so it produced no fill.
   entryOrderIds: [ENTRY_ORDER, EXIT_ORDER],
-  positionFlat: true,
+  cycleClosed: true,
 };
 
 function order(

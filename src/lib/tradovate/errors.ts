@@ -193,7 +193,24 @@ export class TradovateTransientError extends TradovateError {
  * reason is logged, through redactSecrets() like every other diagnostic here.
  */
 export class TradovateUnpriceableError extends TradovateError {
-  readonly reason: 'no_value_per_point' | 'foreign_currency' | 'unknown_currency' | 'missing_fill';
+  readonly reason:
+    | 'no_value_per_point'
+    | 'foreign_currency'
+    | 'unknown_currency'
+    | 'missing_fill'
+    /**
+     * The fills and the fill pairs disagree about the money (REF-117 Stage 2).
+     *
+     * A BUG DETECTOR AND NOT A DATA CONDITION, which is what makes it the odd
+     * one out in this union. The other four describe something the broker said;
+     * this one fires when `lib/tradovate/cycles.ts`' walk and the pair
+     * arithmetic ./fills.ts has been shipping since REF-90 reach different
+     * figures for the same logical position, which can only mean a pair was
+     * assigned to the wrong cycle. It should never fire, the tolerance is twelve
+     * orders of magnitude above float noise, and if it does the answer is a
+     * fixture rather than a retry.
+     */
+    | 'pnl_disagreement';
 
   constructor(message: string, reason: TradovateUnpriceableError['reason']) {
     super(message);

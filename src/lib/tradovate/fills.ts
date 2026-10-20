@@ -105,6 +105,12 @@
  * route and their own privacy note (app/api/tradovate/trades/route.ts).
  */
 
+import {
+  cyclesFromFills,
+  type HeldGroup as CycleHeldGroup,
+  type HeldReason as CycleHeldReason,
+  type LogicalPosition,
+} from './cycles';
 import { TradovateRequestError, TradovateUnpriceableError, withoutResponseBody } from './errors';
 import { closedToday, minutesSince } from './trading-day';
 import {
@@ -297,65 +303,55 @@ export interface BrokerTrade {
    */
   entryOrderIds: number[];
   /**
-   * Whether every position this group's legs belong to is FLAT — `netPos = 0`
-   * on all of them (REF-107 Stage 2).
+   * Whether THIS LOGICAL POSITION's `netPos` returned to zero (REF-117 Stage 2).
    *
-   * THIS IS THE FIELD THAT MAKES {@link brokerTradeKey} SAFE TO PERSIST, and it
-   * exists because of that field's own caveat. The key is the group's lowest
-   * fill id, and a group can still GROW: while the trader is holding contracts
-   * in a position, a later fill pair can bridge two groups that were separate,
-   * and the merged group's lowest fill id may be the other group's. Write a key
-   * mid-position and the next sync writes a SECOND row for the same trade under
-   * a different key — a duplicate the partial UNIQUE cannot catch, because both
-   * keys are genuinely distinct.
+   * THIS REPLACES `positionFlat`, AND THE RENAME IS THE WHOLE OF REF-117'S
+   * SECOND CASE. The old field asked whether every Position row this group's
+   * legs touched was flat RIGHT NOW — a question about the contract, not about
+   * the trade. A Position is one row per contract per trading day with a live
+   * `netPos`, so a trader who closed a round trip and immediately took a new
+   * position on the same contract put that row back to non-zero, and every
+   * trade already finished on that contract read `positionFlat: false` again
+   * for as long as the new one was open. The closed trade did not reach the
+   * journal, and the trader on 19.10 concluded something had broken. They were
+   * reading the field correctly; the field was asking the wrong question.
    *
-   * So a trade is persisted only when this is true. §A3 named the hazard and
-   * Stage 1 pinned it by test; this is the measurement that acts on it, and the
-   * only new read it needs is a field /position/list already returns.
+   * A cycle, by contrast, is closed by the fills that closed it, and nothing
+   * executed afterwards can be part of it — so this is true the moment the
+   * trader is out and stays true whatever they do next.
    *
-   * FALSE WHEN UNKNOWN, not true. A `netPos` that is absent or not a finite
-   * number means we cannot say the position is flat, and the two failure
-   * directions are not symmetric: not importing is a trade missing from the
-   * journal until the next pull, while importing early is a duplicate row in it
-   * that nothing removes. The quiet absence is recoverable; the duplicate is
-   * not.
+   * IT STILL MAKES {@link brokerTradeKey} SAFE TO PERSIST, for a stronger reason
+   * than before rather than the same one. §A3's hazard was that a later fill
+   * pair could BRIDGE two groups, merging them and moving the key to the other
+   * group's lowest fill id — a duplicate the partial UNIQUE could not catch
+   * because both keys were genuinely distinct. Under cycles that cannot happen:
+   * a closed cycle ends at `netPos = 0` and a later fill can only extend the
+   * open cycle or start a new one. The key of a closed cycle is final.
    *
+   * SO WHY IS IT STILL THE IMPORT'S GATE? Because an OPEN cycle's key is not
+   * final — its lowest fill id is fixed, but its quantity, its exit price and
+   * its P&L all still move — and a row written mid-cycle would be restated on
+   * every pull until the trader was out. The gate is now about a row being
+   * FINISHED rather than about a key being stable, which is a smaller claim and
+   * a true one.
    *
-   * AND RE-ENTERING THE SAME CONTRACT TURNS THIS FALSE ON A TRADE THAT HAS
-   * ALREADY CLOSED, WHICH IS THE CONSEQUENCE NOBODY HAD WRITTEN DOWN
-   * --------------------------------------------------------------------------
+   * FALSE WHEN UNKNOWN, still. ./cycles.ts does not state a cycle at all unless
+   * the walk reconciles against the broker's `netPos`; a group it cannot account
+   * for is held, not reported as closed. The two failure directions are the ones
+   * REF-107 named: not importing is a trade missing until the next pull,
+   * importing early is a duplicate nothing removes.
    *
-   * A Position is one row PER CONTRACT PER TRADING DAY (./types.ts) and its
-   * `netPos` is live. So a trader who finishes a round trip on a contract and
-   * then takes a NEW position on the same contract the same day puts that one
-   * Position row back to non-zero — and the fill pairs of the round trip that
-   * already finished point at the SAME `positionId`. Every closed trade on that
-   * contract therefore reads `positionFlat: false` again, for as long as the new
-   * position is open.
-   *
-   * FOR THE IMPORT THAT IS HARMLESS AND IS NOT TOO STRICT. The row is already
-   * written, `importBrokerTrades` counts the skip as `skippedOpen` and restates
-   * nothing — and the hazard this field exists for is genuinely still live: a
-   * later fill pair can bridge two groups and move the key the next pull
-   * derives.
-   *
-   * WHAT IT COSTS IS THE STOP HISTORY, AND THAT COST HAS A DEADLINE.
-   * `tradesNeedingStopHistory` (./import.ts) filters on this field, so an open
-   * position on a contract withholds REF-113's annotation from the day's
-   * earlier trades on that same contract — and `/order/list` is `depthDays = 0`
-   * with no backfill. If the position is still open when the trading day rolls,
-   * those orders are GONE: the trade is then derived as `'interday'` →
-   * `'unknown'`, which is stored, and its real `initialStop`, `movedCount` and
-   * direction are lost permanently. Measured on 19.10 and written up in
-   * ~/Desktop/reflect-reports/ref-113-why-no-write.md.
-   *
-   * The trader this bites is the one who rolls positions on one contract all
-   * day, which is not an edge case. REF-113 Stage 4 is where it is addressed —
-   * by reading when a position GOES FLAT rather than at a fixed hour — and the
-   * note is here because this field is what somebody will be standing on when
-   * they ask why an annotation never arrived.
+   * AND THE STOP-HISTORY COST IS GONE, which was the expensive half of the old
+   * field. `tradesNeedingStopHistory` (./import.ts) filters on this, so under
+   * `positionFlat` an open position on a contract withheld REF-113's annotation
+   * from the day's EARLIER trades on that same contract — and `/order/list` is
+   * `depthDays = 0`, so if the position was still open when the trading day
+   * rolled, those orders were destroyed and the annotation was lost for good
+   * (measured on 19.10, ~/Desktop/reflect-reports/ref-113-why-no-write.md).
+   * A closed cycle is now a candidate immediately, which is decision ד of that
+   * report delivered as a side effect.
    */
-  positionFlat: boolean;
+  cycleClosed: boolean;
 }
 
 /**
@@ -368,6 +364,14 @@ export interface BrokerTrade {
 export interface BrokerDay {
   day: BrokerDayContext;
   trades: BrokerTrade[];
+  /**
+   * The logical positions this pull REFUSED to state, per group (REF-117 Stage 2).
+   *
+   * Pooled across hosts like `trades`, and present even when empty — which it
+   * is on an ordinary day. See {@link HeldGroup} for why an absence travels
+   * beside the rows instead of being swallowed, and for why it is not an error.
+   */
+  held: HeldGroup[];
   /**
    * What discovery saw, per host that ANSWERED it (REF-110 Stage 1).
    *
@@ -430,98 +434,99 @@ const STREAK_WINDOW = 10;
 // either host reaches the same reduction as a full day and that reduction sums
 // nothing. One path to the zero instead of five.
 
-/** A fill pair joined to its two instants and its contract, before pricing. */
-interface DatedPair {
-  pair: TradovateFillPair;
-  /** The earlier leg: when this slice was entered. */
-  openedAtMs: number;
-  /** The later leg: when it was closed. */
-  closedAtMs: number;
-  /** Which side was the earlier leg. See {@link BrokerTrade.direction}. */
-  direction: 'long' | 'short';
-  contractId: number;
-  /** The order that produced the buy leg's fill. See {@link BrokerTrade.entryOrderIds}. */
-  buyOrderId: number;
-  /** The order that produced the sell leg's fill. */
-  sellOrderId: number;
+/**
+ * THERE WAS A UNION-FIND OVER FILL IDS HERE, AND IT WAS THE WRONG RULE
+ * (REF-117 Stage 2).
+ *
+ * `groupIntoTrades`, `Trade`, `DatedPair`, `legsInOpeningOrder` and `datePair`
+ * all lived in this space and are gone. What they did: joined two `FillPair`s
+ * into one trade iff they shared a fill id. That is correct whenever ONE leg of
+ * the round trip filled in a single piece — the shared fill is the glue — and it
+ * breaks the moment BOTH legs fill in pieces, because Tradovate then matches
+ * them pairwise and the resulting pairs have no fill in common at all.
+ *
+ * Measured in production twice on 20.10 (REF-117 Stage 0): a short of two,
+ * covered in two pieces, reported `components: 2, cycles: 1`. One decision, two
+ * journal rows, two scores, two entries in `todayTradeCount`, and TWO
+ * CONSECUTIVE LOSSES where the trader took one — which is the exact distortion
+ * the old `Trade` doc comment warned about for scale-OUTs and then shipped for
+ * scale-ins: `cooldown_after_losses` defaults to three, so the app locks a
+ * trader out over a loss they took once.
+ *
+ * The unit is now a LOGICAL POSITION — every fill on one contract in one account
+ * from the moment `netPos` leaves 0 until it returns to 0 — and it lives in
+ * ./cycles.ts, which is pure and has its own suite. What stayed here is
+ * everything this module was always about: the host rules, the account
+ * ownership filter, the pricing chain, and the refusals.
+ *
+ * THE PAIRS DID NOT GO AWAY AND MUST NOT. They have two jobs left, and losing
+ * either one would be a regression: they are the ONLY path from a fill to an
+ * account (`TradovateFill` carries neither `accountId` nor `positionId`, so a
+ * walk over `/fill/list` alone would interleave a prop trader's two accounts on
+ * one contract into one fabricated cycle), and they are what the money is
+ * computed from — see {@link priceCycle}, which keeps the REF-90 arithmetic and
+ * checks it against the walk rather than replacing it.
+ */
+
+/**
+ * Why a logical position produced no journal row (REF-117 Stage 2).
+ *
+ * ./cycles.ts' five reasons, plus the two this module adds because they are
+ * about a ROW rather than about a walk: `'interday'` (the entry fills are
+ * outside the API's depth, so `entryPrice` and `openedAtMs` cannot be stated)
+ * and `'partly_priced'` (the pairs do not cover the cycle's exit quantity, so
+ * the money would be a fraction of a real loss).
+ */
+export type HeldReason =
+  | CycleHeldReason
+  | 'interday'
+  | 'partly_priced'
+  /**
+   * A pair landed in no cycle at all, so its money was left out of the day.
+   *
+   * THIS IS WHAT REPLACED `datePair`'s `missing_fill` THROW, and it covers the
+   * same ground without taking the pull down. A pair whose legs are not in
+   * `/fill/list` cannot be placed on any cycle, because the walk never saw the
+   * fills that would have held it — so instead of failing the whole day on every
+   * contract, the pair is named and the rest of the day is stated. See
+   * {@link import('./cycles').CycleScan.orphanPairs}.
+   */
+  | 'orphan_pair';
+
+/**
+ * One absence, stated rather than swallowed.
+ *
+ * THE REASON THIS TYPE EXISTS AT ALL is the module's oldest fail-safe: an
+ * under-counted day makes every rule MORE PERMISSIVE, which is the one
+ * direction this integration must never fail in. Before REF-117 the equivalent
+ * absences were either a thrown `missing_fill` — which fails the whole pull, on
+ * every contract, for one unaccountable group — or nothing at all. Neither is
+ * readable. This is counted, carried on {@link BrokerDay.held}, and logged.
+ *
+ * IT IS NOT AN ERROR AND DELIBERATELY DOES NOT FAIL THE PULL, and that is a
+ * judgement rather than a derivation. Holding one `(account, contract)` group
+ * costs the day the trades on that contract; throwing costs the trader every
+ * rule on every contract plus the journal, because one overnight carry would
+ * take the integration down for the session. The under-count is the smaller
+ * failure AS LONG AS IT IS VISIBLE, which is what this type is for — and a
+ * surface that shows it to the trader is REF-117 Stage 6, not this stage.
+ */
+export interface HeldGroup extends Omit<CycleHeldGroup, 'reason'> {
+  reason: HeldReason;
 }
 
 /**
- * ONE TRADE: every fill pair that shares a fill with another, joined up.
+ * How far the pair arithmetic and the fill walk may disagree, in dollars.
  *
- * A `FillPair` is not a trade, and the gap between the two is the sharpest
- * thing the investigation found about counting (§3.3א). An entry of three
- * contracts closed in three instalments produces THREE pairs for one decision;
- * so does one exit that closes three separate entries. Counted as pairs, a
- * trader who scaled out of a single loser would be told they had three
- * consecutive losses — and `cooldown_after_losses` defaults to three, so the
- * app would lock them out of their next trade over one.
- *
- * The join is the fills themselves. Two pairs that share a fill id are two
- * slices of the same decision, and sharing is transitive: pair A shares its buy
- * with B, B shares its sell with C, all three are one trade. That makes this a
- * union-find over fill ids, which is six lines and exactly right, rather than a
- * time-window heuristic, which would be neither.
- *
- * `closedAtMs` is the LATEST close in the group — the moment the trader was
- * finally out — so a trade that finished this morning counts today even if it
- * was entered yesterday. The same rule Reflect uses for a plan: the loss is
- * realised on the close.
+ * ONE CENT, WHICH IS TWELVE ORDERS OF MAGNITUDE ABOVE THE NOISE AND FAR BELOW
+ * ANYTHING A TRADER CAN SEE. The two expressions are equal in real arithmetic
+ * and not in IEEE 754: `(avgSell − avgBuy) × qty` divides and then multiplies,
+ * `−Σ signed × price` does neither, and the REF-117 suite measured the gap at
+ * 1.4e-14 on a five-contract scale-out. A quarter of a million dollars of
+ * notional moves that to about 6e-8. A real fault — a pair assigned to the wrong
+ * cycle — is dollars.
  */
-interface Trade {
-  legs: DatedPair[];
-  closedAtMs: number;
-}
-
-/**
- * The group's legs in the one order every derived field is read from.
- *
- * Earliest open first, `pair.id` breaking a tie. Order matters because the
- * group's direction, its entry instant and its account all come from the leg
- * that OPENED FIRST, and `/fillPair/list` promises no order at all — so without
- * a sort of our own, two pulls of the same unchanged day could disagree about
- * which leg that was. Determinism here is what makes {@link BrokerTrade}
- * comparable across pulls, which is the property Stage 2's de-duplication rests
- * on.
- */
-function legsInOpeningOrder(trade: Trade): DatedPair[] {
-  return [...trade.legs].sort(
-    (a, b) => a.openedAtMs - b.openedAtMs || a.pair.id - b.pair.id
-  );
-}
-
-/** Union-find over fill ids. See {@link Trade} for why. */
-function groupIntoTrades(pairs: readonly DatedPair[]): Trade[] {
-  const parent = new Map<number, number>();
-
-  const find = (id: number): number => {
-    let root = parent.get(id) ?? id;
-    while (root !== (parent.get(root) ?? root)) root = parent.get(root) ?? root;
-    parent.set(id, root);
-    return root;
-  };
-
-  const union = (a: number, b: number) => {
-    const rootA = find(a);
-    const rootB = find(b);
-    if (rootA !== rootB) parent.set(rootB, rootA);
-  };
-
-  for (const entry of pairs) union(entry.pair.buyFillId, entry.pair.sellFillId);
-
-  const groups = new Map<number, DatedPair[]>();
-  for (const entry of pairs) {
-    const key = find(entry.pair.buyFillId);
-    const group = groups.get(key);
-    if (group) group.push(entry);
-    else groups.set(key, [entry]);
-  }
-
-  return [...groups.values()].map((legs) => ({
-    legs,
-    closedAtMs: Math.max(...legs.map((leg) => leg.closedAtMs)),
-  }));
-}
+const PNL_DRIFT_TOLERANCE_USD = 0.01;
 
 /** What one contract is worth per point, in what currency, and what it is called. */
 interface ContractUnit {
@@ -749,6 +754,22 @@ export async function loadHostTrades(params: {
    */
   windowStartMs?: number;
 }): Promise<BrokerTrade[]> {
+  return (await scanHost(params)).trades;
+}
+
+/**
+ * {@link loadHostTrades} plus what it REFUSED to state (REF-117 Stage 2).
+ *
+ * The second half is new and it is not decoration. A group ./cycles.ts holds —
+ * fills that cannot account for the broker's own `netPos` — contributes no
+ * trades, and this module's oldest rule is that an under-counted day makes every
+ * rule MORE PERMISSIVE. So the absence travels beside the rows instead of being
+ * swallowed, and {@link BrokerDay.held} is where it arrives.
+ */
+export async function scanHost(params: Parameters<typeof loadHostTrades>[0]): Promise<{
+  trades: BrokerTrade[];
+  held: HeldGroup[];
+}> {
   const { reader, host, accounts, dayStartMs } = params;
 
   // Never later than the day boundary: the day's scalars are not negotiable by a
@@ -759,7 +780,7 @@ export async function loadHostTrades(params: {
   // zero, not a failure: see the closing note in ./accounts.ts. The caller does
   // not even get here — it drops such a host before asking — but the guard
   // stays, because this function's contract should not depend on that.
-  if (accounts.length === 0) return [];
+  if (accounts.length === 0) return { trades: [], held: [] };
 
   const accountIds = new Set(accounts.map((account) => account.id));
 
@@ -772,35 +793,86 @@ export async function loadHostTrades(params: {
   // fed: a journal row names the account it was traded on, which §E15 of the
   // investigation argues for on the grounds that a journal mixing a prop
   // evaluation account with a personal one is a journal nobody can read.
+  // Positions are still read for exactly the two things only they can answer —
+  // whose trade this is, and what the broker says is currently held — but
+  // `netPos` is no longer reduced to a flat/not-flat SET here. ./cycles.ts needs
+  // the signed figure itself, because it is the right-hand side of the
+  // reconciliation identity that licenses trusting any cycle at all.
   const positions = await reader.get<TradovatePosition[]>('/position/list');
-  const accountByPositionId = new Map<number, number>();
-  // The second answer this same read already carried: whether the trader is
-  // still holding anything in that position. Read here rather than asked for,
-  // and it is what decides whether a trade's key may be persisted — see
-  // BrokerTrade.positionFlat. Only a flat position is recorded as flat; an
-  // absent or unreadable netPos leaves the id out of this set, which reads as
-  // "not known to be flat".
-  const flatPositionIds = new Set<number>();
-  for (const position of positions ?? []) {
-    if (!accountIds.has(position.accountId)) continue;
-    accountByPositionId.set(position.id, position.accountId);
-    if (typeof position.netPos === 'number' && Number.isFinite(position.netPos) && position.netPos === 0) {
-      flatPositionIds.add(position.id);
-    }
-  }
-  if (accountByPositionId.size === 0) return [];
+  const myPositions = (positions ?? []).filter((position) => accountIds.has(position.accountId));
+  if (myPositions.length === 0) return { trades: [], held: [] };
 
+  const myPositionIds = new Set(myPositions.map((position) => position.id));
   const allPairs = await reader.get<TradovateFillPair[]>('/fillPair/list');
-  const myPairs = (allPairs ?? []).filter((pair) => accountByPositionId.has(pair.positionId));
-  if (myPairs.length === 0) return [];
+  const myPairs = (allPairs ?? []).filter((pair) => myPositionIds.has(pair.positionId));
+  if (myPairs.length === 0) return { trades: [], held: [] };
 
   const fills = await reader.get<TradovateFill[]>('/fill/list');
-  const fillById = new Map<number, TradovateFill>();
-  for (const fill of fills ?? []) fillById.set(fill.id, fill);
 
-  const trades = groupIntoTrades(myPairs.map((pair) => datePair(pair, fillById))).sort(
-    (a, b) => b.closedAtMs - a.closedAtMs
+  // EVERY FILL GOES IN, NOT A PRE-FILTERED SET, and that is forced rather than
+  // careless: a fill carries no account, so there is nothing to filter on. What
+  // narrows them is the attribution inside ./cycles.ts — a fill one of MY pairs
+  // names, or one on a contract exactly one of my accounts traded. A fill that
+  // belongs to an account this host holds but that the ownership filter excluded
+  // could in principle be inferred into an eligible account on the same
+  // contract; the reconciliation is what catches it, because the walk would then
+  // carry a term `netPos` does not, and the group is held rather than counted.
+  const scan = cyclesFromFills({
+    fills: fills ?? [],
+    pairs: myPairs,
+    positions: myPositions,
+  });
+
+  const pairById = new Map<number, TradovateFillPair>();
+  for (const pair of myPairs) pairById.set(pair.id, pair);
+
+  // What can become a journal row at all. Three refusals, and each one is the
+  // honest answer to a question `BrokerTrade` has no shape for:
+  //
+  //   - NOTHING MATCHED YET. An open cycle the trader has not exited any of has
+  //     `qty: 0` and no pair, so there is no round trip to state. This is the
+  //     same silence as before: no pair, no trade.
+  //   - INTERDAY. Stage 0 measured /fill/list, /fillPair/list AND /position/list
+  //     at `depthDays = 0`, so a position opened yesterday has unreachable entry
+  //     fills. `entryPrice` and `openedAtMs` are non-nullable on BrokerTrade and
+  //     `submitted_at` is built from the second, so such a cycle cannot be
+  //     expressed as a row without inventing both. ./cycles.ts marks it; a later
+  //     stage is where it earns a nullable column, and until then it is a held
+  //     absence rather than a fabricated entry.
+  //   - NOT FULLY PRICED. A cycle whose pairs do not cover its exit quantity has
+  //     no honest P&L, and a partial one would under-report a real loss.
+  const usable = scan.cycles.filter(
+    (cycle) => cycle.qty > 0 && !cycle.interday && cycle.pairedQty === cycle.qty
   );
+
+  const unpriceable = scan.cycles.filter(
+    (cycle) => cycle.qty > 0 && (cycle.interday || cycle.pairedQty !== cycle.qty)
+  );
+
+  const held: HeldGroup[] = [
+    ...scan.held,
+    ...unpriceable.map((cycle) => ({
+      accountId: cycle.accountId,
+      contractId: cycle.contractId,
+      reason: cycle.interday ? ('interday' as const) : ('partly_priced' as const),
+      fills: cycle.fillIds.length,
+    })),
+    // Money with nowhere to go. Reported once for the host rather than per pair:
+    // the count is the finding, and there is no `(account, contract)` to name
+    // because the pair's own cycle is the thing that does not exist.
+    ...(scan.orphanPairs > 0
+      ? [
+          {
+            accountId: null,
+            contractId: 0,
+            reason: 'orphan_pair' as const,
+            fills: scan.orphanPairs,
+          },
+        ]
+      : []),
+  ];
+
+  const trades = [...usable].sort((a, b) => b.closedAtMs - a.closedAtMs);
 
   // Price only what is actually read: the window's closes, plus the streak
   // window, which reaches back past today. A trader with years of history has
@@ -819,12 +891,13 @@ export async function loadHostTrades(params: {
 
   const units = await loadContractUnits(
     reader,
-    new Set([...needed].flatMap((t) => t.legs.map((leg) => leg.contractId)))
+    new Set([...needed].map((cycle) => cycle.contractId))
   );
 
-  return [...needed].map((trade) =>
-    describeTrade(trade, host, units, accountByPositionId, flatPositionIds)
-  );
+  return {
+    trades: [...needed].map((cycle) => describeCycle(cycle, host, units, pairById)),
+    held,
+  };
 }
 
 /**
@@ -851,72 +924,103 @@ export async function loadHostTrades(params: {
  * is its buy, a short's entry is its sell. The P&L expression above it still
  * reads neither — see the module header.
  */
-function describeTrade(
-  trade: Trade,
+function describeCycle(
+  cycle: LogicalPosition,
   host: TradovateEnvironment,
   units: Map<number, ContractUnit>,
-  accountByPositionId: Map<number, number>,
-  flatPositionIds: ReadonlySet<number>
+  pairById: ReadonlyMap<number, TradovateFillPair>
 ): BrokerTrade {
-  const legs = legsInOpeningOrder(trade);
-  const opener = legs[0];
-
-  const qty = legs.reduce((total, leg) => total + leg.pair.qty, 0);
-  const weighted = (price: (leg: DatedPair) => number) =>
-    legs.reduce((total, leg) => total + price(leg) * leg.pair.qty, 0) / qty;
-  const avgBuy = weighted((leg) => leg.pair.buyPrice);
-  const avgSell = weighted((leg) => leg.pair.sellPrice);
-
-  // Deduplicated: a scale-out shares its entry fill between legs, so the raw
-  // concatenation names it once per leg. Ascending, because the lowest is the
-  // key and a reader should be able to see that at a glance.
-  const fillIds = [
-    ...new Set(legs.flatMap((leg) => [leg.pair.buyFillId, leg.pair.sellFillId])),
-  ].sort((a, b) => a - b);
-
-  // Deduplicated for a second reason on top of the one above: a scale-out shares
-  // its entry FILL between legs, and a single order filling in pieces shares its
-  // ORDER between several distinct fills. Both collapse here, which is what makes
-  // "one order, one id" true of a partially-filled entry (REF-113 Stage 1).
-  const entryOrderIds = [
-    ...new Set(
-      legs
-        .flatMap((leg) => [leg.buyOrderId, leg.sellOrderId])
-        .filter((id): id is number => usableId(id))
-    ),
-  ].sort((a, b) => a - b);
+  const unit = units.get(cycle.contractId);
+  if (!unit) {
+    throw new TradovateUnpriceableError(
+      `No value per point for contract ${cycle.contractId}.`,
+      'no_value_per_point'
+    );
+  }
 
   return {
-    brokerTradeKey: `${host}:${fillIds[0]}`,
+    // The host prefix is still this module's, because host-qualification is its
+    // oldest rule and ./cycles.ts has no business knowing there are two hosts.
+    brokerTradeKey: `${host}:${cycle.keyFillId}`,
     host,
-    // The opening leg's account and contract stand for the group's. Both are
-    // properties of the position and of the fill, and a fill cannot be in two
-    // contracts, so a group connected by shared fills cannot straddle either.
+    accountId: cycle.accountId,
+    symbol: unit.name,
+    direction: cycle.direction,
+    qty: cycle.qty,
+    // Non-null by the filter in scanHost: an interday cycle — the only one whose
+    // entry is unknown — never reaches here.
+    entryPrice: cycle.avgEntry!,
+    exitPrice: cycle.avgExit!,
+    openedAtMs: cycle.openedAtMs!,
+    closedAtMs: cycle.closedAtMs,
+    pnlUsd: priceCycle(cycle, unit, pairById),
+    fillIds: cycle.fillIds,
+    // EVERY ORDER OF THE CYCLE, which is what the field has always documented
+    // itself to mean — "ENTRY *AND* EXIT, DESPITE THE NAME" — and not
+    // ./cycles.ts' narrower `entryOrderIds`. REF-113's layer A depends on the
+    // order that CLOSED the trade being in this list: a stop that fired is then
+    // identified with no window, no tolerance and no inference, which its own
+    // header calls the highest-confidence case in that feature. Narrowing this
+    // to entries would delete that case silently.
     //
-    // The assertion is sound by construction and not by optimism: every pair
-    // here survived a filter on `accountByPositionId.has(pair.positionId)`. A
-    // `?? 0` instead would put a plausible-looking account id on a row rather
-    // than failing, which is the silent-wrongness direction this module refuses
-    // everywhere else.
-    accountId: accountByPositionId.get(opener.pair.positionId)!,
-    symbol: units.get(opener.contractId)?.name ?? null,
-    direction: opener.direction,
-    qty,
-    entryPrice: opener.direction === 'long' ? avgBuy : avgSell,
-    exitPrice: opener.direction === 'long' ? avgSell : avgBuy,
-    openedAtMs: opener.openedAtMs,
-    closedAtMs: trade.closedAtMs,
-    pnlUsd: legs.reduce((total, leg) => total + pricePair(leg, units), 0),
-    fillIds,
-    entryOrderIds,
-    // EVERY leg, not the opener's. A group is connected by shared fills and
-    // cannot straddle two contracts, but it CAN straddle two positions —
-    // /position/list keys a position per contract per trading day, so a trade
-    // entered yesterday and closed today has legs in two of them. One of those
-    // still carrying contracts is exactly the state that can still grow this
-    // group, so `every` is the question and not `opener`.
-    positionFlat: legs.every((leg) => flatPositionIds.has(leg.pair.positionId)),
+    // The entry/exit split now exists on the cycle for whoever wants it, and
+    // REF-113 Stage 5 is where it gets a reader (the per-protective-order
+    // verdict). Nothing here needs it.
+    entryOrderIds: cycle.orderIds,
+    cycleClosed: cycle.cycleClosed,
   };
+}
+
+/**
+ * One cycle's P&L in dollars, from the PAIRS, checked against the FILLS.
+ *
+ * THE PAIR ARITHMETIC IS STILL THE ONE IN PRODUCTION. `(sellPrice − buyPrice) ×
+ * qty × valuePerPoint` has been shipping since REF-90, the module header argues
+ * at length why it needs no direction branch, and REF-117 had no reason to
+ * replace a correct expression — only to group its inputs differently.
+ *
+ * WHAT IS NEW IS THAT IT IS NOW CHECKED. ./cycles.ts reaches the same figure by
+ * a completely different route — `−Σ (buy ? +qty : −qty) × price` over the
+ * fills, which never consults a pair — so the two agreeing is a real statement
+ * about the pair-to-cycle assignment, which is the one new thing Stage 2
+ * introduced and the one thing that could be wrong. They disagree only if a pair
+ * landed on the wrong cycle, and that is a bug, not a data condition: hence
+ * {@link PNL_DRIFT_TOLERANCE_USD} rather than a float epsilon, and a throw
+ * rather than a preference for one of them.
+ *
+ * The suite asserts the same equality on fixtures (`npm run
+ * test:broker-cycles`); this is the production half of it, and it costs one
+ * subtraction per trade.
+ */
+function priceCycle(
+  cycle: LogicalPosition,
+  unit: ContractUnit,
+  pairById: ReadonlyMap<number, TradovateFillPair>
+): number {
+  let fromPairs = 0;
+  for (const pairId of cycle.pairIds) {
+    const pair = pairById.get(pairId);
+    if (!pair) {
+      throw new TradovateUnpriceableError(
+        `Fill pair ${pairId} was assigned to a logical position and then not found, so ` +
+          'the trade cannot be priced.',
+        'missing_fill'
+      );
+    }
+    fromPairs += (pair.sellPrice - pair.buyPrice) * pair.qty * unit.valuePerPoint;
+  }
+
+  const fromFills = (cycle.pointsPnl ?? 0) * unit.valuePerPoint;
+  if (Math.abs(fromPairs - fromFills) > PNL_DRIFT_TOLERANCE_USD) {
+    throw new TradovateUnpriceableError(
+      `The fill pairs and the fills disagree about the P&L of the logical position keyed ` +
+        `on fill ${cycle.keyFillId} by more than ${PNL_DRIFT_TOLERANCE_USD} USD. A pair was ` +
+        'assigned to the wrong cycle; refusing to total a day over it.',
+      'pnl_disagreement'
+    );
+  }
+
+  return fromPairs;
 }
 
 export interface BrokerDayRequest {
@@ -1002,6 +1106,8 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
 
   const claimed = new Set<number>();
   const pooled: BrokerTrade[] = [];
+  /** What no host could state. See {@link HeldGroup}. */
+  const held: HeldGroup[] = [];
   /** One entry per host that ANSWERED discovery. See {@link HostAccounts}. */
   const accounts: HostAccounts[] = [];
 
@@ -1038,9 +1144,15 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
 
     // Rule 2: no try/catch. This host returned eligible accounts, so a failure
     // from here on is a day that cannot be stated, and the pull fails whole.
-    pooled.push(
-      ...(await loadHostTrades({ reader, host: env, accounts: fresh, dayStartMs, windowStartMs }))
-    );
+    const scanned = await scanHost({
+      reader,
+      host: env,
+      accounts: fresh,
+      dayStartMs,
+      windowStartMs,
+    });
+    pooled.push(...scanned.trades);
+    held.push(...scanned.held);
   }
 
   // ── Pooled, and from here on there is one trader and one day ──────────────
@@ -1099,81 +1211,25 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
       asOf,
     },
     trades,
+    held,
     accounts,
   };
 }
 
 /**
- * Join a pair to the instants it opened and closed, the side that opened it, and
- * the contract it traded.
+ * THE TWO PAIR HELPERS THAT LIVED HERE ARE GONE (REF-117 Stage 2).
  *
- * The closing leg is whichever executed LATER — the sell closes a long, the buy
- * closes a short — so this reads the two timestamps rather than the direction.
- * Same reasoning as the P&L expression: there is no direction field to get
- * backwards if nothing consults direction.
+ * `datePair` dated a pair through its two fills and derived the direction from
+ * which leg executed first. Every one of its outputs now comes off the cycle,
+ * computed once per logical position instead of once per pair — and its
+ * `missing_fill` refusal is replaced by something strictly stronger: a pair
+ * whose legs are not in `/fill/list` leaves the netPos walk unable to account
+ * for the broker's own figure, so ./cycles.ts holds the group and names it,
+ * rather than this module failing the whole pull on every contract at once.
  *
- * AND THEREFORE THE OPENING LEG IS THE OTHER ONE, which is REF-107 §A1's second
- * gap closed for free: this function computed both instants and returned only
- * the later one. A pair whose BUY opened is a long and whose SELL opened is a
- * short — that is the definition, in this direction only. Equal timestamps read
- * as a long: it is the convention the field names already imply, and a round
- * trip whose legs executed in the same millisecond has no earlier leg to find.
- *
- * A pair whose legs are not in /fill/list is refused rather than dropped. Both
- * lists cover the same visible scope, so a missing leg is a truncated response,
- * and a pair that cannot be dated cannot be excluded from today either — the
- * honest answer is that this pull failed.
+ * `pricePair` is inlined into {@link priceCycle}, which is where the pair
+ * arithmetic now sits beside the walk it is checked against.
  */
-function datePair(pair: TradovateFillPair, fillById: Map<number, TradovateFill>): DatedPair {
-  const buy = fillById.get(pair.buyFillId);
-  const sell = fillById.get(pair.sellFillId);
-
-  if (!buy || !sell) {
-    throw new TradovateUnpriceableError(
-      `Fill pair ${pair.id} references a fill that /fill/list did not return, so it ` +
-        'cannot be dated. Refusing to total a day with a trade missing from it.',
-      'missing_fill'
-    );
-  }
-
-  const buyAt = Date.parse(buy.timestamp);
-  const sellAt = Date.parse(sell.timestamp);
-
-  if (!Number.isFinite(buyAt) || !Number.isFinite(sellAt)) {
-    throw new TradovateUnpriceableError(
-      `Fill pair ${pair.id} has a leg with an unreadable timestamp, so it cannot be dated.`,
-      'missing_fill'
-    );
-  }
-
-  return {
-    pair,
-    openedAtMs: Math.min(buyAt, sellAt),
-    closedAtMs: Math.max(buyAt, sellAt),
-    direction: buyAt <= sellAt ? 'long' : 'short',
-    // Both legs are the same contract by construction; the buy leg is read so
-    // there is one answer rather than a choice.
-    contractId: buy.contractId,
-    // REF-113 Stage 1. Lifted here for the same reason `direction` and
-    // `contractId` are: this is the one function that holds the FILLS, and
-    // `describeTrade` below holds only the pairs. A pair names its legs by fill
-    // id, and the order that produced a fill is a property of the fill alone.
-    buyOrderId: buy.orderId,
-    sellOrderId: sell.orderId,
-  };
-}
-
-/** Points into dollars. See the header for why there is no direction branch. */
-function pricePair(entry: DatedPair, units: Map<number, ContractUnit>): number {
-  const unit = units.get(entry.contractId);
-  if (!unit) {
-    throw new TradovateUnpriceableError(
-      `No value per point for contract ${entry.contractId}.`,
-      'no_value_per_point'
-    );
-  }
-  return (entry.pair.sellPrice - entry.pair.buyPrice) * entry.pair.qty * unit.valuePerPoint;
-}
 
 /**
  * What each contract is worth per point, and the currency that value is in.

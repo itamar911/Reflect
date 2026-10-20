@@ -291,11 +291,11 @@ const TRADE: BrokerTrade = {
   // join. The import does not read this yet — REF-113 Stage 3 is what writes
   // anything derived from it, and `EXECUTION_FACTS` is unchanged here.
   entryOrderIds: [77412, 77431],
-  positionFlat: true,
+  cycleClosed: true,
 };
 
 /** The same trade while the trader still holds one of the two contracts. */
-const STILL_OPEN: BrokerTrade = { ...TRADE, positionFlat: false };
+const STILL_OPEN: BrokerTrade = { ...TRADE, cycleClosed: false };
 
 /**
  * The facts that are named ONLY WHEN THE PULL RESOLVED THEM.
@@ -4197,7 +4197,7 @@ async function stopCandidateGroup() {
     c('(5) and so is a trade the journal has never seen',
       candidates.some((trade) => trade.brokerTradeKey === 'demo:99999'), true),
     c('(6) a position that is not flat is not imported, so it is not asked about',
-      candidates.some((trade) => !trade.positionFlat), false),
+      candidates.some((trade) => !trade.cycleClosed), false),
     c('(7) two candidates out of five, in one select',
       [candidates.length, db.statements.length], [2, 1]),
     c('(8) a failed read asks about nobody and does not throw', afterError.length, 0),

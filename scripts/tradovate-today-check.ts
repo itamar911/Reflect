@@ -756,13 +756,27 @@ async function main() {
     ])
   );
 
+  // TWELVE SEPARATE ROUND TRIPS, AND THE ENTRY INSTANTS ARE WHAT MAKE THEM
+  // SEPARATE (repaired, REF-117 Stage 2). Every trip used to open at
+  // 02:00:00Z and close a minute apart, which is not twelve trades — it is ONE
+  // position of twelve contracts scaled out in twelve pieces, and the trader
+  // was never flat in between. Nothing noticed while grouping was union-find
+  // over shared fills, because those trips share none; under logical positions
+  // the walk reads what the fixture actually says and answers `lossStreak: 1`.
+  //
+  // Which is the RIGHT answer for that shape, and precisely the distortion this
+  // module's own `Trade` comment warned about for scale-outs: "a trader who
+  // scaled out of a single loser would be told they had three consecutive
+  // losses — and `cooldown_after_losses` defaults to three". So the fixture is
+  // repaired rather than the expectation: each trip now opens and closes inside
+  // its own window, which is what "twelve losing trades" means.
   const manyLosses = await pull(
     withTrips(
       Array.from({ length: 12 }, (_, i) =>
         roundTrip({
           side: 'long',
-          openAt: '2026-10-14T02:00:00Z',
-          closeAt: new Date(Date.parse('2026-10-14T02:30:00Z') + i * 60_000).toISOString(),
+          openAt: new Date(Date.parse('2026-10-14T02:00:00Z') + i * 120_000).toISOString(),
+          closeAt: new Date(Date.parse('2026-10-14T02:01:00Z') + i * 120_000).toISOString(),
           entry: 5000,
           exit: 4999,
         })
@@ -916,9 +930,30 @@ async function main() {
       'unpriceable:unknown_currency'
     ),
     c(
-      'a pair whose fill is missing cannot be dated',
-      await thrown(() => pull(scene({ pairs: [oneTrip.pair], fills: [] }))),
-      'unpriceable:missing_fill'
+      // REWRITTEN ON PURPOSE (REF-117 Stage 2). This asserted
+      // `unpriceable:missing_fill` — `datePair` threw, and the WHOLE PULL
+      // failed, on every contract and every account, because one pair named a
+      // fill `/fill/list` had not returned. That refusal was argued from the
+      // right principle (an under-counted day makes every rule more permissive)
+      // and reached for too large a hammer: `/fill/list` is `depthDays = 0`, so
+      // a single position carried overnight could take the integration down for
+      // the session.
+      //
+      // The replacement is narrower and visible. A pair whose fills the walk
+      // never saw cannot be placed on any cycle, so it is reported as an
+      // `orphan_pair` hold and the rest of the day is stated. The money is still
+      // not counted — it cannot be — but the absence is named instead of either
+      // thrown or swallowed.
+      'a pair whose fill is missing is HELD, and does not fail the pull',
+      await (async () => {
+        const stranded = await pullFull(scene({ pairs: [oneTrip.pair], fills: [] }));
+        return [
+          stranded.day.closedCount,
+          stranded.held.map((item) => item.reason),
+          stranded.held[0]?.fills,
+        ];
+      })(),
+      [0, ['orphan_pair'], 1]
     ),
     c(
       'USD is accepted case-insensitively',
@@ -1059,7 +1094,13 @@ async function main() {
   ) =>
     withTrips([trip], {
       accounts: [{ ...ACCOUNT, id: accountId }],
-      positions: [{ ...POSITION, id: 9001, accountId }],
+      // `contractId` IS NOT DECORATION HERE (repaired, REF-117 Stage 2). The row
+      // used to inherit POSITION's CONTRACT_ID while the fills traded
+      // COLLIDING_CONTRACT — a broker state that cannot exist, and one nothing
+      // noticed because the grouping never compared a fill's contract against a
+      // position's. ./cycles.ts reconciles per (account, contract), so the row
+      // has to name the contract its fills are on.
+      positions: [{ ...POSITION, id: 9001, accountId, contractId: COLLIDING_CONTRACT }],
       contracts: [{ id: COLLIDING_CONTRACT, name, contractMaturityId: MATURITY_ID }],
       products: [{ ...PRODUCT, valuePerPoint }],
     });
@@ -2024,7 +2065,9 @@ async function main() {
       ],
       {
         accounts: [DEMO_ACCOUNT],
-        positions: [{ ...POSITION, accountId: DEMO_ACCOUNT.id }],
+        positions: [
+          { ...POSITION, accountId: DEMO_ACCOUNT.id, contractId: SHARED_NAME_CONTRACT_ID },
+        ],
         // The same instrument, a different host, therefore a different id and
         // the same name — and the same $50 a point, because two hosts naming
         // one instrument cannot disagree about what it is.
@@ -2083,6 +2126,11 @@ async function main() {
         }),
       ],
       {
+        // ONE ROW PER CONTRACT, because that is what Tradovate returns and what
+        // the reconciliation reads. The sibling contract had no position row at
+        // all before REF-117 Stage 2, so its fills could not be attributed and
+        // the whole group would be held.
+        positions: [POSITION, { ...POSITION, id: 9003, contractId: SIBLING_CONTRACT_ID }],
         contracts: [CONTRACT, { id: SIBLING_CONTRACT_ID, name: 'ESH7', contractMaturityId: SIBLING_MATURITY_ID }],
         // Two maturities of ONE product: the March contract and the December
         // one are both ES, and both are worth $50 a point.
@@ -2716,11 +2764,36 @@ async function bothPathsAgree() {
       oneBigExit.pnlUsd,
     ], [scaledOut.brokerTradeKey, scaledOut.qty, scaledOut.pnlUsd]),
     c('(7) two trades sharing no fill are two keys', beforeMerge.map((t) => t.brokerTradeKey).sort(), ['live:310', 'live:320']),
+    // REWRITTEN ON PURPOSE (REF-117 Stage 2), AND THIS IS THE ASSERTION THAT
+    // SAYS THE HAZARD IS GONE.
+    //
+    // It used to read: "KNOWN (§A3): a later pair bridging two groups merges
+    // them and the higher key is lost", expecting `['live:310']`. That was the
+    // central caveat of the whole key design — union-find joins on shared fills,
+    // so a pair arriving later could weld two separate trades together and the
+    // merged group's lowest fill id might belong to the other one. `live:320`
+    // stopped existing, and because both keys were genuinely distinct the
+    // partial UNIQUE could not catch the duplicate. `positionFlat` existed
+    // almost entirely to keep a key from being written while that was still
+    // possible.
+    //
+    // A cycle cannot be bridged. It ends when `netPos` reaches 0, and nothing
+    // executed afterwards can be part of it — so the bridging pair changes
+    // nothing and BOTH keys survive. Same fixture, opposite expectation.
     c(
-      '(8) KNOWN (§A3): a later pair bridging two groups merges them and the higher key is lost',
-      afterMerge.map((t) => t.brokerTradeKey),
-      ['live:310']
+      '(8) a later pair bridging two groups no longer merges them (§A3 hazard gone)',
+      afterMerge.map((t) => t.brokerTradeKey).sort(),
+      ['live:310', 'live:320']
     ),
+    // The bridging pair itself has nowhere to go: its closing leg by time is
+    // `b320`, which the walk reads as an ENTRY, so no cycle claims it. That is
+    // exactly the shape `orphan_pair` exists to name — and the fixture is a
+    // hand-built one Tradovate would never produce, which is why it is the only
+    // place in this suite that reaches it.
+    c('(9) and the bridging pair is reported rather than silently dropped',
+      (await pullFull(handScene([b310, s311, b320, s321], [separatePair, otherPair, bridgePair])))
+        .held.map((item) => item.reason),
+      ['orphan_pair']),
   ]);
 
   // ── The orders behind the fills (REF-113 Stage 1) ─────────────────────────
@@ -2824,17 +2897,29 @@ async function bothPathsAgree() {
   ]);
 
   // ── The flip ──────────────────────────────────────────────────────────────
-
-  // §A4's one uncovered case, and this group PINS THE PRESENT BEHAVIOUR rather
-  // than claiming it is right. A sell of 2 that closes a long of 1 and opens a
-  // short of 1 is one fill in two pairs, so union-find welds the two into one
-  // trade: the trader took two decisions and the journal will show one row of
-  // qty 2 and $0. §A4 calls this a row the trader will not recognise and makes
-  // it a measurement ticket — IS a flip one Tradovate fill or two? — that this
-  // stage cannot answer without a live demo account.
   //
-  // So these assertions are a tripwire. If the grouping is ever changed to split
-  // a flip, this group fails and whoever changed it has to say so on purpose.
+  // §A4'S TRIPWIRE, TRIPPED ON PURPOSE (REF-117 Stage 2).
+  //
+  // This group used to be titled "a position flip is KNOWN-MERGED into one
+  // trade" and its first assertion read "two decisions, one row — this is the
+  // behaviour, not the ideal". A sell of two closing a long of one and opening a
+  // short of one is ONE fill in two pairs, so union-find welded them: the
+  // journal showed a single row of qty 2 and $0, which §A4 called "a row the
+  // trader will not recognise". The group's own comment said: "these assertions
+  // are a tripwire. If the grouping is ever changed to split a flip, this group
+  // fails and whoever changed it has to say so on purpose."
+  //
+  // SAYING SO ON PURPOSE. The flip is now two logical positions, and the first
+  // reason alone decides it: `direction` is a required field on `BrokerTrade`
+  // and on `trade_plans`, and a row that is both long and short is not
+  // representable — merging forces a lie. The matcher reads `direction` too, so
+  // a merged flip could only ever link to one of the two plans behind it, and
+  // possibly the wrong one.
+  //
+  // The split is by QUANTITY at the zero crossing, at ONE price, so nothing is
+  // averaged and assertion (6) holds: the two P&Ls sum to the figure the merged
+  // row showed. The day's `net` does not move — only its `closedCount`,
+  // `losingCount` and `lossStreak` do, and in each case towards what happened.
   const flipBuy = handFill({ id: 401, at: '2026-10-14T05:00:00Z', action: 'Buy', qty: 1, price: 5000 });
   const flipOrder = handFill({ id: 402, at: '2026-10-14T06:00:00Z', action: 'Sell', qty: 2, price: 5010 });
   const flipClose = handFill({ id: 403, at: '2026-10-14T07:00:00Z', action: 'Buy', qty: 1, price: 5020 });
@@ -2849,27 +2934,46 @@ async function bothPathsAgree() {
       ]
     )
   );
-  const flipRow = flipPull.trades[0];
+  // Newest close first, so the SHORT — closed at 07:00 — is trades[0].
+  const [shortHalf, longHalf] = flipPull.trades;
 
-  group('a position flip is KNOWN-MERGED into one trade (REF-107 §A4)', [
-    c('(1) two decisions, one row — this is the behaviour, not the ideal', flipPull.trades.length, 1),
-    c('(2) the shared fill is in it once, and the lowest fill still keys it', [flipRow.brokerTradeKey, flipRow.fillIds], ['live:401', [401, 402, 403]]),
-    c('(3) the merged row spans both decisions and nets them to nothing', [
-      flipRow.qty,
-      flipRow.pnlUsd,
-      flipRow.openedAtMs,
-      flipRow.closedAtMs,
-    ], [2, 0, Date.parse('2026-10-14T05:00:00Z'), Date.parse('2026-10-14T07:00:00Z')]),
-    c('(4) the earliest leg decides the direction, so the row reads long', flipRow.direction, 'long'),
-    // The rules see it the same way, and in the SAFE direction for once: netted
-    // to zero it is not a loss, so it neither counts against max_daily_loss nor
-    // extends a cooldown streak. §A4 notes this is conservative-but-distorted
-    // for a rule and simply wrong for a journal.
-    c('(5) netted to zero it is not a loss, for the rules either', [
+  group('a position flip is TWO logical positions, split at the zero crossing (§A4 decided)', [
+    c('(1) two decisions, two rows — the tripwire, tripped deliberately', flipPull.trades.length, 2),
+    c('(2) a long and a short, because a row that is both cannot be written',
+      [longHalf.direction, shortHalf.direction], ['long', 'short']),
+    c('(3) one contract each, and each keyed on its own lowest fill', [
+      [longHalf.qty, shortHalf.qty],
+      [longHalf.brokerTradeKey, shortHalf.brokerTradeKey],
+    ], [[1, 1], ['live:401', 'live:402']]),
+    // The reversing fill belongs to both halves: an exit of the long and the
+    // entry of the short. The keys are still distinct, because the long holds a
+    // fill older than the reversal by construction.
+    c('(4) the reversing fill is in both rows, and the keys are still distinct', [
+      longHalf.fillIds,
+      shortHalf.fillIds,
+    ], [[401, 402], [402, 403]]),
+    c('(5) each half spans only its own decision', [
+      [longHalf.entryPrice, longHalf.exitPrice],
+      [shortHalf.entryPrice, shortHalf.exitPrice],
+    ], [[5000, 5010], [5010, 5020]]),
+    // THE PROPERTY THAT MAKES THE SPLIT SAFE TO SHIP: the money is unchanged.
+    // The old merged row was qty 2 at $0; these two are +$500 and −$500.
+    c('(6) the two P&Ls sum to exactly what the merged row showed', [
+      longHalf.pnlUsd,
+      shortHalf.pnlUsd,
+      longHalf.pnlUsd + shortHalf.pnlUsd,
+    ], [500, -500, 0]),
+    // And the rules now see what happened. Merged, the flip netted to zero and
+    // so was not a loss at all — §A4 called that "conservative-but-distorted for
+    // a rule and simply wrong for a journal". Split, the losing half is a loss.
+    c('(7) the day counts two closes, one of them a loss, and a streak of one', [
       flipPull.day.closedCount,
       flipPull.day.losingCount,
       flipPull.day.lossStreak,
-    ], [1, 0, 0]),
+      flipPull.day.net,
+    ], [2, 1, 1, 0]),
+    c('(8) and nothing is held — both halves are fully priced by their own pair',
+      flipPull.held.length, 0),
   ]);
 
   // ── The scalars are the reduction of the rows ─────────────────────────────
@@ -3008,12 +3112,16 @@ async function bothPathsAgree() {
   // prices today's plus the ten-trade streak window, and with one it prices the
   // lot. The day's figures are identical either way — a journal query cannot
   // restate a discipline figure.
+  // One trade today and eleven two days ago. The eleven each get their own
+  // entry instant for the reason the `manyLosses` fixture above now spells out:
+  // eleven trips sharing one `openAt` is one position scaled out eleven times,
+  // not eleven trades, and under logical positions the walk says so.
   const twelveTrades = withTrips([
     roundTrip({ side: 'long', openAt: '2026-10-14T05:00:00Z', closeAt: '2026-10-14T06:00:00Z', entry: 5000, exit: 5010 }),
     ...Array.from({ length: 11 }, (_, i) =>
       roundTrip({
         side: 'long',
-        openAt: '2026-10-12T00:00:00Z',
+        openAt: `2026-10-12T${String(i).padStart(2, '0')}:00:00Z`,
         closeAt: `2026-10-12T${String(i).padStart(2, '0')}:30:00Z`,
         entry: 5000,
         exit: 5010,
@@ -3030,30 +3138,26 @@ async function bothPathsAgree() {
     c('(4) and it is today alone', [narrow.day.closedCount, narrow.day.net], [1, 500]),
   ]);
 
-  // ── positionFlat: WHOSE position has to be flat (REF-107 Stage 3b) ────────
+  // ── cycleClosed: WHOSE position has to be flat, REWRITTEN (REF-117 Stage 2) ─
   //
-  // `positionFlat` is the gate the import hangs its whole key-stability
-  // argument on (§A3), and until this group nothing measured HOW fills.ts
-  // decides it — scripts/broker-import-check.ts drives both values of the
-  // boolean, but hands them in ready-made. So "does an unrelated open
-  // position keep an unrelated finished trade out of the journal" had no
-  // answer in the suite, which is the gap this closes.
+  // THIS GROUP ASSERTED THE OPPOSITE UNTIL REF-117, AND IT WAS RIGHT TO. Under
+  // `positionFlat`, case (5) below pinned the documented limit: a trader who
+  // closed a trade in the morning and was holding the SAME contract again in
+  // the afternoon had one position row with a non-zero `netPos`, so the morning
+  // trade — genuinely finished — waited for the afternoon one before it reached
+  // the journal. §A3 chose that direction on purpose and the group's own comment
+  // said a later change to it should be "a decision rather than an accident".
   //
-  // It does not, and the reason is the shape of the data rather than a
-  // filter: /position/list keys a position PER CONTRACT PER TRADING DAY,
-  // every fill pair names its own `positionId`, and the predicate is
-  // `legs.every(...)` over the group's OWN legs. A position the trade has no
-  // leg in is never consulted.
+  // This is that decision. `cycleClosed` is a property of the TRADE, so the
+  // morning trade is importable the moment the trader is out of it. Case (3) is
+  // the same fixture as before and now asserts the opposite outcome.
   //
-  // CASE (5) IS THE REAL LIMIT, and it is a different question: a position
-  // row is shared by everything that happens on that contract that day, so a
-  // trader who closes a trade in the morning and is holding the SAME contract
-  // again in the afternoon has one position with a non-zero `netPos` — and
-  // the morning trade, which is genuinely finished, waits for the afternoon
-  // one before it reaches the journal. That is the conservative direction §A3
-  // chose on purpose (an absence corrects itself on the next pull, a
-  // duplicate does not), and pinning it here makes a later change to it a
-  // decision rather than an accident.
+  // AND TWO FIXTURES HAD TO BE REPAIRED TO SAY IT, WHICH IS ITSELF THE FINDING.
+  // The old (3) and (5) set `netPos: 2` while supplying no fills for those two
+  // contracts — a broker state that cannot exist. Nothing noticed, because the
+  // old code never compared the two. The reconciliation in ./cycles.ts does, so
+  // those fixtures now describe what they always meant: the open position has
+  // its own entry fill.
   const OTHER_CONTRACT = 778899;
   const flatOwn: TradovatePosition = { ...POSITION, netPos: 0 };
   const openOwn: TradovatePosition = { ...POSITION, netPos: 2 };
@@ -3068,48 +3172,75 @@ async function bothPathsAgree() {
       entry: 5000, exit: 5010,
     });
 
+  /** The entry of a position still open: two contracts, no exit, so no pair. */
+  const stillHolding = handFill({
+    id: 990_001, at: '2026-10-14T09:00:00Z', action: 'Buy', qty: 2, price: 5020,
+  });
+
   const aloneRows = await pullRows(withTrips([closedTrip()], { positions: [flatOwn] }));
   const besideOtherRows = await pullRows(withTrips([closedTrip()], { positions: [flatOwn, openOther] }));
-  const ownOpenRows = await pullRows(withTrips([closedTrip()], { positions: [openOwn] }));
-  const missingNetPos = await pullRows(
+
+  // The repaired (3): the contract is genuinely held, with the fill that holds it.
+  const ownOpenTrip = closedTrip();
+  const ownOpen = await pullFull(
+    withTrips([ownOpenTrip], {
+      positions: [openOwn],
+      fills: [...ownOpenTrip.fills, stillHolding],
+    })
+  );
+
+  const missingNetPos = await pullFull(
     withTrips([closedTrip()], {
       positions: [{ ...POSITION, netPos: undefined as unknown as number }],
     })
   );
-  // The afternoon re-entry: a second pair on the SAME position, and the
-  // position still carrying contracts.
+
+  // The repaired (5) — the afternoon re-entry, which is REF-117's second case:
+  // two finished round trips plus a third position still open, all on one
+  // contract, all on one position row.
+  const morning = closedTrip();
+  const afternoon = roundTrip({
+    side: 'long', openAt: '2026-10-14T07:00:00Z', closeAt: '2026-10-14T08:00:00Z',
+    entry: 5020, exit: 5030,
+  });
   const sameContractAgain = await pullRows(
-    withTrips(
-      [
-        closedTrip(),
-        roundTrip({
-          side: 'long', openAt: '2026-10-14T07:00:00Z', closeAt: '2026-10-14T08:00:00Z',
-          entry: 5020, exit: 5030,
-        }),
-      ],
-      { positions: [openOwn] }
-    )
+    withTrips([morning, afternoon], {
+      positions: [openOwn],
+      fills: [...morning.fills, ...afternoon.fills, stillHolding],
+    })
   );
 
-  group('a trade is flat when ITS OWN contract is flat, and not before (§A3)', [
-    c('(1) a finished trade on a flat position is flat',
-      [aloneRows.length, aloneRows[0]?.positionFlat], [1, true]),
-    // THE CASE THIS GROUP WAS ADDED FOR. An open position on another contract
-    // of the same account must not keep a finished trade out of the journal.
+  group('a trade is closed when ITS OWN CYCLE closed, not when the contract is flat (REF-117)', [
+    c('(1) a finished trade on a flat position is closed',
+      [aloneRows.length, aloneRows[0]?.cycleClosed], [1, true]),
+    // Unchanged from the old group, and still the case it was added for: an open
+    // position on another contract of the same account must not keep a finished
+    // trade out of the journal.
     c('(2) an open position on ANOTHER contract does not touch it',
-      [besideOtherRows.length, besideOtherRows[0]?.positionFlat], [1, true]),
-    c('(3) the trade\'s own contract still being held is not flat',
-      [ownOpenRows.length, ownOpenRows[0]?.positionFlat], [1, false]),
-    // FALSE WHEN UNKNOWN, never true: a netPos we cannot read means we cannot
-    // say the position is flat, and the two failure directions are not
-    // symmetric.
-    c('(4) a netPos that is not a finite number reads as not flat',
-      [missingNetPos.length, missingNetPos[0]?.positionFlat], [1, false]),
-    // The documented limit. Both trades on the contract wait together.
-    c('(5) a later re-entry on the same contract holds the earlier trade back too',
-      sameContractAgain.map((trade) => trade.positionFlat), [false, false]),
-    c('(6) and the pull still returns them, so the day\'s figures are unaffected',
-      sameContractAgain.length, 2),
+      [besideOtherRows.length, besideOtherRows[0]?.cycleClosed], [1, true]),
+    // THE REVERSAL. Same fixture as the old (3), opposite answer: the contract
+    // is still being held and the finished trade on it is importable anyway.
+    c('(3) its own contract still being held no longer holds the finished trade back',
+      [ownOpen.trades.length, ownOpen.trades[0]?.cycleClosed], [1, true]),
+    // The still-open cycle contributes no row at all: nothing has been matched,
+    // so there is no round trip to state. Same silence as "no pair, no trade".
+    c('(4) and the open cycle beside it is not a row, nor an absence to explain',
+      [ownOpen.held.length, ownOpen.trades.filter((t) => !t.cycleClosed).length], [0, 0]),
+    // FAIL CLOSED, in the direction REF-107 named and ./cycles.ts strengthened:
+    // a `netPos` we cannot read is not "flat", and it is not a trade either —
+    // the group is HELD and the absence is reported rather than a row being
+    // emitted with a boolean nobody can trust.
+    c('(5) a netPos that is not a finite number HOLDS the group',
+      [missingNetPos.trades.length, missingNetPos.held.length, missingNetPos.held[0]?.reason],
+      [0, 1, 'netpos_mismatch']),
+    // THE 19.10 CASE, as an assertion. Two finished trades and one position
+    // still open on the same contract: both finished trades reach the journal.
+    c('(6) two finished trades on a contract that is still held are BOTH closed',
+      sameContractAgain.map((trade) => trade.cycleClosed), [true, true]),
+    c('(7) and they are two trades with two keys, not one netted row', [
+      sameContractAgain.length,
+      new Set(sameContractAgain.map((trade) => trade.brokerTradeKey)).size,
+    ], [2, 2]),
   ]);
 
   // ── The route ─────────────────────────────────────────────────────────────
@@ -3136,7 +3267,7 @@ async function bothPathsAgree() {
     // The route neither reads this nor filters on it; it is the IMPORT's gate
     // (REF-107 Stage 2, §A3). True here so the fixture is an ordinary finished
     // trade. scripts/broker-import-check.ts is where both values are exercised.
-    positionFlat: true,
+    cycleClosed: true,
   };
   /** Yesterday evening: in the pull because the streak reaches back, not in today. */
   const ROW_YESTERDAY: BrokerTrade = {
@@ -3305,7 +3436,7 @@ async function bothPathsAgree() {
     // this list in the same change that created the field, because a field added
     // to BrokerTrade and NOT added here is a leak nothing would catch.
     'entryOrderIds',
-    'positionFlat',
+    'cycleClosed',
     'trades',
   ];
 
@@ -3829,12 +3960,13 @@ async function liveCacheGroup() {
 
 // ── REF-113 Stage 4b: a position going flat fires the stop read ────────────
 //
-// The gate on recording a stop history is `BrokerTrade.positionFlat`, and a
-// Position is one row per contract per trading day with a live `netPos` — so
-// re-entering a contract withholds the annotation from every trade already
-// closed on it, and `/order/list` is `depthDays = 0`, so a position still open
-// when the day rolls takes those orders with it. A trader who rolls positions
-// all day is therefore invisible to the 21:30 cron, and this poll is the only
+// The gate on recording a stop history is `BrokerTrade.cycleClosed` (REF-117
+// Stage 2, formerly `positionFlat`). The re-entry half of this problem is gone
+// with the rename — a closed cycle is a candidate immediately, whatever the
+// contract does next — but the DEADLINE is not: `/order/list` is
+// `depthDays = 0`, so a position still open when the day rolls takes those
+// orders with it. A trader who rolls positions all day is still invisible to
+// the 21:30 cron for the cycle they are IN, and this poll is the only
 // thing in the product watching the instant that fixes it.
 //
 // What is asserted here is the TRIGGER and not the capture: `captureStops` is

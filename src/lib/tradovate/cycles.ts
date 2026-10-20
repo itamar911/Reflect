@@ -307,6 +307,21 @@ export interface CycleScan {
   unattributedFills: number;
   /** Fills attributed because exactly one account traded that contract. */
   inferredAttributions: number;
+  /**
+   * Pairs that landed in NO cycle, on a group that was not held.
+   *
+   * MONEY WITH NOWHERE TO GO, WHICH IS THE ONE FAILURE THIS MODULE MUST NOT HAVE
+   * SILENTLY. Every pair is assigned to the cycle holding its CLOSING leg, and
+   * for real data that always exists — a pair matches an opening fill against a
+   * later closing one, and the closing one is an exit of the cycle it closed. A
+   * non-zero count here therefore means either a pair shape nothing has seen
+   * (an "exit" that the walk reads as an entry) or a genuine bug in the
+   * assignment, and in both cases a P&L figure was quietly left out of the day.
+   *
+   * Pairs on a HELD group are not counted: that group states no cycles at all
+   * and its absence is already reported.
+   */
+  orphanPairs: number;
 }
 
 const usable = (value: unknown): value is number =>
@@ -703,6 +718,19 @@ export function cyclesFromFills(input: {
     }
   }
 
+  // Pairs with nowhere to go. Scoped to the groups that DID state cycles, so a
+  // held group's pairs — whose absence is already reported — are not counted
+  // twice under a different name.
+  const assignedPairs = new Set(cycles.flatMap((cycle) => cycle.pairIds));
+  const heldKeys = new Set(held.map((item) => `${item.accountId}|${item.contractId}`));
+  const positionById = new Map(positions.map((position) => [position.id, position]));
+  const orphanPairs = pairs.filter((pair) => {
+    if (assignedPairs.has(pair.id)) return false;
+    const position = positionById.get(pair.positionId);
+    if (!position) return false;
+    return !heldKeys.has(`${position.accountId}|${position.contractId}`);
+  }).length;
+
   return {
     cycles: cycles.sort(
       (a, b) => a.closedAtMs - b.closedAtMs || a.keyFillId - b.keyFillId
@@ -710,5 +738,6 @@ export function cyclesFromFills(input: {
     held: held.sort((a, b) => (a.accountId ?? 0) - (b.accountId ?? 0) || a.contractId - b.contractId),
     unattributedFills: unattributable.size,
     inferredAttributions: inferred,
+    orphanPairs,
   };
 }
