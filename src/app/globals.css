@@ -308,6 +308,55 @@ html.light .today-context-colours {
   --today-context-attention: #b45309;
 }
 
+/* ── Live P&L colours ────────────────────────────────────
+   Scoped to components/tradovate/LivePositionLines.tsx (REF-108 Stage 4b),
+   which renders the broker's open figure beside an open position.
+
+   THE VALUES ARE THE SAME AS --today-context-gain/loss BY INTENT, NOT BY
+   ACCIDENT, and they are duplicated rather than shared for one reason: this
+   component renders on THREE surfaces and that block's are scoped to one of
+   them. A token defined on the component's own root works wherever it is
+   mounted; reaching into the panel's scope would make the dashboard depend on
+   a class named for a different component. If one set ever changes, the other
+   should be reconsidered in the same change — they are the same decision about
+   the same kind of value.
+
+   MEASURED ON ALL THREE SURFACES, BOTH THEMES, rather than assumed from the
+   panel's measurement. The surfaces this actually renders on:
+
+     dashboard greeting  --color-tg-bg         #292930 dark | #ffffff light
+     portfolio card      --color-tg-surface    #303036 dark | #f4f6f8 light
+     day panel           --color-tg-surface-2  #383840 dark | #e9ecf0 light
+
+                      bg      surface  surface-2
+     gain  dark  #22c55e   6.34     5.75     5.10
+     loss  dark  #fb8c8c   6.35     5.76     5.11
+     zero  dark  #a8adb8   6.42     5.83     5.16
+     gain  light #166534   7.13     6.58     6.02
+     loss  light #b91c1c   6.47     5.97     5.46
+     zero  light #5c6370   6.05     5.58     5.10
+
+   All nine clear AA (4.5:1) for text, which these are — an amount of money.
+   And the useful half of that table: **surface-2 is the worst case in BOTH
+   themes**, because in dark mode it is the lightest of the three behind light
+   text and in light mode the darkest behind dark text. So the panel's existing
+   measurement was already the binding one, and anything that passes there
+   passes on the other two. A new surface is NOT covered by that argument —
+   measure it.
+
+   zero is --color-tg-muted, a global token, so it is not restated below.
+   A break-even figure is a fact but it is not a gain, and green would read as
+   one. Red stays on money lost and nothing else; the contract count is never
+   coloured. */
+.live-pnl-colours {
+  --live-pnl-gain: #22c55e;
+  --live-pnl-loss: #fb8c8c;
+}
+html.light .live-pnl-colours {
+  --live-pnl-gain: #166534;
+  --live-pnl-loss: #b91c1c;
+}
+
 /* ── Sidebar toggle handle ────────────────────────────────
    Half-pill tab attached to the sidebar's edge (RTL: rounded on the left,
    flat against the panel). The outer button (.sidebar-handle-btn, inline

@@ -86,7 +86,10 @@ import {
   loadOpenPositions,
   type LiveReader,
 } from '../src/lib/tradovate/positions';
-import type { BrokerLivePull } from '../src/app/api/tradovate/live/route';
+import type {
+  BrokerLivePull,
+  LiveAccountLine,
+} from '../src/app/api/tradovate/live/route';
 import {
   FLAT_MS,
   HOLDING_MS,
@@ -98,9 +101,11 @@ import {
 } from '../src/lib/tradovate/liveClock';
 import { openAccounts } from '../src/lib/tradovate/useLivePositions';
 import {
-  NO_PRICE_NOTE,
+  PORTFOLIO_TOTAL,
   contractsLabel,
-  positionLines,
+  liveRows,
+  moneyColour,
+  rendersMoney,
 } from '../src/components/tradovate/LivePositionLines';
 import type {
   TradovateAccount,
@@ -4404,6 +4409,40 @@ async function liveFlatTransitionGroup() {
 // asserted here, without a browser and without a timer. What is left in the
 // hook is a setTimeout and a visibility listener; the decisions are these.
 
+/** The texts of a row list, which is what the copy groups assert on. */
+const texts = (rows: readonly { text: string }[]) => rows.map((row) => row.text);
+
+/** One portfolio holding ONE contract, with a figure (or null). */
+function solo(
+  displayName: string,
+  netPos: number,
+  openPnl: number | null,
+  contractName: string | null
+): LiveAccountLine {
+  return {
+    accountId: displayName,
+    displayName,
+    openPnl,
+    positions: [{ contractName, netPos }],
+  };
+}
+
+/**
+ * One portfolio holding TWO contracts — the case the per-account figure cannot
+ * be attributed to either of, and therefore the one Stage 4b is really about.
+ */
+function pair(displayName: string, openPnl: number | null): LiveAccountLine {
+  return {
+    accountId: displayName,
+    displayName,
+    openPnl,
+    positions: [
+      { contractName: 'ESZ6', netPos: 1 },
+      { contractName: 'MNQZ6', netPos: 4 },
+    ],
+  };
+}
+
 function verifiedPull(positions: number[]): BrokerLivePull {
   return {
     source: 'broker_verified',
@@ -4497,6 +4536,8 @@ async function liveClockGroup() {
   ]);
 
   group('REF-108: the line a trader reads', [
+    // `liveRows` answers with rows; these groups are about the COPY, so they
+    // read the text and the figure-placement groups below read `money`.
     // Hebrew has a dual. "2 חוזים" reads as a translation; "שני חוזים" reads
     // as a sentence.
     c('(1) one contract', contractsLabel(1), 'חוזה אחד'),
@@ -4510,41 +4551,161 @@ async function liveClockGroup() {
     // One portfolio: no name on the line, because it would be noise on every
     // one of them.
     c('(6) a single portfolio is not named',
-      positionLines(openAccounts(verifiedPull([2]))), ['פוזיציה פתוחה · שני חוזים ESZ6']),
+      texts(liveRows(openAccounts(verifiedPull([2])), 'positions')),
+      ['פוזיציה פתוחה · שני חוזים ESZ6']),
     // Several: the name IS the point (REF-108, 16.10) — a trader with two
     // evaluations needs to know which one they are in.
-    // `openPnl: null` THROUGHOUT THIS GROUP, AND THAT IS THE POINT OF STAGE 4A.
-    // The figure is on the wire and `positionLines` does not read it, so every
-    // assertion below is unchanged in meaning — which is the evidence that this
-    // stage did not touch the display. Stage 4b is where these grow a number.
     c('(7) two portfolios are both named',
-      positionLines([
-        { accountId: 'a', displayName: 'Eval One', positions: [{ contractName: 'ESZ6', netPos: 1 }], openPnl: null },
-        { accountId: 'b', displayName: 'Eval Two', positions: [{ contractName: 'MNQZ6', netPos: -2 }], openPnl: null },
-      ]),
+      texts(liveRows([solo('Eval One', 1, null, 'ESZ6'), solo('Eval Two', -2, null, 'MNQZ6')], 'positions')),
       ['פוזיציה פתוחה · חוזה אחד ESZ6 · Eval One', 'פוזיציה פתוחה · שני חוזים MNQZ6 · Eval Two']),
     c('(8) several positions are one line each',
-      positionLines([
-        {
-          accountId: 'a', displayName: 'Solo', openPnl: null, positions: [
-            { contractName: 'ESZ6', netPos: 1 },
-            { contractName: 'MNQZ6', netPos: 4 },
-          ],
-        },
-      ]).length, 2),
+      texts(liveRows([pair('Solo', null)], 'positions')).length, 2),
     // A contract we could not name still says how much is held.
     c('(9) an unnamed contract still reports the size',
-      positionLines([{ accountId: 'a', displayName: 'Solo', positions: [{ contractName: null, netPos: 1 }], openPnl: null }]),
+      texts(liveRows([solo('Solo', 1, null, null)], 'positions')),
       ['פוזיציה פתוחה · חוזה אחד']),
-    c('(10) flat renders no line', positionLines(openAccounts(verifiedPull([0]))), []),
+    c('(10) flat renders no row', liveRows(openAccounts(verifiedPull([0])), 'positions'), []),
+  ]);
 
-    // The sentence that stops a missing number reading as a broken one.
-    // Pinned verbatim, because a reword is a product decision taken again.
-    c('(11) the no-price note, verbatim', NO_PRICE_NOTE,
-      'המחיר החי אינו זמין דרך הברוקר; הרווח/הפסד ייספר עם הסגירה.'),
-    // §8: it describes, it does not instruct.
-    c('(12) and it instructs nobody to do anything',
-      /כדאי|תעצור|מומלץ|עליך|שים לב/.test(NO_PRICE_NOTE), false),
+  // ── REF-108 Stage 4b: the figure, where it goes and where it does not ────
+  //
+  // `NO_PRICE_NOTE` AND ITS TWO ASSERTIONS ARE GONE FROM HERE, which is the
+  // deletion Imri approved on 20.10 and the reason the copy was pinned in the
+  // first place: the reword had to be a decision taken again rather than a diff
+  // nobody read. What replaced the sentence is silence, and (5) below is the
+  // assertion that it really is silence and not a dash.
+  //
+  // The §8 "describes, does not instruct" check did NOT go with it — it moved
+  // onto the new copy, over EVERY row of every layout, which is a wider net
+  // than the one sentence it used to cover.
+  const singleFigure = liveRows([solo('Solo', 3, 120, 'MNQZ6')], 'positions');
+  const twoInOne = liveRows([pair('Solo', 120)], 'positions');
+  const twoInOneNoFigure = liveRows([pair('Solo', null)], 'positions');
+  const dashboard = liveRows(
+    [solo('אפקס 1', 1, 120, 'ESZ6'), solo('טופסטפ', -2, -30, 'MNQZ6')],
+    'portfolios'
+  );
+
+  // Every row of every shape this component can produce, for the imperative
+  // check below. A net is only as good as what is thrown at it.
+  const allCopy = [
+    ...singleFigure, ...twoInOne, ...twoInOneNoFigure, ...dashboard,
+    ...liveRows([solo('Solo', 1, 0, 'ESZ6')], 'positions'),
+    ...liveRows([solo('Solo', 1, null, null)], 'positions'),
+  ].map((row) => row.text);
+
+  group('REF-108 Stage 4b: the figure beside the position', [
+    // ONE CONTRACT: the figure is this line's, so it goes on it and needs no
+    // qualifier — that is Imri's 20.10 clarification.
+    c('(1) one contract carries the figure inline',
+      [singleFigure.length, singleFigure[0].text, singleFigure[0].money],
+      [1, 'פוזיציה פתוחה · 3 חוזים MNQZ6', 120]),
+    c('(2) and says nothing about a portfolio total',
+      singleFigure.some((r) => r.text.includes(PORTFOLIO_TOTAL)), false),
+
+    // TWO OR MORE: the snapshot is an ACCOUNT aggregate, so the figure belongs
+    // to neither line. On its own row, qualified, exactly once.
+    c('(3) two contracts put the figure on its own qualified row',
+      twoInOne.map((r) => [r.text, r.money]),
+      [['פוזיציה פתוחה · חוזה אחד ESZ6', null],
+       ['פוזיציה פתוחה · 4 חוזים MNQZ6', null],
+       [PORTFOLIO_TOTAL, 120]]),
+    // THE ASSERTION THAT PROTECTS THE WHOLE DESIGN. A figure repeated per line
+    // is one a reader adds up.
+    c('(4) and the figure appears exactly once',
+      twoInOne.filter((r) => r.money !== null).length, 1),
+
+    // SILENCE, NOT A DASH AND NOT AN EXPLANATION. A row carrying only a
+    // qualifier would be an explanation of an absence.
+    c('(5) no figure means no money and no extra row',
+      twoInOneNoFigure.map((r) => r.money), [null, null]),
+    c('(6) and no qualifier row is invented for it',
+      twoInOneNoFigure.some((r) => r.text.includes(PORTFOLIO_TOTAL)), false),
+    c('(7) a null figure on a single line is simply absent',
+      liveRows([solo('Solo', 1, null, 'ESZ6')], 'positions')[0].money, null),
+
+    // ZERO IS A FIGURE. Stage 4a's null is the non-answer; break-even is an
+    // answer, and it must survive the display layer as 0 rather than vanish.
+    c('(8) a break-even figure is rendered, not dropped',
+      liveRows([solo('Solo', 1, 0, 'ESZ6')], 'positions')[0].money, 0),
+    c('(9) a loss keeps its sign',
+      liveRows([solo('Solo', 1, -240, 'ESZ6')], 'positions')[0].money, -240),
+
+    // THE DASHBOARD: one row per portfolio, NAMED, whatever is in it.
+    c('(10) the dashboard is one row per portfolio',
+      dashboard.map((r) => [r.text, r.money]),
+      [['אפקס 1 · פוזיציה פתוחה', 120], ['טופסטפ · פוזיציה פתוחה', -30]]),
+    c('(11) and names the nickname rather than a broker account number',
+      dashboard.every((r) => /^[^0-9]/.test(r.text)), true),
+    // Two contracts in one portfolio is still ONE dashboard row — the figure
+    // is the portfolio's, so no qualifier is needed there either.
+    c('(12) two contracts in one portfolio is one dashboard row',
+      liveRows([pair('Solo', 120)], 'portfolios').map((r) => r.money), [120]),
+    c('(13) flat renders no dashboard row',
+      liveRows(openAccounts(verifiedPull([0])), 'portfolios'), []),
+
+    // §8, MOVED HERE FROM `NO_PRICE_NOTE` AND WIDENED. Vendor compliance, not
+    // style: every string this component can emit is a statement of fact.
+    c('(14) no row instructs anybody to do anything',
+      allCopy.filter((t) => /כדאי|תעצור|מומלץ|עליך|שים לב|הגיע הזמן|שקול/.test(t)), []),
+    // The figure is a fact; a possessive turns it into a prompt about the
+    // trader rather than about the position.
+    c('(15) and none of it editorialises the money',
+      allCopy.filter((t) => /הרווח שלך|ההפסד שלך|אתה ברווח|אתה בהפסד/.test(t)), []),
+    c('(16) the qualifier is pinned', PORTFOLIO_TOTAL, '(סה״כ בתיק)'),
+
+    // ── `totalFirst` — the portfolio card's 44px clip ────────────────────
+    //
+    // MEASURED IN A BROWSER, NOT REASONED ABOUT. `LivePnlSlot` is a fixed 44px
+    // with `overflow: hidden` and its header forbids changing that. Three 11px
+    // rows at the default line height are 53.5px, so a portfolio holding two
+    // contracts overflowed by 9.5px — and the row the box cut off was the one
+    // carrying the figure. Tightened rows are 41.25px and fit with 2.75px to
+    // spare; the figure moving to the top is what protects the portfolios that
+    // hold four or five contracts, where no tightening can help.
+    //
+    // These two assert the ORDER, which is the half that survives a CSS change.
+    c('(17) the card puts the figure first, so a clip costs a contract line',
+      liveRows([pair('Solo', 120)], 'positions', { totalFirst: true })[0],
+      { key: 'Solo:total', text: PORTFOLIO_TOTAL, money: 120 }),
+    // `.at(-1)?` RATHER THAN `[2]`: an index access here crashes the whole
+    // group when the row count is wrong, and a crash reports nothing — the
+    // sabotage check found exactly that. "The last row is the total" is also
+    // the claim being made, so this reads as what it asserts.
+    c('(18) and the panel keeps the reading order, figure last',
+      liveRows([pair('Solo', 120)], 'positions').at(-1)?.text ?? null, PORTFOLIO_TOTAL),
+    // Same rows either way — the option reorders, it never adds or drops one.
+    c('(19) totalFirst reorders and nothing else',
+      [liveRows([pair('Solo', 120)], 'positions', { totalFirst: true }).length,
+       liveRows([pair('Solo', 120)], 'positions').length],
+      [3, 3]),
+    // A single contract has no total row to move, so the option is inert.
+    c('(20) with one contract the option changes nothing',
+      texts(liveRows([solo('Solo', 1, 120, 'ESZ6')], 'positions', { totalFirst: true })),
+      texts(liveRows([solo('Solo', 1, 120, 'ESZ6')], 'positions'))),
+
+    // ── What actually reaches the glyph ─────────────────────────────────
+    //
+    // THESE EXIST BECAUSE A SABOTAGE CHECK GOT THROUGH. The render predicate
+    // was `if (!money)` inside the component — correct for every value except
+    // `0`, which is falsy, so a break-even position lost its "$0" while all
+    // 413 assertions passed. The node suite cannot render React, so a decision
+    // taken inside a component is a decision nothing tests; the rule moved out
+    // to `rendersMoney` and these reach it.
+    //
+    // `null` is not `0` is the line Stage 4a drew in `readOpenPnl`, and it has
+    // to survive all the way to the glyph to have meant anything.
+    c('(21) a null figure renders nothing', rendersMoney(null), false),
+    c('(22) a BREAK-EVEN figure renders — zero is an answer',
+      rendersMoney(0), true),
+    c('(23) and so do both directions', [rendersMoney(120), rendersMoney(-240)], [true, true]),
+
+    // Green up, red down, muted at zero. The colour is never the only signal —
+    // `formatMoney`'s sign is in the text — but a gain and a break-even must
+    // not look alike.
+    c('(24) the three colours are distinct and zero is not a gain',
+      [moneyColour(120), moneyColour(-240), moneyColour(0)],
+      ['var(--live-pnl-gain)', 'var(--live-pnl-loss)', 'var(--color-tg-muted)']),
   ]);
 
   group('REF-108: what the consumers render from', [

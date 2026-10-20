@@ -44,22 +44,28 @@
 import LivePositions from '@/components/tradovate/LivePositions';
 
 /**
- * FILLED BY REF-108 STAGE 3 — with what is open, and not with a figure.
+ * FILLED BY STAGE 3, AND THE FIGURE ARRIVED IN STAGE 4B — in the same box, at
+ * the same height, in the same place.
  *
- * The box, its height and its position are unchanged, which is what the
- * header above asked of whoever got here. What changed is that the box now
- * has something in it: "פוזיציה פתוחה · N חוזים", for THIS portfolio only.
+ * Stage 3 put "פוזיציה פתוחה · N חוזים" here and said, in this comment, that
+ * if the broker turned out to compute an open figure of its own it would
+ * arrive in this same box and nothing would move. **That is what happened.**
+ * `/cashBalance/getcashbalancesnapshot` carries an `openPnL` (Stage 0 Q8,
+ * measured 19.10), so the line now reads
+ * "פוזיציה פתוחה · שני חוזים ESZ6 · +$120" for THIS portfolio only.
  *
- * It is still not the live P&L REF-108 was written for, and the reason is
- * one the ticket cannot route around: Market Data is Denied in our OAuth
- * registration, so there is no mark price to multiply by. The sentence under
- * the line says so to the trader. If the broker turns out to compute an open
- * figure of its own (`--live`, Stage 0, Q8), it arrives in this same box and
- * nothing here moves.
+ * `SLOT_HEIGHT` IS UNCHANGED AND THAT IS NOT LUCK. The figure goes INSIDE the
+ * existing line rather than on a row of its own, and deleting Stage 3's
+ * no-price sentence gave back a row — so the common case is shorter than what
+ * this box already held. The one case that grows is a portfolio holding two or
+ * more contracts, where the per-portfolio total takes a third row; see the
+ * note on {@link SLOT_HEIGHT}.
  *
  * STILL A FIXED-HEIGHT BOX, and still unconditionally rendered. A portfolio
  * with no open position renders an empty one of the same height, exactly as
  * the header required — the content is conditional, the reservation is not.
+ * A portfolio whose figure could not be read renders the line without it, in
+ * silence, which is the Stage 3 floor.
  */
 
 /** The reserved height, in px. See the header before changing it. */

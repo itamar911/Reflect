@@ -21,9 +21,15 @@
  */
 
 import { openAccounts, useLivePositions } from '@/lib/tradovate/useLivePositions';
-import LivePositionLines from './LivePositionLines';
+import LivePositionLines, { type LiveLayout } from './LivePositionLines';
 
-export default function LivePositions({ userId, enabled, compact = false, accountId = null }: {
+export default function LivePositions({
+  userId,
+  enabled,
+  compact = false,
+  accountId = null,
+  layout = 'positions',
+}: {
   userId: string;
   enabled: boolean;
   compact?: boolean;
@@ -35,10 +41,21 @@ export default function LivePositions({ userId, enabled, compact = false, accoun
    * of them, which is what the day panel and the dashboard want.
    */
   accountId?: string | null;
+  /**
+   * Which shape this surface wants (REF-108 Stage 4b).
+   *
+   * `positions` — a line per contract, the figure on the portfolio. The day
+   * panel and the portfolio card. `portfolios` — a line per portfolio with its
+   * name and figure, which is the dashboard's 20.10 requirement.
+   *
+   * Defaulted rather than required so the two surfaces that want the original
+   * shape say nothing, and the one that changed says so at its mount site.
+   */
+  layout?: LiveLayout;
 }) {
   const { pull } = useLivePositions({ userId, enabled });
   const accounts = openAccounts(pull);
   const scoped = accountId === null ? accounts : accounts.filter((a) => a.accountId === accountId);
 
-  return <LivePositionLines accounts={scoped} compact={compact} />;
+  return <LivePositionLines accounts={scoped} compact={compact} layout={layout} />;
 }

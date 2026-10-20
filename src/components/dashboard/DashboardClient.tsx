@@ -1612,9 +1612,16 @@ export default function DashboardClient({
               renders nothing at all when they are flat — so the greeting row
               is unchanged for a trader with no open position. `canSync` is
               already the allowlist AND the import flag, which is exactly the
-              gate the poll wants. */}
+              gate the poll wants.
+
+              `layout="portfolios"` is the 20.10 requirement: one row per
+              portfolio that is live right now, named with the nickname the
+              trader gave it, carrying that portfolio's own figure. A trader
+              with three evaluations gets three rows rather than a row per
+              contract — this screen asks WHICH portfolios are working, and
+              what is inside them belongs in the day panel. */}
           <div style={{ marginTop: 6 }}>
-            <LivePositions userId={userId} enabled={canSync} />
+            <LivePositions userId={userId} enabled={canSync} layout="portfolios" />
           </div>
         </div>
         {/* NO `refreshOnChange` HERE, and that is the point of the prop. The
