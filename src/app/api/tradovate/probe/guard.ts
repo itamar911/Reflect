@@ -58,6 +58,18 @@ export const PROBE_ENDPOINTS = [
   '/contract/item',
   '/contractMaturity/item',
   '/product/item',
+
+  // --- fills mode (REF-117 Stage 0) — TEMPORARY, deleted with ./fills.ts ---
+  //
+  // The one endpoint that mode adds. A read, and one
+  // `src/lib/tradovate/fills.ts` already makes on every day pull — it is the
+  // source of the grouping REF-117 is measuring. `/fill/list` and
+  // `/position/list` are listed above already and are not repeated.
+  //
+  // Checked against the denylist the same way the rest of this list was:
+  // `/fillPair/list` contains no `place`, `cancel`, `modify`, `create`,
+  // `update` or `delete`.
+  '/fillPair/list',
 ] as const;
 
 export type ProbeEndpoint = (typeof PROBE_ENDPOINTS)[number];

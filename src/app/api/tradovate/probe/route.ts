@@ -3,7 +3,8 @@
  *
  * **This is not product code and nothing in the app imports it.** It replaces
  * `scripts/spike/tradovate-spike.mjs` as the way to answer REF-113 Q1-Q7,
- * REF-108 Q8/Q9 and REF-110's account-naming question, for one reason: the
+ * REF-108 Q8/Q9, REF-110's account-naming question and REF-117's grouping
+ * question (`?mode=fills`, Stage 0), for one reason: the
  * spike authenticates with a username, a password and a CID/SEC API key against
  * a demo account, and those four things describe a vendor trial, not a trader.
  * This asks the same questions through the OAuth connection the product
@@ -45,6 +46,13 @@
  * never emitted. The same rule as `relativeSeconds`: an offset is a measurement,
  * a level is an identifier.
  *
+ * And in `?mode=fills` only and TEMPORARILY, the SHAPE OF THE FILL GRAPH —
+ * ./fills.ts: component sizes, cycle counts and a relative day index, all of
+ * them counts of rows. The quantities the netPos walk needs and the `netPos` the
+ * reconciliation compares against are read server-side and never emitted; what
+ * leaves is a pair of booleans. Same rule, other axis: a count of fills is a
+ * measurement, a contract quantity is the position.
+ *
  * It may NOT return ids, symbols, prices, quantities, account names, instants
  * or hostnames — the brief's list. Two mechanisms, in this order:
  *
@@ -74,6 +82,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getUserTradingApi } from '@/lib/tradovate/connections';
 import { redactSecrets } from '@/lib/tradovate/redact';
 
+import { FILL_QUESTIONS, probeFillsHost } from './fills';
 import { guardSelfCheck } from './guard';
 import { LIVE_QUESTIONS, probeLiveHost } from './live';
 import { ORDER_QUESTIONS, probeOrdersHost, WINDOW_HOURS } from './orders';
@@ -117,12 +126,12 @@ export function isProbeUser(userId: string, env: NodeJS.ProcessEnv = process.env
 const SAFE_SAMPLE = /^(<(string|number|boolean|bigint|symbol|function|object|undefined)>|<array len=\d+>|null|true|false|[A-Za-z][A-Za-z0-9_-]{0,31})$/;
 
 /**
- * The subtree every value of which is checked, not just its `sample` fields.
+ * The subtrees every value of which is checked, not just their `sample` fields.
  *
  * Q8 (REF-113 §4.2, ./q8.ts) is the first block here that reports MEASUREMENTS
  * rather than field shapes — signed tick distances and row counts — so it has no
  * `sample` keys for the rule above to catch, and the rule above would wave the
- * whole thing through. Under this key the grammar applies to every string, every
+ * whole thing through. Under these keys the grammar applies to every string, every
  * object KEY (a key is a value in JSON, and a free-text `commandType` used as one
  * would be emitted verbatim), and numbers must be INTEGERS.
  *
@@ -130,8 +139,21 @@ const SAFE_SAMPLE = /^(<(string|number|boolean|bigint|symbol|function|object|und
  * construction and a quarter-tick index price is not, so a raw `stopPrice` that
  * reached this block would be named here rather than read as a measurement. It
  * is also why ./q8.ts reports `null` instead of falling back to points.
+ *
+ * A SET SINCE REF-117 STAGE 0, and the second and third entries are what made it
+ * one. `?mode=fills` (./fills.ts) reports the fill graph's SHAPE — component
+ * sizes, cycle counts, a relative day index — which is the same kind of block
+ * with the same absence of `sample` keys. Its counts are integers by
+ * construction and a contract quantity read off the wire would be too, so the
+ * integer rule is weaker here than it is for Q8; what carries the weight in that
+ * block is that no quantity is written into the response at all. Its own header
+ * argues that, and this is still the check that a price never reached it.
+ *
+ * `depthDays` is NOT under any of these on purpose — it is a rounded day count
+ * and therefore fractional. Both modes that report one keep it beside the field
+ * surveys, outside.
  */
-const STRICT_SUBTREE_KEY = 'perOrder';
+const STRICT_SUBTREE_KEYS = new Set(['perOrder', 'perGroup', 'perComponent']);
 
 /**
  * Re-read the finished payload and confirm no raw value is in it.
@@ -179,9 +201,9 @@ export function scanForLeaks(payload: unknown): {
         if (typeof value !== 'string' || !SAFE_SAMPLE.test(value)) offenders.push(here);
         continue;
       }
-      // Entering the strict subtree is one-way: everything nested below it is
+      // Entering a strict subtree is one-way: everything nested below it is
       // checked, so a block cannot opt its own children back out.
-      const strictHere = strict || key === STRICT_SUBTREE_KEY;
+      const strictHere = strict || STRICT_SUBTREE_KEYS.has(key);
       if (strictHere && !SAFE_SAMPLE.test(key)) offenders.push(`${here} <key>`);
       walk(value, here, strictHere);
     }
@@ -207,9 +229,12 @@ export async function GET(request: Request): Promise<NextResponse> {
   if (!isProbeUser(user.id)) return notFound();
 
   const mode = new URL(request.url).searchParams.get('mode');
-  if (mode !== 'live' && mode !== 'orders') {
+  if (mode !== 'live' && mode !== 'orders' && mode !== 'fills') {
     return NextResponse.json(
-      { error: 'mode must be "live" or "orders"', example: '/api/tradovate/probe?mode=live' },
+      {
+        error: 'mode must be "live", "orders" or "fills"',
+        example: '/api/tradovate/probe?mode=fills',
+      },
       { status: 400, headers: NO_STORE }
     );
   }
@@ -241,14 +266,21 @@ export async function GET(request: Request): Promise<NextResponse> {
     // nothing about where the trader's accounts live. A host with no
     // provisioning answers 401/403, which ./call.ts records as an answer.
     hosts[host] =
-      mode === 'live' ? await probeLiveHost(options) : await probeOrdersHost(options);
+      mode === 'live'
+        ? await probeLiveHost(options)
+        : mode === 'fills'
+          ? await probeFillsHost(options)
+          : await probeOrdersHost(options);
   }
+
+  const questions =
+    mode === 'live' ? LIVE_QUESTIONS : mode === 'fills' ? FILL_QUESTIONS : ORDER_QUESTIONS;
 
   const payload = {
     mode,
     generatedAt: new Date().toISOString(),
     windowHours: mode === 'orders' ? WINDOW_HOURS : null,
-    questions: mode === 'live' ? LIVE_QUESTIONS : ORDER_QUESTIONS,
+    questions,
     readOnlyGuard: {
       ok: guard.ok,
       mutationShapedEndpoints: guard.offenders,
