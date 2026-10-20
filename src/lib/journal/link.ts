@@ -102,6 +102,31 @@ export const LINK_STATE_COPY: Record<LinkState, string> = {
 };
 
 /**
+ * The same three states as a CHIP beside the row in the journal list.
+ *
+ * SEPARATE STRINGS BECAUSE THE BROKER'S NAME IS ALREADY THERE. The list puts
+ * `Tradovate` in its own chip, so these are the sentences above with that
+ * prefix removed rather than a second opinion about what each state is called.
+ *
+ * `linked` IS NULL, AND THAT IS THE DECISION. A linked row is a trade with a
+ * plan behind it — the normal case this product is moving towards — and the
+ * `Tradovate` chip beside it already says where it came from. The detail modal
+ * is where the link is a fact worth stating; a row in a list is not.
+ *
+ * AND THE SAME BUG AS §A, ONE SCREEN OVER (finding 2 of 19.10). The chip read
+ * `t.unplanned` directly, which is true for a QUEUED row as well as a declined
+ * one — so "לא תוכננה" was printed over a trade nobody had been asked about
+ * yet, next to a modal offering to assign it to a plan. `unplanned` is the
+ * column, not the answer; `link_confirmed_at` is what records that the question
+ * was put to the trader, and that is what {@link linkState} reads.
+ */
+export const LINK_STATE_CHIP: Record<LinkState, string | null> = {
+  linked: null,
+  queued: 'ממתינה לשיוך',
+  declined: 'לא תוכננה',
+};
+
+/**
  * The banner on /trades. Singular and plural spelled out, not templated.
  *
  * Same rule as `addedSentence` in lib/tradovate/sync-response.ts, and the same

@@ -10,6 +10,7 @@ import { readStoredDebrief } from '@/lib/journal/debrief';
 import {
   deleteWarningText,
   isQueuedBrokerRow,
+  LINK_STATE_CHIP,
   LINK_STATE_COPY,
   linkState,
   queueBannerText,
@@ -1496,9 +1497,21 @@ function RowStatusChip({ t }: { t: Trade }) {
  * SMALL, AND NOT A WARNING. An imported trade is the normal case this product
  * is moving towards — "manual entry is no longer the source of truth" is the
  * goal on REF-107 — so the badge is a label, in the turquoise the rest of the
- * app uses for a fact, and not an amber flag. "לא תוכננה" sits beside it in
- * muted grey rather than red for the same reason: `unplanned` is a description,
- * and the trader already knows they did not fill the form.
+ * app uses for a fact, and not an amber flag. The state chip sits beside it in
+ * muted grey rather than red for the same reason: both of its words are
+ * descriptions, and neither is news to the trader.
+ *
+ * THE SECOND CHIP READS THE STATE AND NOT THE COLUMN (finding 2 of 19.10). It
+ * used to render "לא תוכננה" off `t.unplanned`, which is true from the moment
+ * the import writes the row — so a trade waiting in the queue was labelled not
+ * planned before anybody had asked, in the same list whose banner was offering
+ * to assign it to a plan. lib/journal/link.ts owns the three words and the
+ * reason; "לא תוכננה" now appears only once the trader has said so.
+ *
+ * GREY FOR BOTH, DELIBERATELY. "ממתינה לשיוך" is a queue position and not a
+ * problem, and turquoise on this page means a live fact about the trade while
+ * amber and red are reserved for discipline and money. The same neutral pair
+ * `RowStatusChip` uses for 'not_entered', for the same reason.
  *
  * Lucide only and no emoji, per CLAUDE.md. There is no icon here at all — a
  * broker's name is a word, and the two chips next to a direction chip and a
@@ -1506,10 +1519,12 @@ function RowStatusChip({ t }: { t: Trade }) {
  */
 function ProvenanceChips({ t }: { t: Trade }) {
   if (!isBrokerRow(t)) return null;
+  const state = linkState(t);
+  const chip = state ? LINK_STATE_CHIP[state] : null;
   return (
     <>
       <Chip bg="rgba(0,210,210,0.1)" color={GOLD}>Tradovate</Chip>
-      {t.unplanned && <Chip bg={SURF2} color={MUTED}>לא תוכננה</Chip>}
+      {chip && <Chip bg={SURF2} color={MUTED}>{chip}</Chip>}
     </>
   );
 }

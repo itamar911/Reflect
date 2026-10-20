@@ -154,6 +154,7 @@ import {
   declineLink,
   deleteWarningText,
   isQueuedBrokerRow,
+  LINK_STATE_CHIP,
   LINK_STATE_COPY,
   linkState,
   proposeFlags,
@@ -2990,6 +2991,30 @@ async function confirmScreenGroup() {
     c('(3) the מקור row needs three sentences, not two',
       [LINK_STATE_COPY.linked, LINK_STATE_COPY.queued, LINK_STATE_COPY.declined],
       ['Tradovate · מקושרת לתוכנית', 'Tradovate · ממתינה לשיוך', 'Tradovate · לא תוכננה']),
+    // THE CHIP IN THE LIST, AND THE ONE WORD IT MUST NOT SAY (finding 2 of
+    // 19.10). It used to be rendered off `unplanned`, which is true the moment
+    // the import writes the row — so "לא תוכננה" was printed over a trade in
+    // the queue, under a banner offering to assign it to a plan. The state is
+    // the only thing allowed to decide it, and `linkState` is the state.
+    c('(3a) a queued row is waiting, not unplanned',
+      LINK_STATE_CHIP[linkState({ source: 'tradovate', unplanned: true, link_confirmed_at: null })!],
+      'ממתינה לשיוך'),
+    c('(3b) and only the trader\'s own answer says otherwise',
+      LINK_STATE_CHIP[linkState({
+        source: 'tradovate', unplanned: true, link_confirmed_at: '2026-10-16T10:00:00.000Z',
+      })!],
+      'לא תוכננה'),
+    // A linked row carries the broker's name and nothing else: the trade has a
+    // plan behind it, which is the normal case and not a thing to label.
+    c('(3c) a linked row carries no state chip',
+      LINK_STATE_CHIP[linkState({
+        source: 'tradovate', unplanned: false, link_confirmed_at: '2026-10-16T10:00:00.000Z',
+      })!],
+      null),
+    // The word nobody may reach from the column alone. If `unplanned` is ever
+    // read directly again, one of these three is the assertion that says so.
+    c('(3d) the two chips are never the same word',
+      LINK_STATE_CHIP.queued === LINK_STATE_CHIP.declined, false),
     c('(4) a deleted row is not in the queue',
       [isQueuedBrokerRow({ source: 'tradovate', unplanned: true, link_confirmed_at: null }),
        isQueuedBrokerRow({ source: 'tradovate', unplanned: true, link_confirmed_at: null, hidden: true })],
