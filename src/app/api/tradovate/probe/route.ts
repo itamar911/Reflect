@@ -153,7 +153,7 @@ const SAFE_SAMPLE = /^(<(string|number|boolean|bigint|symbol|function|object|und
  * and therefore fractional. Both modes that report one keep it beside the field
  * surveys, outside.
  */
-const STRICT_SUBTREE_KEYS = new Set(['perOrder', 'perGroup', 'perComponent']);
+const STRICT_SUBTREE_KEYS = new Set(['perOrder', 'perGroup', 'perComponent', 'perDay', 'readVia']);
 
 /**
  * Re-read the finished payload and confirm no raw value is in it.

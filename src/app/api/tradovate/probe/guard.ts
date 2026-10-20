@@ -70,6 +70,19 @@ export const PROBE_ENDPOINTS = [
   // `/fillPair/list` contains no `place`, `cancel`, `modify`, `create`,
   // `update` or `delete`.
   '/fillPair/list',
+
+  // The narrowing walk, added after the first run of that mode found
+  // `/fill/list` and `/fillPair/list` BOTH EMPTY the morning after a trading
+  // day whose round trips are in the journal. These two are the only candidates
+  // for reaching a fill those lists have dropped — `src/lib/tradovate/fills.ts`
+  // names them in its header and declines them on cost grounds, which was a
+  // judgement about requests and not about whether they answer.
+  //
+  // `deps`/`items` are the Tradovate convention for "the children of this
+  // entity" and "these entities by id". Both are reads and neither matches the
+  // mutation pattern.
+  '/fillPair/deps',
+  '/fill/items',
 ] as const;
 
 export type ProbeEndpoint = (typeof PROBE_ENDPOINTS)[number];

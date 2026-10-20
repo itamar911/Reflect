@@ -33,6 +33,40 @@
  * Hence this.
  *
  *
+ * AND THEN THE FIRST RUN ANSWERED A DIFFERENT QUESTION (20.10, 09:00 UTC)
+ * ----------------------------------------------------------------------
+ *
+ * `/fill/list` AND `/fillPair/list` BOTH RETURNED ZERO ROWS, on both hosts, with
+ * `/position/list` returning one. The trader's 19.10 round trips are in the
+ * journal, so those fills certainly existed — and they are not in the list any
+ * more. That excludes the only reading under which the list carries history, and
+ * it makes a liar of this module's own header one level down:
+ * `src/lib/tradovate/fills.ts` says "`/fill/list` and `/fillPair/list` grow with
+ * a trader's whole history because the API offers no way to ask for less". They
+ * do not. They behave like `/order/list`, which REF-113 measured at
+ * `depthDays = 0` and whose own type comment records that "the evening before
+ * the measurement it returned zero rows".
+ *
+ * Three things in the product are built on the assumption that just died, and
+ * none of them is reachable by a parameter: `BrokerDayRequest.windowStartMs`
+ * (which widens PRICING only — the pull is unfiltered by design),
+ * `IMPORT_LOOKBACK_MS` (48h, the nightly cron) and `MAX_SINCE_AGE_MS` (7 days,
+ * the /trades route). A window cannot resurrect a row the list did not return.
+ *
+ * SO THIS MODE NOW ASKS A SECOND QUESTION, AND IT IS THE MORE URGENT ONE: is
+ * there ANY endpoint that still reaches yesterday? The narrowing variants the
+ * fills.ts header named and rejected on cost grounds are the only candidates —
+ *
+ *   /position/list                    → does IT carry past trading days?  (Q6)
+ *   /fillPair/deps?masterid=<posId>   → that position's pairs             (Q7)
+ *   /fill/items?ids=<fillIds>         → those pairs' fills                (Q7)
+ *
+ * — and if they do, the graph analysis below runs on what they return rather than
+ * on an empty list, which is how Q1 gets its answer about 19.10 after all. Every
+ * fill and pair this mode sees, whichever read produced it, goes into one graph;
+ * `readVia` at the top of the response says which read found what.
+ *
+ *
  * WHAT IT MEASURES: GRAPH SHAPE, AND NOTHING ELSE
  * -----------------------------------------------
  *
@@ -83,9 +117,11 @@
  * the strict subtree, beside the field surveys, exactly where `?mode=orders`
  * puts its own. See `STRICT_SUBTREE_KEYS` in ../route.ts.
  *
- * NO MUTATION AND ONE NEW ENDPOINT. `/fillPair/list` joins the allowlist in
- * ./guard.ts — a read, and one lib/tradovate/fills.ts already makes on every
- * single day pull. `/fill/list` and `/position/list` were listed already.
+ * NO MUTATION AND THREE NEW ENDPOINTS, all reads: `/fillPair/list` (which
+ * lib/tradovate/fills.ts already calls on every day pull) plus
+ * `/fillPair/deps` and `/fill/items` for the narrowing walk. `/fill/list` and
+ * `/position/list` were on the allowlist already. See ./guard.ts, where each is
+ * checked against the mutation denylist the same way the rest of that list was.
  */
 
 import { callEndpoint, reportOf } from './call';
@@ -106,6 +142,11 @@ export const FILL_QUESTIONS = [
   '      זנב פתוח מ-netPos.',
   'Q5  האם יש חציית אפס (היפוך פוזיציה) — ומחזור שנפתח בלי להיסגר?',
   '      שאלת המדידה של REF-107 §A4, פתוחה מאז. קובעת אם הפיצול הסינתטי נחוץ.',
+  'Q6  האם /position/list מגיע לימי מסחר קודמים?',
+  '      אם לא — אין שום ידית לאתמול, וכל הייבוא חייב לקרות בתוך המסחר.',
+  'Q7  האם המסלול המצומצם מגיע למה ש-/fill/list לא?',
+  '      /fillPair/deps?masterid=<positionId> ואז /fill/items?ids=. זו השאלה',
+  '      שהריצה הראשונה פתחה: הרשימות חזרו ריקות ב-20.10 בבוקר.',
 ];
 
 /**
@@ -123,6 +164,29 @@ const MAX_GROUPS = 40;
 
 /** How many components one group reports individually. The counts are totalled regardless. */
 const MAX_COMPONENTS = 12;
+
+/**
+ * How many positions get a `/fillPair/deps` call.
+ *
+ * The same cap ./orders.ts puts on its own deps fan-out, for the same reason:
+ * deps are one request per master, and Tradovate's limits are documented as
+ * variable by hour, minute AND second, escalating to a `p-captcha` that a
+ * third-party application cannot clear — the trader then waits about an hour and
+ * the rule engine's day pull waits with them. A diagnostic is never worth that.
+ *
+ * Twelve is headroom rather than a limit expected to bite: the first run saw ONE
+ * position row. If it ever caps, `capped: true` says so.
+ */
+const MAX_DEPS_POSITIONS = 12;
+
+/**
+ * How many fill ids go into one `/fill/items?ids=` call.
+ *
+ * A bound on URL length, not on quota — the ids are a comma-joined query
+ * parameter and a trader with a busy day could otherwise build a request no
+ * proxy will forward.
+ */
+const ITEMS_CHUNK = 80;
 
 /** A fill, reduced to what the two measurements need. Nothing here is emitted. */
 interface FillFacts {
@@ -419,30 +483,101 @@ export async function probeFillsHost(options: {
     note: '/order/list נמדד כ-0 ב-19.10. אם גם כאן אין עומק — §2.4 מחזיקה כל עסקת סווינג.',
   };
 
-  // Q4. Presence and non-null count, never a value — the shape ./live.ts uses
-  // for every field question it asks.
-  answers['Q4'] = {
-    question: 'האם finallyPaired קיים ואמיתי?',
-    present: hasField(fills.rows, 'finallyPaired'),
-    nonNull: nonNullCount(fills.rows, 'finallyPaired'),
-    trueCount: fills.rows.filter((row) => row['finallyPaired'] === true).length,
-    falseCount: fills.rows.filter((row) => row['finallyPaired'] === false).length,
+  // ── THE NARROWING WALK (Q7) ───────────────────────────────────────────────
+  //
+  // Run UNCONDITIONALLY and not only when the lists came back thin, because the
+  // comparison IS the measurement: "deps found 9 pairs where the list found 9"
+  // is as much of an answer as "where the list found 0", and a conditional read
+  // would make the two runs incomparable.
+  const positionIds = [...positionById.keys()].slice(0, MAX_DEPS_POSITIONS);
+  const depsPairRows: Row[] = [];
+  const depsCalls: unknown[] = [];
+
+  for (const masterid of positionIds) {
+    const deps = await callEndpoint('/fillPair/deps', { ...options, query: { masterid } });
+    depsCalls.push(reportOf(deps));
+    depsPairRows.push(...deps.rows);
+  }
+
+  endpoints['/fillPair/deps'] = {
+    positionsAsked: positionIds.length,
+    positionsAvailable: positionById.size,
+    capped: positionById.size > MAX_DEPS_POSITIONS,
+    calls: depsCalls,
+    rowCount: depsPairRows.length,
+    fields: depsPairRows.length ? fieldSurvey(depsPairRows) : null,
   };
 
-  if (!positions.ok || !pairs.ok || !fills.ok) {
+  // The fills those pairs name, asked for by id — the one read in this file that
+  // can reach a fill `/fill/list` has dropped. Chunked; see ITEMS_CHUNK.
+  const wantedFillIds = [
+    ...new Set(
+      depsPairRows.flatMap((row) => [int(row['buyFillId']), int(row['sellFillId'])])
+        .filter((id): id is number => id !== null)
+    ),
+  ];
+
+  const itemsFillRows: Row[] = [];
+  const itemsCalls: unknown[] = [];
+  for (let i = 0; i < wantedFillIds.length; i += ITEMS_CHUNK) {
+    const ids = wantedFillIds.slice(i, i + ITEMS_CHUNK).join(',');
+    const items = await callEndpoint('/fill/items', { ...options, query: { ids } });
+    itemsCalls.push(reportOf(items));
+    itemsFillRows.push(...items.rows);
+  }
+
+  endpoints['/fill/items'] = {
+    idsAsked: wantedFillIds.length,
+    calls: itemsCalls,
+    rowCount: itemsFillRows.length,
+    fields: itemsFillRows.length ? fieldSurvey(itemsFillRows) : null,
+  };
+
+  // Q4. Presence and non-null count, never a value — the shape ./live.ts uses
+  // for every field question it asks. Over BOTH fill sources, so an answer
+  // survives a day when the list is empty.
+  const allFillRows = [...fills.rows, ...itemsFillRows];
+  answers['Q4'] = {
+    question: 'האם finallyPaired קיים ואמיתי?',
+    present: hasField(allFillRows, 'finallyPaired'),
+    nonNull: nonNullCount(allFillRows, 'finallyPaired'),
+    trueCount: allFillRows.filter((row) => row['finallyPaired'] === true).length,
+    falseCount: allFillRows.filter((row) => row['finallyPaired'] === false).length,
+  };
+
+  if (!positions.ok) {
     answers['Q1'] = {
       question: 'האם פוזיציה לוגית אחת מתפרקת לכמה עסקאות?',
-      answered: 'לא — אחת משלוש הקריאות לא נענתה על המארח הזה. ראה endpoints.',
+      answered: 'לא — /position/list לא נענה על המארח הזה, ובלעדיו אין שיוך לחשבון. ראה endpoints.',
     };
     return { endpoints, answers };
   }
 
-  // ── The graph ─────────────────────────────────────────────────────────────
+  // ── The graph, over BOTH reads ────────────────────────────────────────────
+  //
+  // One graph from whatever was found, which is what makes the narrowing walk
+  // worth making: if the lists are empty and deps is not, the analysis below
+  // runs on 19.10 instead of on nothing.
 
   const fillById = new Map<number, FillFacts>();
+  /** Which read found each fill. Counted at the top of the response as `readVia`. */
+  const fillSource = new Map<number, 'list' | 'items' | 'both'>();
+
   for (const row of fills.rows) {
     const facts = fillFactsOf(row);
-    if (facts) fillById.set(facts.id, facts);
+    if (facts) {
+      fillById.set(facts.id, facts);
+      fillSource.set(facts.id, 'list');
+    }
+  }
+  for (const row of itemsFillRows) {
+    const facts = fillFactsOf(row);
+    if (!facts) continue;
+    fillSource.set(facts.id, fillById.has(facts.id) ? 'both' : 'items');
+    // The list's copy wins where both answered: it is the shape the product
+    // actually reads, so a difference between the two is worth not hiding
+    // behind an overwrite.
+    if (!fillById.has(facts.id)) fillById.set(facts.id, facts);
   }
 
   /** `fillId → accountId`, resolved through the pairs. See the note above. */
@@ -450,31 +585,53 @@ export async function probeFillsHost(options: {
   let accountConflicts = 0;
   const edges: Edge[] = [];
 
-  for (const row of pairs.rows) {
-    const positionId = int(row['positionId']);
-    const buyFillId = int(row['buyFillId']);
-    const sellFillId = int(row['sellFillId']);
-    if (positionId === null || buyFillId === null || sellFillId === null) continue;
-    const position = positionById.get(positionId);
-    if (!position) continue;
+  // Both pair reads, deduplicated BY PAIR ID. A pair that `/fillPair/list` and
+  // `/fillPair/deps` both returned must contribute ONE edge — counting it twice
+  // would inflate `pairs` and could weld two components that are genuinely one.
+  const seenPairIds = new Set<number>();
+  let pairsFromListUsed = 0;
+  let pairsFromDepsOnly = 0;
 
-    edges.push({ buyFillId, sellFillId, accountId: position.accountId, contractId: position.contractId });
+  for (const [source, rows] of [['list', pairs.rows], ['deps', depsPairRows]] as const) {
+    for (const row of rows) {
+      const pairId = int(row['id']);
+      const positionId = int(row['positionId']);
+      const buyFillId = int(row['buyFillId']);
+      const sellFillId = int(row['sellFillId']);
+      if (positionId === null || buyFillId === null || sellFillId === null) continue;
+      if (pairId !== null && seenPairIds.has(pairId)) continue;
+      if (pairId !== null) seenPairIds.add(pairId);
 
-    for (const fillId of [buyFillId, sellFillId]) {
-      const seen = accountByFill.get(fillId);
-      // One fill in two accounts is impossible and would mean the join is wrong.
-      // Counted rather than thrown: a diagnostic that refuses to answer tells
-      // the owner less than one that answers and says so.
-      if (seen !== undefined && seen !== position.accountId) accountConflicts += 1;
-      else accountByFill.set(fillId, position.accountId);
+      const position = positionById.get(positionId);
+      if (!position) continue;
+
+      if (source === 'list') pairsFromListUsed += 1;
+      else pairsFromDepsOnly += 1;
+
+      edges.push({ buyFillId, sellFillId, accountId: position.accountId, contractId: position.contractId });
+
+      for (const fillId of [buyFillId, sellFillId]) {
+        const seen = accountByFill.get(fillId);
+        // One fill in two accounts is impossible and would mean the join is
+        // wrong. Counted rather than thrown: a diagnostic that refuses to answer
+        // tells the owner less than one that answers and says so.
+        if (seen !== undefined && seen !== position.accountId) accountConflicts += 1;
+        else accountByFill.set(fillId, position.accountId);
+      }
     }
   }
 
   // The trading days present, newest first, so `dayIndex` is a relative offset
   // and no date is emitted. See the header.
-  const dayOrder = [...new Set(
-    [...fillById.values()].map((f) => f.dayKey).filter((key): key is string => key !== null)
-  )].sort().reverse().slice(0, MAX_DAYS);
+  //
+  // BUILT FROM THE FILLS **AND** THE POSITIONS, which matters on exactly the day
+  // that produced this change: when `/fill/list` is empty and `/position/list`
+  // is not, the positions are the only thing that establishes what "the most
+  // recent trading day" is, and without them every index would shift.
+  const dayOrder = [...new Set([
+    ...[...fillById.values()].map((f) => f.dayKey),
+    ...[...positionById.values()].map((p) => p.dayKey),
+  ].filter((key): key is string => key !== null))].sort().reverse().slice(0, MAX_DAYS);
   const dayIndexOf = new Map(dayOrder.map((key, index) => [key, index]));
 
   /** `account|contract|day` → the fills and edges that belong to it. */
@@ -583,8 +740,66 @@ export async function probeFillsHost(options: {
     (a, b) => a.dayIndex - b.dayIndex || Number(b.splits) - Number(a.splits) || b.pairs - a.pairs
   );
 
+  // Q6. Does the one read that DID answer carry past trading days? If it does
+  // not, there is no handle on yesterday at all and every import has to happen
+  // inside the session — which is a product decision, not a probe finding, and
+  // this is the measurement it would rest on.
+  const positionsPerDay = dayOrder.map((dayKey, dayIndex) => {
+    const rows = [...positionById.values()].filter((p) => p.dayKey === dayKey);
+    return {
+      dayIndex,
+      positions: rows.length,
+      flat: rows.filter((p) => p.netPos === 0).length,
+      nonFlat: rows.filter((p) => p.netPos !== null && p.netPos !== 0).length,
+    };
+  });
+
+  answers['Q6'] = {
+    question: 'האם /position/list מגיע לימי מסחר קודמים?',
+    positionRows: positionById.size,
+    distinctTradeDates: new Set(
+      [...positionById.values()].map((p) => p.dayKey).filter((key): key is string => key !== null)
+    ).size,
+    datelessRows: [...positionById.values()].filter((p) => p.dayKey === null).length,
+    perDay: positionsPerDay,
+    verdict:
+      positionsPerDay.filter((d) => d.positions > 0).length > 1
+        ? 'כן — יש שורות פוזיציה ליותר מיום מסחר אחד. יש ידית לאתמול; ראה Q7 אם היא מובילה למילויים.'
+        : 'לא — שורות הפוזיציה הן של יום מסחר אחד בלבד. אם גם Q7 ריק, אין שום דרך להגיע לאתמול.',
+  };
+
+  // Q7. The comparison that is the whole point of the second read.
+  const fillsFromItemsOnly = [...fillSource.values()].filter((via) => via === 'items').length;
+  answers['Q7'] = {
+    question: 'האם המסלול המצומצם מגיע למה ש-/fill/list לא?',
+    pairsFromList: pairs.count,
+    pairsFromDeps: depsPairRows.length,
+    pairsFromDepsOnly,
+    pairsFromListUsed,
+    fillsFromList: fills.count,
+    fillsFromItems: itemsFillRows.length,
+    fillsFromItemsOnly,
+    // The two that decide it: a read that found something the list did not.
+    depsReachesMore: pairsFromDepsOnly > 0,
+    itemsReachesMore: fillsFromItemsOnly > 0,
+    verdict:
+      pairsFromDepsOnly > 0 || fillsFromItemsOnly > 0
+        ? 'כן — deps/items החזירו מה שהרשימות לא. יש מסלול לאתמול, והייבוא יכול להיבנות עליו.'
+        : (pairs.count ?? 0) === 0 && (fills.count ?? 0) === 0 && positionById.size > 0
+          ? 'לא — גם deps/items ריקים כשהרשימות ריקות. אין שום מסלול לאתמול; הייבוא חייב לקרות בתוך המסחר.'
+          : 'deps/items לא מצאו שום דבר חדש, אבל הרשימות לא היו ריקות — כלומר אין מה להשוות עדיין.',
+  };
+
   answers['Q1'] = {
     question: 'האם פוזיציה לוגית אחת מתפרקת היום לכמה עסקאות?',
+    // Which read produced the graph this answer is computed over. On a day when
+    // the lists are empty, `items` being non-zero is what makes Q1 meaningful
+    // at all — and `list: 0, items: 0` is what makes it unanswerable.
+    readVia: {
+      fillsFromList: [...fillSource.values()].filter((via) => via === 'list').length,
+      fillsFromBoth: [...fillSource.values()].filter((via) => via === 'both').length,
+      fillsFromItemsOnly,
+    },
     groups: groups.size,
     groupsReported: Math.min(groups.size, MAX_GROUPS),
     totalComponents,
@@ -599,11 +814,16 @@ export async function probeFillsHost(options: {
     // totalCycles` while a real split is sitting in the list. Measured on the
     // fixtures this was driven against before it shipped.
     verdict:
-      splitGroups > 0
-        ? 'כן — יש קבוצה שבה components > cycles. זה מקרה א, נמדד. REF-117 מאומת.'
-        : totalComponents === totalCycles
-          ? 'לא בחלון הזה — components = cycles בכל קבוצה. לבדוק את העומק ב-Q3 לפני מסקנה.'
-          : 'cycles גדול מ-components — הילוך ה-netPos מצא מחזורים שאין להם זוגות. לקרוא Q5.',
+      // THE CASE THE FIRST RUN LANDED IN, and it must not read as "no bug
+      // found". No fill was reached by either read, so this question was not
+      // answered — which is a different statement from answering it "no".
+      groups.size === 0
+        ? 'לא ניתן לענות — לא נמצא אף מילוי בשום קריאה. ראה Q3, Q6 ו-Q7, לא את השדות כאן.'
+        : splitGroups > 0
+          ? 'כן — יש קבוצה שבה components > cycles. זה מקרה א, נמדד. REF-117 מאומת.'
+          : totalComponents === totalCycles
+            ? 'לא בחלון הזה — components = cycles בכל קבוצה. לבדוק את העומק ב-Q3 לפני מסקנה.'
+            : 'cycles גדול מ-components — הילוך ה-netPos מצא מחזורים שאין להם זוגות. לקרוא Q5.',
     perGroup: perGroup.slice(0, MAX_GROUPS),
   };
 
