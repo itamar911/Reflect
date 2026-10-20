@@ -2139,6 +2139,12 @@ const MICRO_PAIRS: { micro: string; mini: string; microContract: string; miniCon
   { micro: 'MGC', mini: 'GC', microContract: 'MGCZ6', miniContract: 'GCZ6' },
   { micro: 'MCL', mini: 'CL', microContract: 'MCLZ6', miniContract: 'CLZ6' },
   { micro: 'SIL', mini: 'SI', microContract: 'SILZ6', miniContract: 'SIZ6' },
+  // The three the tail test covered by accident or not at all (finding 4 of
+  // 19.10). They are table lines and nothing else, which is what the table was
+  // for: the stage's own trade was "a missing pair is one line here".
+  { micro: 'MHG', mini: 'HG', microContract: 'MHGZ6', miniContract: 'HGZ6' },
+  { micro: 'MBT', mini: 'BTC', microContract: 'MBTZ6', miniContract: 'BTCZ6' },
+  { micro: 'MET', mini: 'ETH', microContract: 'METZ6', miniContract: 'ETHZ6' },
 ];
 
 async function symbolRootGroup() {
@@ -2223,8 +2229,10 @@ async function microMiniGroup() {
     ...MICRO_PAIRS.map((pair) =>
       c(`(1) ${pair.micro} is ${pair.mini}`, canonicalRoot(pair.micro), pair.mini)),
 
-    // BOTH DIRECTIONS FOR ALL SEVEN. The old rule was "one root is a tail of
-    // the other", which got five of these right by coincidence of spelling:
+    // BOTH DIRECTIONS FOR EVERY PAIR THE TABLE CARRIES, and the list is the
+    // only place a new one has to be named — adding a line above adds three
+    // assertions here. The old rule was "one root is a tail of the other",
+    // which got five of the original seven right by coincidence of spelling:
     // `SIL` does not end in `SI`, and `M2K` shares no letter with `RTY`.
     ...MICRO_PAIRS.map((pair) =>
       c(`(2) a plan written ${pair.mini} matches a ${pair.microContract} trade`,
@@ -2254,6 +2262,43 @@ async function microMiniGroup() {
     c('(9) the production pair does not conflict', rootsConflict('NQ1', 'MNQZ6'), false),
     // It failed against the MINI too. This was never a micro problem.
     c('(10) nor does it against the mini', rootsConflict('NQ1', 'NQZ6'), false),
+
+    // ── The three added after 19.10, named one at a time ──────────────────
+    //
+    // The parametrised assertions above already cover all three in both
+    // directions. These are here because the first report said out loud that
+    // `MHG`/`HG` had REGRESSED when the tail test went, and that `MBT`/`BTC`
+    // and `MET`/`ETH` had never worked at all — so a failure should name the
+    // product rather than a row index.
+    c('(11) micro copper, which the tail test used to cover by accident',
+      [rootsConflict('MHG', 'HGZ6'), rootsConflict('HG', 'MHGZ6')], [false, false]),
+    c('(12) micro bitcoin, which never matched its mini before',
+      [rootsConflict('MBT', 'BTCZ6'), rootsConflict('BTC', 'MBTZ6')], [false, false]),
+    c('(13) micro ether, which never matched its mini before',
+      [rootsConflict('MET', 'ETHZ6'), rootsConflict('ETH', 'METZ6')], [false, false]),
+
+    // A CONTINUOUS MICRO COPPER PLAN, which is the spelling a trader on a
+    // TradingView chart actually types and the one that used to misparse: the
+    // table makes `MHG` a known root, so the trailing `1` is read as a marker
+    // instead of `MHG1` resolving to `MH` through the contract reading.
+    c('(14) the continuous spelling of a new micro',
+      [planSymbolRoot('MHG1'), planSymbolRoot('MBT1'), planSymbolRoot('MET1')],
+      ['MHG', 'MBT', 'MET']),
+
+    // NON-REGRESSION FOR THE NEW LINES, the same shape as (7): three pairs
+    // were added, not one crypto bucket. Micro bitcoin is not micro ether, and
+    // micro copper is not micro gold.
+    c('(15) the new micros do not match each other',
+      [rootsConflict('MBT', 'METZ6'), rootsConflict('MET', 'BTCZ6'),
+       rootsConflict('MHG', 'MGCZ6'), rootsConflict('MHG', 'GCZ6')],
+      [true, true, true, true]),
+    // And `6E` is STILL unreadable, so `M6E` folds into nothing and sits every
+    // decision out exactly as it did before these three lines were added. It is
+    // pinned here as well as in the plan-symbol group because this table is
+    // where somebody would try to add the pair.
+    c('(16) micro euro remains out of the decision',
+      [planSymbolRoot('M6E'), planSymbolRoot('6E'), canonicalRoot(planSymbolRoot('M6E'))],
+      [null, null, null]),
   ]);
 }
 

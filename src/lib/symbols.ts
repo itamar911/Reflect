@@ -84,6 +84,20 @@ const BARE_ROOT = /^[A-Z]{1,4}$/;
  * before they are compared. Adding a pair is adding one line here, and the line
  * is checkable against the exchange's product list rather than inferred from a
  * string operation.
+ *
+ * THE LAST THREE ARE THAT PROMISE BEING KEPT. Dropping the tail test lost the
+ * micros it had got right by coincidence — `MHG`/`HG` was one — and the trade
+ * the stage made explicit was "replace the accidental test with a checkable
+ * table, and a missing pair is one line". These are the line: micro copper,
+ * micro bitcoin and micro ether, all three CME products, two of which
+ * (`MBT`/`BTC`, `MET`/`ETH`) the tail test never read as one instrument either.
+ *
+ * `M6E`/`6E` IS STILL OUT, and it is not an omission. It cannot be added here
+ * alone: `6E` is unreadable by {@link BARE_ROOT} on purpose — see that field —
+ * so the mini side of the pair would come back null and the fold would never
+ * run. Admitting it means admitting digit-leading roots by shape, which also
+ * admits `ZC1` and `NQ2` as roots in their own right. That is a decision about
+ * {@link KNOWN_ROOTS}, not about this table.
  */
 const MICRO_TO_MINI: Readonly<Record<string, string>> = {
   MNQ: 'NQ',
@@ -93,6 +107,9 @@ const MICRO_TO_MINI: Readonly<Record<string, string>> = {
   MGC: 'GC',
   MCL: 'CL',
   SIL: 'SI',
+  MHG: 'HG',
+  MBT: 'BTC',
+  MET: 'ETH',
 };
 
 /**
