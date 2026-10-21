@@ -3838,6 +3838,9 @@ const MOVED_HISTORY: StopHistory = {
   preFillVersions: 0,
   anchoredAtFill: true,
   otherTargets: [],
+  // One bracket, which is what the measured trade had and what every fixture
+  // here is a departure from (REF-113 Stage 5).
+  stopCount: 1,
 };
 
 const KEPT_HISTORY: StopHistory = {
@@ -3861,6 +3864,9 @@ const NONE_HISTORY: StopHistory = {
   noStopPlaced: true,
   source: 'none',
   versions: [],
+  // No protective order to count. Zero and one are different claims, and
+  // neither is "we did not look" — that is the column being NULL.
+  stopCount: 0,
 };
 
 /** We could not read the orders. NOT the same claim as NONE_HISTORY. */
@@ -4727,6 +4733,54 @@ function stopSentenceGroup() {
       stopWasWidened(stopDoc({ direction: 'tightened' })),
       stopWasWidened(null),
     ], [true, true, false, false]),
+
+    // ── stopCount: a row describing one of several real stops (Stage 5) ──────
+    //
+    // TWO BRACKETS MEAN THE from→to RANGE IS A CLAIM THE ROW CANNOT MAKE. The
+    // prices are the most-risk bracket's and the verdict spans both, so quoting
+    // them as "the stop went from X to Y" describes one bracket as though it
+    // were the trade. The count replaces them, which also answers the question
+    // the missing range provokes.
+    c('(18) above one stop, the range is replaced by the count',
+      sentenceOf(stopDoc({
+        direction: 'tightened', movedCount: 1, finalStop: 29_690, stopCount: 2,
+      })),
+      'הסטופ הודק לכיוון הרווח (2 פקודות הגנה)'),
+    c('(19) and a widening says so too, still with no two prices',
+      sentenceOf(stopDoc({
+        direction: 'widened', movedCount: 1, finalStop: 29_651.25, stopCount: 3,
+      })),
+      'הסטופ הורחק מנקודת הכניסה — הסיכון גדל (3 פקודות הגנה)'),
+    c('(20) `kept` over two brackets names the count rather than pluralising',
+      sentenceOf(stopDoc({ verdict: 'kept', movedCount: 0, direction: null, stopCount: 2 })),
+      'הסטופ לא הוזז (2 פקודות הגנה)'),
+    // ONE STOP READS EXACTLY AS IT DID, which is what makes this deployable
+    // over the rows the old reading wrote.
+    c('(21) exactly one stop reads as it always has',
+      sentenceOf(stopDoc({
+        direction: 'tightened', movedCount: 1, finalStop: 29_690, stopCount: 1,
+      })),
+      'הסטופ הודק לכיוון הרווח (מ-29671.25 ל-29690.00)'),
+    // AND SO DOES A ROW FROM BEFORE THE FIELD EXISTED. Those rows were written
+    // while one scaled-in position became SEVERAL journal rows, so each really
+    // did describe one bracket — withholding the range would delete a true
+    // sentence from every row the feature has ever written.
+    c('(22) an absent count is not "more than one", and keeps its range',
+      [sentenceOf(stopDoc({
+        direction: 'tightened', movedCount: 1, finalStop: 29_690,
+      })),
+       readStopHistory(stopDoc())?.stopCount ?? 'absent'],
+      ['הסטופ הודק לכיוון הרווח (מ-29671.25 ל-29690.00)', 'absent']),
+    c('(23) and a count that arrives as a string still reads as a number',
+      readStopHistory(stopDoc({ stopCount: '2' }))?.stopCount, 2),
+    // `'none'` CARRIES ZERO, which is a measurement — "we read the orders and
+    // there was no protective order" — and not the absence above.
+    c('(24) `none` states zero protective orders',
+      readStopHistory(stopDoc({ verdict: 'none', stopCount: 0 }))?.stopCount, 0),
+    // A price is still offered on a two-bracket row: the most-risk stop IS what
+    // the trader was risking, and a stop is a worst case.
+    c('(25) the broker price is still shown above one stop',
+      brokerStopToShow(readStopHistory(stopDoc({ stopCount: 2 })), 29_671.25), 29_671.25),
   ]);
 }
 

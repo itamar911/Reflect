@@ -96,6 +96,41 @@
  * answer this module must never give.
  *
  *
+ * THE VERDICT IS PER PROTECTIVE ORDER AND THEN COMBINED (REF-113 STAGE 5)
+ * ----------------------------------------------------------------------
+ *
+ * REF-117 made a journal row a LOGICAL POSITION, and a position scaled into over
+ * two entries has TWO BRACKETS AND THEREFORE TWO REAL STOPS, at two different
+ * prices. Before this stage the module picked one of them — the one stating the
+ * most risk — and read its verdict as the trade's: a trader who left bracket
+ * one alone and widened bracket two's stop was reported as `kept`, and
+ * `moved_sl` was written `false` on evidence that said the opposite.
+ *
+ * So {@link countMoves} now runs ONCE PER BELIEVED CANDIDATE and
+ * {@link combineMoves} unions the results. The union is the SAME final
+ * expression the single-order case always used — `mixed` when both directions
+ * happened, else `widened`, else `tightened`, else null — rather than a second
+ * rule written beside it, which is what keeps a two-bracket trade and a
+ * there-and-back drag describable in one vocabulary.
+ *
+ * WHAT IS **NOT** COMBINED IS EVERY PRICE, AND THAT IS THE POINT.
+ * {@link StopHistory.initialStop}, {@link StopHistory.finalStop} and
+ * {@link StopHistory.versions} stay the CHOSEN order's — the most risk, by the
+ * reduce below — because **the mean of two stop prices is a price that was never
+ * a stop**, and storing one is the 19.10 defect in a new costume
+ * (`broker_stop_loss = 29701.25` where the stop was 29671.25).
+ * {@link StopHistory.stopCount} is what tells a reader the figure describes one
+ * of several orders, and lib/journal/stopHistory.ts drops the from→to range
+ * whenever it is above one, for the reason `'mixed'` already drops it: two
+ * prices cannot describe two stops.
+ *
+ * AND THE VERSIONS OF TWO ORDERS ARE NEVER CONCATENATED. That was the silent
+ * regression REF-117 §6.2 flagged: chained, the second bracket's FIRST stop
+ * price reads as a move of the first bracket's — a move that did not happen, on
+ * a trade where the trader touched nothing. Each order's version list is cut and
+ * counted on its own; only the three booleans meet.
+ *
+ *
  * AND THE INITIAL STOP IS ANCHORED AT THE ENTRY FILL, NOT AT VERSION ONE
  * ---------------------------------------------------------------------
  *
@@ -161,9 +196,22 @@
  * on. `'unknown'` is our own failure, and {@link StopHistory.reason} says which:
  *
  *   `'interday'`   the trade's own orders are not in today's list. PERMANENT.
- *   `'ambiguous'`  two parallel positions in one contract (§1.3). PERMANENT.
  *   `'capped'`     the per-run request ceiling stopped the scan. TRANSIENT.
  *   `'failed'`     a read failed. TRANSIENT.
+ *
+ * THERE WERE FOUR, AND `'ambiguous'` IS GONE (REF-113 Stage 5). It meant "two
+ * parallel positions open in one contract, sharing no order id" — §1.3's
+ * refusal, reached through a `relatedTrades` overlap test that is deleted with
+ * it. Under REF-117 the state cannot arise: a cycle is every fill on one
+ * contract in one ACCOUNT between two zero crossings, so two rows of one
+ * account and one contract cannot overlap in time, and two accounts are already
+ * separated by `(accountId, contractId)`. The §1.3 sibling case — one position
+ * reported as several rows — cannot arise either, which is what deleted
+ * `sharedWithTrades`.
+ *
+ * lib/journal/stopHistory.ts STILL READS THE VALUE, deliberately: rows written
+ * before this stage carry it, there is no backfill, and a reader's job is to
+ * describe what is stored rather than what the writer would write today.
  *
  * AND THE TWO TRANSIENT ONES ARE DROPPED BY {@link readStopHistories} RATHER
  * THAN RETURNED. This is a deliberate refinement of §4.3, which said a capped
@@ -270,8 +318,14 @@ export interface StopHistory {
    *   `'unknown'` we could not tell. See {@link reason}.
    */
   verdict: 'moved' | 'kept' | 'none' | 'unknown';
-  /** Why the verdict is `'unknown'`, and null whenever it is not. */
-  reason: 'interday' | 'ambiguous' | 'capped' | 'failed' | null;
+  /**
+   * Why the verdict is `'unknown'`, and null whenever it is not.
+   *
+   * `'ambiguous'` was a fourth value and is no longer produced — see the header.
+   * It is still in lib/journal/stopHistory.ts' reader, which describes stored
+   * rows rather than this stage's writer.
+   */
+  reason: 'interday' | 'capped' | 'failed' | null;
   /**
    * The stop THE POSITION OPENED UNDER. This is what `broker_stop_loss` holds.
    *
@@ -282,6 +336,13 @@ export interface StopHistory {
    *
    * `versions[preFillVersions]`, and that identity is worth keeping: the
    * revisions this skipped are still in {@link versions} rather than erased.
+   *
+   * ON A SCALED-IN POSITION IT IS ONE OF SEVERAL REAL STOPS, AND IT IS NOT AN
+   * AVERAGE (REF-113 Stage 5). Two entries mean two brackets mean two stops at
+   * two prices, and this is the one stating the MOST RISK — the reduce in
+   * {@link deriveStopHistory}, for the reason argued there. A mean of the two
+   * would be a price that was never a stop. {@link stopCount} is how a reader
+   * knows to say "one of two" rather than "the stop".
    */
   initialStop: number | null;
   /**
@@ -326,7 +387,20 @@ export interface StopHistory {
   /** The target nearest the entry. This is what `broker_take_profit` holds. */
   initialTarget: number | null;
   /**
-   * How many times the stop price changed, inside the counted window.
+   * How many times a stop price changed, inside the counted window — SUMMED
+   * ACROSS EVERY PROTECTIVE ORDER THIS ROW BELIEVES IN (REF-113 Stage 5).
+   *
+   * A SUM AND NOT THE CHOSEN ORDER'S, because the question `moved_sl` asks is
+   * "did you move your risk", and a trader who left bracket one alone and
+   * dragged bracket two's stop twice moved it twice. Reporting the chosen
+   * order's count would have answered zero on a `'moved'` verdict, which is a
+   * row disagreeing with itself.
+   *
+   * SO IT IS NOT A COUNT OVER {@link versions} WHEN {@link stopCount} IS ABOVE
+   * ONE. That is the cost of the sum and it is why `stopCount` is stored beside
+   * it: the evidence list belongs to one order and this figure spans all of
+   * them. The one reader that put the two side by side —
+   * lib/journal/stopHistory.ts' from→to range — stops doing so above one stop.
    *
    * THREE THINGS ARE NOT A MOVE, and each of them put a number on this field
    * that the trader would not recognise:
@@ -348,6 +422,13 @@ export interface StopHistory {
    *
    * Null when nothing moved. "Widened" and not "worsened": this is a
    * description, and the judgement belongs to the rule the trader wrote.
+   *
+   * UNIONED ACROSS PROTECTIVE ORDERS (REF-113 Stage 5), through the same
+   * expression one order's steps already went through — so a widening on
+   * EITHER of two brackets reaches `moved_sl_last_trade`, and a trade with one
+   * bracket tightened and the other widened reads `'mixed'` rather than losing
+   * half of what happened. The steps of two orders are never chained into one
+   * sequence; only these booleans meet. See {@link combineMoves}.
    */
   direction: 'tightened' | 'widened' | 'mixed' | null;
   /**
@@ -416,8 +497,32 @@ export interface StopHistory {
   anchoredAtFill: boolean;
   /** The targets that were not chosen, nearest first (§1.3 of decision 3). */
   otherTargets: number[];
-  /** Present when one logical position became several trade rows (§1.3). */
-  sharedWithTrades?: number;
+  /**
+   * How many DISTINCT protective orders this row's verdict was read from
+   * (REF-113 Stage 5).
+   *
+   * One on a trade entered in one piece, which is most of them. Above one is
+   * the signature of a position scaled into over several entries, each with its
+   * own bracket, and it is the field that makes the rest of this document
+   * readable: {@link movedCount} and {@link direction} span all of them, while
+   * {@link initialStop}, {@link finalStop} and {@link versions} describe ONE —
+   * the order stating the most risk.
+   *
+   * SO ANY READER PUTTING TWO PRICES IN FRONT OF A TRADER MUST BRANCH ON THIS,
+   * exactly as it must branch on {@link initialStopSide}. "הסטופ הודק (מ-4504
+   * ל-4512)" is a true sentence about one bracket and a false one about the
+   * trade that had two — see `stopMoveSentence` in lib/journal/stopHistory.ts.
+   *
+   * ZERO ON `'none'` AND ON `'unknown'`: there is no protective order to count.
+   * Zero and one are therefore different claims, and neither is "we did not
+   * look" — that is the column being NULL.
+   *
+   * AND `undefined` IS A THIRD STATE FOR A READER OF THE STORED COLUMN, for
+   * {@link anchoredAtFill}'s reason and with the same remedy: every row written
+   * before this stage carries no such key, there is no backfill, and an absent
+   * value must be read as UNKNOWN rather than as one.
+   */
+  stopCount: number;
   /** Present when the run hit {@link MAX_ORDER_DEPS_PER_RUN}. */
   capped?: true;
 }
@@ -717,68 +822,34 @@ export function candidateOrders(params: {
   return candidates;
 }
 
-/** A trade's life, for the overlap test: submission of the first order to exit. */
-function lifespan(trade: BrokerTrade, orders: StopEvidence['orders']): [number, number] {
-  const anchor = anchorMs(ownOrders(trade, orders));
-  return [Math.min(anchor ?? trade.openedAtMs, trade.openedAtMs), trade.closedAtMs];
-}
-
 /**
- * The other trade rows of this run that describe the same logical position.
+ * `relatedTrades`, `lifespan` AND `sharedWithTrades` LIVED HERE AND ARE GONE
+ * (REF-113 Stage 5).
  *
- * §1.3, AND THE MOST SUBTLE THING IN THIS MODULE. `order → trade` is not a
- * function: Stage 1 found that an entry order for three contracts, filling in
- * three pieces each paired with a separate exit fill, produces THREE
- * `BrokerTrade` rows — union-find groups on shared fills, and those three share
- * none. There was one stop on one position, and the honest answer is to attribute
- * it to all three rows and say so (`sharedWithTrades`). That distortion —
- * `tradeScore` penalising three rows for one move — already exists today for the
- * trade count and the P&L, and REF-113 does not deepen it.
+ * What they did: grouped the run's rows by `(host, accountId, contractId)`,
+ * took each row's life as `[first order submission, last exit fill]`, and asked
+ * what an overlap meant. Two answers, and REF-117 removed the ground under
+ * both:
  *
- * WHAT SEPARATES THAT FROM REAL AMBIGUITY IS WHETHER THEY SHARE AN ORDER ID:
+ *   overlap AND a shared `orderId` → one logical position reported as several
+ *     rows, so one stop was attributed to all of them and `sharedWithTrades`
+ *     said how many. This existed BECAUSE union-find grouped on shared fills:
+ *     an entry order for three contracts, filling in three pieces each paired
+ *     with a separate exit, produced three rows that shared no fill. A cycle is
+ *     the whole position, so there is one row and nothing to share.
  *
- *   lifespans do not overlap          → unrelated. Ordinary attribution.
- *   overlap AND share an `orderId`    → ONE position, several rows. Attribute
- *                                       to all of them.
- *   overlap AND share NO `orderId`    → two parallel positions in one contract.
- *                                       `'unknown'`, and nothing is written.
+ *   overlap AND no shared `orderId` → two parallel positions in one contract,
+ *     refused as `'unknown'` with reason `'ambiguous'`. A cycle runs from one
+ *     zero crossing of `(accountId, contractId)` to the next, so two cycles of
+ *     one account and one contract CANNOT overlap in time; two accounts on one
+ *     contract are two separate walks by construction (./cycles.ts §2.2). The
+ *     state is unreachable, so refusing it is dead code and `'ambiguous'` is no
+ *     longer a value this module writes.
  *
- * The third row is the case §B declared and this is the explicit test for it.
+ * The work they were covering for has not disappeared — it moved. A scaled-in
+ * position now arrives as ONE row carrying TWO BRACKETS, and that is what
+ * {@link combineMoves} is for.
  */
-function relatedTrades(params: {
-  trade: BrokerTrade;
-  trades: readonly BrokerTrade[];
-  orders: StopEvidence['orders'];
-  contractId: number;
-}): { shared: BrokerTrade[]; ambiguous: boolean } {
-  const { trade, trades, orders, contractId } = params;
-  const [from, until] = lifespan(trade, orders);
-  const mine = new Set(trade.entryOrderIds);
-
-  const shared: BrokerTrade[] = [];
-  let ambiguous = false;
-
-  for (const other of trades) {
-    if (other.brokerTradeKey === trade.brokerTradeKey) continue;
-    if (other.host !== trade.host) continue;
-    if (other.accountId !== trade.accountId) continue;
-
-    const otherOwn = ownOrders(other, orders);
-    // A trade whose own orders are not in today's list cannot be holding a
-    // competing position whose stop IS in it — both were submitted on the same
-    // day as the orders they belong to. So it is not evidence either way.
-    if (otherOwn.length === 0) continue;
-    if (contractOf(otherOwn) !== contractId) continue;
-
-    const [otherFrom, otherUntil] = lifespan(other, orders);
-    if (otherUntil < from || otherFrom > until) continue;
-
-    if (other.entryOrderIds.some((id) => mine.has(id))) shared.push(other);
-    else ambiguous = true;
-  }
-
-  return { shared, ambiguous };
-}
 
 /** One candidate, once its versions have been read and classified. */
 interface ProtectiveOrder {
@@ -859,6 +930,7 @@ function unknownHistory(
     preFillVersions: 0,
     anchoredAtFill: false,
     otherTargets: [],
+    stopCount: 0,
     ...extra,
   };
 }
@@ -866,9 +938,10 @@ function unknownHistory(
 /**
  * What the broker's orders say about one trade. PURE.
  *
- * `trades` is the whole run's rows and not a mistake: the §1.3 test needs the
- * siblings, and a function that took only the subject would have to be told the
- * answer instead of working it out.
+ * ONE TRADE AND NOT THE RUN'S ROWS (REF-113 Stage 5). It took the whole batch
+ * for one reader — the §1.3 overlap test — and that test is deleted: see the
+ * note where `relatedTrades` used to be. Nothing here now needs to know that
+ * other trades exist, which is a smaller contract and a truer one.
  *
  * READS NOTHING AND THROWS NOTHING. Every number comes off the evidence through
  * a finiteness check, because a type here is a claim about Tradovate's
@@ -877,10 +950,9 @@ function unknownHistory(
  */
 export function deriveStopHistory(params: {
   trade: BrokerTrade;
-  trades: readonly BrokerTrade[];
   evidence: StopEvidence;
 }): StopHistory {
-  const { trade, trades, evidence } = params;
+  const { trade, evidence } = params;
   const capped = evidence.unscanned === 'capped' ? { capped: true as const } : {};
   // Why an `'unknown'` from an incomplete scan is unknown. Defaulted to the
   // ceiling because a caller that assembled evidence with gaps and did not say
@@ -894,16 +966,11 @@ export function deriveStopHistory(params: {
   // grounds to say the trader placed none.
   if (own.length === 0) return unknownHistory('interday');
 
+  // Still read, and now for ONE question rather than two: a trade whose own
+  // orders name no contract cannot anchor layer C's window. The overlap test
+  // that was the other reader is gone — see the note above.
   const contractId = contractOf(own);
   if (contractId === null) return unknownHistory('interday');
-
-  const { shared, ambiguous } = relatedTrades({ trade, trades, orders: evidence.orders, contractId });
-  // Two positions open in one contract at one time, sharing no order. Which
-  // stop belonged to which is not recoverable, and a guess here would put one
-  // trade's risk on another's row.
-  if (ambiguous) return unknownHistory('ambiguous');
-
-  const sharedWith = shared.length > 0 ? { sharedWithTrades: shared.length + 1 } : {};
 
   // ── Classify the candidates ───────────────────────────────────────────────
   const candidates = candidateOrders({ trade, evidence });
@@ -965,7 +1032,7 @@ export function deriveStopHistory(params: {
     // our own failure wearing the finding's clothes, and `'none'` would arm a
     // coach to tell a trader they traded without a stop.
     if (missing || !evidence.strategiesComplete) {
-      return unknownHistory(transient, { ...capped, ...sharedWith });
+      return unknownHistory(transient, capped);
     }
 
     const chosenTarget = nearestTarget(targetOrders, trade);
@@ -986,8 +1053,11 @@ export function deriveStopHistory(params: {
       preFillVersions: 0,
       anchoredAtFill: false,
       otherTargets: chosenTarget.otherTargets,
+      // Zero protective orders is what `'none'` MEANS, so this restates the
+      // verdict rather than adding to it — and it keeps the field non-optional,
+      // which is what stops a reader having to tell "no stops" from "no key".
+      stopCount: 0,
       ...capped,
-      ...sharedWith,
     };
   }
 
@@ -1027,14 +1097,31 @@ export function deriveStopHistory(params: {
     riskOf(entry, trade) > riskOf(worst, trade) ? entry : worst
   );
 
-  const counted = stop.counted.map((entry) => entry.price);
-  const steps = countMoves({
-    steps: stop.counted,
-    direction: trade.direction,
-    trailing: isTrailingType(stop.order.type),
-    automated: evidence.automated,
-  });
+  // ── The verdict: every believed order, counted apart, then combined ───────
+  //
+  // `ranked` AND NOT `anchored`, so the risk-side partition decides what the
+  // verdict is read from as well as which price is reported. A wrong-side
+  // candidate is one our own attribution got wrong (see the reduce above), and
+  // counting its revisions would report moves on an order that was never a
+  // protective stop — the 19.10 defect, arriving through the verdict instead of
+  // through the price. When every candidate is wrong-side the partition keeps
+  // them all, so nothing is lost and `initialStopSide` still says it is bad.
+  //
+  // PER ORDER AND THEN UNIONED. Each order carries its own `trailing` flag,
+  // because a trail is a property of the order and not of the trade, and its
+  // own cut window from {@link anchorStop}. Nothing crosses between the lists.
+  const steps = combineMoves(
+    ranked.map((entry) =>
+      countMoves({
+        steps: entry.counted,
+        direction: trade.direction,
+        trailing: isTrailingType(entry.order.type),
+        automated: evidence.automated,
+      })
+    )
+  );
 
+  const counted = stop.counted.map((entry) => entry.price);
   const chosenTarget = nearestTarget(targetOrders, trade);
 
   return {
@@ -1047,6 +1134,11 @@ export function deriveStopHistory(params: {
     movedCount: steps.movedCount,
     direction: steps.direction,
     movedAtMs: null,
+    // THE CHOSEN ORDER'S, like the prices beside it and unlike the verdict. A
+    // trail is the server stepping one order's stop, so unioning this over a
+    // cycle whose other bracket was dragged by hand would mute a real move —
+    // and `trailing` is what suppresses `moved_sl` (./import.ts). Narrow, and
+    // the same value every single-stop trade has always reported.
     trailing: isTrailingType(stop.order.type),
     noStopPlaced: false,
     source: stop.order.layer === 'window' ? 'inferred' : 'linked',
@@ -1054,8 +1146,8 @@ export function deriveStopHistory(params: {
     preFillVersions: stop.preFill,
     anchoredAtFill: stop.anchoredAtFill,
     otherTargets: chosenTarget.otherTargets,
+    stopCount: ranked.length,
     ...capped,
-    ...sharedWith,
   };
 }
 
@@ -1492,7 +1584,7 @@ function countMoves(params: {
   direction: BrokerTrade['direction'];
   trailing: boolean;
   automated?: ReadonlyMap<number, boolean>;
-}): { movedCount: number; direction: StopHistory['direction'] } {
+}): Moves {
   const { steps: stated, direction, trailing, automated } = params;
 
   let movedCount = 0;
@@ -1518,6 +1610,67 @@ function countMoves(params: {
     const towardEntry = direction === 'long' ? after > before : after < before;
     if (trailLoosened || !towardEntry) widened = true;
     else tightened = true;
+  }
+
+  return { movedCount, tightened, widened };
+}
+
+/**
+ * One protective order's steps, before the direction is named.
+ *
+ * THE TWO BOOLEANS RATHER THAN A DIRECTION, so that {@link combineMoves} can
+ * union several orders through the SAME expression that names one order's
+ * direction. Naming it per order and then merging the names would be a second
+ * rule: `'mixed'` and `'tightened'` merging to `'mixed'` is `tightened ∨
+ * widened` written less clearly and with a case to forget.
+ */
+interface Moves {
+  movedCount: number;
+  /** At least one counted step moved toward the entry. */
+  tightened: boolean;
+  /** At least one moved away from it, or loosened a trail. */
+  widened: boolean;
+}
+
+/**
+ * Every believed protective order's steps, as one verdict (REF-113 Stage 5).
+ *
+ * THE COUNT IS A SUM AND THE DIRECTION IS A UNION, and that asymmetry is what
+ * the two fields mean: {@link StopHistory.movedCount} answers "how many times
+ * was risk moved on this position" and {@link StopHistory.direction} answers
+ * "which ways". A trader with two brackets who widened one and left the other
+ * alone moved their risk once, outward.
+ *
+ * **A WIDENING ANYWHERE SURVIVES**, which is the one property this function
+ * exists for and the regression REF-117 §6.2 flagged. `stopWasWidened` is what
+ * arms `moved_sl_last_trade`, and reading only the most-risk bracket meant a
+ * widening on the other one was invisible.
+ *
+ * `'mixed'` IS KEPT RATHER THAN COLLAPSED INTO `'widened'`. Both directions
+ * happening is a different thing from only widening — on one order it is a
+ * stop walked out and then pulled back, on two it is one bracket managed and
+ * one loosened — and every reader already branches on it (`stopWasWidened`
+ * treats it as a widening, so nothing a rule does changes either way). A rule
+ * that answered `'widened'` here would be throwing away half of what was
+ * measured for no reader's benefit.
+ *
+ * An EMPTY list cannot reach this: `deriveStopHistory` has already returned
+ * `'none'` when there is no stop order, and `ranked` is non-empty by the same
+ * check. Zero steps across a non-empty list is `kept`, which the null direction
+ * states.
+ */
+function combineMoves(perOrder: readonly Moves[]): {
+  movedCount: number;
+  direction: StopHistory['direction'];
+} {
+  let movedCount = 0;
+  let tightened = false;
+  let widened = false;
+
+  for (const moves of perOrder) {
+    movedCount += moves.movedCount;
+    tightened = tightened || moves.tightened;
+    widened = widened || moves.widened;
   }
 
   return {
@@ -1653,7 +1806,7 @@ export async function readStopHistories(params: {
       // for every later run that day.
       let history: StopHistory;
       try {
-        history = deriveStopHistory({ trade, trades: hostTrades, evidence });
+        history = deriveStopHistory({ trade, evidence });
       } catch (error) {
         // `kindOf` AND NOT THE MESSAGE, for the usual reason sharpened: a
         // TypeError's message quotes the value it choked on, and the values

@@ -166,7 +166,7 @@
 --
 --      {
 --        verdict:      'moved' | 'kept' | 'none' | 'unknown',
---        reason:       'interday' | 'ambiguous' | 'capped' | 'failed' | null,
+--        reason:       'interday' | 'capped' | 'failed' | null,
 --        initialStop:  number | null,
 --        initialStopSide: 'risk' | 'wrong' | null,
 --        finalStop:    number | null,
@@ -181,7 +181,7 @@
 --        preFillVersions: number,
 --        anchoredAtFill:  boolean,
 --        otherTargets: number[],
---        sharedWithTrades?: number,
+--        stopCount:    number,         -- REF-113 Stage 5; see below
 --        capped?:      true
 --      }
 --
@@ -189,18 +189,36 @@
 --    object, and the one reader validates every field before using it — the
 --    same defensive-read rule 036 states for `debrief_ai`.
 --
+--    TWO KEYS ABOVE ARE NOT WHAT THIS FILE SHIPPED. `reason` had a fourth value,
+--    `'ambiguous'` — "two parallel positions in one contract, sharing no order"
+--    — and there was a `sharedWithTrades?: number` for one logical position
+--    reported as several journal rows. REF-117 made a row a LOGICAL POSITION, so
+--    neither state can arise and REF-113 Stage 5 deleted both. ROWS WRITTEN
+--    EARLIER MAY CARRY EITHER, and the reader in src/lib/journal/stopHistory.ts
+--    still accepts `'ambiguous'` for exactly that reason: it describes what is
+--    stored, not what today's writer would write.
+--
 --    AND THE SHAPE HAS GROWN SINCE THIS FILE RAN, WHICH IS THE THING A READER
---    OF THIS BLOCK MOST NEEDS TO KNOW. `initialStopSide` (REF-113 side fix) and
---    `preFillVersions` / `anchoredAtFill` (REF-113 fill anchor) were added after
---    it, and JSONB takes new keys with no migration — so ROWS WRITTEN EARLIER
---    CARRY NONE OF THE THREE, and a reader gets `undefined` where the TypeScript
---    type promises a value.
+--    OF THIS BLOCK MOST NEEDS TO KNOW. `initialStopSide` (REF-113 side fix),
+--    `preFillVersions` / `anchoredAtFill` (REF-113 fill anchor) and `stopCount`
+--    (REF-113 Stage 5) were added after it, and JSONB takes new keys with no
+--    migration — so ROWS WRITTEN EARLIER CARRY NONE OF THE FOUR, and a reader
+--    gets `undefined` where the TypeScript type promises a value.
 --
 --    THERE IS NO BACKFILL AND THERE CANNOT BE ONE. The import's candidate filter
 --    is `stop_history IS NULL`, so a row that already holds a history is never
 --    re-derived, and `/order/list` is `depthDays = 0` — the orders those rows
 --    were derived from are gone. So: treat an absent `anchoredAtFill` as
 --    `false`, and an absent `preFillVersions` as UNKNOWN rather than as zero.
+--    AN ABSENT `stopCount` IS NOT ONE EITHER, and that absence reads as SAFE TO
+--    DESCRIBE rather than as a reason to withhold — the opposite of the two
+--    above, and argued in the field's own comment. Rows written before it were
+--    written while a scaled-in position became SEVERAL journal rows, so each of
+--    them genuinely described one bracket and the from-to range genuinely was
+--    that bracket's. Above one, the range is withheld: two prices cannot
+--    describe two stops, and the mean of two stop prices is a price that was
+--    never a stop.
+--
 --    Those rows took the initial stop from version ONE of the stop order, which
 --    on a trade whose entry order moved before it filled can be a price the
 --    position never opened under — measured on 19.10 as 11 ticks of risk stored

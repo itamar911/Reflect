@@ -266,16 +266,18 @@ function evidenceOf(params: {
   };
 }
 
-/** One trade's answer, from arrays. The shorthand every group below uses. */
+/**
+ * One trade's answer, from arrays. The shorthand every group below uses.
+ *
+ * `trades` WAS A PARAMETER AND IS NOT ONE (REF-113 Stage 5). `deriveStopHistory`
+ * took the whole run's rows for the §1.3 overlap test alone, and that test is
+ * deleted — a cycle cannot overlap another cycle of the same account and
+ * contract, so there was nothing left for it to find.
+ */
 function derive(
-  params: Parameters<typeof evidenceOf>[0] & { trade?: BrokerTrade; trades?: BrokerTrade[] }
+  params: Parameters<typeof evidenceOf>[0] & { trade?: BrokerTrade }
 ): StopHistory {
-  const trade = params.trade ?? TRADE;
-  return deriveStopHistory({
-    trade,
-    trades: params.trades ?? [trade],
-    evidence: evidenceOf(params),
-  });
+  return deriveStopHistory({ trade: params.trade ?? TRADE, evidence: evidenceOf(params) });
 }
 
 // ── The reader stub ─────────────────────────────────────────────────────────
@@ -377,8 +379,10 @@ function measuredCaseGroup() {
     // v1 reads zero `/command/list`, so there is no instant to carry (§2.1).
     c('(8) movedAtMs is null, and says so rather than being absent',
       [history.movedAtMs, 'movedAtMs' in history], [null, true]),
-    c('(9) one trade, so nothing is shared',
-      [history.sharedWithTrades ?? null, history.capped ?? null], [null, null]),
+    // ONE bracket, so the figures above describe the order they came from and
+    // the count says so. `sharedWithTrades` was asserted here and is deleted.
+    c('(9) one protective order, and the run was not capped',
+      [history.stopCount, history.capped ?? null], [1, null]),
     // No commands in this fixture, so the fill anchor fell back to version one
     // — which on a market entry with one stop is the same version it would have
     // anchored on anyway. `fillAnchorGroup` is where the two diverge.
@@ -1350,93 +1354,147 @@ function layerGroup() {
   ]);
 }
 
-function sharedAndAmbiguousGroup() {
-  // §1.3. One entry order for three contracts, filling in three pieces paired
-  // with three separate exits, produces three BrokerTrade rows that share the
-  // entry order. There was ONE stop on ONE position.
-  const siblings: BrokerTrade[] = [
-    { ...TRADE, brokerTradeKey: 'demo:1', fillIds: [1, 2] },
-    { ...TRADE, brokerTradeKey: 'demo:2', fillIds: [3, 4] },
-    { ...TRADE, brokerTradeKey: 'demo:3', fillIds: [5, 6] },
-  ];
-  const shared = deriveStopHistory({
-    trade: siblings[0],
-    trades: siblings,
-    evidence: evidenceOf({ ...BRACKET }),
-  });
+/**
+ * ONE ROW, SEVERAL BRACKETS — the verdict per protective order (REF-113 Stage 5).
+ *
+ * THIS GROUP REPLACES `sharedAndAmbiguousGroup`, AND THE REPLACEMENT IS THE
+ * POINT RATHER THAN A TIDY-UP. That group asserted §1.3's two answers: one
+ * logical position reported as three rows sharing a stop (`sharedWithTrades: 3`)
+ * and two parallel positions in one contract refused as
+ * `'unknown' / 'ambiguous'`. Both described states that union-find grouping
+ * produced and that CYCLES CANNOT (REF-117): a cycle is every fill on one
+ * contract in one account between two zero crossings, so one position is one
+ * row and two rows of one account and contract cannot overlap in time.
+ *
+ * What arrives instead is the shape those rows were standing in for: ONE row
+ * carrying TWO ENTRIES, each with its own bracket, each with its own real stop
+ * at its own price. The fixture is a long of two contracts scaled in — the
+ * REF-117 Stage 0 shape — and the three assertions REF-117 §6.2 asked for are
+ * the first three below.
+ */
+function perOrderVerdictGroup() {
+  const ENTRY_2 = ENTRY_ORDER + 20;
+  const STOP_2_ORDER = STOP_ORDER + 20;
 
-  // Two positions open at once in the same contract, sharing no order. Which
-  // stop belonged to which is not recoverable, and a guess would put one
-  // trade's risk on the other's row.
-  const parallel: BrokerTrade[] = [
-    TRADE,
-    {
-      ...TRADE,
-      brokerTradeKey: 'demo:parallel',
-      entryOrderIds: [78_501, 78_502],
-      fillIds: [7, 8],
-    },
-  ];
-  const ambiguous = deriveStopHistory({
-    trade: parallel[0],
-    trades: parallel,
-    evidence: evidenceOf({
-      orders: [
-        ...BRACKET.orders,
-        order(78_501, { action: 'Buy', ordStatus: 'Filled' }),
-        order(78_502, { ordStatus: 'Filled' }),
-      ],
-      versions: [
-        ...BRACKET.versions,
-        version(92_001, 78_501, { orderType: 'Market' }),
-        version(92_002, 78_502, { orderType: 'Market' }),
-      ],
-      links: BRACKET.links,
-    }),
-  });
+  /** A long of two, entered in two pieces, each piece bracketed. */
+  const SCALED_IN: BrokerTrade = {
+    ...TRADE,
+    qty: 2,
+    entryPrice: 4510.5,
+    // Every order of the cycle, which is what the field means (REF-117 Stage 2).
+    entryOrderIds: [ENTRY_ORDER, ENTRY_2, EXIT_ORDER],
+  };
 
-  // The same two trades, not overlapping in time: ordinary attribution.
-  const sequential = deriveStopHistory({
-    trade: parallel[0],
-    trades: [
-      parallel[0],
-      {
-        ...parallel[1],
-        openedAtMs: CLOSED + 600_000,
-        closedAtMs: CLOSED + 900_000,
-      },
-    ],
-    evidence: evidenceOf({
+  /** Two brackets, with each stop's versions supplied by the caller. */
+  function twoBrackets(stops: readonly TradovateOrderVersion[]) {
+    return {
       orders: [
-        ...BRACKET.orders,
-        order(78_501, {
-          action: 'Buy',
+        order(ENTRY_ORDER, { action: 'Buy', ordStatus: 'Filled' }),
+        order(ENTRY_2, { action: 'Buy', ordStatus: 'Filled' }),
+        order(STOP_ORDER),
+        order(STOP_2_ORDER),
+        order(EXIT_ORDER, {
           ordStatus: 'Filled',
-          timestamp: new Date(CLOSED + 600_000).toISOString(),
+          timestamp: new Date(CLOSED - 1_000).toISOString(),
         }),
-        order(78_502, { ordStatus: 'Filled', timestamp: new Date(CLOSED + 900_000).toISOString() }),
       ],
       versions: [
-        ...BRACKET.versions,
-        version(92_001, 78_501, { orderType: 'Market' }),
-        version(92_002, 78_502, { orderType: 'Market' }),
+        version(90_001, ENTRY_ORDER, { orderType: 'Market', orderQty: 1 }),
+        version(90_010, ENTRY_2, { orderType: 'Market', orderQty: 1 }),
+        ...stops,
+        version(90_006, EXIT_ORDER, { orderType: 'Market', orderQty: 2 }),
       ],
-      links: BRACKET.links,
-    }),
-  });
+      links: [ENTRY_ORDER, ENTRY_2, STOP_ORDER, STOP_2_ORDER],
+      trade: SCALED_IN,
+    };
+  }
 
-  group('one position split across rows is shared; two positions are refused', [
-    c('(1) one stop, three rows, attributed to all of them',
-      [shared.verdict, shared.initialStop], ['moved', STOP_1]),
-    c('(2) and the row says how many it was shared with', shared.sharedWithTrades, 3),
-    c('(3) two parallel positions sharing no order: `unknown`, reason ambiguous',
-      [ambiguous.verdict, ambiguous.reason], ['unknown', 'ambiguous']),
-    c('(4) and nothing is claimed about the prices',
-      [ambiguous.initialStop, ambiguous.initialTarget, ambiguous.movedCount],
-      [null, null, 0]),
-    c('(5) the same two trades, not overlapping, attribute normally',
-      [sequential.verdict, sequential.initialStop, sequential.sharedWithTrades ?? null],
-      ['moved', STOP_1, null]),
+  // ── (1) BOTH BRACKETS LEFT ALONE ─────────────────────────────────────────
+  // One version each, two different prices. THIS IS THE REGRESSION TEST: a
+  // chained reading would see 4504 then 4506 as a sequence and report a move
+  // the trader never made, on a trade where they touched nothing.
+  const bothKept = derive(
+    twoBrackets([
+      version(90_002, STOP_ORDER, { orderType: 'Stop', stopPrice: 4504, orderQty: 1 }),
+      version(90_020, STOP_2_ORDER, { orderType: 'Stop', stopPrice: 4506, orderQty: 1 }),
+    ])
+  );
+
+  // The same two prices in the other id order, because chaining is sensitive to
+  // it and a correct reading is not: 4506 then 4504 would read as a WIDENING.
+  const bothKeptReversed = derive(
+    twoBrackets([
+      version(90_002, STOP_ORDER, { orderType: 'Stop', stopPrice: 4506, orderQty: 1 }),
+      version(90_020, STOP_2_ORDER, { orderType: 'Stop', stopPrice: 4504, orderQty: 1 }),
+    ])
+  );
+
+  // ── (2) ONE WIDENED ──────────────────────────────────────────────────────
+  // Bracket one untouched; bracket two's stop walked AWAY from the entry. The
+  // widening is on the order that is NOT chosen for the prices — 4504 states
+  // more risk than 4506 — so a reading that took only the chosen order's
+  // verdict would answer `kept` and write `moved_sl = false`.
+  const oneWidened = derive(
+    twoBrackets([
+      version(90_002, STOP_ORDER, { orderType: 'Stop', stopPrice: 4504, orderQty: 1 }),
+      version(90_020, STOP_2_ORDER, { orderType: 'Stop', stopPrice: 4506, orderQty: 1 }),
+      version(90_021, STOP_2_ORDER, { orderType: 'Stop', stopPrice: 4503, orderQty: 1 }),
+    ])
+  );
+
+  // One bracket tightened and the other widened. Neither direction is thrown
+  // away: `'mixed'` is what both happening has always meant.
+  const oneEachWay = derive(
+    twoBrackets([
+      version(90_002, STOP_ORDER, { orderType: 'Stop', stopPrice: 4504, orderQty: 1 }),
+      version(90_003, STOP_ORDER, { orderType: 'Stop', stopPrice: 4507, orderQty: 1 }),
+      version(90_020, STOP_2_ORDER, { orderType: 'Stop', stopPrice: 4506, orderQty: 1 }),
+      version(90_021, STOP_2_ORDER, { orderType: 'Stop', stopPrice: 4502, orderQty: 1 }),
+    ])
+  );
+
+  // Both brackets dragged once, the same way. The count is the SUM.
+  const bothTightened = derive(
+    twoBrackets([
+      version(90_002, STOP_ORDER, { orderType: 'Stop', stopPrice: 4504, orderQty: 1 }),
+      version(90_003, STOP_ORDER, { orderType: 'Stop', stopPrice: 4505, orderQty: 1 }),
+      version(90_020, STOP_2_ORDER, { orderType: 'Stop', stopPrice: 4506, orderQty: 1 }),
+      version(90_021, STOP_2_ORDER, { orderType: 'Stop', stopPrice: 4508, orderQty: 1 }),
+    ])
+  );
+
+  group('one row, two brackets: the verdict is per protective order, then combined', [
+    // REF-117 §6.2's first assertion, and the silent regression it named.
+    c('(1) two brackets both left alone is `kept`, NOT `moved` by chaining',
+      [bothKept.verdict, bothKept.movedCount, bothKept.direction], ['kept', 0, null]),
+    c('(1b) and the same holds whichever order has the lower id',
+      [bothKeptReversed.verdict, bothKeptReversed.movedCount, bothKeptReversed.direction],
+      ['kept', 0, null]),
+    // REF-117 §6.2's third assertion.
+    c('(1c) stopCount is 2, so a reader knows the prices describe one of them',
+      bothKept.stopCount, 2),
+    // The prices are the MOST-RISK bracket's and are not averaged. 4505 is the
+    // mean of the two stops and must appear nowhere.
+    c('(1d) initialStop is the stop stating the most risk, never the mean',
+      [bothKept.initialStop, bothKept.finalStop], [4504, 4504]),
+    c('(1e) and the evidence list is that order\'s alone, not both concatenated',
+      bothKept.versions, [{ stopPrice: 4504 }]),
+    // REF-117 §6.2's second assertion.
+    c('(2) a widening on EITHER bracket reaches the verdict',
+      [oneWidened.verdict, oneWidened.movedCount, oneWidened.direction],
+      ['moved', 1, 'widened']),
+    c('(2b) even though the widened order is not the one the prices come from',
+      [oneWidened.initialStop, oneWidened.stopCount], [4504, 2]),
+    c('(3) one tightened and one widened is `mixed`, not half of what happened',
+      [oneEachWay.verdict, oneEachWay.movedCount, oneEachWay.direction],
+      ['moved', 2, 'mixed']),
+    c('(4) the count is the SUM across orders, and the direction the union',
+      [bothTightened.movedCount, bothTightened.direction], [2, 'tightened']),
+    // A one-bracket trade is unchanged in every field, which is what makes this
+    // stage safe to deploy over rows the old reading produced.
+    c('(5) a single-bracket trade still reports stopCount 1 and its own range',
+      [derive({ ...BRACKET }).stopCount, derive({ ...BRACKET }).movedCount],
+      [1, 2]),
   ]);
 }
 
@@ -1874,7 +1932,7 @@ async function main() {
   automatedGroup();
   trailingGroup();
   layerGroup();
-  sharedAndAmbiguousGroup();
+  perOrderVerdictGroup();
   unknownGroup();
   await readerGroup();
   await readerFailureGroup();

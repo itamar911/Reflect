@@ -80,6 +80,30 @@ export interface StoredStopHistory {
   direction: 'tightened' | 'widened' | 'mixed' | null;
   /** The steps were the server's, not a decision taken mid-trade. */
   trailing: boolean;
+  /**
+   * How many distinct protective orders the verdict was read from, or null
+   * (REF-113 Stage 5).
+   *
+   * **NULL IS "WE DO NOT KNOW HOW MANY", NOT ONE**, and that is why this field
+   * is nullable where `movedCount` defaults to zero: every row written before
+   * Stage 5 carries no such key, there is no backfill, and resolving the
+   * absence to a number would state something that was never measured.
+   *
+   * BUT A NULL READS AS SAFE TO DESCRIBE, AND THAT IS NOT THE USUAL DIRECTION
+   * IN THIS FILE. {@link stopMoveSentence} shows the from→to range on a null
+   * and withholds it only above one. The rows that lack the key are rows
+   * written while a scaled-in position became SEVERAL journal rows (union-find
+   * grouped on shared fills, REF-117), so each of them really did describe one
+   * bracket and the range really was that bracket's. Withholding it would
+   * delete a true sentence from every row the feature has ever written, to
+   * guard against a shape those rows cannot have.
+   *
+   * Above one means the position was scaled into and each entry had its own
+   * bracket, so {@link initialStop} and {@link finalStop} describe ONE of
+   * several real stops — the one that stated the most risk — while
+   * {@link movedCount} and {@link direction} span all of them.
+   */
+  stopCount: number | null;
 }
 
 type Raw = Record<string, unknown>;
@@ -139,6 +163,10 @@ export function readStopHistory(value: unknown): StoredStopHistory | null {
     movedCount: num(raw.movedCount) ?? 0,
     direction: str(raw.direction, DIRECTIONS),
     trailing: raw.trailing === true,
+    // No `?? 0` and no `?? 1`: see the field. A document that states a count
+    // states it, and one that does not is a document from before the count
+    // existed.
+    stopCount: num(raw.stopCount),
   };
 }
 
@@ -189,6 +217,14 @@ const price = (value: number): string => value.toFixed(2);
  *   - we looked and the order we found cannot have been a protective stop
  *     (`initialStopSide === 'wrong'`) — see the field
  *
+ * `stopCount > 1` IS NOT IN THAT LIST EITHER, AND THAT IS A DECISION (REF-113
+ * Stage 5). On a position scaled into over two entries this is ONE of two real
+ * stop prices — the one stating the most risk — and it is still the honest
+ * answer to "what was I risking": the worst case is what a stop is. What must
+ * not be shown is a from→to RANGE, because that claims the one order's
+ * revisions are the trade's, and {@link stopMoveSentence} is where that is
+ * withheld. A single price with the count beside it says what it is.
+ *
  * `'unknown'` IS NOT IN THAT LIST, and that is not an oversight: an inter-day
  * trade has no initial stop to report, so the column is null anyway and the
  * `?? null` below is what answers. Were a future `'unknown'` to carry a price,
@@ -237,6 +273,15 @@ export interface StopSentence {
  *
  * PRICES ARE SHOWN ONLY WHEN BOTH ENDS ARE READABLE AND THE SIDE IS RIGHT, so
  * the sentence degrades to its own words rather than to "(מ-— ל-—)".
+ *
+ * AND ONLY WHEN THERE WAS ONE STOP TO DESCRIBE (REF-113 Stage 5). A position
+ * scaled into over two entries has two brackets and two stops, and
+ * {@link StoredStopHistory.initialStop} is then one of them — the one that
+ * stated the most risk — while the verdict spans both. "הסטופ הודק (מ-4504 ל-
+ * 4512)" is a true sentence about that bracket and a false one about the trade,
+ * so above one stop the sentence keeps its words and drops its numbers. Same
+ * reduction `'mixed'` already makes, for the same reason: two prices cannot
+ * describe two stops any more than they can describe one that went both ways.
  */
 export function stopMoveSentence(history: StoredStopHistory | null): StopSentence | null {
   if (history === null) return null;
@@ -249,27 +294,40 @@ export function stopMoveSentence(history: StoredStopHistory | null): StopSentenc
     return { text: 'לא הוצב סטופ בעסקה הזו', tone: 'warning' };
   }
 
+  // SEVERAL PROTECTIVE ORDERS, WHICH REPLACES THE PRICES RATHER THAN THE WORDS.
+  //
+  // The sentences stay singular on purpose. "הסטופים הורחקו" would claim BOTH
+  // brackets were widened, and `'widened'` over two orders only says that one
+  // step somewhere widened and none tightened — so the plural would overstate
+  // exactly where this module is most careful not to. What the trader is owed
+  // instead is the count, which is also the answer to "why is there no price
+  // here": the number describes one of several real stops and the verdict
+  // describes all of them.
+  const several = history.stopCount !== null && history.stopCount > 1;
+  const manyNote = several ? ` (${history.stopCount} פקודות הגנה)` : '';
+
   if (history.trailing) {
-    return { text: 'סטופ נגרר אוטומטית', tone: 'neutral' };
+    return { text: `סטופ נגרר אוטומטית${manyNote}`, tone: 'neutral' };
   }
 
   if (history.verdict === 'kept') {
-    return { text: 'הסטופ לא הוזז', tone: 'neutral' };
+    return { text: `הסטופ לא הוזז${manyNote}`, tone: 'neutral' };
   }
 
   // From here the verdict is `'moved'`. The range is appended only where the
   // spec asks for it — `'mixed'` says how MANY times instead, because two
-  // prices cannot describe a stop that went both ways.
+  // prices cannot describe a stop that went both ways, and `several` withholds
+  // it for the same reason one level up.
   const from = history.initialStop;
   const to = history.finalStop;
   const range =
-    history.initialStopSide !== 'wrong' && from !== null && to !== null
+    !several && history.initialStopSide !== 'wrong' && from !== null && to !== null
       ? ` (מ-${price(from)} ל-${price(to)})`
-      : '';
+      : manyNote;
 
   if (history.direction === 'mixed') {
     return {
-      text: `הסטופ הוזז ${history.movedCount} פעמים — גם הורחק וגם הודק`,
+      text: `הסטופ הוזז ${history.movedCount} פעמים — גם הורחק וגם הודק${manyNote}`,
       tone: 'warning',
     };
   }
@@ -288,7 +346,10 @@ export function stopMoveSentence(history: StoredStopHistory | null): StopSentenc
   // direction, and stay neutral: claiming a widening we cannot see is the error
   // this module refuses everywhere else.
   return {
-    text: history.movedCount > 0 ? `הסטופ הוזז ${history.movedCount} פעמים` : 'הסטופ הוזז',
+    text:
+      history.movedCount > 0
+        ? `הסטופ הוזז ${history.movedCount} פעמים${manyNote}`
+        : `הסטופ הוזז${manyNote}`,
     tone: 'neutral',
   };
 }
