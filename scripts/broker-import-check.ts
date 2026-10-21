@@ -170,6 +170,7 @@ import {
   resetLinkGuard,
   UNLINK_WARNING,
   unlinkPlan,
+  unlinkWarningText,
 } from '../src/lib/journal/link';
 import {
   respondToDebriefRequest,
@@ -490,6 +491,19 @@ class FakeDb {
         if (!broker || !plan) {
           return Promise.resolve({ data: null, error: { code: 'P0002', message: 'not found' } });
         }
+
+        // MIGRATION 041'S CAPTURE, MIRRORED, AND THE ORDER IS THE WHOLE POINT:
+        // `plan_symbol = COALESCE(plan.plan_symbol, plan.symbol)` reads the
+        // PLAN's symbol, and in SQL it reads it out of a record variable
+        // captured before the UPDATE. So it has to be computed here BEFORE the
+        // facts overwrite `symbol`, or the stub would capture the broker's
+        // spelling and this suite would prove the opposite of the feature.
+        //
+        // COALESCE and not an assignment, for the re-link case: a row that was
+        // unlinked and is being linked again must keep the original it already
+        // captured. `?? null` on the right so the key exists either way, like
+        // a column that is present and NULL.
+        plan.plan_symbol = (plan.plan_symbol ?? plan.symbol) ?? null;
 
         for (const { column } of EXECUTION_FACTS_FOR_TEST) plan[column] = broker[column];
         plan.broker_trade_key = broker.broker_trade_key;
@@ -2930,6 +2944,57 @@ async function unlinkGroup() {
     unlinkPlan({ client, rowId: 'plan-1' }),
   ]);
 
+  // ── MIGRATION 041: the symbol the trader typed comes back ─────────────────
+  //
+  // THE PAIR THE FEATURE IS ABOUT, in the trader's own language: the plan says
+  // `NQ1` — the continuous mini, which is what a trader writes — and the
+  // broker reports `MNQZ6`, a dated micro. The micro table is what lets the
+  // matcher link them, and the fact that it has to is the whole argument: these
+  // are TWO DIFFERENT PRODUCTS, so the broker's spelling is not a correction of
+  // the trader's the way `entry_price` is.
+  //
+  // The default fixture cannot show this — `storedPlan()` types the same
+  // `MNQZ6` the broker reports, so a restore and a no-op are the same string.
+  resetLinkGuard();
+  const typedDb = new FakeDb([storedPlan({ symbol: 'NQ1' })]);
+  await quietImport({
+    client: typedDb.client(), userId: USER, trades: [TRADE], isTradeSource: true, env: ON, nowMs: MATCH_NOW,
+  });
+  // SNAPSHOT, not the row: `FakeDb` mutates its rows in place, so holding the
+  // object here would show it as the unlink leaves it and (15) would be
+  // asserting the same state as (16).
+  const linkedTyped = { ...(typedDb.rows.find((row) => row.id === 'plan-1') ?? {}) };
+  await unlinkPlan({ client: typedDb.client(), rowId: 'plan-1' });
+  const restoredTyped = typedDb.rows.find((row) => row.id === 'plan-1') ?? {};
+
+  // A ROW LINKED BEFORE 041 RAN. No `plan_symbol` key at all, which is what
+  // PostgREST returns both for a database without the column and for a row
+  // whose link predates it. Nothing can be restored, and the one thing that
+  // must NOT happen is `symbol: null` being written over the only spelling the
+  // row has — `symbol` is nullable, so that write would succeed.
+  resetLinkGuard();
+  const legacyDb = new FakeDb([{ ...storedPlan(), symbol: SYMBOL, source: 'tradovate',
+    unplanned: false, broker_trade_key: TRADE.brokerTradeKey,
+    link_confirmed_at: '2026-10-16T10:00:00.000Z' }]);
+  await unlinkPlan({ client: legacyDb.client(), rowId: 'plan-1' });
+  const legacyRow = legacyDb.rows.find((row) => row.id === 'plan-1') ?? {};
+  const legacyUpdate = legacyDb.statements.find((s) => s.kind === 'update');
+
+  // THE RE-LINK, which is why the capture is a COALESCE and not an assignment.
+  // A row that already carries a captured original is linked again; the
+  // function must prefer what it captured over whatever `symbol` holds now.
+  // Driven through `confirmLink` rather than the matcher, because the two
+  // spellings here deliberately do not match each other.
+  resetLinkGuard();
+  const relink = new FakeDb([
+    { ...storedPlan(), symbol: 'ESZ6', plan_symbol: 'NQ1' },
+    { id: 'broker-1', user_id: USER, source: 'tradovate', status: 'closed', unplanned: true,
+      broker_trade_key: TRADE.brokerTradeKey, symbol: SYMBOL, direction: 'short',
+      entry_price: ENTRY, exit_price: EXIT, quantity: 2, actual_pnl: 270 },
+  ]);
+  await confirmLink({ client: relink.client(), brokerRowId: 'broker-1', planId: 'plan-1' });
+  const relinked = relink.rows.find((row) => row.id === 'plan-1') ?? {};
+
   group('an unlink gives the plan back and lets the trade return', [
     c('(0) the fixture really was linked first',
       wasLinked, ['tradovate', TRADE.brokerTradeKey, 'closed']),
@@ -2953,10 +3018,13 @@ async function unlinkGroup() {
       [plan.strategy, plan.stop_loss, plan.take_profit, plan.rr_ratio,
        plan.trade_reason, plan.emotional_state, plan.setup_id],
       ['פריצת טווח', 29900, 29700, 2, 'פריצה של הטווח הלילי', 4, 'setup-7']),
-    // NOT RECOVERABLE, and the dialog says so. EXECUTION_FACTS owns all five
-    // and nothing kept what the trader originally typed.
-    c('(8) the entry half stays as the broker reported it',
-      [plan.symbol, plan.direction, plan.entry_price, plan.quantity], [SYMBOL, 'short', ENTRY, 2]),
+    // NOT RECOVERABLE, and the dialog says so. EXECUTION_FACTS owns all four
+    // and nothing kept what the trader originally typed. `symbol` used to be
+    // the fifth member of this list and is now restored instead — see (15)
+    // onwards. It reads as unchanged HERE only because this fixture's plan
+    // types the same spelling the broker reports.
+    c('(8) the rest of the entry half stays as the broker reported it',
+      [plan.direction, plan.entry_price, plan.quantity], ['short', ENTRY, 2]),
 
     // THE ASSERTION THIS GROUP EXISTS FOR.
     c('(9) the next import brings the trade back AS A QUEUED ROW, not a re-link',
@@ -2973,7 +3041,60 @@ async function unlinkGroup() {
     c('(13) two overlapping unlinks: the second says why it did nothing',
       both.filter((o) => o.ok === false).map((o) => o.ok === false && o.reason), ['busy']),
     c('(14) and the dialog states the one thing that cannot be undone',
-      UNLINK_WARNING.includes('פרטי הכניסה נשארים כפי שהברוקר דיווח'), true),
+      UNLINK_WARNING.keeps.includes('פרטי הכניסה נשארים כפי שהברוקר דיווח'), true),
+
+    // ── MIGRATION 041 ──────────────────────────────────────────────────────
+    //
+    // THE ASSERTION THE COLUMN EXISTS FOR. The link overwrote `NQ1` with the
+    // broker's `MNQZ6`; the unlink gives the trader their own spelling back.
+    c('(15) the link captured what the trader typed, beside what the broker said',
+      [linkedTyped.symbol, linkedTyped.plan_symbol], [SYMBOL, 'NQ1']),
+    c('(16) and the unlink restores it', restoredTyped.symbol, 'NQ1'),
+    // SPENT ON PURPOSE. The row is a plan again carrying its own symbol, so a
+    // later re-link must capture afresh rather than prefer a value from two
+    // links ago.
+    c('(17) the capture is spent by the restore', restoredTyped.plan_symbol, null),
+    // Restoring one entry fact must not have quietly reverted the other four.
+    c('(18) and the other entry facts still read as the broker reported them',
+      [restoredTyped.direction, restoredTyped.entry_price, restoredTyped.quantity],
+      ['short', ENTRY, 2]),
+
+    // ── THE PRE-041 POPULATION, which is the half that could go wrong ──────
+    c('(19) a row with no captured symbol keeps the broker\'s',
+      [legacyRow.symbol, legacyRow.plan_symbol ?? null], [SYMBOL, null]),
+    // `symbol` is NULLABLE, so a `symbol: null` here would succeed and blank
+    // the instrument on a row that at least had a truthful spelling.
+    c('(20) and the update does not name symbol or plan_symbol at all',
+      Object.keys((legacyUpdate?.values ?? {}) as Row)
+        .filter((key) => key === 'symbol' || key === 'plan_symbol'),
+      []),
+
+    // ── THE RE-LINK, which is why the capture is a COALESCE ────────────────
+    c('(21) a second link keeps the original it already captured',
+      [relinked.symbol, relinked.plan_symbol], [SYMBOL, 'NQ1']),
+
+    // ── THE DIALOG CANNOT PROMISE WHAT THE WRITE WILL NOT DO ───────────────
+    //
+    // Two populations, two sentences, one predicate. The pre-041 row is the one
+    // "הסימבול יחזור למה שרשמת" would be a lie to.
+    c('(22) a row that can be restored is promised the symbol back',
+      unlinkWarningText({ plan_symbol: 'NQ1' }), UNLINK_WARNING.restores),
+    c('(23) and one that cannot is not',
+      [unlinkWarningText({ plan_symbol: null }), unlinkWarningText({}),
+       unlinkWarningText({ plan_symbol: '' })],
+      [UNLINK_WARNING.keeps, UNLINK_WARNING.keeps, UNLINK_WARNING.keeps]),
+    c('(24) the two sentences are not the same sentence',
+      UNLINK_WARNING.restores === UNLINK_WARNING.keeps, false),
+    c('(25) only one of them mentions the symbol',
+      [UNLINK_WARNING.restores.includes('הסימבול יחזור למה שרשמת'),
+       UNLINK_WARNING.keeps.includes('הסימבול')],
+      [true, false]),
+    // Both populations keep the prices and the quantity, and both sentences
+    // have to say so — that is the part of the old copy that is still true.
+    c('(26) and both still say the broker owns the figures',
+      [UNLINK_WARNING.restores.includes('כפי שהברוקר דיווח'),
+       UNLINK_WARNING.keeps.includes('כפי שהברוקר דיווח')],
+      [true, true]),
   ]);
 }
 

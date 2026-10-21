@@ -166,6 +166,18 @@ export default async function TradesPage({ searchParams }: {
     // lib/journal/stages.ts validates every field it reads, and a cast here
     // would be a second, unchecked claim about the same document.
     broker_stages:      t.broker_stages ?? null,
+    // ── The symbol the trader typed, from migration 041 (REF-107) ─────────
+    //
+    // Same `?? null` rule, sixth time, and for the field-by-field reason
+    // again: the unlink dialog branches on this column to decide whether it
+    // may promise the symbol back, and a column nobody names here reads as
+    // absent — which is the same answer as "041 has not run", and the correct
+    // one for every row in such a database.
+    //
+    // THIS IS A MAP AND NOT A QUERY, so it does not make the deploy wait for
+    // 041: `select('*')` above returns no key for a column that does not
+    // exist, rather than failing. See 041's deploy-order note.
+    plan_symbol:        (t.plan_symbol as string | null) ?? null,
   }));
 
   const exportTrades = allTrades.map((t) => ({

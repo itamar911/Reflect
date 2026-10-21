@@ -538,12 +538,27 @@ export async function declineLink(params: {
  * claimed to be, and leaving them would be a plan carrying somebody else's
  * result.
  *
- * THE ENTRY HALF STAYS, AND IT IS NOT RECOVERABLE. `symbol`, `direction`,
+ * THE ENTRY HALF STAYS — EXCEPT THE SYMBOL, SINCE MIGRATION 041. `direction`,
  * `entry_price`, `quantity` and `submitted_at` were OVERWRITTEN by the link —
- * `EXECUTION_FACTS` in lib/tradovate/import.ts owns all five — and nothing
- * anywhere kept what the trader originally typed. So an unlink restores the
- * plan's STATE but not its original entry figures, and the confirmation dialog
- * says so in as many words rather than letting the trader discover it.
+ * `EXECUTION_FACTS` in lib/tradovate/import.ts owns all four — and nothing
+ * anywhere kept what the trader originally typed. That is arguably a feature
+ * for those four: the broker's figures are MORE accurate than the typed ones,
+ * and the dialog says they stay.
+ *
+ * `symbol` IS DIFFERENT IN KIND, which is why 041 exists. A micro dated
+ * contract and a continuous mini are not a correction of each other — they are
+ * two different products in the trader's head — so a restored plan carrying the
+ * broker's spelling groups under the wrong instrument in stats and will not
+ * match the trader's next plan for the same setup. `link_broker_trade` now
+ * captures the plan's own symbol into `plan_symbol` before overwriting
+ * `symbol`, and the read below gives it back.
+ *
+ * ROWS LINKED BEFORE 041 RAN CANNOT BE HELPED, and that is not a bug in this
+ * function. Their symbol was overwritten in place and the broker row it came
+ * from was hard-DELETEd, so there is nothing to restore from; they keep the
+ * broker's spelling exactly as they do today. The product therefore carries two
+ * populations for a while, and {@link unlinkWarningText} is what stops the
+ * dialog promising the second one something this code cannot deliver.
  *
  * Every intent column is untouched, here as everywhere: the strategy, the
  * stop, the target, the R:R, the reason, the emotional state, `setup_id`. They
@@ -587,9 +602,47 @@ export async function unlinkPlan(params: {
   inFlight.add(rowId);
 
   try {
+    // READ FIRST, because PostgREST cannot assign one column from another in a
+    // single statement: `symbol = plan_symbol` is not expressible over the REST
+    // interface, and the alternative is a second RPC for a restore that has no
+    // ordering constraint to protect.
+    //
+    // TWO STATEMENTS ARE ACCEPTABLE HERE, and this function is already the
+    // place where that is true: the doc comment above accepts that the
+    // follow-up sync may fail while the unlink stands. The failure mode of THIS
+    // read failing is the strongest one available — it behaves exactly as this
+    // function did before 041, which is the currently shipped behaviour.
+    //
+    // `maybeSingle` AND A DELIBERATELY IGNORED ERROR. On a database where 041
+    // has not run, `plan_symbol` is an unknown column and this answers 42703;
+    // on a row that somehow is not there, it answers no row. Both arrive here
+    // as "nothing to restore", which is the right answer to both. THIS IS THE
+    // ONLY QUERY IN THE APP THAT NAMES THE COLUMN — see 041's deploy-order
+    // note, which rests on this branch.
+    const { data: row } = await client
+      .from('trade_plans')
+      .select('plan_symbol')
+      .eq('id', rowId)
+      .maybeSingle();
+
+    const captured = (row as { plan_symbol?: unknown } | null)?.plan_symbol;
+    // THE EMPTY BRANCH IS THE IMPORTANT HALF. `symbol` is nullable, so writing
+    // `symbol: null` over a pre-041 row would SUCCEED and silently blank the
+    // instrument on a row that at least had a truthful spelling on it.
+    //
+    // `plan_symbol: null` on the restore spends the capture on purpose: the row
+    // is a plan again, carrying the trader's own symbol in `symbol`, and a
+    // later re-link captures it afresh. Leaving it set would make 041's
+    // COALESCE prefer a stale value from two links ago.
+    const restored =
+      typeof captured === 'string' && captured !== ''
+        ? { symbol: captured, plan_symbol: null }
+        : {};
+
     const { error } = await client
       .from('trade_plans')
       .update({
+        ...restored,
         // The provenance goes, and with the key gone the next sync does not
         // find this trade in the table and imports it afresh.
         broker_trade_key: null,
@@ -631,6 +684,48 @@ export async function unlinkPlan(params: {
   }
 }
 
-/** The confirmation dialog's copy. One place, so the suite reads what ships. */
-export const UNLINK_WARNING =
-  'השיוך יבוטל. התוכנית שלך תחזור למצב פתוח והעסקה מהברוקר תיובא מחדש בסנכרון הבא. פרטי הכניסה נשארים כפי שהברוקר דיווח.';
+/**
+ * The confirmation dialog's copy — TWO SENTENCES, because there are two
+ * populations of row and the dialog is read by both.
+ *
+ * One place, so the suite reads what ships, and a Record rather than two loose
+ * constants for the reason `LINK_STATE_COPY` is one: the states are an
+ * exhaustive set and a new one should fail to compile rather than fall back to
+ * whichever string was nearest.
+ *
+ * `restores` is the truth about a row whose link ran under migration 041: the
+ * symbol the trader typed was captured and is about to come back. `keeps` is
+ * the truth about every row linked before that, and it is the sentence that
+ * shipped — their original spelling was overwritten in place and is gone, so
+ * the broker's stays. SAYING "הסימבול יחזור למה שרשמת" TO THAT SECOND
+ * POPULATION WOULD BE A LIE, and one the trader would catch within a second of
+ * pressing the button.
+ *
+ * Both sentences name the prices and the quantity as staying, because both do.
+ */
+export const UNLINK_WARNING: Record<'restores' | 'keeps', string> = {
+  restores:
+    'השיוך יבוטל. התוכנית שלך תחזור למצב פתוח והעסקה מהברוקר תיובא מחדש בסנכרון הבא. הסימבול יחזור למה שרשמת, והמחירים והכמות יישארו כפי שהברוקר דיווח.',
+  keeps:
+    'השיוך יבוטל. התוכנית שלך תחזור למצב פתוח והעסקה מהברוקר תיובא מחדש בסנכרון הבא. פרטי הכניסה נשארים כפי שהברוקר דיווח.',
+};
+
+/**
+ * Which of the two the dialog shows, decided by the row in front of the trader.
+ *
+ * A CONDITIONAL AND NOT A SECOND CONSTANT ELSEWHERE: the modal already has the
+ * row — `select('*')` on the trades page, mapped through `plan_symbol` — so the
+ * question "can this unlink actually restore the symbol?" is answerable at the
+ * moment the dialog opens, and answering it anywhere else would be a guess.
+ *
+ * The predicate is deliberately the same one {@link unlinkPlan} branches on: a
+ * non-empty string, so an absent column (pre-041), a NULL and an empty string
+ * all read as "cannot restore". If those two ever disagree the dialog becomes a
+ * promise the write does not keep, which is the whole failure this function
+ * exists to prevent.
+ */
+export function unlinkWarningText(row: { plan_symbol?: string | null }): string {
+  return typeof row.plan_symbol === 'string' && row.plan_symbol !== ''
+    ? UNLINK_WARNING.restores
+    : UNLINK_WARNING.keeps;
+}

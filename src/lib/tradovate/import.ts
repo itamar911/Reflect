@@ -882,15 +882,35 @@ export interface ImportRequest {
  * the key from then on, so the next run finds it and restates it rather than
  * matching it again. One transient failure therefore costs a confirmation,
  * never a duplicate and never a loss.
+ *
+ * IT ALSO RETURNS THE CANDIDATES' OWN SYMBOLS, for migration 041's capture.
+ * The symbol is already in the select — condition 7 compares it — so this
+ * costs nothing and is the only place the trader's spelling is in hand before
+ * `facts()` overwrites it. See {@link linkOnto}.
  */
+interface LinkDecisions {
+  /** `brokerTradeKey` → what the matcher decided about that trade. */
+  decisions: Map<string, MatchResult>;
+  /**
+   * `planId` → the symbol the trader typed on that plan, as read.
+   *
+   * Every candidate, not only the matched ones: the map is built from the pool
+   * before the loop claims anything, because a caller asking about a plan the
+   * matcher rejected should get `undefined` from a lookup rather than from a
+   * map that happens not to contain it yet.
+   */
+  planSymbols: Map<string, string | null>;
+}
+
 async function decideLinks(
   client: SupabaseClient,
   userId: string,
   trades: readonly BrokerTrade[],
   nowMs: number
-): Promise<Map<string, MatchResult>> {
+): Promise<LinkDecisions> {
   const decisions = new Map<string, MatchResult>();
-  if (trades.length === 0) return decisions;
+  const planSymbols = new Map<string, string | null>();
+  if (trades.length === 0) return { decisions, planSymbols };
 
   const earliest = Math.min(...trades.map((trade) => trade.openedAtMs));
   const latest = Math.max(...trades.map((trade) => trade.openedAtMs));
@@ -917,12 +937,15 @@ async function decideLinks(
     // The code, never the message. One line, because every trade in the batch
     // has the same reason.
     console.info(redactSecrets(`[tradovate][import] candidates:${error.code ?? 'none'}`));
-    return decisions;
+    return { decisions, planSymbols };
   }
 
   const pool = new Map<string, CandidatePlan>();
   for (const plan of (data ?? []) as unknown as CandidatePlan[]) {
-    if (typeof plan.id === 'string') pool.set(plan.id, plan);
+    if (typeof plan.id === 'string') {
+      pool.set(plan.id, plan);
+      planSymbols.set(plan.id, plan.symbol ?? null);
+    }
   }
 
   for (const trade of [...trades].sort((a, b) => a.openedAtMs - b.openedAtMs)) {
@@ -931,7 +954,7 @@ async function decideLinks(
     if (result.kind === 'unique') pool.delete(result.planId);
   }
 
-  return decisions;
+  return { decisions, planSymbols };
 }
 
 /**
@@ -1018,7 +1041,7 @@ export async function importBrokerTrades(request: ImportRequest): Promise<Broker
   // queued row the trader will decide about, or a plan that was linked on an
   // earlier run and already carries the key.
   const unseen = flat.filter((trade) => !existing.has(trade.brokerTradeKey));
-  const decisions = await decideLinks(client, userId, unseen, nowMs);
+  const { decisions, planSymbols } = await decideLinks(client, userId, unseen, nowMs);
 
   // Sequential. The batch is a handful of trades, there is no deadline on any
   // of the three call sites, and a parallel write would multiply the unique-
@@ -1041,7 +1064,10 @@ export async function importBrokerTrades(request: ImportRequest): Promise<Broker
     // refuses, so the trade reaches the journal either way.
     const decision = decisions.get(trade.brokerTradeKey);
     if (decision?.kind === 'unique') {
-      const written = await linkOnto(client, userId, decision.planId, trade, nowMs, refusals, derived);
+      const written = await linkOnto(
+        client, userId, decision.planId, planSymbols.get(decision.planId) ?? null,
+        trade, nowMs, refusals, derived
+      );
       if (written) {
         counts.linkedAuto += 1;
         continue;
@@ -1104,16 +1130,62 @@ export async function importBrokerTrades(request: ImportRequest): Promise<Broker
  * the key is taken, the link cannot have it, and falling through means the
  * insert below fails the same way and is retried as the update it should have
  * been. Both directions of that race end with one row and no lost trade.
+ *
+ *
+ * MIGRATION 041: THE SYMBOL THE TRADER TYPED, CAPTURED HERE TOO
+ * ------------------------------------------------------------
+ *
+ * THE RPC IS NOT THE ONLY LINK PATH, which is the thing to know about this
+ * function. `link_broker_trade` covers the CONFIRMATION screen, and 041's
+ * `plan_symbol = COALESCE(plan.plan_symbol, plan.symbol)` lives in it — but
+ * this path never calls it, for the reason the note above gives: one statement,
+ * no second row, no transaction to need. So without the capture below the
+ * auto-link would still discard the trader's spelling, and the feature would
+ * cover half the links in the product — the half the trader never sees happen,
+ * and therefore the half they would be most surprised by.
+ *
+ * IT IS A SEPARATE STATEMENT AND THAT IS DELIBERATE. `plan_symbol` named in the
+ * UPDATE below would make the whole auto-link answer PostgREST 42703 on a
+ * database where 041 has not run: the link would fail, the trade would fall
+ * through to the insert and arrive in the QUEUE instead, and the deploy would
+ * have to wait for the migration — the hazard 038 and 040 both carry and state
+ * in their headers. As its own statement, its failure costs exactly the capture
+ * and nothing else, so this feature imposes NO deploy order at all.
+ *
+ * `.is('plan_symbol', null)` IS THE `COALESCE`, written as a predicate: it is
+ * what makes a re-link keep the original it already captured instead of
+ * overwriting it with whatever `symbol` holds now. On this path the column is
+ * in fact always NULL — condition 8 of the matching rule refuses any plan
+ * carrying a `link_confirmed_at`, so the matcher can only reach a plan that has
+ * never been linked — but the predicate costs nothing, and it means the two
+ * link paths implement the same rule rather than one of them resting on that
+ * argument.
  */
 async function linkOnto(
   client: SupabaseClient,
   userId: string,
   planId: string,
+  /** The symbol the trader typed on this plan, from the candidate read. */
+  planSymbol: string | null,
   trade: BrokerTrade,
   nowMs: number,
   refusals: string[],
   derived: Derived
 ): Promise<boolean> {
+  // A plan with no symbol has nothing to keep, and writing NULL over NULL is a
+  // statement for no reason. THE ERROR IS DISCARDED, not pushed to `refusals`:
+  // a failed capture is not a failed link, and all it changes is that an unlink
+  // of this row behaves as it did before 041 — which the dialog's own
+  // conditional already accounts for.
+  if (typeof planSymbol === 'string' && planSymbol !== '') {
+    await client
+      .from('trade_plans')
+      .update({ plan_symbol: planSymbol })
+      .eq('id', planId)
+      .eq('user_id', userId)
+      .is('plan_symbol', null);
+  }
+
   const { error } = await client
     .from('trade_plans')
     .update({

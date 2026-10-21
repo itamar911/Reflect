@@ -14,8 +14,8 @@ import {
   LINK_STATE_COPY,
   linkState,
   queueBannerText,
-  UNLINK_WARNING,
   unlinkPlan,
+  unlinkWarningText,
 } from '@/lib/journal/link';
 import {
   brokerStopToShow,
@@ -168,6 +168,21 @@ interface Trade {
    * says nothing — which is the right answer for a row nobody measured.
    */
   broker_stages?: unknown;
+
+  /**
+   * The symbol the trader typed, before the link overwrote `symbol` with the
+   * broker's (REF-107, migration 041).
+   *
+   * Optional for the SIXTH time and the sixth identical reason: the column
+   * arrives with 041, and `select('*')` on a database without it returns no
+   * key. Absent reads as "there is nothing to restore", which is the truth
+   * about every row linked before 041 as well — the original was overwritten
+   * in place and the broker row it came from was deleted.
+   *
+   * ONE READER, AND IT IS THE DIALOG: `unlinkWarningText` decides from this
+   * whether the unlink may promise the symbol back. Nothing renders it.
+   */
+  plan_symbol?: string | null;
 }
 
 /**
@@ -1302,14 +1317,21 @@ export default function JournalClient({
                 style={{ color: MUTED, fontSize: 18, lineHeight: 1, fontWeight: 600 }}>×</button>
             </div>
             {/* THE LAST SENTENCE IS THE ONE THAT MATTERS, and it is not
-                boilerplate: the link OVERWROTE the plan's entry price, symbol,
+                boilerplate: the link OVERWROTE the plan's entry price,
                 direction, quantity and submitted_at with the broker's, and
-                nothing kept the originals (EXECUTION_FACTS owns all five). So
+                nothing kept the originals (EXECUTION_FACTS owns all four). So
                 an unlink restores the plan's STATE and not its figures, and a
                 trader who expects their own typed entry back has to be told
-                here rather than discover it afterwards. */}
+                here rather than discover it afterwards.
+
+                AND IT IS NOW TWO SENTENCES, PICKED OFF THIS ROW (migration
+                041). The symbol is the one entry fact that does come back —
+                but only for a row whose link captured it, and rows linked
+                before 041 ran cannot be given it. `unlinkWarningText` reads
+                `t.plan_symbol`, the same predicate `unlinkPlan` branches on,
+                so the dialog cannot promise what the write will not do. */}
             <p className="text-sm" style={{ color: TEXT2 }}>
-              {UNLINK_WARNING}
+              {unlinkWarningText(t)}
             </p>
             {unlinkError && <p className="text-xs" style={{ color: RED }}>{unlinkError}</p>}
             <div className="flex gap-2 pt-1">
