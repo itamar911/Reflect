@@ -9,9 +9,11 @@ import {
   moreLinesText,
   NET_LABEL,
   showsLineList,
+  stagesLabel,
   visibleLines,
   type TodayTradeLine,
 } from '@/lib/rules/todayLines';
+import { describeStages } from '@/lib/journal/stages';
 import type { RuleContextSource } from '@/lib/types';
 import LivePositions from '@/components/tradovate/LivePositions';
 
@@ -243,6 +245,29 @@ function TradeLines({ lines, net }: { lines: readonly TodayTradeLine[]; net: num
               usable — a state fills.ts prices a day through rather than
               failing on. */}
           <Ltr style={{ color: 'var(--color-tg-text)' }}>{line.symbol ?? '—'}</Ltr>
+          {/* HOW MANY PIECES, AND ONLY WHEN THERE WERE SEVERAL (REF-117
+              Stage 6). A trade entered and exited whole renders nothing here,
+              so an ordinary day's list is byte-identical to the one before this
+              stage — which is the same reduction lib/journal/stages.ts makes
+              for the trade card and REF-117 §5.1 makes for the live line.
+              Muted and small: it qualifies the row rather than competing with
+              the symbol or the amount. Its own `dir="ltr"`, like every figure
+              in this panel (§9). */}
+          {stagesLabel(line.stages) !== null && (
+            <span
+              dir="ltr"
+              className="text-[11px] whitespace-nowrap"
+              style={{ color: 'var(--color-tg-text-2)' }}
+              /* The glyph is four characters; this is what it means. A screen
+                 reader gets the sentence, the eye gets the shorthand — and it
+                 is the TRADE CARD'S sentence, from lib/journal/stages.ts,
+                 rather than a template of this panel's. A template here read
+                 "נכנסת ב-1 שלבים" on a trade entered whole and exited in
+                 three: a raw numeral knows nothing about Hebrew's dual. */
+              title={describeStages(line.stages!.entries, line.stages!.exits)}>
+              {stagesLabel(line.stages)}
+            </span>
+          )}
           <span className="flex-1" />
           <Ltr style={{ color: amountColour(line.pnl) }}>{formatMoney(line.pnl)}</Ltr>
         </div>

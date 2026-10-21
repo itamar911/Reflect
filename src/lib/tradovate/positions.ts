@@ -82,13 +82,10 @@
  * the trader IS holding is the failure this feature exists to prevent.
  */
 
+import { loadContractNames } from './contract-names';
 import { discoverHostAccounts, type TradovateReader } from './fills';
 import type { TradovateEnvironment } from './hosts';
-import type {
-  TradovateCashBalanceSnapshot,
-  TradovateContract,
-  TradovatePosition,
-} from './types';
+import type { TradovateCashBalanceSnapshot, TradovatePosition } from './types';
 
 /**
  * A {@link TradovateReader} that can also POST a read (REF-108 Stage 4a).
@@ -183,6 +180,8 @@ export interface HostAccountPositions {
   openPnl: number | null;
 }
 
+export { forgetContractNames } from './contract-names';
+
 export interface OpenPositionsPull {
   accounts: HostAccountPositions[];
   /** When this was read, ISO 8601. The same field name /today and /trades use. */
@@ -190,66 +189,15 @@ export interface OpenPositionsPull {
 }
 
 /**
- * Contract names, by host-qualified id.
+ * CONTRACT NAMES MOVED TO ./contract-names.ts (REF-117 Stage 6).
  *
- * KEYED `${host}:${contractId}` AND NOT BY ID ALONE, which is the opposite of
- * {@link import('./fills').ContractUnit}'s cache and for the same underlying
- * rule. That one is keyed by contract NAME precisely so it can be shared
- * across hosts — a name is an exchange fact. This one is keyed BY ID, because
- * the id is what we have before the lookup, and nothing documents live and
- * demo as sharing an id space. An id-keyed cache without the host prefix would
- * eventually label one host's contract with the other host's name, which is a
- * quiet wrong answer on a screen the trader is watching.
- *
- * No expiry: a contract's name does not change, and the natural TTL is the
- * process, which on Vercel is short. The cap is what stops a long-lived
- * instance from growing an entry per contract per trader forever.
+ * The cache, its host-qualified key and the swallow-and-return-null rule all
+ * lived here. They have a second caller now — ./fills.ts names the contract of
+ * a HELD group for the sentence the trader is shown — and the failure rule is
+ * the thing being shared rather than the lookup: a name that cannot be read
+ * costs the name and never the position or the pull. {@link forgetContractNames}
+ * is re-exported so the suites that clear it keep their one import.
  */
-const nameByHostContract = new Map<string, string | null>();
-const MAX_CACHED_CONTRACTS = 500;
-
-/** Test seam. Nothing in production calls this. */
-export function forgetContractNames(): void {
-  nameByHostContract.clear();
-}
-
-async function loadContractNames(
-  reader: TradovateReader,
-  host: TradovateEnvironment,
-  contractIds: ReadonlySet<number>
-): Promise<Map<number, string | null>> {
-  const names = new Map<number, string | null>();
-
-  for (const contractId of contractIds) {
-    const key = `${host}:${contractId}`;
-    const cached = nameByHostContract.get(key);
-    if (cached !== undefined) {
-      names.set(contractId, cached);
-      continue;
-    }
-
-    // A name is decoration on this screen, so a lookup that fails costs the
-    // name and not the position. The day pull takes the opposite line and
-    // throws, because there a missing contract means a missing VALUE PER
-    // POINT and the figure would be in points against a dollar threshold.
-    let name: string | null = null;
-    try {
-      const contract = await reader.get<TradovateContract>('/contract/item', { id: contractId });
-      const raw = contract?.name;
-      name = typeof raw === 'string' && raw.trim() !== '' ? raw : null;
-    } catch {
-      name = null;
-    }
-
-    if (nameByHostContract.size >= MAX_CACHED_CONTRACTS) {
-      nameByHostContract.delete(nameByHostContract.keys().next().value as string);
-    }
-    nameByHostContract.set(key, name);
-    names.set(contractId, name);
-  }
-
-  return names;
-}
 
 /** The one endpoint Stage 4a adds. A POST, and a read — see ./client.ts. */
 const SNAPSHOT_PATH = '/cashBalance/getcashbalancesnapshot';

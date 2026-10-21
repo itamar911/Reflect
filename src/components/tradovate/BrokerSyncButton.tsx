@@ -198,11 +198,16 @@ export default function BrokerSyncButton({
             <span style={{ color: message.problem ? 'var(--color-tg-text)' : 'var(--color-tg-text-2)' }}>
               {message.text}
             </span>
-            {message.detail && (
-              <span className="block" style={{ color: 'var(--color-tg-text-2)' }}>
-                {message.detail}
+            {/* ONE BLOCK PER QUALIFIER (REF-117 Stage 6). It was a single
+                nullable string; there are now two independent things that can
+                both be true of one run — a contract whose trades could not be
+                stated, and a position still open — and neither may suppress
+                the other. lib/tradovate/sync-response.ts orders them. */}
+            {message.details.map((detail) => (
+              <span key={detail} className="block" style={{ color: 'var(--color-tg-text-2)' }}>
+                {detail}
               </span>
-            )}
+            ))}
             {message.reconnect && (
               // The same href the Settings card and TodayContextPanel use. A
               // plain link: the connect flow is a server route and nothing

@@ -162,6 +162,13 @@ const TRADE: BrokerTrade = {
   // cancelled, so it produced no fill.
   entryOrderIds: [ENTRY_ORDER, EXIT_ORDER],
   cycleClosed: true,
+  // REF-117 Stage 6. One contract in, one out — nothing in this file reads it,
+  // and the field is non-optional on `BrokerTrade` so that a row cannot be
+  // built without stating how it was taken.
+  stages: {
+    entries: [{ qty: 1, price: ENTRY_PRICE }],
+    exits: [{ qty: 1, price: 4518.5 }],
+  },
 };
 
 function order(

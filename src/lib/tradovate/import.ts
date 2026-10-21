@@ -198,7 +198,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { accountIdentity } from './accounts';
 import type { TradovateEnvironment } from './hosts';
-import type { BrokerTrade } from './fills';
+import type { BrokerTrade, TradeStages } from './fills';
 import type { StopHistory } from './orders';
 import {
   MATCH_WINDOW_MS,
@@ -377,6 +377,19 @@ const EXECUTION_FACTS = [
   // be compared equal to everything and NEVER updated. A silent trap, and the
   // reason this kind exists at all.
   { column: 'stop_history', kind: 'json' },
+  // REF-117 Stage 6, migration 040. In this list for the reason `account_id`
+  // is: it is derived from the broker's own fills, so a trader cannot be
+  // asserting anything about it that the broker contradicts.
+  //
+  // UNLIKE THE FOUR ABOVE IT IS NOT PRESENT-OR-ABSENT, and the asymmetry is
+  // worth knowing. The stop columns are absent on two of the four triggers
+  // because two of them CANNOT read `/order/list` — so a NULL there would
+  // erase what another trigger captured. The stages come off the same
+  // `/fill/list` pass that produces the trade itself, so EVERY trigger that
+  // can state a trade can state its stages, and there is no trigger whose
+  // silence has to be protected. A row that somehow has none gets one honest
+  // NULL rather than a reason to keep guessing.
+  { column: 'broker_stages', kind: 'json' },
 ] as const satisfies readonly { column: string; kind: FactKind }[];
 
 /**
@@ -407,6 +420,13 @@ export const EXECUTION_FACTS_FOR_TEST: readonly { column: string }[] = EXECUTION
  * gated behind is already '1' in production, so without 038 every import answers
  * PostgREST 42703 and nothing is imported at all. 038's header says so at the
  * top, and this is the line it is talking about.
+ *
+ * `broker_stages` ARRIVES THE SAME WAY AND CARRIES THE SAME DEBT (REF-117
+ * Stage 6, migration 040). The sentence above is now true of two migrations,
+ * and the failure is identical and total: not "the stages are missing" but "no
+ * trade is imported". **Run 040, then deploy.** There is no flag gating it
+ * separately, on purpose — a second environment variable per migration is a
+ * second thing to get wrong forever, and stating the order is what 038 chose.
  */
 const EXISTING_COLUMNS = [
   'id',
@@ -425,7 +445,7 @@ const EXISTING_COLUMNS = [
  * for `moved_sl`/`kept_sl`, which are not facts — they travel in the same
  * statement, never through {@link changedFacts}.
  */
-type FactValue = string | number | boolean | null | StopHistory;
+type FactValue = string | number | boolean | null | StopHistory | TradeStages;
 type FactValues = Record<string, FactValue>;
 
 /**
@@ -524,6 +544,11 @@ function facts(trade: BrokerTrade, derived: Derived = {}): FactValues {
     submitted_at: new Date(trade.openedAtMs).toISOString(),
     closed_at: new Date(trade.closedAtMs).toISOString(),
     status: 'closed',
+    // REF-117 Stage 6, and UNCONDITIONALLY rather than present-or-absent: the
+    // stages come off the same `/fill/list` pass that produced this row, so
+    // every trigger that can state a trade can state them. See the note in
+    // {@link EXECUTION_FACTS} on why that makes them unlike the stop columns.
+    broker_stages: trade.stages,
     ...(stop === undefined
       ? {}
       : {

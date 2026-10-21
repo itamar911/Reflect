@@ -122,6 +122,31 @@ export type BrokerSyncResult =
        * verified member, because the other three never reach the gate.
        */
       importEnabled: boolean;
+      /**
+       * The contracts whose trades this run refused to state (REF-117 Stage 6).
+       *
+       * THE ONLY TRADE-SHAPED STRING THIS ROUTE HAS EVER SENT, so it is worth
+       * being explicit about the bound. It is a SYMBOL — `MNQZ6` — and not an
+       * id, a price, a quantity or an account: `HeldGroup` carries all of those
+       * and lib/tradovate/sync.ts reduces it to this one field before the
+       * response is built. The privacy class is /api/tradovate/trades', which
+       * sends a trader their own rows on their own request, and this is a POST
+       * the trader pressed a button to make.
+       *
+       * WHY IT IS SENT AT ALL: a held group is a day UNDER-COUNTED on that
+       * contract, and an under-counted day makes every rule MORE PERMISSIVE.
+       * REF-117 Stage 2 chose to hold the group rather than fail the whole pull
+       * — one overnight carry must not take the integration down for a session
+       * — and wrote down that the choice is defensible only if the trader can
+       * see it. Nothing could, until this.
+       *
+       * Absent when empty, like `isTradeSource` on /today and for the same
+       * reason: an ordinary day produces a response byte-identical to the one
+       * before this stage.
+       */
+      heldSymbols?: string[];
+      /** How many groups were held, including any with no readable symbol. */
+      heldCount?: number;
     } & BrokerImportCounts)
   | { source: 'broker_expired' }
   | { source: 'broker_unavailable' }
@@ -201,7 +226,7 @@ export async function respondToSyncRequest(
   try {
     // Spelled out rather than passed whole: the parse also carries `ok` and
     // `clamped`, which are this function's business and not the sync's.
-    const { counts, asOf, importEnabled } = await deps.runSync(userId, {
+    const { counts, asOf, importEnabled, heldSymbols, heldCount } = await deps.runSync(userId, {
       dayStartMs: requested.dayStartMs,
       windowStartMs: requested.windowStartMs,
     });
@@ -211,6 +236,11 @@ export async function respondToSyncRequest(
       windowStart: new Date(requested.windowStartMs).toISOString(),
       asOf,
       importEnabled,
+      // OMITTED WHEN NOTHING WAS HELD, which is every ordinary day, so the
+      // body is byte-identical to the pre-Stage-6 one. `readSyncResponse`
+      // reads the absence as "nothing held", the same rule it applies to
+      // `importEnabled`.
+      ...(heldCount > 0 ? { heldSymbols, heldCount } : {}),
       ...counts,
     });
   } catch (error) {

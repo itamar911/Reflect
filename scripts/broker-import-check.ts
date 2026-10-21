@@ -106,6 +106,13 @@ import {
   stopWasWidened,
 } from '../src/lib/journal/stopHistory';
 import {
+  describeStages,
+  readTradeStages,
+  stagePieces,
+  stagesSentence,
+  wasScaled,
+} from '../src/lib/journal/stages';
+import {
   CONDITION_LABELS,
   conditionNeedsThreshold,
   describeCustomRule,
@@ -183,6 +190,7 @@ import {
   NET_LABEL,
   readTodayTradeLines,
   showsLineList,
+  stagesLabel,
   TODAY_LINE_CAP,
   visibleLines,
 } from '../src/lib/rules/todayLines';
@@ -293,10 +301,41 @@ const TRADE: BrokerTrade = {
   // anything derived from it, and `EXECUTION_FACTS` is unchanged here.
   entryOrderIds: [77412, 77431],
   cycleClosed: true,
+  // REF-117 Stage 6. A SIMPLE ROUND TRIP — entered whole, exited whole — which
+  // is what this trade was and what most trades are, so the readers say
+  // nothing about it. The per-stage prices are the row's own two prices,
+  // because with one piece a side the weighted mean IS the fill price.
+  stages: {
+    entries: [{ qty: 2, price: ENTRY }],
+    exits: [{ qty: 2, price: EXIT }],
+  },
 };
 
 /** The same trade while the trader still holds one of the two contracts. */
 const STILL_OPEN: BrokerTrade = { ...TRADE, cycleClosed: false };
+
+/**
+ * The same position, entered in two pieces and covered in two (REF-117 Stage 6).
+ *
+ * The shape Stage 0 measured in production on 20.10, and the one the whole
+ * ticket exists for: four numbers identical to {@link TRADE}'s, and a fact
+ * about the trade that those four numbers provably erase. The piece prices
+ * average to the row's `entryPrice` and `exitPrice`, which is what keeps the
+ * fixture a real broker shape rather than an illustration.
+ */
+const SCALED: BrokerTrade = {
+  ...TRADE,
+  stages: {
+    entries: [
+      { qty: 1, price: ENTRY - 0.25 },
+      { qty: 1, price: ENTRY + 0.25 },
+    ],
+    exits: [
+      { qty: 1, price: EXIT - 0.25 },
+      { qty: 1, price: EXIT + 0.25 },
+    ],
+  },
+};
 
 /**
  * The facts that are named ONLY WHEN THE PULL RESOLVED THEM.
@@ -307,6 +346,12 @@ const STILL_OPEN: BrokerTrade = { ...TRADE, cycleClosed: false };
  * three stop columns because neither `/today` nor the nightly cron can read the
  * orders at all (REF-113 Stage 3). A pull that named them with NULL instead
  * would erase, on every run, what a run that COULD resolve them had written.
+ *
+ * `broker_stages` IS DELIBERATELY NOT ONE OF THEM (REF-117 Stage 6). It comes
+ * off the same `/fill/list` pass that produces the trade itself, so every
+ * trigger that can state a row can state its stages — there is no trigger whose
+ * silence has to be protected, and making it conditional would be a mechanism
+ * guarding against nothing.
  */
 const CONDITIONAL_FACTS = ['account_id', 'broker_stop_loss', 'broker_take_profit', 'stop_history'];
 
@@ -762,6 +807,14 @@ async function idempotenceGroup() {
       submitted_at: '2026-10-15T09:12:00+00:00',
       closed_at: '2026-10-15T09:41:00+00:00',
       status: 'closed',
+      // REF-117 Stage 6. JSONB comes back from PostgREST as a decomposed
+      // OBJECT whose key order is Postgres', not ours — which is the trap
+      // `kind: 'json'` and `stableJson` exist for, and this row is where it is
+      // exercised: the keys are deliberately in the other order.
+      broker_stages: {
+        exits: [{ price: EXIT, qty: 2 }],
+        entries: [{ price: ENTRY, qty: 2 }],
+      },
     },
   ]);
   const onWire = await quietImport({
@@ -1418,6 +1471,9 @@ function syncDeps(over: Partial<SyncRouteDeps> = {}): SyncRouteDeps {
       asOf: '2026-10-15T13:59:00.000Z',
       isTradeSource: true,
       importEnabled: true,
+      // The ordinary day: nothing was held (REF-117 Stage 6).
+      heldSymbols: [],
+      heldCount: 0,
     }),
     ...over,
   };
@@ -1618,7 +1674,13 @@ async function syncResponseGroup() {
 }
 
 async function syncCopyGroup() {
-  const verified = (over: Partial<typeof RAN_COUNTS> & { importEnabled?: boolean } = {}) =>
+  const verified = (
+    over: Partial<typeof RAN_COUNTS> & {
+      importEnabled?: boolean;
+      heldSymbols?: string[];
+      heldCount?: number;
+    } = {}
+  ) =>
     describeSyncOutcome({
       source: 'broker_verified',
       windowStart: SYNC_DAY_START,
@@ -1632,6 +1694,8 @@ async function syncCopyGroup() {
       skippedOpen: 0,
       skippedHidden: 0,
       failed: 0,
+      heldSymbols: [],
+      heldCount: 0,
       ...over,
     } as BrokerSyncOutcome);
 
@@ -1646,18 +1710,25 @@ async function syncCopyGroup() {
   const notSource = verified({ ran: false, importEnabled: true });
   const lapsed = describeSyncOutcome({ source: 'broker_expired' });
 
+  // ── REF-117 Stage 6: a contract whose trades could not be stated ──────────
+  const held = verified({ heldSymbols: ['MNQZ6'], heldCount: 1 });
+  const heldWithImport = verified({ imported: 2, heldSymbols: ['MNQZ6'], heldCount: 1 });
+  const heldTwo = verified({ heldSymbols: ['ESZ6', 'MNQZ6'], heldCount: 2 });
+  const heldUnnamed = verified({ heldSymbols: [], heldCount: 1 });
+  const heldAndOpen = verified({ skippedOpen: 1, heldSymbols: ['MNQZ6'], heldCount: 1 });
+
   group('the sync copy says what happened, in Hebrew that counts', [
     c('(1) three imported', three.text, 'נוספו 3 עסקאות'),
     // Hebrew counts one and then everything else. "נוספו 1 עסקאות" is the
     // kind of thing that makes a product look unfinished.
     c('(2) one imported takes the singular', one.text, 'נוספה עסקה אחת'),
     c('(3) a quiet run', nothing.text, 'הכל מעודכן'),
-    c('(4) and a quiet run says nothing else', nothing.detail, null),
+    c('(4) and a quiet run says nothing else', nothing.details, []),
     // "הכל מעודכן" on its own would be a small lie here: there IS a trade the
     // trader took that is not in the journal, and this is why.
     c('(5) an open position is explained, not swallowed',
-      [openLeft.text, openLeft.detail],
-      ['הכל מעודכן', 'פוזיציה פתוחה נכנסת ליומן רק לאחר סגירתה.']),
+      [openLeft.text, openLeft.details],
+      ['הכל מעודכן', ['פוזיציה פתוחה נכנסת ליומן רק לאחר סגירתה.']]),
     c('(6) refused rows are NOT "הכל מעודכן"',
       refused.text, 'חלק מהעסקאות לא נשמרו. נסה שוב בעוד רגע.'),
     c('(7) restated rows get their own sentence', restated.text, 'עודכנו 4 עסקאות'),
@@ -1671,6 +1742,53 @@ async function syncCopyGroup() {
       flagOff.text === notSource.text, false),
     c('(12) only a lapsed connection offers the reconnect link',
       [lapsed.reconnect, nothing.reconnect, flagOff.reconnect], [true, false, false]),
+
+    // ── THE HELD SURFACE (REF-117 Stage 6) ─────────────────────────────────
+    //
+    // THIS IS THE ASSERTION THE STAGE 2 BUILD REPORT LEFT OWING. `cycles.ts`
+    // holds a `(account, contract)` group whose fills cannot account for the
+    // broker's netPos instead of failing the pull, which under-counts the day
+    // on that contract — and an under-counted day makes every rule MORE
+    // PERMISSIVE. The exchange was accepted on the explicit condition that the
+    // trader would see it. Until this, nothing anywhere said so.
+    c('(13) a held contract is named, and says what will happen next',
+      held.details,
+      ['עסקאות ב-MNQZ6 ממתינות — הנתונים מהברוקר לא תאמו, ננסה שוב בסנכרון הבא.']),
+    // THE ONE THAT MATTERS MOST: "הכל מעודכן" in grey over "trades are
+    // waiting" would be two lines contradicting each other.
+    c('(14) and a held group makes the run a problem even with nothing else wrong',
+      [held.text, held.problem, nothing.problem], ['הכל מעודכן', true, false]),
+    c('(15) a run that imported AND held still reports both',
+      [heldWithImport.text, heldWithImport.problem, heldWithImport.details.length],
+      ['נוספו 2 עסקאות', true, 1]),
+    c('(16) two contracts are one sentence, not two identical ones',
+      heldTwo.details,
+      ['עסקאות ב-ESZ6, MNQZ6 ממתינות — הנתונים מהברוקר לא תאמו, ננסה שוב בסנכרון הבא.']),
+    // A group whose contract body named nothing usable, and the orphan-pair
+    // group which is about no contract at all. The absence is the finding; the
+    // symbol is the detail.
+    c('(17) a group with no readable symbol still gets a sentence',
+      heldUnnamed.details,
+      ['עסקאות ממתינות — הנתונים מהברוקר לא תאמו, ננסה שוב בסנכרון הבא.']),
+    // BOTH QUALIFIERS, AND IN THIS ORDER. The held line is a gap in the day's
+    // figures; the open-position line is the mechanism working as designed.
+    // Neither may suppress the other, which is why `details` is a list.
+    c('(18) a held contract and an open position are two lines, held first',
+      heldAndOpen.details,
+      ['עסקאות ב-MNQZ6 ממתינות — הנתונים מהברוקר לא תאמו, ננסה שוב בסנכרון הבא.',
+       'פוזיציה פתוחה נכנסת ליומן רק לאחר סגירתה.']),
+    // NO TRADE COUNT, EVER. A held group produced no cycles, so "how many
+    // trades are waiting" is exactly the figure that could not be worked out —
+    // and inventing it is the one thing this sentence must not do.
+    c('(19) and it never claims a number of waiting trades',
+      /\d/.test(held.details[0]!.replace('MNQZ6', '')), false),
+    // DESCRIPTIVE, NEVER AN INSTRUCTION — §8, a NinjaTrader vendor compliance
+    // requirement. "ננסה שוב" is what WE will do.
+    c('(20) no imperative and no advice shape',
+      ['כדאי', 'שים לב', 'נסה שוב בעוד', 'עליך'].some((word) =>
+        held.details[0]!.includes(word)
+      ),
+      false),
   ]);
 }
 
@@ -2889,11 +3007,14 @@ async function todayPanelGroup() {
     // sent them in. The panel NUMBERS these rows, so "1" against the most
     // recent trade would tell the trader their last trade was their first,
     // which is the one thing the numbering exists to say.
-    c('(1) three rows, oldest close first, three fields each and nothing else',
+    c('(1) three rows, oldest close first, four fields each and nothing else',
       lines, [
-        { direction: 'short', symbol: SYMBOL, pnl: 270 },
-        { direction: 'long', symbol: 'ESZ6', pnl: -125 },
-        { direction: 'short', symbol: null, pnl: 40 },
+        // `stages: null` on all three: the fixture's trades carry no `stages`
+        // key at all, which is what a deployment before REF-117 Stage 6 sends
+        // — and `null` is the "say nothing" the panel renders as silence.
+        { direction: 'short', symbol: SYMBOL, pnl: 270, stages: null },
+        { direction: 'long', symbol: 'ESZ6', pnl: -125, stages: null },
+        { direction: 'short', symbol: null, pnl: 40, stages: null },
       ]),
     c('(1b) which is NOT the order the route sent, and that is the point',
       lines?.map((line) => line.pnl), [270, -125, 40]),
@@ -2908,11 +3029,66 @@ async function todayPanelGroup() {
         { direction: 'long', symbol: 'A', pnlUsd: 1 },
         { direction: 'long', symbol: 'B', pnlUsd: 2, closedAtMs: Date.parse('2026-10-15T10:00:00Z') },
       ] })?.map((line) => line.symbol), ['B', 'A']),
-    // The reader takes three fields and drops the rest on the floor: the key,
+    // The reader takes four fields and drops the rest on the floor: the key,
     // the account id and the fill ids are not this panel's business even
-    // though the route sends them.
+    // though the route sends them. `stages` is the fourth since REF-117 Stage
+    // 6 — the COUNTS only, never the pieces, which are the trade card's.
     c('(2) the key and the account id are not carried into the view',
-      Object.keys(lines?.[0] ?? {}).sort(), ['direction', 'pnl', 'symbol']),
+      Object.keys(lines?.[0] ?? {}).sort(), ['direction', 'pnl', 'stages', 'symbol']),
+
+    // ── REF-117 Stage 6: how many pieces, on the surface with least room ────
+    //
+    // NULL ON A SIMPLE ROUND TRIP, which is what keeps every ordinary day's
+    // panel byte-identical to the one before this stage. The threshold is
+    // `wasScaled` in lib/journal/stages.ts, shared with the trade card so the
+    // two surfaces cannot disagree about what "scaled" means.
+    c('(2a) one piece a side says nothing',
+      readTodayTradeLines({ ...body, trades: [{
+        direction: 'long', symbol: 'ESZ6', pnlUsd: 10,
+        closedAtMs: Date.parse('2026-10-15T10:00:00Z'),
+        stages: { entries: [{ qty: 2, price: 10 }], exits: [{ qty: 2, price: 11 }] },
+      }] })?.[0]?.stages, null),
+    c('(2b) two entries and three exits are counted, and labelled entry-to-exit',
+      (() => {
+        const scaled = readTodayTradeLines({ ...body, trades: [{
+          direction: 'long', symbol: 'ESZ6', pnlUsd: 10,
+          closedAtMs: Date.parse('2026-10-15T10:00:00Z'),
+          stages: {
+            entries: [{ qty: 1, price: 10 }, { qty: 1, price: 10.25 }],
+            exits: [{ qty: 1, price: 11 }, { qty: 0.5, price: 11.25 }, { qty: 0.5, price: 11.5 }],
+          },
+        }] })?.[0];
+        return [scaled?.stages, stagesLabel(scaled?.stages ?? null)];
+      })(),
+      [{ entries: 2, exits: 3 }, '2→3']),
+    // ALL OR NOTHING PER SIDE. A side that silently lost an unreadable piece
+    // would report "2 שלבים" on a position entered in three, and a count wrong
+    // by one is worse than no count — the trader cannot tell which they have.
+    c('(2c) a malformed piece drops the whole document, not just the piece',
+      readTodayTradeLines({ ...body, trades: [{
+        direction: 'long', symbol: 'ESZ6', pnlUsd: 10,
+        closedAtMs: Date.parse('2026-10-15T10:00:00Z'),
+        stages: {
+          entries: [{ qty: 1, price: 10 }, { qty: 1 }],
+          exits: [{ qty: 2, price: 11 }],
+        },
+      }] })?.[0]?.stages, null),
+    c('(2d) and so does a side that is not an array',
+      readTodayTradeLines({ ...body, trades: [{
+        direction: 'long', symbol: 'ESZ6', pnlUsd: 10,
+        closedAtMs: Date.parse('2026-10-15T10:00:00Z'),
+        stages: { entries: 2, exits: 3 },
+      }] })?.[0]?.stages, null),
+    c('(2e) null in, null out of the label', stagesLabel(null), null),
+    // THE SENTENCE BEHIND THE SHORTHAND IS THE TRADE CARD'S, not a template
+    // of the panel's — which said "נכנסת ב-1 שלבים" for one commit, because a
+    // raw numeral knows nothing about Hebrew's dual or about where a maqaf
+    // goes. One entry and three exits is the shape that exposed it.
+    c('(2f) one piece on a side is "בשלב אחד", never "ב-1 שלבים"',
+      [describeStages(1, 3), describeStages(2, 2), describeStages(1, 1)],
+      ['נכנסת בשלב אחד · יצאת ב-3 שלבים',
+       'נכנסת בשני שלבים · יצאת בשני שלבים',
+       'נכנסת בשלב אחד · יצאת בשלב אחד']),
 
     // Every non-verified state is "no list", which is a different thing from
     // "no trades" — and the panel keeps its sentences for it.
@@ -3810,6 +3986,123 @@ async function accountStampGroup() {
   ]);
 }
 
+// ── REF-117 Stage 6: how the position was taken, stored and read ────────────
+
+/**
+ * The stages, from the column to the sentence.
+ *
+ * ONE GROUP OVER TWO HALVES, because the interesting property spans them: the
+ * import writes a document whose two arrays the journal reader then has to
+ * refuse or describe, and the thing worth pinning is that a SIMPLE ROUND TRIP
+ * — which is most trades and every manual one — reaches the trader as silence
+ * rather than as "נכנסת בשלב אחד".
+ */
+async function stagesGroup() {
+  const simple = new FakeDb();
+  await quietImport({
+    client: simple.client(), userId: USER, trades: [TRADE], isTradeSource: true, env: ON,
+  });
+  const simpleRow = simple.rows[0] ?? {};
+
+  const scaled = new FakeDb();
+  await quietImport({
+    client: scaled.client(), userId: USER, trades: [SCALED], isTradeSource: true, env: ON,
+  });
+  const scaledRow = scaled.rows[0] ?? {};
+
+  // A second import of the same trade. JSONB comes back decomposed, so this is
+  // the `kind: 'json'` path: `kind: 'exact'` would compare
+  // `'[object Object]' === '[object Object]'` and never update the column at all.
+  const twice = await quietImport({
+    client: scaled.client(), userId: USER, trades: [SCALED], isTradeSource: true, env: ON,
+  });
+
+  // The broker restated the SAME four figures with a different shape — three
+  // exits instead of two. Only the document moved, and it has to move.
+  //
+  // ITS OWN FakeDb, because `scaled.rows[0]` is a LIVE OBJECT: restating it in
+  // place would rewrite the document the assertions below read, and (2) and
+  // (5) would then be asserting the reshape against itself.
+  const reshapedDb = new FakeDb();
+  await quietImport({
+    client: reshapedDb.client(), userId: USER, trades: [SCALED], isTradeSource: true, env: ON,
+  });
+  const reshaped = await quietImport({
+    client: reshapedDb.client(),
+    userId: USER,
+    trades: [{
+      ...SCALED,
+      stages: {
+        ...SCALED.stages,
+        exits: [
+          { qty: 0.5, price: EXIT - 0.25 },
+          { qty: 0.5, price: EXIT },
+          { qty: 1, price: EXIT + 0.25 },
+        ],
+      },
+    }],
+    isTradeSource: true,
+    env: ON,
+  });
+  const reshapedColumns = Object.keys(
+    reshapedDb.writes[reshapedDb.writes.length - 1]?.values ?? {}
+  ).sort();
+
+  const read = readTradeStages(scaledRow.broker_stages);
+  const simpleRead = readTradeStages(simpleRow.broker_stages);
+
+  group('REF-117 Stage 6: the pieces a position was taken in', [
+    // THE COLUMN IS NAMED ON EVERY STATEMENT, unlike the four conditional
+    // facts. See the note on CONDITIONAL_FACTS.
+    c('(1) every import names the column, not just the ones that read orders',
+      [
+        'broker_stages' in (simple.writes[0]?.values ?? {}),
+        CONDITIONAL_FACTS.includes('broker_stages'),
+      ],
+      [true, false]),
+    c('(2) the document is the two sides, in time order',
+      scaledRow.broker_stages, SCALED.stages),
+
+    // IDEMPOTENCE OVER JSONB. This is the `kind: 'json'` assertion from the
+    // other direction: `stop_history` proved the kind exists, this proves it
+    // covers the second document too.
+    c('(3) a re-import of the same stages writes nothing',
+      [twice.unchanged, twice.updated], [1, 0]),
+    c('(4) a reshaped document IS an update, and only that column moves',
+      [reshaped.updated, reshapedColumns], [1, ['broker_stages']]),
+
+    // ── The reader ─────────────────────────────────────────────────────────
+    c('(5) a scaled row reads back whole',
+      [read?.entries.length, read?.exits.length], [2, 2]),
+    // THE REDUCTION THIS FEATURE RESTS ON. A `שלבים · שלב אחד` row on every
+    // trade ever logged would be a column announcing a feature that does not
+    // apply to it.
+    c('(6) a simple round trip reads back, and still says NOTHING',
+      [simpleRead?.entries.length, wasScaled(simpleRead), stagesSentence(simpleRead)],
+      [1, false, null]),
+    c('(7) and a row with no column at all says nothing either',
+      [readTradeStages(null), readTradeStages(undefined), readTradeStages({}),
+       readTradeStages('stages'), readTradeStages([])],
+      [null, null, null, null, null]),
+    c('(8) the sentence names BOTH sides whenever either is interesting',
+      stagesSentence(read), 'נכנסת בשני שלבים · יצאת בשני שלבים'),
+    // Hebrew has a dual; "2 שלבים" reads as a translation.
+    c('(9) one, two and three are three different words',
+      stagesSentence(readTradeStages({
+        entries: [{ qty: 1, price: 1 }],
+        exits: [{ qty: 0.5, price: 2 }, { qty: 0.5, price: 3 }, { qty: 0, price: 4 }],
+      })),
+      'נכנסת בשלב אחד · יצאת ב-3 שלבים'),
+    c('(10) the pieces are quantity by price, and empty when nothing is said',
+      [stagePieces(read).exits, stagePieces(simpleRead).exits],
+      [['1 × 29767.00', '1 × 29767.50'], []]),
+    // NO EMOJI, NO IMPERATIVE — CLAUDE.md and §8's compliance requirement.
+    c('(11) the sentence describes and never instructs',
+      ['כדאי', 'שים לב', 'עליך', 'נסה'].some((w) => stagesSentence(read)!.includes(w)),
+      false),
+  ]);
+}
+
 // ── REF-113 Stage 3: the broker's stop, written ─────────────────────────────
 
 /**
@@ -4009,6 +4302,10 @@ async function stopNotDeletedGroup() {
       pnl_currency: '$',
       submitted_at: new Date(OPENED).toISOString(),
       closed_at: new Date(CLOSED).toISOString(),
+      // What an earlier run wrote. The stages come off the same `/fill/list`
+      // pass as the trade, so EVERY run states them — unlike the three stop
+      // columns below, which two of the four triggers cannot read at all.
+      broker_stages: TRADE.stages,
       // What an earlier, order-reading run wrote.
       broker_stop_loss: 4504,
       broker_take_profit: 4525,
@@ -5169,6 +5466,7 @@ async function main() {
   await accountStampGroup();
 
   // REF-113 Stage 3 — the broker's stop, written.
+  await stagesGroup();
   await stopHistoryGroup();
   await stopNotDeletedGroup();
   await stopSelfReportGroup();

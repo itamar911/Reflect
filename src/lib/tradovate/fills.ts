@@ -107,10 +107,12 @@
 
 import {
   cyclesFromFills,
+  type CycleLeg,
   type HeldGroup as CycleHeldGroup,
   type HeldReason as CycleHeldReason,
   type LogicalPosition,
 } from './cycles';
+import { loadContractNames } from './contract-names';
 import { TradovateRequestError, TradovateUnpriceableError, withoutResponseBody } from './errors';
 import { closedToday, minutesSince } from './trading-day';
 import {
@@ -352,6 +354,49 @@ export interface BrokerTrade {
    * report delivered as a side effect.
    */
   cycleClosed: boolean;
+  /**
+   * The pieces this position was entered and exited in (REF-117 Stage 6).
+   *
+   * ALWAYS PRESENT AND OFTEN TRIVIAL: a trade entered and exited whole is one
+   * entry and one exit, and the surfaces that read this say nothing at all
+   * unless one side has more than one. See {@link TradeStages}.
+   */
+  stages: TradeStages;
+}
+
+/**
+ * One entry or one exit, as a journal row carries it (REF-117 Stage 6).
+ *
+ * A PROJECTION OF {@link import('./cycles').CycleLeg} AND NOT THE LEG ITSELF.
+ * The leg carries a fill id, an order id, an instant and a `splitFromFill`
+ * flag, and none of those is a thing to show a trader or to store: ids never
+ * leave the server (the leak group in scripts/tradovate-today-check.ts), and
+ * the instants are already summarised into `submitted_at` and `closed_at`. What
+ * is left is what the sentence needs — how much, at what price.
+ */
+export interface TradeStage {
+  /** Contracts this piece contributed. */
+  qty: number;
+  price: number;
+}
+
+/**
+ * How the position was entered and exited, piece by piece (REF-117 Stage 6).
+ *
+ * WHY THIS IS A FIELD AT ALL, AND WHY IT IS NOT DERIVABLE DOWNSTREAM. `qty`,
+ * `entryPrice` and `exitPrice` are a quantity and two QUANTITY-WEIGHTED MEANS,
+ * and the whole of {@link describeCycle}'s averaging note is about making those
+ * three reproduce the P&L beside them. What they cannot do is say how many
+ * decisions produced them: "נכנסת ב-2 שלבים · יצאת ב-3 שלבים" is a fact about a
+ * trade that the three figures provably erase, and REF-117 Stage 0 measured a
+ * production position that was entered in two pieces and covered in two.
+ *
+ * THE ORDER IS TIME ORDER, which is ./cycles.ts' order for `legs` and is the
+ * order a trader scaled in. It is data, like `versions` in a stop history.
+ */
+export interface TradeStages {
+  entries: TradeStage[];
+  exits: TradeStage[];
 }
 
 /**
@@ -513,6 +558,28 @@ export type HeldReason =
  */
 export interface HeldGroup extends Omit<CycleHeldGroup, 'reason'> {
   reason: HeldReason;
+  /**
+   * The contract's NAME, for the one sentence the trader is shown (REF-117
+   * Stage 6).
+   *
+   * THE ONLY FIELD ON THIS TYPE THAT MAY LEAVE THE SERVER. `accountId`,
+   * `contractId`, `fills` and `impliedPrevPos` are broker ids and operator
+   * diagnostics; a trader cannot act on any of them and the leak group in
+   * scripts/tradovate-today-check.ts is what keeps ids off the wire. A symbol
+   * is the thing they recognise — "the MNQ trades are not in yet" — and
+   * lib/tradovate/sync-response.ts carries this one string and nothing else.
+   *
+   * NULL FOR TWO DIFFERENT REASONS AND BOTH RENDER THE SAME WAY: the contract
+   * body named nothing usable, or the group is not about a contract at all
+   * (`'orphan_pair'`, which is reported once for the host). A null degrades the
+   * sentence to the one without a symbol rather than suppressing it — the
+   * absence is the thing worth saying, and the contract is the detail.
+   *
+   * RESOLVED THROUGH ./contract-names.ts, WHICH SWALLOWS. A held group must
+   * never be able to fail the pull; that is the whole reason this type exists
+   * instead of a throw.
+   */
+  symbol: string | null;
 }
 
 /**
@@ -849,7 +916,7 @@ export async function scanHost(params: Parameters<typeof loadHostTrades>[0]): Pr
     (cycle) => cycle.qty > 0 && (cycle.interday || cycle.pairedQty !== cycle.qty)
   );
 
-  const held: HeldGroup[] = [
+  const unnamedHeld: Omit<HeldGroup, 'symbol'>[] = [
     ...scan.held,
     ...unpriceable.map((cycle) => ({
       accountId: cycle.accountId,
@@ -871,6 +938,26 @@ export async function scanHost(params: Parameters<typeof loadHostTrades>[0]): Pr
         ]
       : []),
   ];
+
+  // ── What the trader is told a held group is ABOUT (REF-117 Stage 6) ───────
+  //
+  // ONE `/contract/item` PER HELD CONTRACT, SWALLOWED, AND ONLY WHEN SOMETHING
+  // IS HELD — which on an ordinary day is never, so this costs nothing on the
+  // path every pull takes. It is deliberately NOT folded into
+  // `loadContractUnits` below: that chain THROWS on a gap, by REF-90 §4's
+  // argument about a figure in points measured against a dollar threshold, and
+  // a held group given the power to fail the pull would invert the entire
+  // reason {@link HeldGroup} exists. `contractId: 0` — the orphan-pair row —
+  // is not a contract and is not looked up.
+  const heldNames = await loadContractNames(
+    reader,
+    host,
+    new Set(unnamedHeld.map((group) => group.contractId).filter((id) => usableId(id)))
+  );
+  const held: HeldGroup[] = unnamedHeld.map((group) => ({
+    ...group,
+    symbol: heldNames.get(group.contractId) ?? null,
+  }));
 
   const trades = [...usable].sort((a, b) => b.closedAtMs - a.closedAtMs);
 
@@ -968,8 +1055,20 @@ function describeCycle(
     // verdict). Nothing here needs it.
     entryOrderIds: cycle.orderIds,
     cycleClosed: cycle.cycleClosed,
+    // The legs, reduced to what a sentence needs (REF-117 Stage 6). ./cycles.ts
+    // already has them in time order and already split entry from exit by
+    // whether the leg moved `netPos` AWAY from zero — which is the only
+    // definition that survives a flip, where one FILL contributes a leg to each
+    // of two cycles.
+    stages: {
+      entries: cycle.legs.filter((leg) => leg.entry).map(asStage),
+      exits: cycle.legs.filter((leg) => !leg.entry).map(asStage),
+    },
   };
 }
+
+/** A leg, less the four fields a row has no business carrying. {@link TradeStage}. */
+const asStage = (leg: CycleLeg): TradeStage => ({ qty: leg.qty, price: leg.price });
 
 /**
  * One cycle's P&L in dollars, from the PAIRS, checked against the FILLS.

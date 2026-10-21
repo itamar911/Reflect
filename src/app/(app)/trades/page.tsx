@@ -157,6 +157,15 @@ export default async function TradesPage({ searchParams }: {
     broker_stop_loss:   t.broker_stop_loss != null ? Number(t.broker_stop_loss) : null,
     broker_take_profit: t.broker_take_profit != null ? Number(t.broker_take_profit) : null,
     stop_history:       t.stop_history ?? null,
+    // ── The pieces the position was taken in, from migration 040 ──────────
+    //
+    // Same `?? null` rule, fifth time, and named HERE for the fourth time's
+    // reason: this object is built field by field, so a column nobody names
+    // never reaches the component however wide the `select('*')` above is.
+    // Untyped, like `stop_history` beside it — `readTradeStages` in
+    // lib/journal/stages.ts validates every field it reads, and a cast here
+    // would be a second, unchecked claim about the same document.
+    broker_stages:      t.broker_stages ?? null,
   }));
 
   const exportTrades = allTrades.map((t) => ({

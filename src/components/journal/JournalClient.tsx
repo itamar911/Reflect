@@ -22,6 +22,7 @@ import {
   readStopHistory,
   stopMoveSentence,
 } from '@/lib/journal/stopHistory';
+import { readTradeStages, stagePieces, stagesSentence } from '@/lib/journal/stages';
 import { startOfTodayIso } from '@/lib/rules/tradeRuleContext';
 import { DAY_START_PARAM, MAX_SINCE_AGE_MS, SINCE_PARAM } from '@/lib/tradovate/trading-day';
 import EmotionalStateSlider from '@/components/trade/EmotionalStateSlider';
@@ -152,6 +153,21 @@ interface Trade {
   broker_take_profit?: number | null;
   /** The evidence, as JSONB. Read only through `readStopHistory`. */
   stop_history?: unknown;
+
+  /**
+   * The pieces the position was entered and exited in (REF-117 Stage 6).
+   *
+   * Optional for the FIFTH time and the fifth identical reason: the column
+   * arrives with migration 040. The note above applies unchanged — the page
+   * reads `select('*')`, so there is nothing to gate.
+   *
+   * AND IT IS NULL ON EVERY ROW IMPORTED BEFORE 040, PERMANENTLY. The legs are
+   * derived from `/fill/list`, which is `depthDays = 0`, so there is no
+   * backfill and there cannot be one: this is a feature that begins working for
+   * trades taken after it ships. `readTradeStages` answers null, and the modal
+   * says nothing — which is the right answer for a row nobody measured.
+   */
+  broker_stages?: unknown;
 }
 
 /**
@@ -1782,6 +1798,22 @@ function TradeDetailModal({ trade, plans, onClose, onLinkResolved, onUnlink, deb
   // for "what happened to my stop" is already looking.
   const stopSentenceAfter = brokerStop !== null ? 'סטופ בברוקר' : 'Stop Loss';
 
+  // ── How many pieces the position was taken in (REF-117 Stage 6) ───────────
+  //
+  // A ROW AND NOT A SENTENCE, unlike the stop beside it, because this one IS a
+  // comparable figure: "נכנסת בשני שלבים · יצאת בשלושה שלבים" answers "how" in
+  // the same register as `כיוון` and `נכס` do. The stop's four answers are not
+  // comparable figures, which is why that one is prose.
+  //
+  // ABSENT ENTIRELY ON A SIMPLE ROUND TRIP, which is most trades and every
+  // manual one. `stagesSentence` returns null below two pieces on either side,
+  // and a `שלבים · שלב אחד` on every row the trader ever logged would be a
+  // column announcing a feature that does not apply to it — the same reduction
+  // the `סטופ בברוקר` row above makes for a manual trade.
+  const stages = readTradeStages(trade.broker_stages);
+  const stagesRow = stagesSentence(stages);
+  const pieces = stagePieces(stages);
+
   const rows: [string, string | number | null][] = [
     // Where the row came from, FIRST, because it changes how every row under it
     // should be read: an imported trade's prices are the broker's and its
@@ -1802,6 +1834,11 @@ function TradeDetailModal({ trade, plans, onClose, onLinkResolved, onUnlink, deb
     ['אסטרטגיה', trade.strategy ?? '—'],
     ['נכס', trade.symbol ?? '—'],
     ['כיוון', dir === 'long' ? 'לונג ↑' : 'שורט ↓'],
+    // ABOVE THE TWO PRICES, because it qualifies them: `מחיר כניסה` and `מחיר
+    // יציאה` are QUANTITY-WEIGHTED MEANS (lib/tradovate/fills.ts), and a reader
+    // who knows the position was entered in two pieces reads those two numbers
+    // correctly. Below them it would read as an afterthought about the exit.
+    ...(stagesRow !== null ? ([['שלבים', stagesRow]] as [string, string][]) : []),
     ['מחיר כניסה', trade.entry_price.toFixed(2)],
     ['Stop Loss', fmtPriceCell(trade.stop_loss)],
     // DIRECTLY UNDER THE PLANNED STOP, because the comparison is the whole
@@ -1881,6 +1918,43 @@ function TradeDetailModal({ trade, plans, onClose, onLinkResolved, onUnlink, deb
                   }}>
                   {stopSentence.text}
                 </span>
+              </div>
+            )}
+            {/* THE PIECES THEMSELVES, under the row that counted them
+                (REF-117 Stage 6).
+                A DETAIL BLOCK AND NOT A TOOLTIP, which the ticket allowed
+                either of. A tooltip is unreachable on a touch screen and
+                unreadable to a screen reader without ARIA this modal has no
+                other instance of, and the content is four short LTR tokens —
+                there is nothing here worth hiding behind a hover. The modal
+                is also already the place a trader has the row open beside
+                their broker statement, which is exactly who wants the pieces.
+                `dir="ltr"` on each figure, Hebrew labels outside it: §9's
+                rule, and the separator stays in the RTL flow. */}
+            {label === 'שלבים' && (
+              <div className="flex flex-col gap-1 pb-2.5 -mt-1">
+                {([['כניסות', pieces.entries], ['יציאות', pieces.exits]] as const).map(
+                  ([side, list]) => (
+                    <div key={side} className="flex items-start gap-2">
+                      <span
+                        className="text-[11px] font-semibold shrink-0"
+                        style={{ color: 'var(--color-tg-muted)', minWidth: 46 }}>
+                        {side}
+                      </span>
+                      <span className="flex flex-wrap gap-x-2 gap-y-0.5">
+                        {list.map((text, n) => (
+                          <span
+                            key={n}
+                            dir="ltr"
+                            className="text-[11px] whitespace-nowrap"
+                            style={{ color: 'var(--color-tg-text-2)' }}>
+                            {text}
+                          </span>
+                        ))}
+                      </span>
+                    </div>
+                  )
+                )}
               </div>
             )}
             {/* DIRECTLY UNDER THE מקור ROW, which is §C's whole argument: that

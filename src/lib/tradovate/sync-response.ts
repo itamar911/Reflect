@@ -58,6 +58,25 @@ export type BrokerSyncOutcome =
       asOf: string;
       /** Whether TRADOVATE_IMPORT_ENABLED was set for this run. See the header. */
       importEnabled: boolean;
+      /**
+       * The contracts whose trades this run refused to state (REF-117 Stage 6).
+       *
+       * Required here although the wire fields are optional — the parser
+       * resolves both absences once, so no consumer has to remember the rule.
+       * Empty is the ordinary day.
+       */
+      heldSymbols: string[];
+      /**
+       * How many groups were held, INCLUDING any whose contract had no
+       * readable name.
+       *
+       * SO THAT `heldSymbols: [], heldCount: 1` IS EXPRESSIBLE, and it is not a
+       * redundancy. A group whose `/contract/item` lookup found nothing — and
+       * the orphan-pair group, which is about no contract at all — has an
+       * absence worth stating and no symbol to state it with. Reading the list
+       * length instead would silently turn that into an ordinary day.
+       */
+      heldCount: number;
     } & BrokerImportCounts)
   | { source: 'broker_expired' }
   | { source: 'broker_unavailable' }
@@ -128,6 +147,24 @@ export function readSyncResponse(body: unknown): BrokerSyncOutcome {
     // on this account") rather than to one that tells a trader they made a
     // setting they may never have touched.
     importEnabled: b.importEnabled === true,
+    // REF-117 Stage 6. Absent means nothing was held, the same rule
+    // `importEnabled` follows — and a deployment from before this stage held
+    // things it could not report, which reads as the quiet day it always did.
+    //
+    // EVERY ELEMENT MUST BE A NON-EMPTY STRING OR IT IS DROPPED. A symbol is
+    // the whole content of the sentence below; a `""` or a number would
+    // render as "עסקאות ב- ממתינות", and the count is what carries an
+    // unnameable group anyway.
+    heldSymbols: Array.isArray(b.heldSymbols)
+      ? b.heldSymbols.filter((s): s is string => typeof s === 'string' && s !== '')
+      : [],
+    // NOT FLOORED TO THE LIST LENGTH, deliberately: a run that held one group
+    // it could not name sends `heldSymbols: []` with `heldCount: 1`, and that
+    // is a sentence rather than silence. Non-finite or negative reads as zero.
+    heldCount:
+      typeof b.heldCount === 'number' && Number.isFinite(b.heldCount) && b.heldCount > 0
+        ? b.heldCount
+        : 0,
     ran: b.ran,
     offered: counts.offered,
     imported: counts.imported,
@@ -163,14 +200,26 @@ export interface SyncMessage {
   /** The result sentence. Always present; never empty. */
   text: string;
   /**
-   * A qualifier under it, or null.
+   * The qualifiers under it, one line each. Empty on most runs.
    *
-   * Only ever the open-position note today. It is a second line rather than a
-   * clause because it answers a different question from the headline: the
-   * headline says what this run did, this says why a trade the trader took is
-   * still not in the journal.
+   * A LIST SINCE REF-117 STAGE 6, AND IT HAD TO BECOME ONE. It was a single
+   * nullable string carrying the open-position note, and there are now two
+   * independent things that can both be true of one run: a position is still
+   * open, AND a contract's trades could not be stated at all. They answer
+   * different questions and neither may suppress the other — collapsing them
+   * would mean the held sentence hid behind the routine one, or the reverse,
+   * depending on the order somebody wrote the ternary in.
+   *
+   * Each is a second line rather than a clause because each answers a
+   * different question from the headline: the headline says what this run did,
+   * these say why a trade the trader took is still not in the journal.
+   *
+   * MOST NEWSWORTHY FIRST, like the headline's own clauses: "we could not read
+   * this contract at all" outranks "an open position waits for its close",
+   * because the first is a gap in the day's figures and the second is the
+   * mechanism working as designed.
    */
-  detail: string | null;
+  details: string[];
   /** Whether to offer the reconnect link. True in exactly one state. */
   reconnect: boolean;
   /** Whether this reports a run that failed to do what it set out to do. */
@@ -179,6 +228,49 @@ export interface SyncMessage {
 
 /** A trade closed today but still open at the broker will not be imported (§A3, rule 1). */
 const OPEN_POSITION_NOTE = 'פוזיציה פתוחה נכנסת ליומן רק לאחר סגירתה.';
+
+/**
+ * A contract whose trades could not be stated at all (REF-117 Stage 6).
+ *
+ * THE SURFACE THE STAGE 2 BUILD REPORT LEFT OPEN. `cycles.ts` refuses to state
+ * any cycle for a `(account, contract)` group whose fills cannot account for
+ * the broker's own `netPos` — a truncated `/fill/list`, or an overnight carry
+ * whose opening fills are outside the API's depth. The group is HELD rather
+ * than thrown, because throwing costs the trader every rule on every contract
+ * plus the journal, while holding costs them one contract for one day. That
+ * exchange was explicitly conditional on the absence being visible, and until
+ * now nothing anywhere said it.
+ *
+ * WHAT THE WORDS DO AND DO NOT CLAIM:
+ *
+ *   - "ממתינות" and not "חסרות". The next sync re-offers the same window, and
+ *     the usual cause — a response that arrived short — does not repeat.
+ *   - "הנתונים מהברוקר לא תאמו" is the honest description of a failed
+ *     reconciliation: we are not saying the broker is wrong and not saying the
+ *     trader is, only that two figures from the same source disagree.
+ *   - NO COUNT OF TRADES, because there is none to give: a held group produced
+ *     no cycles, so "how many trades are waiting" is precisely the thing that
+ *     could not be worked out. Saying "3 עסקאות ממתינות" would be inventing
+ *     the number whose absence is the finding.
+ *   - DESCRIPTIVE, NEVER AN INSTRUCTION — §8 of TodayContextPanel, which is a
+ *     NinjaTrader vendor compliance requirement. "ננסה שוב" is what WE will
+ *     do, not something the trader is told to do. No emojis (CLAUDE.md).
+ *
+ * THE SYMBOL IS NAMED WHEN WE HAVE IT AND THE SENTENCE STANDS WITHOUT IT. A
+ * group whose `/contract/item` lookup found nothing, and the orphan-pair group
+ * which is about no contract at all, still produce a line — the absence is the
+ * thing worth saying and the contract is the detail. See
+ * {@link BrokerSyncOutcome.heldCount} on why that case is expressible.
+ */
+function heldNote(symbols: readonly string[]): string {
+  const tail = 'הנתונים מהברוקר לא תאמו, ננסה שוב בסנכרון הבא.';
+  if (symbols.length === 0) return `עסקאות ממתינות — ${tail}`;
+  // Comma-joined rather than one line per contract. Two held contracts at once
+  // means something broad went wrong with the response, not two unrelated
+  // facts, and two identical sentences differing only in a symbol is the shape
+  // a reader skips. The symbols are latin and ltr-isolated by the component.
+  return `עסקאות ב-${symbols.join(', ')} ממתינות — ${tail}`;
+}
 
 /**
  * Hebrew counts one, and then everything else.
@@ -228,12 +320,15 @@ function linkedSentence(n: number): string {
  *
  * The open-position note rides along with any run that happened, because it is
  * equally true whether the run added five trades or none, and it is the answer
- * to "my trade did not appear" in both.
+ * to "my trade did not appear" in both. SO DOES THE HELD NOTE (REF-117 Stage 6),
+ * for the same reason and with one addition: it also flips `problem`, because
+ * a run that could not state a contract's trades has not left the journal
+ * up to date whatever else it managed. See {@link heldNote}.
  */
 export function describeSyncOutcome(outcome: BrokerSyncOutcome): SyncMessage {
   const plain = (text: string, problem = true): SyncMessage => ({
     text,
-    detail: null,
+    details: [],
     reconnect: false,
     problem,
   });
@@ -242,7 +337,7 @@ export function describeSyncOutcome(outcome: BrokerSyncOutcome): SyncMessage {
     // The same words as TodayContextPanel's expired branch, trimmed of the
     // rule-engine clause that does not apply here: nothing is being evaluated,
     // a sync was asked for and the credential is what stopped it.
-    return { text: 'החיבור ל-Tradovate פג.', detail: null, reconnect: true, problem: true };
+    return { text: 'החיבור ל-Tradovate פג.', details: [], reconnect: true, problem: true };
   }
   if (outcome.source === 'broker_unavailable') {
     return plain('לא הצלחנו למשוך עסקאות מ-Tradovate. נסה שוב בעוד רגע.');
@@ -260,12 +355,18 @@ export function describeSyncOutcome(outcome: BrokerSyncOutcome): SyncMessage {
       : plain('ייבוא עסקאות אינו פעיל בחשבון הזה');
   }
 
-  const detail = outcome.skippedOpen > 0 ? OPEN_POSITION_NOTE : null;
+  // Both qualifiers, most newsworthy first — see {@link SyncMessage.details}.
+  // A held group is a gap in the day's figures; an open position is the
+  // mechanism working as designed.
+  const details = [
+    ...(outcome.heldCount > 0 ? [heldNote(outcome.heldSymbols)] : []),
+    ...(outcome.skippedOpen > 0 ? [OPEN_POSITION_NOTE] : []),
+  ];
 
   if (outcome.failed > 0) {
     return {
       text: 'חלק מהעסקאות לא נשמרו. נסה שוב בעוד רגע.',
-      detail,
+      details,
       reconnect: false,
       problem: true,
     };
@@ -284,9 +385,15 @@ export function describeSyncOutcome(outcome: BrokerSyncOutcome): SyncMessage {
 
   return {
     text: clauses.length > 0 ? clauses.join(' · ') : 'הכל מעודכן',
-    detail,
+    details,
     reconnect: false,
-    problem: false,
+    // A HELD GROUP MAKES A RUN A PROBLEM EVEN WHEN EVERY ROW IT OFFERED WAS
+    // WRITTEN (REF-117 Stage 6). `problem` decides whether the headline is
+    // drawn in the ordinary text colour or the muted one, and "הכל מעודכן" in
+    // grey above "עסקאות ב-MNQZ6 ממתינות" would be two lines contradicting
+    // each other. Not everything IS updated: a contract's trades are missing
+    // from the day, and the figures every rule reads are short by them.
+    problem: outcome.heldCount > 0,
   };
 }
 

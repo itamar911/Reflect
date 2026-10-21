@@ -41,8 +41,10 @@
  * panel, and it is the one the rules used.
  */
 
+import { readTradeStages, stageCounts } from '@/lib/journal/stages';
+
 /**
- * One closed round trip, as the panel lists it. Three fields, nothing else.
+ * One closed round trip, as the panel lists it. Four fields, nothing else.
  *
  * `closedAtMs` is read by {@link readTodayTradeLines} to order these and is
  * deliberately NOT kept: the panel renders no instant, so carrying one would
@@ -55,6 +57,27 @@ export interface TodayTradeLine {
   symbol: string | null;
   /** Net dollars for the round trip. Signed. Gross — see `GrossPnlNote`. */
   pnl: number;
+  /**
+   * How many pieces this position was entered and exited in, or null when
+   * there is nothing to say (REF-117 Stage 6).
+   *
+   * JUST THE COUNTS, which is the ticket's own reduction for this surface —
+   * "אותו דבר בקצרה, רק מספר השלבים". The trade card gets the quantity and
+   * the price of every piece; a panel at the top of a form that lists up to
+   * ten closes on one line each has room for two numerals.
+   *
+   * NULL ON A SIMPLE ROUND TRIP, not `{1, 1}`, so that `TradeLines` renders
+   * exactly what it rendered before this stage on every ordinary day. The
+   * threshold is `wasScaled` in lib/journal/stages.ts, which is the one place
+   * "worth saying" is defined.
+   *
+   * SOURCED FROM `BrokerTrade.stages` OVER THE WIRE AND NOT FROM THE DATABASE,
+   * which is why this surface works with no migration at all: the panel's list
+   * comes from `GET /api/tradovate/trades`, which answers with the pull's own
+   * rows. `trade_plans.broker_stages` (migration 040) is what the JOURNAL
+   * needs, because the journal reads stored rows.
+   */
+  stages: { entries: number; exits: number } | null;
 }
 
 /**
@@ -127,6 +150,12 @@ export function readTodayTradeLines(body: unknown): TodayTradeLine[] | null {
         direction,
         symbol: typeof trade.symbol === 'string' && trade.symbol !== '' ? trade.symbol : null,
         pnl,
+        // THROUGH THE JOURNAL'S OWN READER, not a second parse. `stageCounts`
+        // over `readTradeStages` is what the trade card uses, so the two
+        // surfaces cannot disagree about what "scaled" means or about which
+        // malformed documents are refused — and this body is as untrusted as a
+        // stored column is: it has crossed a network either way.
+        stages: stageCounts(readTradeStages(trade.stages)),
       },
       // See the header: unreadable sorts last, not first.
       closedAtMs: Number.isFinite(closedAtMs) ? closedAtMs : Number.POSITIVE_INFINITY,
@@ -196,3 +225,18 @@ export const NET_LABEL = 'נטו היום';
  */
 export const LOSS_LIMIT_LABEL = 'מגבלת הפסד';
 export const LOSS_LIMIT_NOTE = 'רק הפסדים נספרים, רווחים לא מקזזים';
+
+/**
+ * "2→3" — the stage counts, for one line of the day's list (REF-117 Stage 6).
+ *
+ * AN ARROW AND NOT TWO WORDS, because this sits on a row that already carries
+ * a direction glyph, a symbol and an amount, and "נכנסת בשני שלבים" is the
+ * trade card's job. The arrow reads entry→exit in both directions of text: it
+ * is inside a `dir="ltr"` span in the panel, like every other figure there
+ * (§9), and the glyph is the same `→` the stop sentences use for a range.
+ *
+ * Null in, null out, so the caller renders nothing rather than an empty span.
+ */
+export function stagesLabel(stages: TodayTradeLine['stages']): string | null {
+  return stages === null ? null : `${stages.entries}→${stages.exits}`;
+}

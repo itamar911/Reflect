@@ -3335,6 +3335,13 @@ async function bothPathsAgree() {
     // (REF-107 Stage 2, §A3). True here so the fixture is an ordinary finished
     // trade. scripts/broker-import-check.ts is where both values are exercised.
     cycleClosed: true,
+    // REF-117 Stage 6. One piece a side, so the surfaces that read it say
+    // nothing — and the leak group below still covers it, because it asserts
+    // the response's EXACT KEY SET rather than spot-checking names.
+    stages: {
+      entries: [{ qty: 1, price: 5000 }],
+      exits: [{ qty: 1, price: 5010 }],
+    },
   };
   /** Yesterday evening: in the pull because the streak reaches back, not in today. */
   const ROW_YESTERDAY: BrokerTrade = {

@@ -143,6 +143,40 @@ export interface SyncResult {
    * change and therefore a different sentence.
    */
   importEnabled: boolean;
+  /**
+   * The contracts whose trades this run REFUSED to state (REF-117 Stage 6).
+   *
+   * SYMBOLS ONLY, DEDUPLICATED, AND NEVER THE REST OF {@link
+   * import('./fills').HeldGroup}. That type carries a broker account id, a
+   * broker contract id, a fill count and an `impliedPrevPos` — operator
+   * diagnostics, already in the pull's log line, and ids that the leak group in
+   * scripts/tradovate-today-check.ts exists to keep off the wire. What a trader
+   * can act on is the symbol: "the MNQ trades are not in yet".
+   *
+   * EMPTY ON EVERY ORDINARY DAY, which is what makes this free to carry. A
+   * non-empty list means ./cycles.ts could not reconcile a group's fills
+   * against the broker's own `netPos` and therefore stated no cycles for it —
+   * the day is UNDER-COUNTED on that contract, and this module's oldest
+   * fail-safe is that an under-counted day makes every rule MORE PERMISSIVE.
+   * REF-117 Stage 2 chose to hold the group rather than fail the pull, on the
+   * grounds that one overnight carry must not take the integration down for a
+   * session, and recorded that the choice is only defensible IF THE TRADER SEES
+   * IT. This is the field that makes it so.
+   *
+   * A NULL SYMBOL IS DROPPED RATHER THAN RENDERED AS A BLANK, and the absence
+   * is then carried by {@link heldCount}: a group whose contract body named
+   * nothing usable, and the orphan-pair row, which is about no contract at all.
+   */
+  heldSymbols: string[];
+  /**
+   * How many groups were held, INCLUDING the ones with no readable symbol.
+   *
+   * So that `heldSymbols: [], heldCount: 1` is expressible — "something was
+   * held and we cannot tell you what it was on" — rather than collapsing into
+   * the ordinary silent day. lib/tradovate/sync-response.ts has a sentence for
+   * exactly that case.
+   */
+  heldCount: number;
 }
 
 /**
@@ -191,6 +225,10 @@ export async function syncUserTrades(request: SyncRequest): Promise<SyncResult> 
       asOf: new Date().toISOString(),
       isTradeSource,
       importEnabled: enabled,
+      // No pull happened, so nothing was held. An honest empty rather than an
+      // absence, for the reason every other field in this shape is stated.
+      heldSymbols: [],
+      heldCount: 0,
     };
   }
 
@@ -205,7 +243,7 @@ export async function syncUserTrades(request: SyncRequest): Promise<SyncResult> 
     get: (path, query) => tradovateGet(path, query, { accessToken: api.accessToken, apiUrl }),
   });
 
-  const { day, trades, accounts: hosts } = await loadBrokerDay({
+  const { day, trades, held, accounts: hosts } = await loadBrokerDay({
     readers: {
       live: readerFor(api.hosts.live.url),
       demo: readerFor(api.hosts.demo.url),
@@ -275,5 +313,21 @@ export async function syncUserTrades(request: SyncRequest): Promise<SyncResult> 
     stopHistories,
   });
 
-  return { counts, accounts, asOf: day.asOf, isTradeSource, importEnabled: enabled };
+  // Deduplicated and sorted, so that two held groups on one contract — the
+  // two-account case — produce one symbol, and so that the sentence a trader
+  // reads is the same on two runs that saw the same thing. A null symbol
+  // contributes to the count and not to the list; see {@link SyncResult}.
+  const heldSymbols = [
+    ...new Set(held.map((group) => group.symbol).filter((s): s is string => s !== null)),
+  ].sort();
+
+  return {
+    counts,
+    accounts,
+    asOf: day.asOf,
+    isTradeSource,
+    importEnabled: enabled,
+    heldSymbols,
+    heldCount: held.length,
+  };
 }
