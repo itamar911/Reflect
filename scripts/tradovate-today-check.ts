@@ -101,12 +101,18 @@ import {
 } from '../src/lib/tradovate/liveClock';
 import { openAccounts } from '../src/lib/tradovate/useLivePositions';
 import {
+  COMPACT_MAX_ROWS,
+  COMPACT_ROW_PX,
   PORTFOLIO_TOTAL,
   contractsLabel,
   liveRows,
   moneyColour,
   rendersMoney,
 } from '../src/components/tradovate/LivePositionLines';
+// The 44px box itself, so (1) of the fold group is arithmetic over the two
+// constants that actually decide the clip rather than over a copy of either.
+import { SLOT_HEIGHT } from '../src/components/accounts/LivePnlSlot';
+import { moreLinesText } from '../src/lib/rules/todayLines';
 import type {
   TradovateAccount,
   TradovateContract,
@@ -4450,6 +4456,30 @@ function pair(displayName: string, openPnl: number | null): LiveAccountLine {
   };
 }
 
+/**
+ * One portfolio holding `count` DIFFERENT instruments — the axis the 44px box
+ * actually overflows on.
+ *
+ * Not the axis the ticket named. `account.positions` is one entry per distinct
+ * contract and `contractsLabel` renders the quantity as text inside one row, so
+ * a trader holding twelve of one instrument has ONE line. Three different
+ * instruments is what produces four rows.
+ */
+function holding(count: number, openPnl: number | null): LiveAccountLine {
+  return {
+    accountId: 'Solo',
+    displayName: 'Solo',
+    openPnl,
+    positions: Array.from({ length: count }, (_, i) => ({
+      contractName: `AAA${i + 1}`,
+      netPos: i + 1,
+    })),
+  };
+}
+
+/** The card's options, in one place: both are the 44px box. */
+const CARD = { totalFirst: true, maxRows: COMPACT_MAX_ROWS } as const;
+
 function verifiedPull(positions: number[]): BrokerLivePull {
   return {
     source: 'broker_verified',
@@ -4599,6 +4629,10 @@ async function liveClockGroup() {
     ...singleFigure, ...twoInOne, ...twoInOneNoFigure, ...dashboard,
     ...liveRows([solo('Solo', 1, 0, 'ESZ6')], 'positions'),
     ...liveRows([solo('Solo', 1, null, null)], 'positions'),
+    // The folded rows (REF-107 follow-up) are copy too, and new copy is
+    // exactly what this net is for. Both branches: with a figure and without.
+    ...liveRows([holding(4, 120)], 'positions', CARD),
+    ...liveRows([holding(4, null)], 'positions', CARD),
   ].map((row) => row.text);
 
   group('REF-108 Stage 4b: the figure beside the position', [
@@ -4713,6 +4747,114 @@ async function liveClockGroup() {
     c('(24) the three colours are distinct and zero is not a gain',
       [moneyColour(120), moneyColour(-240), moneyColour(0)],
       ['var(--live-pnl-gain)', 'var(--live-pnl-loss)', 'var(--color-tg-muted)']),
+  ]);
+
+  // ── REF-107 follow-up: the box may not clip an instrument in silence ─────
+  //
+  // THE REAL FAILURE WAS AN UN-ASSERTED MEASUREMENT. `LivePnlSlot` is
+  // `height: 44, overflow: 'hidden'` and the compact rows are 13.75px, so four
+  // rows are 55px and the fourth is cut — with no ellipsis, no scrollbar and
+  // nothing on screen saying a row existed. A portfolio holding THREE
+  // instruments (three lines plus the total) showed two of them and looked
+  // complete. Nothing failed, because no test said "N rows at this leading must
+  // fit in SLOT_HEIGHT".
+  //
+  // (1) is that test. It is arithmetic over two constants in two files, which
+  // is why it lives here — this suite can import both, and LivePositionLines
+  // cannot import SLOT_HEIGHT without an import cycle through LivePnlSlot.
+  //
+  // THE AXIS IS INSTRUMENTS, NOT CONTRACTS. The ticket asked about "4+
+  // contracts", which never overflows: quantity is text inside one row, so a
+  // trader holding twelve of one instrument has one line and 30px to spare.
+  // (2) pins that, because it is the premise everything else rests on.
+  const threeWithFigure = liveRows([holding(3, 120)], 'positions', CARD);
+  const fourWithFigure = liveRows([holding(4, 120)], 'positions', CARD);
+  const fourNoFigure = liveRows([holding(4, null)], 'positions', CARD);
+  const threeNoFigure = liveRows([holding(3, null)], 'positions', CARD);
+  const twoWithFigure = liveRows([holding(2, 120)], 'positions', CARD);
+
+  group('REF-107: the portfolio card folds what it cannot show', [
+    // ── THE ARITHMETIC ─────────────────────────────────────────────────────
+    c('(1) the cap is the most rows that fit, and one more does not',
+      [COMPACT_MAX_ROWS * COMPACT_ROW_PX <= SLOT_HEIGHT,
+       (COMPACT_MAX_ROWS + 1) * COMPACT_ROW_PX <= SLOT_HEIGHT],
+      [true, false]),
+    // Printed, so a failure above says WHICH number moved. 11px × 1.25
+    // leading-tight = 13.75, measured in Chromium rather than read off
+    // Tailwind's defaults — globals.css moves the whole scale up one step.
+    c('(1b) and the three numbers behind it',
+      [COMPACT_ROW_PX, COMPACT_MAX_ROWS, SLOT_HEIGHT], [13.75, 3, 44]),
+
+    // ── THE PREMISE ────────────────────────────────────────────────────────
+    c('(2) quantity never adds a row: twelve of one instrument is one line',
+      liveRows([solo('Solo', 12, 120, 'AAA1')], 'positions', CARD).length, 1),
+
+    // ── THE CASE THE TICKET IS ABOUT ───────────────────────────────────────
+    //
+    // Three instruments and a figure wanted four rows. Now: the figure's row
+    // carries the count, and the card stays inside its box.
+    c('(3) three instruments fold the third into the total row',
+      threeWithFigure.map((row) => [row.text, row.money]),
+      [['(סה״כ בתיק) · ועוד 1', 120],
+       ['פוזיציה פתוחה · חוזה אחד AAA1', null],
+       ['פוזיציה פתוחה · שני חוזים AAA2', null]]),
+    c('(4) four instruments say how many are not shown',
+      fourWithFigure[0].text, '(סה״כ בתיק) · ועוד 2'),
+    // THE CAP, OVER EVERY COUNT A TRADER COULD HOLD. This is the assertion
+    // that fails if the fold is ever skipped for some arm of the branch.
+    c('(5) no count of instruments ever exceeds the cap',
+      [1, 2, 3, 4, 5, 6, 12].map((n) => liveRows([holding(n, 120)], 'positions', CARD).length),
+      [1, 3, 3, 3, 3, 3, 3]),
+    // The figure is still never what gets dropped — `totalFirst`'s own
+    // guarantee, now that the row it protects also carries the count.
+    c('(6) and the figure survives every one of them, exactly once',
+      [1, 2, 3, 4, 5, 6, 12].map((n) =>
+        liveRows([holding(n, 120)], 'positions', CARD).filter((row) => row.money !== null).length),
+      [1, 1, 1, 1, 1, 1, 1]),
+
+    // ── NO FIGURE: a row still has to carry the fold ───────────────────────
+    //
+    // Four lines and no total row is 55px — the same clip by a different
+    // route. One row is spent on "ועוד N" whether or not there is a figure.
+    c('(7) with no figure the fold still gets a row',
+      fourNoFigure.map((row) => [row.text, row.money]),
+      [['ועוד 2', null],
+       ['פוזיציה פתוחה · חוזה אחד AAA1', null],
+       ['פוזיציה פתוחה · שני חוזים AAA2', null]]),
+    // THREE lines and no figure is 41.25px and fits, so nothing is folded and
+    // no row is spent explaining an absence — the Stage 4b rule, unchanged.
+    c('(8) but three lines with no figure fit as they are',
+      [threeNoFigure.length, threeNoFigure.some((row) => row.text.includes('ועוד'))],
+      [3, false]),
+
+    // ── WHAT DID NOT CHANGE ────────────────────────────────────────────────
+    c('(9) two instruments and a figure are exactly what they were',
+      twoWithFigure.map((row) => [row.text, row.money]),
+      [[PORTFOLIO_TOTAL, 120],
+       ['פוזיציה פתוחה · חוזה אחד AAA1', null],
+       ['פוזיציה פתוחה · שני חוזים AAA2', null]]),
+    // THE TWO UNCAPPED SURFACES. The day panel and the dashboard have no
+    // ceiling and must keep listing everything — folding there would hide a
+    // position on a surface with room for it.
+    c('(10) the panel folds nothing and lists every instrument',
+      liveRows([holding(5, 120)], 'positions').length, 6),
+    c('(11) and says nothing about an overflow',
+      liveRows([holding(5, 120)], 'positions').some((row) => row.text.includes('ועוד')), false),
+    c('(12) the dashboard is still one row per portfolio whatever it holds',
+      liveRows([holding(5, 120)], 'portfolios').length, 1),
+
+    // ── THE IDIOM IS THE PRODUCT'S, NOT THIS FILE'S ────────────────────────
+    //
+    // "ועוד N" is already how the day panel's capped list says the same thing
+    // (lib/rules/todayLines.ts). Two spellings would be two things to keep in
+    // step, and this is what fails if one of them is re-templated locally.
+    c('(13) the fold reuses the day panel\'s own overflow wording',
+      fourWithFigure[0].text.endsWith(moreLinesText(2)), true),
+    // A count of INSTRUMENTS, deliberately not run through `contractsLabel`:
+    // "ועוד שני חוזים" would read as a position size rather than as two more
+    // lines.
+    c('(14) and it is not phrased as a quantity',
+      fourWithFigure[0].text.includes(contractsLabel(2)), false),
   ]);
 
   group('REF-108: what the consumers render from', [

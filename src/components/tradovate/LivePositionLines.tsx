@@ -77,6 +77,7 @@
 
 import type { LiveAccountLine } from '@/app/api/tradovate/live/route';
 import { formatMoney } from '@/lib/money';
+import { moreLinesText } from '@/lib/rules/todayLines';
 
 /**
  * Which shape a surface wants.
@@ -96,6 +97,52 @@ export type LiveLayout = 'positions' | 'portfolios';
  * per-account aggregate and a reader who adds two numbers together.
  */
 export const PORTFOLIO_TOTAL = '(סה״כ בתיק)';
+
+/**
+ * One compact row's height in px: `text-[11px] leading-tight` is 11 × 1.25.
+ *
+ * MEASURED, NOT DERIVED FROM TAILWIND'S DEFAULTS — `globals.css` overrides the
+ * whole type scale up one step, so reasoning from the class names alone gives
+ * the wrong number. 13.75px is what Chromium reports for these rows and it
+ * matches the three-row figure the `totalFirst` note below records (41.25px).
+ *
+ * Exported for one reason: the suite multiplies it by {@link COMPACT_MAX_ROWS}
+ * and compares the product against `SLOT_HEIGHT`. See that constant.
+ */
+export const COMPACT_ROW_PX = 13.75;
+
+/**
+ * How many rows the portfolio card's box can hold. Three.
+ *
+ * ARITHMETIC, AND THE REAL FAILURE HERE WAS THAT NOBODY HAD WRITTEN IT DOWN:
+ *
+ *     3 × 13.75px = 41.25px  ≤  44px   fits, 2.75px spare
+ *     4 × 13.75px = 55.00px  >  44px   overflows by 11px
+ *
+ * `LivePnlSlot` is `height: 44, overflow: 'hidden'` and its header forbids
+ * changing that, with good reason — a slot that grows when it acquires content
+ * reflows the card on every fifteen-second poll. So the fourth row is not
+ * clipped elegantly, it is clipped SILENTLY: no ellipsis, no scrollbar, nothing
+ * on screen saying a row existed. A portfolio holding three instruments showed
+ * two of them and the total, and looked complete.
+ *
+ * The `totalFirst` note below already predicted this ("a portfolio holding four
+ * or five contracts — which no tightening can fit — loses a contract line to
+ * the clip") and accepted it. That is defensible at four or five and surprising
+ * at THREE, which is an ordinary number of instruments to hold.
+ *
+ * WHAT THE NUMBER IS NOT: it is not a count of contracts. `account.positions`
+ * is one entry per distinct CONTRACT, and `contractsLabel` renders the quantity
+ * as text inside one row — so a trader holding twelve of one instrument has one
+ * line and the most comfortable case there is. Row count is driven by how many
+ * different instruments are open, never by how many contracts.
+ *
+ * NOT ENFORCED HERE BY IMPORTING `SLOT_HEIGHT`, deliberately: LivePnlSlot
+ * imports LivePositions which imports this file, so reading the height here
+ * would be an import cycle. The cross-check is an assertion in
+ * scripts/tradovate-today-check.ts, which can see both.
+ */
+export const COMPACT_MAX_ROWS = 3;
 
 /** One rendered row. `money` is null when there is no figure to show. */
 export interface LiveRow {
@@ -129,7 +176,19 @@ export function contractsLabel(netPos: number): string {
 export function liveRows(
   accounts: readonly LiveAccountLine[],
   layout: LiveLayout,
-  options: { totalFirst?: boolean } = {}
+  options: {
+    totalFirst?: boolean;
+    /**
+     * The most rows one account may render. Unset means no ceiling, which is
+     * the two surfaces that have none — the day panel and the dashboard both
+     * grow with their content.
+     *
+     * The portfolio card passes {@link COMPACT_MAX_ROWS}. It is a parameter
+     * rather than a flag read off `totalFirst` because the two are different
+     * decisions about the same box: one is reading order, this is capacity.
+     */
+    maxRows?: number;
+  } = {}
 ): LiveRow[] {
   if (layout === 'portfolios') {
     // ONE ROW PER PORTFOLIO, NAMED, WHATEVER THE CONTRACTS ARE. The dashboard
@@ -175,7 +234,46 @@ export function liveRows(
     // TWO OR MORE: the figure covers all of them and belongs to none, so it
     // gets its own row and says so. Omitted entirely when there is no figure —
     // a row carrying only a qualifier would explain an absence.
-    if (account.openPnl === null) return lines;
+    const hasTotal = account.openPnl !== null;
+
+    // ── THE CEILING, AND WHAT GOES OVER IT (REF-107 follow-up) ─────────────
+    //
+    // `maxRows` is the portfolio card's 44px box expressed as a row count; see
+    // COMPACT_MAX_ROWS for the arithmetic. Over it, the box CLIPS IN SILENCE —
+    // no ellipsis, no scrollbar — so a portfolio holding three instruments
+    // showed two and the total and looked complete. The figure was never what
+    // got cut (`totalFirst` sees to that); what got cut was a whole instrument.
+    //
+    // So the count goes where the reader is already looking: the row that
+    // exists anyway says how many lines are not on screen. The trader loses the
+    // per-contract detail they were already losing, and gains the fact that
+    // there is more — with /accounts' own list behind the card for the rest.
+    //
+    // ONE ROW IS SPENT ON THE FOLD WHETHER OR NOT THERE IS A FIGURE. With a
+    // figure the total row is already there and only its text changes; without
+    // one, a row has to carry "ועוד N" or the fold is as silent as the clip
+    // was. That is why the reservation is `cap - 1` in both branches.
+    const cap = options.maxRows ?? Infinity;
+    const wanted = lines.length + (hasTotal ? 1 : 0);
+
+    if (wanted > cap) {
+      const shown = lines.slice(0, cap - 1);
+      const more = lines.length - shown.length;
+      // `moreLinesText` and not a local template: "ועוד N" is already this
+      // product's idiom for a capped list (lib/rules/todayLines.ts, the day
+      // panel's own overflow), and two spellings of it would be two things to
+      // keep in step. The count is INSTRUMENTS, not contracts — so it is
+      // deliberately not run through `contractsLabel`, which counts quantity
+      // and would read as a position size.
+      const folded = {
+        key: `${account.accountId}:total`,
+        text: hasTotal ? `${PORTFOLIO_TOTAL} · ${moreLinesText(more)}` : moreLinesText(more),
+        money: account.openPnl,
+      };
+      return options.totalFirst ? [folded, ...shown] : [...shown, folded];
+    }
+
+    if (!hasTotal) return lines;
 
     const total = {
       key: `${account.accountId}:total`,
@@ -194,9 +292,14 @@ export function liveRows(
     //
     // Two things fix it together. The compact rows are tightened (see the
     // component below), which brings three rows to 41.25px and inside the box;
-    // and the figure moves to the TOP, so that a portfolio holding four or
-    // five contracts — which no tightening can fit — loses a contract line to
-    // the clip and never the number.
+    // and the figure moves to the TOP, so that a portfolio with more
+    // instruments than the box can hold loses a contract line and never the
+    // number.
+    //
+    // THAT LOSS IS NO LONGER SILENT, which is what the `maxRows` branch below
+    // added: the overflow is folded into this very row as "ועוד N" instead of
+    // being clipped by the box. `totalFirst` still matters — it is what makes
+    // the surviving row the one carrying both the figure and the count.
     //
     // This is not a divergence invented here: `LivePnlSlot`'s own header says
     // the figure sits above the realised ones because "live P&L is the first
@@ -287,9 +390,13 @@ export default function LivePositionLines({
   compact?: boolean;
   layout?: LiveLayout;
 }) {
-  // `totalFirst` on the card only. See the note in `liveRows`: it is what keeps
-  // the figure out of `LivePnlSlot`'s 44px clip.
-  const rows = liveRows(accounts, layout, { totalFirst: compact });
+  // Both options are the card's 44px box, and only the card's. `totalFirst`
+  // keeps the figure out of the clip; `maxRows` means there is nothing left to
+  // clip — see COMPACT_MAX_ROWS. The panel and the dashboard grow instead.
+  const rows = liveRows(accounts, layout, {
+    totalFirst: compact,
+    maxRows: compact ? COMPACT_MAX_ROWS : undefined,
+  });
   if (rows.length === 0) return null;
 
   return (
