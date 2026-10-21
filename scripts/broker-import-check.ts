@@ -141,7 +141,10 @@ import {
   type BrokerSyncOutcome,
 } from '../src/lib/tradovate/sync-response';
 import {
+  AUTO_DEBRIEF_PER_LOAD,
+  debriefOnResolve,
   hasStoredDebrief,
+  owedDebriefs,
   readStoredDebrief,
 } from '../src/lib/journal/debrief';
 import {
@@ -5542,6 +5545,102 @@ async function ordersCronWindowGroup() {
   ]);
 }
 
+// ── REF-107 follow-up: a link costs exactly ONE model call ──────────────────
+//
+// It used to cost two. Same trade id, two POSTs, both reaching the model,
+// ~$0.010 each — and the route could not stop the second one: its gate is
+// `if (!force && hasStoredDebrief(trade))`, evaluated against the row as read
+// at the top of the request, and the first call had not stored anything yet.
+//
+// THE SEQUENCE SPANS A REMOUNT, which is why this group had to wait for the
+// rule to be extracted out of the component. Played out in order:
+//
+//   1. `confirmLink` succeeds; the broker row is deleted and the plan carries
+//      the trade.
+//   2. `handleLinkResolved` runs → `debriefOnResolve`. CALL #1 used to be here.
+//   3. `router.refresh()`; trades/page.tsx rebuilds `listKey` from the row
+//      count, which just dropped, so JournalClient REMOUNTS.
+//   4. The fresh instance has a fresh `sweptRef`, so the effect runs →
+//      `owedDebriefs`. The just-linked plan qualifies on all three bounds.
+//
+// Step 4's call is the one whose answer can land on the row: step 2's
+// `setTrades` runs on the instance step 3 is unmounting. So the fix is to drop
+// step 2 on the `linked` branch, and NOT to guard step 4 — a guard that kept
+// #1 and dropped #2 would re-open the 20.10 bug `fc4107d` fixed, where the
+// score reached the database and the ring read `—` until F5.
+function linkDebriefCountGroup() {
+  const NOW = Date.parse('2026-10-21T09:00:00.000Z');
+  const at = (ms: number) => new Date(NOW - ms).toISOString();
+
+  /** A decided row with no stored debrief: exactly what the sweep looks for. */
+  const owedRow = (id: string, decidedMsAgo: number) => ({
+    id,
+    source: 'tradovate',
+    unplanned: false,
+    link_confirmed_at: at(decidedMsAgo),
+    debrief_generated_at: null,
+  });
+
+  // THE CAP'S WORST CASE, and the reason the sort matters: three rows the
+  // overnight cron auto-linked are already owed when the trader links a
+  // fourth by hand. In list order (`submitted_at` desc, which these are) the
+  // trader's own link is not necessarily in the first three.
+  const backlog = [owedRow('cron-1', 6 * 3_600_000), owedRow('cron-2', 7 * 3_600_000),
+                   owedRow('cron-3', 8 * 3_600_000)];
+  const justLinked = owedRow('plan-1', 0);
+
+  // Step 2, on both branches.
+  const handlerOnLink = debriefOnResolve('broker-1', { kind: 'linked', planId: 'plan-1' });
+  const handlerOnDecline = debriefOnResolve('broker-1', { kind: 'declined' });
+
+  // Step 4. The list as the server re-renders it after the link: the broker
+  // row is gone and the plan is in its place, newest `submitted_at` first.
+  const sweepAfterLink = owedDebriefs([justLinked, ...backlog], NOW).map((row) => row.id);
+
+  // The whole sequence, as calls.
+  const linkCalls = [handlerOnLink, ...sweepAfterLink].filter((id) => id !== null);
+  // A decline does NOT remount — the row stays and the count does not move —
+  // so no sweep runs on that path and the handler's call is the only one.
+  const declineCalls = [handlerOnDecline].filter((id) => id !== null);
+
+  group('a link costs exactly one model call', [
+    // THE ASSERTION THE TICKET IS ABOUT.
+    c('(1) one call for the trade that was linked, over the whole sequence',
+      linkCalls.filter((id) => id === 'plan-1').length, 1),
+    c('(2) and the handler is not the one making it',
+      handlerOnLink, null),
+    c('(3) the sweep is', sweepAfterLink.includes('plan-1'), true),
+    // FRESHEST DECISION FIRST. Without the sort this is list order, and the
+    // trader's own link can fall outside the cap — the symptom fc4107d fixed.
+    c('(4) and it is first, so the cap cannot drop it', sweepAfterLink[0], 'plan-1'),
+    c('(5) the cap still holds', sweepAfterLink.length, AUTO_DEBRIEF_PER_LOAD),
+    // The backlog is not starved either: the oldest of the four is what waits.
+    c('(6) so the row that waits for the next load is the oldest decision',
+      sweepAfterLink.includes('cron-3'), false),
+
+    // ── THE DECLINE PATH IS UNCHANGED, and that is why #1 could not simply
+    //    be deleted outright ───────────────────────────────────────────────
+    c('(7) a decline still asks, from the handler', handlerOnDecline, 'broker-1'),
+    c('(8) exactly once', declineCalls.length, 1),
+    // It asks for the BROKER row, not a plan: a declined trade has no plan.
+    c('(9) and about the row that holds the trade', declineCalls, ['broker-1']),
+
+    // ── The three bounds, pinned where they can be seen ──────────────────
+    c('(10) a row decided more than a day ago is not swept',
+      owedDebriefs([owedRow('old-1', 25 * 3_600_000)], NOW).map((row) => row.id), []),
+    c('(11) a row that already has a debrief is not swept',
+      owedDebriefs([{ ...justLinked, debrief_generated_at: at(0) }], NOW).map((row) => row.id), []),
+    c('(12) a queued row is not swept — it is not scored at all',
+      owedDebriefs([{ ...justLinked, unplanned: true, link_confirmed_at: null }], NOW).length, 0),
+    c('(13) nor is a manual plan, which has no link to debrief',
+      owedDebriefs([{ ...justLinked, source: 'manual' }], NOW).length, 0),
+    // A decided row with an unreadable instant cannot be ordered against the
+    // others, and the sort would be at the engine's mercy. It is excluded.
+    c('(14) and a row with no readable decision instant is not swept',
+      owedDebriefs([{ ...justLinked, link_confirmed_at: 'not a date' }], NOW).length, 0),
+  ]);
+}
+
 // ── REF-107 follow-up: the settings card's account of how data arrives ──────
 //
 // TradovateConnectionCard is the only place in the product that explains the
@@ -5669,7 +5768,9 @@ async function main() {
   // J1 — the unplanned row's score (REF-107 Stage 3b follow-up).
   scoringGroup();
 
-  // REF-107 follow-up — the settings card's account of how data arrives.
+  // REF-107 follow-up — one model call per link, and the settings card's
+  // account of how data arrives.
+  linkDebriefCountGroup();
   settingsNoteGroup();
 
   console.log('');

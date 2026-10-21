@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { AlertTriangle, Bot, Eye, Inbox, MoreHorizontal, Pencil, Trash2, Unlink, X } from 'lucide-react';
 import CloseTrade, { AIDebriefView, type AIDebriefResult } from '@/components/journal/CloseTrade';
 import LinkConfirm from '@/components/journal/LinkConfirm';
-import { readStoredDebrief } from '@/lib/journal/debrief';
+import { debriefOnResolve, owedDebriefs, readStoredDebrief } from '@/lib/journal/debrief';
 import {
   deleteWarningText,
   isQueuedBrokerRow,
@@ -247,17 +247,6 @@ function fmtPrice(v: number) {
 }
 
 const PAGE_SIZES = [15, 30, 50, 100];
-
-/**
- * How many owed debriefs one page load will ask for. See the sweep below.
- *
- * Three, because this spends money from a render: at roughly $0.008 a debrief
- * (§D) the worst load costs two cents, and a fourth row simply waits for the
- * next one. The number is here rather than inline because it is the knob
- * somebody will want to turn, and because the reason for its value is the
- * reason it exists at all.
- */
-const AUTO_DEBRIEF_PER_LOAD = 3;
 
 /**
  * Ask the server to re-pull the last week, and ignore the answer.
@@ -795,60 +784,44 @@ export default function JournalClient({
     }
 
     // §D cases א and ב: the debrief runs the moment the trade has an answer,
-    // and on the row that now holds the trade — the PLAN after a link, the
-    // broker row after a decline. This is the first time the debrief gets a
-    // real stop, a real R:R and a real reason beside real fills, which §D
-    // calls the trade it was built for.
-    requestDebrief(outcome.kind === 'linked' ? outcome.planId : rowId);
+    // and on the row that now holds the trade. This is the first time the
+    // debrief gets a real stop, a real R:R and a real reason beside real
+    // fills, which §D calls the trade it was built for.
+    //
+    // ON THE DECLINE BRANCH ONLY, and `debriefOnResolve` owns the reason: a
+    // link remounts this component, the sweep below asks from the fresh
+    // instance, and asking here as well was a second model call for the same
+    // trade id. Two POSTs, both reaching the model, because the route's
+    // dedupe gate cannot see a call that has not stored anything yet.
+    const askFor = debriefOnResolve(rowId, outcome);
+    if (askFor !== null) requestDebrief(askFor);
 
     setViewTradeId(null);
     router.refresh();
   }
 
   /**
-   * The debriefs the cron's auto-links are owed (REF-107 Stage 3b, §G step 7).
+   * The debriefs the cron's auto-links are owed (REF-107 Stage 3b, §G step 7)
+   * — and, since the link's own request was removed, the trader's own links.
    *
-   * THE IMPORT NEVER CALLS CLAUDE, and this effect is why it does not have to.
-   * The nightly job runs over every connected trader with a 60-second budget;
-   * a model call inside its loop would put a third party's latency on the
-   * critical path of a job whose whole purpose is to be finished before
-   * anybody is awake, and a timeout mid-loop would leave some traders
-   * imported and others not.
+   * THE RULE ITSELF IS `owedDebriefs` in lib/journal/debrief.ts: which rows
+   * are owed, in what order, and how many per load, with the three bounds
+   * argued there. It is pure and lives outside this file because the sequence
+   * it takes part in SPANS A REMOUNT — the handler above runs on one instance
+   * of this component and this effect runs on the next one — so counting the
+   * calls a link costs is only possible against a function no browser is
+   * needed to drive. scripts/broker-import-check.ts does exactly that.
    *
-   * SO THE QUEUE IS THE DATA, NOT A TABLE. "A decided trade with no stored
-   * debrief" is already a complete description of the work outstanding — it
-   * needs no column, no job table and nothing to keep in sync — and the next
-   * time the trader opens their journal, this asks for them. The dedupe gate
-   * in the route is what makes that safe to do from a render.
-   *
-   * THREE BOUNDS, because this spends money from a page load:
-   *
-   *   1. **Decided in the last day.** The cron ran at 03:30; a trader opening
-   *      the journal at 09:00 is inside it. A historical backlog — rows
-   *      decided weeks ago, or declined in bulk — is NOT swept, so the cost
-   *      of this is bounded by what actually happened yesterday rather than
-   *      by how long the trader has used the product.
-   *   2. **Three per load.** At roughly $0.008 a debrief (§D), that is two
-   *      cents for the worst load, and a fourth row waits for the next one.
-   *   3. **Once per mount.** The ref, not the state: `trades` changes on
-   *      every edit and delete, and re-running this on each of them would
-   *      re-request the rows the first run has not finished storing yet.
+   * WHAT STAYS HERE IS BOUND 3: once per mount, the ref and not the state.
+   * `trades` changes on every edit and delete, and re-running this on each of
+   * them would re-request the rows the first run has not finished storing yet.
    */
   const sweptRef = useRef(false);
   useEffect(() => {
     if (sweptRef.current) return;
     sweptRef.current = true;
 
-    const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
-    const owed = trades.filter(t => {
-      const state = linkState(t);
-      if (state !== 'linked' && state !== 'declined') return false;
-      if (t.debrief_generated_at) return false;
-      const decided = Date.parse(String(t.link_confirmed_at ?? ''));
-      return Number.isFinite(decided) && decided >= dayAgo;
-    });
-
-    for (const trade of owed.slice(0, AUTO_DEBRIEF_PER_LOAD)) requestDebrief(trade.id);
+    for (const trade of owedDebriefs(trades, Date.now())) requestDebrief(trade.id);
     // Deliberately not depending on `trades`: see bound 3 above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
