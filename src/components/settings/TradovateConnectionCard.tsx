@@ -79,6 +79,88 @@ function RevokeNote() {
 }
 
 /**
+ * How broker data arrives, and the one window in which it does not.
+ *
+ * THIS CARD IS THE ONLY PLACE IN THE PRODUCT THAT EXPLAINS THE MECHANISM. The
+ * journal's queue banner explains what to do with a trade once it is here;
+ * nothing else explains how it got here.
+ *
+ * It replaces a sentence that read "אין סנכרון אוטומטי ברקע", which has been
+ * false since REF-117 Stage 2b: vercel.json registers two daily passes
+ * (/api/cron/tradovate-import at 20:00 UTC and /api/cron/tradovate-orders at
+ * 21:30) and BOTH import trades — the second one calls the same
+ * `syncUserTrades`, as import-cron.ts says in as many words. A card that denies
+ * having a background sync cannot then explain a cutoff inside one, so the
+ * false sentence is replaced rather than joined.
+ *
+ * Why it is worded the way it is
+ * ------------------------------
+ * - **"בסביבות 01:00", hedged.** Tradovate clears the day's fills, pairs,
+ *   positions and orders at the daily reset (all four measured at
+ *   `depthDays = 0`), and the reset is the US futures roll — which
+ *   trading-day.ts is explicit about having INFERRED at 17:00 CT from a support
+ *   article it could not fetch. 17:00 CT is 01:00 Israel in both DST regimes,
+ *   and the card already has a precedent for hedging a hand-verified fact (see
+ *   RevokeNote's "ייתכן שהשם או המיקום המדויק יהיו שונים").
+ *
+ *   Naming 01:00 is also the SAFE DIRECTION. Israel and the US change clocks a
+ *   week apart, and in that gap the real reset is 02:00 Israel — later. A
+ *   trader acting on "before 01:00" is never caught out by the mismatch.
+ *
+ * - **No UTC, no "cron", no "sync job", no "API".** "פעמיים בכל לילה" is the
+ *   whole of what a trader needs from the schedule.
+ *
+ * - **"תגיע לכאן רק אם…" and not "תאבד".** Nothing is lost from Reflect — a
+ *   trade inside the window was never imported, because Tradovate dropped it
+ *   and there is no backfill at any price. "Lost" would send someone looking
+ *   for a deleted row.
+ *
+ * - **No advice shape.** This is product mechanics, not a trading
+ *   recommendation, which is the line TodayContextPanel's NinjaTrader
+ *   compliance ban is drawn around. Do NOT extend it into "אל תסחר בשעות
+ *   האלה", which would cross it.
+ *
+ * Exported because a suite reads it: broker-import-check.ts asserts the old
+ * false sentence is gone and that an hour is still named. That assertion is the
+ * tripwire that would have caught the drift when the cron moved.
+ */
+export const SYNC_NOTE =
+  'כשתפתח תוכנית עסקה Reflect מושך מהברוקר את העסקאות שלך באותו רגע, ובנוסף אנחנו ' +
+  'מושכים אותן פעמיים בכל לילה. Tradovate מוחק את רשימת העסקאות של היום בסביבות ' +
+  '01:00, ולכן עסקה שנסגרה אחרי 00:30 תגיע לכאן רק אם תפתח את Reflect לפני השעה הזאת.';
+
+/**
+ * The clock tokens inside SYNC_NOTE, as a split pattern.
+ *
+ * `01:00` and `00:30` are LTR tokens inside RTL sentences, and the bidi
+ * algorithm reorders a bare `00:30` against its neighbours — the same bug
+ * ref-107-unlink.md §C recorded shipping once already. Splitting on a capturing
+ * group keeps the delimiters, so the paragraph below is rendered FROM the
+ * exported constant rather than beside it: there is one copy of this sentence,
+ * and the suite reads the one the user sees.
+ *
+ * No /g flag on purpose — `test()` on a global regex carries `lastIndex`
+ * between calls and would answer differently on alternate segments.
+ */
+const CLOCK = /(\d{2}:\d{2})/;
+
+function SyncNote() {
+  return (
+    <p className="text-xs text-tg-muted mt-1.5">
+      {SYNC_NOTE.split(CLOCK).map((piece, index) =>
+        CLOCK.test(piece) ? (
+          <span key={index} dir="ltr" className="inline-block">
+            {piece}
+          </span>
+        ) : (
+          piece
+        )
+      )}
+    </p>
+  );
+}
+
+/**
  * The app's focus convention, copied from AccessibilityWidget: a turquoise ring
  * on keyboard focus only.
  *
@@ -167,10 +249,7 @@ export default function TradovateConnectionCard({
           </span>
         </div>
 
-        <p className="text-xs text-tg-muted mt-1.5">
-          כשתפתח תוכנית עסקה, Reflect ימשוך מהברוקר את נתוני העסקאות שלך באותו רגע. אין
-          סנכרון אוטומטי ברקע.
-        </p>
+        <SyncNote />
 
         {!canConnect && (
           <button

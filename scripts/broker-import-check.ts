@@ -196,6 +196,11 @@ import {
 } from '../src/lib/rules/todayLines';
 import { formatMoney } from '../src/lib/money';
 import { calcRR } from '../src/lib/utils';
+// A client component, imported for one exported string. The precedent is
+// features-null-safety-check.ts, which imports `computeStats` out of
+// StrategiesClient.tsx the same way: 'use client' is a string literal to tsx,
+// and nothing here renders the component.
+import { SYNC_NOTE } from '../src/components/settings/TradovateConnectionCard';
 
 // ── Harness ─────────────────────────────────────────────────────────────────
 
@@ -5416,6 +5421,61 @@ async function ordersCronWindowGroup() {
   ]);
 }
 
+// ── REF-107 follow-up: the settings card's account of how data arrives ──────
+//
+// TradovateConnectionCard is the only place in the product that explains the
+// mechanism, and for weeks it explained it WRONGLY — "אין סנכרון אוטומטי ברקע",
+// on a deployment where vercel.json registers two nightly passes that BOTH
+// import trades (the orders cron calls the same `syncUserTrades`).
+//
+// Nothing in scripts/ referenced this file before this group, which is exactly
+// why the drift survived REF-117 Stage 2b: the sentence was true when written
+// and nothing was watching when the crons arrived. (1) is the assertion that
+// matters — it is the one that would have failed on that commit — and (3) is
+// the one that keeps failing if the SCHEDULE changes again, because it reads
+// the copy's own count against vercel.json rather than against a literal.
+function settingsNoteGroup() {
+  const vercel = JSON.parse(
+    fs.readFileSync(path.join(process.cwd(), 'vercel.json'), 'utf8')
+  ) as { crons: { path: string; schedule: string }[] };
+
+  // Both of these import trades. `/api/cron/tradovate-orders` is not only a
+  // stop-order job: import-cron.ts says in as many words that it "ALREADY DOES
+  // EVERYTHING THIS ONE DOES", because it calls the same `syncUserTrades`.
+  const importingCrons = vercel.crons.filter(
+    (entry) =>
+      entry.path === '/api/cron/tradovate-import' ||
+      entry.path === '/api/cron/tradovate-orders'
+  ).length;
+
+  group('the settings card does not deny the background sync it has', [
+    // THE TRIPWIRE.
+    c('(1) the false sentence is gone', SYNC_NOTE.includes('אין סנכרון אוטומטי ברקע'), false),
+    // A cutoff the trader can act on. The hour is inferred rather than
+    // documented (trading-day.ts:40-47), so the copy hedges it — but it has to
+    // NAME one, or the paragraph is a warning with no instruction in it.
+    c('(2) and a cutoff hour is named', /\d{2}:\d{2}/.test(SYNC_NOTE), true),
+    // The copy's count of the nightly passes, read off the config it describes.
+    // Two crons ⇒ "פעמיים". A third would fail here, which is the point.
+    c('(3) the copy counts the nightly passes correctly',
+      [importingCrons, SYNC_NOTE.includes('פעמיים בכל לילה')], [2, true]),
+    // Plain Hebrew for a trader, not an operator's description of a job.
+    c('(4) no technical terms reach the card',
+      ['UTC', 'cron', 'API', 'sync', 'webhook'].filter((term) =>
+        SYNC_NOTE.toLowerCase().includes(term.toLowerCase())),
+      []),
+    // "Lost" would send someone looking for a deleted row. Nothing is deleted:
+    // the trade was never imported, because Tradovate dropped it first.
+    c('(5) it states what makes a trade arrive, not that one was lost',
+      [SYNC_NOTE.includes('תאבד'), SYNC_NOTE.includes('תגיע לכאן רק אם')], [false, true]),
+    // The NinjaTrader compliance line (TodayContextPanel §8). This card may
+    // instruct about app mechanics and does; it may not advise about trading.
+    c('(6) and it is not shaped as trading advice',
+      ['כדאי', 'שים לב', 'אל תסחר', 'מומלץ'].filter((term) => SYNC_NOTE.includes(term)),
+      []),
+  ]);
+}
+
 async function main() {
   await flagGroup();
   await firstImportGroup();
@@ -5487,6 +5547,9 @@ async function main() {
 
   // J1 — the unplanned row's score (REF-107 Stage 3b follow-up).
   scoringGroup();
+
+  // REF-107 follow-up — the settings card's account of how data arrives.
+  settingsNoteGroup();
 
   console.log('');
   if (failures.length > 0) {
