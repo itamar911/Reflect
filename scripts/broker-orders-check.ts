@@ -58,10 +58,19 @@ import {
   candidateOrders,
   deriveStopHistory,
   MAX_ORDER_DEPS_PER_RUN,
+  MAX_WINDOW_CANDIDATES_PER_TRADE,
   readStopHistories,
   type StopEvidence,
   type StopHistory,
 } from '../src/lib/tradovate/orders';
+// The READER of the document, which is browser-safe and pure — so the sentence
+// a trader is actually shown is assertable from the same fixture that produced
+// the document (REF-113 Stage 6).
+import {
+  readStopHistory,
+  stopMoveSentence,
+  stopWasWidened,
+} from '../src/lib/journal/stopHistory';
 import type { BrokerTrade, TradovateReader } from '../src/lib/tradovate/fills';
 import { TradovateRequestError } from '../src/lib/tradovate/errors';
 import type {
@@ -102,6 +111,12 @@ function group(name: string, cases: Case[]) {
 }
 
 const c = (label: string, got: unknown, want: unknown): Case => ({ label, got, want });
+
+/** The one line the trade card would show for this document, and its tone. */
+const sentenceOf = (history: StopHistory): string | null =>
+  stopMoveSentence(readStopHistory(history))?.text ?? null;
+const toneOf = (history: StopHistory): string | null =>
+  stopMoveSentence(readStopHistory(history))?.tone ?? null;
 
 async function captureLogs<T>(run: () => Promise<T>): Promise<{ result: T; lines: string[] }> {
   const lines: string[] = [];
@@ -737,6 +752,12 @@ function wrongSideGroup() {
     c('(7) a short mirrors both tests: its stop is ABOVE the entry',
       [shortTwoStops.initialStop, shortTwoStops.initialStopSide, shortTwoStops.verdict],
       [29_736.75, 'risk', 'kept']),
+    // AND A WRONG-SIDE CANDIDATE IS NOT A CONCURRENT PROTECTIVE STOP (Stage 6).
+    // `stopCount` is read off the risk-side partition, like the verdict and the
+    // prices, so this trade keeps the one real stop it has — and keeps the
+    // from→to range that `stopCount > 1` would have taken away.
+    c('(7b) and a wrong-side sibling does not inflate the protective-order count',
+      [twoSellStops.stopCount, shortTwoStops.stopCount], [1, 1]),
     // The guard. See the comment above `draggedIntoProfit`.
     c('(8) a stop dragged INTO PROFIT is still a risk-side stop — only v1 is tested',
       [draggedIntoProfit.initialStop, draggedIntoProfit.finalStop,
@@ -1268,6 +1289,13 @@ function layerGroup() {
   });
 
   // Layer C: a stop placed by hand after entering, with no bracket anywhere.
+  //
+  // THIS FIXTURE'S EXPECTED ANSWER CHANGED IN STAGE 6 AND IT IS THE TICKET'S
+  // CASE B. The stop is submitted 118 seconds after the position opened, so the
+  // position opened UNPROTECTED — and the old assertion read `initialStop:
+  // STOP_1`, which is `broker_stop_loss`, which is "the stop the position opened
+  // under". It did not open under anything. The stop is still found and still
+  // `'inferred'`; what is new is that the row now says WHEN.
   const manualStop = derive({
     orders: [
       order(ENTRY_ORDER, { action: 'Buy', ordStatus: 'Filled' }),
@@ -1338,9 +1366,14 @@ function layerGroup() {
     c('(1) layer A: the stop that closed the trade needs no bracket',
       [stopWasExit.verdict, stopWasExit.initialStop, stopWasExit.source],
       ['kept', STOP_1, 'linked']),
+    // The price moved from `initialStop` to `lateStop` in Stage 6 — see the
+    // comment on the fixture. `lateStopGroup` is where the whole shape is pinned.
     c('(2) layer C: a hand-placed stop with no bracket is found, as INFERRED',
-      [manualStop.verdict, manualStop.initialStop, manualStop.source],
+      [manualStop.verdict, manualStop.lateStop, manualStop.source],
       ['kept', STOP_1, 'inferred']),
+    c('(2b) and it is reported as a LATE stop, not as the stop the trade opened under',
+      [manualStop.stopAtEntry, manualStop.initialStop, manualStop.initialStopSide],
+      [false, null, null]),
     // Every one of the five was rejected, so the answer is the FINDING `none`
     // and not a stop belonging to somebody else's position.
     c('(3) wrong account, wrong contract, entry side, out of window, too big',
@@ -1502,6 +1535,446 @@ function perOrderVerdictGroup() {
     c('(5) a single-bracket trade still reports stopCount 1 and its own range',
       [derive({ ...BRACKET }).stopCount, derive({ ...BRACKET }).movedCount],
       [1, 2]),
+  ]);
+}
+
+/**
+ * REPLACEMENT STOPS, LATE STOPS AND BARE CANCELS — the tracks model (Stage 6).
+ *
+ * THE TWO CASES THE TICKET NAMES WERE ONE DEFECT AND IT WAS FOUR LINES LONG.
+ * Neither was missed by the read, by the attribution layers, or by a missing
+ * endpoint: both were already IN the candidate set and both were thrown away by
+ * one gate, which chose between the linked orders and all of them before
+ * anything was compared.
+ *
+ *   - **Case A.** The bracket stop is cancelled and a new sell-stop replaces it.
+ *     The cancelled order is still in `/order/list` (deliberately —
+ *     ./types.ts), so a linked stop existed, so the replacement was dropped
+ *     unexamined and the verdict was read off a cancelled order with ONE
+ *     version: `kept`, `movedCount: 0`. ./import.ts then wrote `moved_sl =
+ *     false` and `tradeScore` paid the full twelve discipline points for it —
+ *     ON A WIDENING. Fixture (2) is that trade and it asserts the whole chain.
+ *   - **Case B.** No stop at entry, a take-profit in the bracket, the stop typed
+ *     in by hand afterwards. `linkedTargets.length === 1` closed the same gate
+ *     from the other side, the late stop was discarded, and the row said
+ *     `'none'` — "you traded without a stop". Fixture (6) is the one that proves
+ *     the gate was the bug: it is `'none'` with a target before this stage.
+ *
+ * AND EVERY FIXTURE HERE IS PAIRED WITH THE SHAPE IT MUST NOT FIRE ON, because
+ * the model's whole risk is in the other direction: `direction` arms
+ * `moved_sl_widened_last_trade`, whose action can be `block_day`, and a widening
+ * this module INVENTED would lock a trader out of the app over something they
+ * did not do. (5) is paired with (5b) on the cancel instant, (7) with the OCO
+ * cancel that follows every hand-flattened trade, (8) with the scale-out that
+ * looks identical to a coverage drop, and (9) with two real brackets.
+ *
+ * Prices are symbolic: `E` is the entry, `S_1 < S_2 < E` below it on a long,
+ * and `S_LOW < S_1` is the widening.
+ */
+function tracksGroup() {
+  const E = ENTRY_PRICE;
+  const S_LOW = 4500.0; // below STOP_1 — the widening
+  const FILL = TRADE.openedAtMs;
+  /** When the original stop was cancelled, mid-trade and well before the close. */
+  const CANCEL_AT = FILL + 100_000;
+  /** When the replacement was submitted. After the cancel, so it chains. */
+  const REPLACED_AT = FILL + 120_000;
+
+  const REPLACEMENT = 78_001;
+  const REPLACEMENT_2 = 78_002;
+  const LATE_ORDER = 78_010;
+  const STOP_LEG = 78_020;
+
+  const at = (ms: number) => new Date(ms).toISOString();
+
+  /** The entry and the hand-flatten that closed it. Every fixture has these. */
+  const bookends = [
+    order(ENTRY_ORDER, { action: 'Buy', ordStatus: 'Filled' }),
+    order(EXIT_ORDER, { ordStatus: 'Filled', timestamp: at(CLOSED - 1_000) }),
+  ];
+  const bookendVersions = [
+    version(90_001, ENTRY_ORDER, { orderType: 'Market', orderQty: 1 }),
+    version(90_006, EXIT_ORDER, { orderType: 'Market', orderQty: 1 }),
+  ];
+
+  /**
+   * One command per version PLUS ONE — the cancel, which mints no version and is
+   * last. That spare is the whole clock the tracks model runs on: it dates the
+   * cancel, which is what makes "this order replaced that one" a statement about
+   * CONCURRENCY rather than a guess about two orders that happen to be adjacent.
+   */
+  const cancelledAt = (ms: number) => [FILL - 1_000, ms];
+
+  // ── (1) A replacement that TIGHTENED ─────────────────────────────────────
+  // The bracket's stop at S_1 cancelled, a new sell-stop at S_2 — closer to the
+  // entry — placed by hand afterwards. ONE stop, two orders, one move.
+  const replacementBase = {
+    orders: [
+      ...bookends,
+      order(STOP_ORDER, { ordStatus: 'Canceled' }),
+      order(REPLACEMENT, { ordStatus: 'Canceled', timestamp: at(REPLACED_AT) }),
+    ],
+    links: [ENTRY_ORDER, STOP_ORDER],
+    commandTimes: { [STOP_ORDER]: cancelledAt(CANCEL_AT) },
+  };
+  const replacementVersions = (price: number) => [
+    ...bookendVersions,
+    version(90_002, STOP_ORDER, { orderType: 'Stop', stopPrice: STOP_1, orderQty: 1 }),
+    version(90_050, REPLACEMENT, { orderType: 'Stop', stopPrice: price, orderQty: 1 }),
+  ];
+
+  const tighten = derive({ ...replacementBase, versions: replacementVersions(STOP_2) });
+
+  // ── (2) The same shape, WIDENED — the −12 and `block_day` path ───────────
+  const widen = derive({ ...replacementBase, versions: replacementVersions(S_LOW) });
+  // What ./import.ts' `fillWhenEmpty` reads to decide `moved_sl`: the verdict
+  // and the trailing flag, and nothing else. `'moved'` and not trailing is
+  // `moved_sl = true`, which is the twelve points this trade was collecting.
+  const movedSlOf = (history: StopHistory): boolean | null =>
+    history.verdict === 'moved' && !history.trailing
+      ? true
+      : history.verdict === 'kept'
+        ? false
+        : null;
+
+  // ── (3) A LATE stop: nothing at the fill, a sell-stop by hand afterwards ──
+  const lateStop = derive({
+    orders: [
+      ...bookends,
+      order(LATE_ORDER, { ordStatus: 'Canceled', timestamp: at(REPLACED_AT) }),
+    ],
+    versions: [
+      ...bookendVersions,
+      version(90_060, LATE_ORDER, { orderType: 'Stop', stopPrice: STOP_1, orderQty: 1 }),
+    ],
+    links: [ENTRY_ORDER],
+  });
+
+  // ── (4) Partial coverage: one stop replaced by TWO legs ──────────────────
+  // A long of three. The three-lot stop at S_1 is cancelled and replaced by a
+  // one-lot at S_LOW and a two-lot at the entry. ONE stop that became TWO, so
+  // the root seeds both tracks and each leg is a move of it — one out, one in.
+  const THREE: BrokerTrade = {
+    ...TRADE,
+    qty: 3,
+    stages: { entries: [{ qty: 3, price: E }], exits: [{ qty: 3, price: 4518.5 }] },
+  };
+  const split = derive({
+    trade: THREE,
+    orders: [
+      order(ENTRY_ORDER, { action: 'Buy', ordStatus: 'Filled' }),
+      order(EXIT_ORDER, { ordStatus: 'Filled', timestamp: at(CLOSED - 1_000) }),
+      order(STOP_ORDER, { ordStatus: 'Canceled' }),
+      order(REPLACEMENT, { ordStatus: 'Canceled', timestamp: at(REPLACED_AT) }),
+      order(REPLACEMENT_2, { ordStatus: 'Canceled', timestamp: at(REPLACED_AT + 1_000) }),
+    ],
+    versions: [
+      version(90_001, ENTRY_ORDER, { orderType: 'Market', orderQty: 3 }),
+      version(90_006, EXIT_ORDER, { orderType: 'Market', orderQty: 3 }),
+      version(90_002, STOP_ORDER, { orderType: 'Stop', stopPrice: STOP_1, orderQty: 3 }),
+      version(90_050, REPLACEMENT, { orderType: 'Stop', stopPrice: S_LOW, orderQty: 1 }),
+      version(90_051, REPLACEMENT_2, { orderType: 'Stop', stopPrice: E, orderQty: 2 }),
+    ],
+    links: [ENTRY_ORDER, STOP_ORDER],
+    commandTimes: { [STOP_ORDER]: cancelledAt(CANCEL_AT) },
+  });
+  /** Every price the document states anywhere. A blend must appear in none. */
+  const pricesOf = (history: StopHistory): number[] => [
+    ...(history.initialStop === null ? [] : [history.initialStop]),
+    ...(history.finalStop === null ? [] : [history.finalStop]),
+    ...(history.lateStop === null ? [] : [history.lateStop]),
+    ...history.versions.map((entry) => entry.stopPrice),
+  ];
+  /** The two numbers §3.4 forbids: the mean, and the quantity-weighted mean. */
+  const MEAN = (S_LOW + E) / 2;
+  const WEIGHTED = (S_LOW * 1 + E * 2) / 3;
+
+  // ── (5) A cancel with NOTHING in its place ───────────────────────────────
+  // The trader pulled the stop mid-trade and rode the rest naked. One widening
+  // step, and it has no "to" price.
+  const bareBase = {
+    orders: [...bookends, order(STOP_ORDER, { ordStatus: 'Canceled' })],
+    versions: [
+      ...bookendVersions,
+      version(90_002, STOP_ORDER, { orderType: 'Stop', stopPrice: STOP_1, orderQty: 1 }),
+    ],
+    links: [ENTRY_ORDER, STOP_ORDER],
+  };
+  const bareCancel = derive({
+    ...bareBase,
+    commandTimes: { [STOP_ORDER]: cancelledAt(CANCEL_AT) },
+  });
+
+  // (5b) THE PAIR THAT PINS THE FAIL-MUTE RULE. The same fixture with the
+  // command list one short, so the cancel cannot be dated — and an undated
+  // cancel is not a widening we are entitled to report.
+  const bareUntimed = derive({
+    ...bareBase,
+    commandTimes: { [STOP_ORDER]: [FILL - 1_000] },
+  });
+
+  // ── (6) Case B's real shape: a late stop BEHIND A LINKED TAKE-PROFIT ─────
+  // THE FIXTURE THAT PROVES THE GATE WAS THE BUG. Before this stage the linked
+  // target closed the window layer, so the hand-placed stop was never looked at
+  // and the row read `'none'` with a target set: "you traded without a stop",
+  // on evidence that held the stop.
+  const lateWithTarget = derive({
+    orders: [
+      ...bookends,
+      order(TARGET_ORDER, { ordStatus: 'Canceled' }),
+      order(LATE_ORDER, { ordStatus: 'Canceled', timestamp: at(REPLACED_AT) }),
+    ],
+    versions: [
+      ...bookendVersions,
+      version(90_005, TARGET_ORDER, { orderType: 'Limit', price: TARGET, orderQty: 1 }),
+      version(90_060, LATE_ORDER, { orderType: 'Stop', stopPrice: STOP_1, orderQty: 1 }),
+    ],
+    links: [ENTRY_ORDER, TARGET_ORDER],
+  });
+
+  // ── (7) The OCO cancel behind a hand-flatten ─────────────────────────────
+  // THE MOST COMMON TERMINAL SHAPE IN THE WHOLE INTEGRATION, and it is
+  // innocent: the trader closes by hand and the bracket cancels the stop behind
+  // them, within seconds of the close. The margin against `closedAtMs` is what
+  // keeps (5) off it.
+  const flattenCancelsOco = derive({
+    ...bareBase,
+    commandTimes: { [STOP_ORDER]: cancelledAt(CLOSED - 5_000) },
+  });
+
+  // ── (8) A scale-out that reduces coverage ────────────────────────────────
+  // A long of three in two stop legs. The trader exits one contract and the
+  // one-lot leg is cancelled behind it — a DATED cancel, mid-trade, exactly the
+  // shape (5) fires on. It must not fire here: telling a scale-out from a
+  // trader pulling their stop needs the position size at that instant, which
+  // needs per-leg fill instants `BrokerTrade` does not carry. Mute.
+  const scaleOut = derive({
+    trade: THREE,
+    orders: [
+      order(ENTRY_ORDER, { action: 'Buy', ordStatus: 'Filled' }),
+      order(EXIT_ORDER, { ordStatus: 'Filled', timestamp: at(CLOSED - 1_000) }),
+      order(STOP_ORDER, { ordStatus: 'Canceled' }),
+      order(STOP_LEG, { ordStatus: 'Canceled' }),
+    ],
+    versions: [
+      version(90_001, ENTRY_ORDER, { orderType: 'Market', orderQty: 3 }),
+      version(90_006, EXIT_ORDER, { orderType: 'Market', orderQty: 3 }),
+      version(90_002, STOP_ORDER, { orderType: 'Stop', stopPrice: STOP_1, orderQty: 2 }),
+      version(90_070, STOP_LEG, { orderType: 'Stop', stopPrice: STOP_1, orderQty: 1 }),
+    ],
+    links: [ENTRY_ORDER, STOP_ORDER, STOP_LEG],
+    // Only the cancelled LEG is dated, so nothing can chain and the bare-cancel
+    // rule has a live sibling track to see.
+    commandTimes: { [STOP_LEG]: cancelledAt(CANCEL_AT) },
+  });
+
+  // ── (9) Two real brackets, both cancelled, BOTH DATED ────────────────────
+  // THE REGRESSION GUARD, and the strongest form of it. A scaled-in long whose
+  // two brackets are cancelled by the flatten that closed the trade: both
+  // cancels are datable, so the only thing standing between two stops and one
+  // invented chain is CONCURRENCY — neither was submitted after the other had
+  // ended. Chained, bracket two's first price would read as a move of bracket
+  // one's, on a trade where the trader touched nothing (REF-117 §6.2).
+  const ENTRY_2 = ENTRY_ORDER + 20;
+  const STOP_2_ORDER = STOP_ORDER + 20;
+  const twoBrackets = derive({
+    trade: {
+      ...TRADE,
+      qty: 2,
+      entryPrice: 4510.5,
+      entryOrderIds: [ENTRY_ORDER, ENTRY_2, EXIT_ORDER],
+    },
+    orders: [
+      order(ENTRY_ORDER, { action: 'Buy', ordStatus: 'Filled' }),
+      order(ENTRY_2, { action: 'Buy', ordStatus: 'Filled', timestamp: at(SUBMITTED + 5_000) }),
+      order(STOP_ORDER, { ordStatus: 'Canceled' }),
+      order(STOP_2_ORDER, { ordStatus: 'Canceled', timestamp: at(SUBMITTED + 5_000) }),
+      order(EXIT_ORDER, { ordStatus: 'Filled', timestamp: at(CLOSED - 1_000) }),
+    ],
+    versions: [
+      version(90_001, ENTRY_ORDER, { orderType: 'Market', orderQty: 1 }),
+      version(90_010, ENTRY_2, { orderType: 'Market', orderQty: 1 }),
+      version(90_002, STOP_ORDER, { orderType: 'Stop', stopPrice: 4504, orderQty: 1 }),
+      version(90_020, STOP_2_ORDER, { orderType: 'Stop', stopPrice: 4506, orderQty: 1 }),
+      version(90_006, EXIT_ORDER, { orderType: 'Market', orderQty: 2 }),
+    ],
+    links: [ENTRY_ORDER, ENTRY_2, STOP_ORDER, STOP_2_ORDER],
+    commandTimes: {
+      [STOP_ORDER]: cancelledAt(CLOSED - 2_000),
+      [STOP_2_ORDER]: cancelledAt(CLOSED - 2_000),
+    },
+  });
+
+  group('REF-113 Stage 6: a cancelled stop and its replacement are ONE stop', [
+    // ── Case A ──────────────────────────────────────────────────────────────
+    c('(1) a replacement closer to the entry is ONE stop tightened once',
+      [tighten.verdict, tighten.direction, tighten.movedCount, tighten.stopCount],
+      ['moved', 'tightened', 1, 1]),
+    c('(1b) the prices span both orders, and the evidence list says so',
+      [tighten.initialStop, tighten.finalStop, tighten.versions.map((v) => v.stopPrice)],
+      [STOP_1, STOP_2, [STOP_1, STOP_2]]),
+    c('(1c) the stop was there at the open, and the weakest link decides `source`',
+      [tighten.stopAtEntry, tighten.lateStop, tighten.source], [true, null, 'inferred']),
+    // THE WHOLE POINT OF THE STAGE. Before it: `kept`, `movedCount: 0`,
+    // `moved_sl = false`, +12 points, on a trade whose risk grew.
+    c('(2) REGRESSION, Case A: a replacement FURTHER out is a widening',
+      [widen.verdict, widen.direction, widen.movedCount, widen.finalStop],
+      ['moved', 'widened', 1, S_LOW]),
+    c('(2b) and it reaches `stopWasWidened` — the −12 and `block_day` path',
+      [stopWasWidened(widen), stopWasWidened(tighten)], [true, false]),
+    c('(2c) and `fillWhenEmpty` would write moved_sl TRUE, not false',
+      [movedSlOf(widen), movedSlOf(tighten)], [true, true]),
+
+    // ── Case B ──────────────────────────────────────────────────────────────
+    c('(3) a stop placed after the fill is `kept`, with NO initial stop',
+      [lateStop.verdict, lateStop.stopAtEntry, lateStop.initialStop,
+       lateStop.initialStopSide, lateStop.movedCount],
+      ['kept', false, null, null, 0]),
+    c('(3b) the price is on `lateStop`, which `broker_stop_loss` never holds',
+      [lateStop.lateStop, lateStop.finalStop], [STOP_1, STOP_1]),
+    // The order's own submission answered, which needs no positional pairing —
+    // and this fixture supplies no commands at all.
+    c('(3c) the clock DID answer, off the order and not off the versions',
+      [lateStop.anchoredAtFill, lateStop.preFillVersions], [true, 0]),
+    c('(3d) and nothing was covered at the open',
+      [lateStop.coveredQty, lateStop.partialCoverage], [0, true]),
+    // THE FIXTURE THAT PROVES `useWindow` WAS THE BUG.
+    c('(6) REGRESSION, Case B: a linked TARGET no longer hides a late stop',
+      [lateWithTarget.verdict, lateWithTarget.noStopPlaced, lateWithTarget.stopAtEntry,
+       lateWithTarget.lateStop, lateWithTarget.initialTarget],
+      ['kept', false, false, STOP_1, TARGET]),
+
+    // ── Partial coverage ────────────────────────────────────────────────────
+    c('(4) one stop split into two legs is TWO tracks sharing one root',
+      [split.stopCount, split.movedCount, split.direction], [2, 2, 'mixed']),
+    c('(4b) the reported price is the highest-risk leg, never a blend',
+      [split.finalStop, pricesOf(split).includes(MEAN), pricesOf(split).includes(WEIGHTED)],
+      [S_LOW, false, false]),
+    // The position opened under the three-lot stop, so that is what
+    // `broker_stop_loss` holds — and coverage is summed over DISTINCT roots, or
+    // one root claimed by two tracks would report six contracts covered by three.
+    c('(4c) the initial stop is still the one the position OPENED under',
+      [split.initialStop, split.stopAtEntry, split.coveredQty, split.partialCoverage],
+      [STOP_1, true, 3, false]),
+    c('(4d) and two tracks drop the from→to range from the sentence',
+      sentenceOf(split), 'הסטופ הוזז 2 פעמים — גם הורחק וגם הודק (2 פקודות הגנה)'),
+
+    // ── The bare cancel, and the three shapes it must not fire on ───────────
+    c('(5) a DATED cancel with nothing in its place is one widening',
+      [bareCancel.verdict, bareCancel.movedCount, bareCancel.direction,
+       bareCancel.cancelledUnreplaced],
+      ['moved', 1, 'widened', true]),
+    // A widening with no "to" price, so the sentence must not print a range —
+    // "from 4504 to 4504" is a range describing a cancellation.
+    c('(5a) and it gets its own sentence rather than a range from a price to itself',
+      [sentenceOf(bareCancel), toneOf(bareCancel)],
+      ['הסטופ בוטל ולא הוצב סטופ אחר', 'warning']),
+    c('(5b) PAIR: an UNDATED cancel is not a widening we may report',
+      [bareUntimed.verdict, bareUntimed.movedCount, bareUntimed.direction,
+       bareUntimed.cancelledUnreplaced],
+      ['kept', 0, null, false]),
+    c('(7) PAIR: the OCO cancel behind a hand-flatten is not a widening',
+      [flattenCancelsOco.verdict, flattenCancelsOco.movedCount,
+       flattenCancelsOco.direction, flattenCancelsOco.cancelledUnreplaced],
+      ['kept', 0, null, false]),
+    c('(8) PAIR: a scale-out that cancels a leg is not a widening either',
+      [scaleOut.verdict, scaleOut.movedCount, scaleOut.direction,
+       stopWasWidened(scaleOut)],
+      ['kept', 0, null, false]),
+    c('(8b) and the coverage it changed is recorded as a FACT, not a direction',
+      [scaleOut.stopCount, scaleOut.coveredQty, scaleOut.partialCoverage],
+      [2, 3, false]),
+
+    // ── The regression guard ────────────────────────────────────────────────
+    c('(9) two brackets with DATED cancels are still two stops, not a chain',
+      [twoBrackets.verdict, twoBrackets.movedCount, twoBrackets.direction,
+       twoBrackets.stopCount],
+      ['kept', 0, null, 2]),
+    c('(9b) and the prices are the most-risk bracket\'s alone, not concatenated',
+      [twoBrackets.initialStop, twoBrackets.finalStop,
+       twoBrackets.versions.map((v) => v.stopPrice)],
+      [4504, 4504, [4504]]),
+  ]);
+}
+
+/**
+ * The two answers that must never be `'none'`, and neither is a timeline
+ * question (REF-113 Stage 6, §2.3 and §1.7).
+ */
+function neverNoneGroup() {
+  const at = (ms: number) => new Date(ms).toISOString();
+
+  // ── A candidate we READ and could not classify ───────────────────────────
+  // `orderTypeOf` answers null when no version names a type, and such an order
+  // falls out of both `stops` and `targets`. Before Stage 6 `missing` was set
+  // only when the versions were never ASKED for — so "we read them and they
+  // stated no `orderType`" reached `'none'`, `noStopPlaced: true`: the trader
+  // told they traded without a stop on evidence that said nothing at all.
+  const typeless = derive({
+    orders: [
+      order(ENTRY_ORDER, { action: 'Buy', ordStatus: 'Filled' }),
+      order(EXIT_ORDER, { ordStatus: 'Filled', timestamp: at(CLOSED - 1_000) }),
+      order(STOP_ORDER, { ordStatus: 'Canceled' }),
+    ],
+    versions: [
+      version(90_001, ENTRY_ORDER, { orderType: 'Market', orderQty: 1 }),
+      version(90_006, EXIT_ORDER, { orderType: 'Market', orderQty: 1 }),
+      // Read successfully. States a stop price and no type.
+      version(90_002, STOP_ORDER, { stopPrice: STOP_1, orderQty: 1 }),
+    ],
+    links: [ENTRY_ORDER, STOP_ORDER],
+  });
+
+  // ── The per-trade fan-out cap ────────────────────────────────────────────
+  // A ladder-dragging front-end that implements every drag as cancel + replace:
+  // twenty drags are twenty orders and twenty `deps` calls on ONE cycle. The cap
+  // costs that trader an `'unknown'` instead of costing every trade in the run
+  // its budget — and `'capped'` is transient, so the row is retried.
+  const ladder = (count: number) =>
+    derive({
+      orders: [
+        order(ENTRY_ORDER, { action: 'Buy', ordStatus: 'Filled' }),
+        order(EXIT_ORDER, { ordStatus: 'Filled', timestamp: at(CLOSED - 1_000) }),
+        ...Array.from({ length: count }, (_, i) =>
+          order(79_000 + i, { ordStatus: 'Canceled', timestamp: at(TRADE.openedAtMs + i * 1_000) })
+        ),
+      ],
+      versions: [
+        version(90_001, ENTRY_ORDER, { orderType: 'Market', orderQty: 1 }),
+        version(90_006, EXIT_ORDER, { orderType: 'Market', orderQty: 1 }),
+        ...Array.from({ length: count }, (_, i) =>
+          version(92_000 + i, 79_000 + i, {
+            orderType: 'Stop',
+            stopPrice: STOP_1 - i * 0.25,
+            orderQty: 1,
+          })
+        ),
+      ],
+      links: [ENTRY_ORDER],
+    });
+
+  const atCap = ladder(MAX_WINDOW_CANDIDATES_PER_TRADE);
+  const overCap = ladder(MAX_WINDOW_CANDIDATES_PER_TRADE + 1);
+
+  group('the two answers that must never be `none`', [
+    // §2.3. One line, and it is a false "you traded without a stop".
+    c('(1) versions that were READ but state no order type are UNKNOWN',
+      [typeless.verdict, typeless.noStopPlaced, typeless.initialStop],
+      ['unknown', false, null]),
+    // §1.7, mitigation 2. Over the cap the answer is `'unknown'` outright and
+    // not a verdict read off the first twelve: a chain with holes in it can
+    // compare two prices that were never consecutive, which is a widening this
+    // module would have invented.
+    // AT the cap the trade is answered normally. Nothing chains in this fixture
+    // — no cancel in it is datable — so twelve orders are twelve PARALLEL stops,
+    // which is what `stopCount` says and is why the answer is `kept`.
+    c('(2) at the cap the trade is still answered, as twelve parallel stops',
+      [atCap.verdict, atCap.reason, atCap.stopCount], ['kept', null, 12]),
+    c('(3) over it the answer is UNKNOWN and capped, never `none`',
+      [overCap.verdict, overCap.reason, overCap.capped, overCap.noStopPlaced],
+      ['unknown', 'capped', true, false]),
+    c('(4) and the cap is a constant, not a magic number in a loop',
+      MAX_WINDOW_CANDIDATES_PER_TRADE, 12),
   ]);
 }
 
@@ -1940,6 +2413,8 @@ async function main() {
   trailingGroup();
   layerGroup();
   perOrderVerdictGroup();
+  tracksGroup();
+  neverNoneGroup();
   unknownGroup();
   await readerGroup();
   await readerFailureGroup();

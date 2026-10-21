@@ -22,18 +22,25 @@
  * NULL SHOWS NOTHING, AND THAT IS THE WHOLE POINT OF THE COLUMN
  * ------------------------------------------------------------
  *
- * There are FOUR answers and a reader that collapses any two of them is the bug
+ * There are FIVE answers and a reader that collapses any two of them is the bug
  * this ticket exists to prevent:
  *
  *   NULL / unreadable  we never looked          → SAY NOTHING
  *   `'none'`           we looked, no stop       → "לא הוצב סטופ בעסקה הזו"
  *   `'kept'`           we looked, never moved   → "הסטופ לא הוזז"
  *   `'unknown'`        we looked, could not tell → "לא הצלחנו לקרוא..."
+ *   `stopAtEntry: false`  a stop, but not at the open → "נכנסת בלי סטופ..."
  *
- * The last two are the pair that matters. Without a distinct sentence for
- * `'unknown'` it reads exactly like `'kept'` — a trader would be told their
- * stop stayed put on the strength of a read that failed, which is a claim about
- * their discipline made out of our own missing data.
+ * `'kept'` AND `'unknown'` ARE THE PAIR THAT MATTERS. Without a distinct
+ * sentence for `'unknown'` it reads exactly like `'kept'` — a trader would be
+ * told their stop stayed put on the strength of a read that failed, which is a
+ * claim about their discipline made out of our own missing data.
+ *
+ * THE FIFTH IS REF-113 STAGE 6 AND IT IS NOT A VERDICT. A late stop is `'kept'`
+ * or `'moved'` like any other stop that existed; what it is not is a stop the
+ * position opened under. See {@link StoredStopHistory.stopAtEntry} for why that
+ * lives beside the verdict rather than inside it, and why its absence is a third
+ * state rather than a `true`.
  *
  *
  * TIGHTENING IS NOT A FAILING (Imri, 19.10)
@@ -102,8 +109,55 @@ export interface StoredStopHistory {
    * bracket, so {@link initialStop} and {@link finalStop} describe ONE of
    * several real stops — the one that stated the most risk — while
    * {@link movedCount} and {@link direction} span all of them.
+   *
+   * AND IT COUNTS CONCURRENT STOPS RATHER THAN ORDERS SINCE STAGE 6, which
+   * changed the writer and needed nothing here: a cancelled stop and the order
+   * that replaced it are one stop, so a single stop moved once still reports
+   * `1` and still keeps its range. Every branch below reads only `> 1`.
    */
   stopCount: number | null;
+  /**
+   * Whether a protective stop was in force WHEN THE POSITION OPENED, or null
+   * (REF-113 Stage 6).
+   *
+   * **NULL IS "WE DO NOT KNOW", AND IT MUST NOT BECOME `true`.** Every row
+   * written before Stage 6 carries no such key and there is no backfill, so
+   * resolving the absence to `true` would state that each of those positions
+   * opened protected — which is the claim the field exists to be able to deny.
+   * {@link stopMoveSentence} therefore branches on `=== false` and never on
+   * falsiness.
+   *
+   * `false` IS THE FINDING: a stop existed in this trade and the position was
+   * not protected when it opened. It is not the same thing as
+   * `verdict === 'none'`, which is "no stop at any point", and the sentence for
+   * the two is different because the trader did two different things.
+   */
+  stopAtEntry: boolean | null;
+  /**
+   * The first stop placed after the position opened, when there was none at the
+   * open. Null otherwise (REF-113 Stage 6).
+   *
+   * DELIBERATELY NOT WHAT `broker_stop_loss` HOLDS, and {@link brokerStopToShow}
+   * will not offer it: that column and that panel are "the stop the position
+   * opened under", beside the stop the trader planned, and there was none.
+   */
+  lateStop: number | null;
+  /**
+   * The trade's only protective stop was cancelled with nothing in its place
+   * (REF-113 Stage 6).
+   *
+   * THE SENTENCE CANNOT BE WRITTEN WITHOUT THIS FIELD. A cancellation is counted
+   * as a widening — the trader rode the rest of the position with no stop — and
+   * it is a widening WITH NO "TO" PRICE, while {@link finalStop} still holds the
+   * last price the stop was submitted at. Without this flag the row renders as
+   * "הסטופ הורחק מנקודת הכניסה (מ-4504 ל-4504)", a from→to range describing a
+   * cancellation. {@link stopMoveSentence} gives it its own words instead.
+   *
+   * A PLAIN BOOLEAN, unlike {@link stopAtEntry}: an absent key and a `false`
+   * withhold the same sentence, so there is nothing a third state could tell a
+   * reader that it does not already know.
+   */
+  cancelledUnreplaced: boolean;
 }
 
 type Raw = Record<string, unknown>;
@@ -167,6 +221,14 @@ export function readStopHistory(value: unknown): StoredStopHistory | null {
     // states it, and one that does not is a document from before the count
     // existed.
     stopCount: num(raw.stopCount),
+    // THREE STATES, AND THE ABSENT ONE IS NOT `true`. A strict test on both
+    // booleans rather than a cast or a `=== true` with a `?? true` behind it:
+    // the rows that carry no key are rows from before the measurement existed,
+    // and they are not entitled to say the position opened protected.
+    stopAtEntry:
+      raw.stopAtEntry === true ? true : raw.stopAtEntry === false ? false : null,
+    lateStop: num(raw.lateStop),
+    cancelledUnreplaced: raw.cancelledUnreplaced === true,
   };
 }
 
@@ -265,6 +327,13 @@ export interface StopSentence {
  *      definition and a later branch would read them.
  *   2. `'none'` next: with no stop there is nothing to have moved, and the
  *      trailing flag and the direction are both meaningless.
+ *   2b. `stopAtEntry === false` next (REF-113 Stage 6): the trader entered
+ *      UNPROTECTED and the stop arrived afterwards, which outranks anything
+ *      that happened to it later — and there are no prices to quote, because
+ *      `initialStop` is null on a late stop by construction.
+ *   2c. `cancelledUnreplaced` next (REF-113 Stage 6): the stop was pulled and
+ *      nothing replaced it, which is the final state of the trade's risk — and
+ *      the one `'moved'` shape whose step has no "to" price to quote.
  *   3. `trailing` ahead of the direction, because a trailing stop's steps are
  *      the SERVER'S. Reporting them as "the stop was tightened" would credit
  *      the trader with a decision they did not take — and `moved_sl` is
@@ -292,6 +361,51 @@ export function stopMoveSentence(history: StoredStopHistory | null): StopSentenc
 
   if (history.verdict === 'none') {
     return { text: 'לא הוצב סטופ בעסקה הזו', tone: 'warning' };
+  }
+
+  // ── ENTERED WITHOUT A STOP (REF-113 Stage 6) ─────────────────────────────
+  //
+  // AHEAD OF `trailing` AND OF THE DIRECTION, because it is the first thing
+  // about the trade: a stop that arrived after the position did is the headline,
+  // and "the stop was tightened" told on its own would describe the management
+  // of a risk the trader was not carrying when they took it on.
+  //
+  // `=== false` AND NOT `!history.stopAtEntry`. Null is "we do not know" — every
+  // row written before this stage — and a falsiness test would announce this
+  // finding on every one of them.
+  //
+  // `warning` FOR BOTH, consistently with the tone's own definition: it is
+  // reserved for the things that COST the trader something, and the measured
+  // seconds or minutes between the fill and the stop are seconds or minutes of
+  // unbounded risk.
+  //
+  // AND NO PRICES ON EITHER, which falls out of {@link StoredStopHistory}
+  // rather than being withheld here: `initialStop` is null on a late stop, so
+  // there is no "from" for a from→to range to start at. The two sentences say
+  // what happened in words, which is what the trader can check against their
+  // own memory of the trade.
+  if (history.stopAtEntry === false) {
+    return {
+      text:
+        history.movedCount > 0
+          ? 'נכנסת בלי סטופ — הסטופ הוצב אחרי הכניסה והוזז לאחר מכן'
+          : 'נכנסת בלי סטופ — הסטופ הוצב אחרי הכניסה',
+      tone: 'warning',
+    };
+  }
+
+  // ── THE STOP WAS CANCELLED AND NOTHING TOOK ITS PLACE (Stage 6) ──────────
+  //
+  // AHEAD OF THE DIRECTION FOR THE SAME REASON THE LATE STOP IS: it is the
+  // final state of the risk, and "the stop was widened" is a true but much
+  // smaller thing to say about a trade that finished with no stop at all.
+  //
+  // AND IT IS THE ONE `'moved'` SHAPE WITH NO PRICES TO QUOTE. The step has no
+  // "to" price — a cancellation states none — so this branch returns before the
+  // range below can pair `finalStop` with `initialStop` and describe the
+  // cancellation as a move from a price to itself.
+  if (history.cancelledUnreplaced) {
+    return { text: 'הסטופ בוטל ולא הוצב סטופ אחר', tone: 'warning' };
   }
 
   // SEVERAL PROTECTIVE ORDERS, WHICH REPLACES THE PRICES RATHER THAN THE WORDS.

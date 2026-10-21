@@ -4261,8 +4261,18 @@ const MOVED_HISTORY: StopHistory = {
   anchoredAtFill: true,
   otherTargets: [],
   // One bracket, which is what the measured trade had and what every fixture
-  // here is a departure from (REF-113 Stage 5).
+  // here is a departure from (REF-113 Stage 5). ONE TRACK since Stage 6 — the
+  // stop was dragged rather than cancelled and replaced, so the count is the
+  // same number for the same trade.
   stopCount: 1,
+  // The bracket was submitted with the entry, so the position opened protected
+  // and there is no late stop to report (REF-113 Stage 6). One contract, fully
+  // covered.
+  stopAtEntry: true,
+  lateStop: null,
+  coveredQty: 1,
+  partialCoverage: false,
+  cancelledUnreplaced: false,
 };
 
 const KEPT_HISTORY: StopHistory = {
@@ -4289,6 +4299,35 @@ const NONE_HISTORY: StopHistory = {
   // No protective order to count. Zero and one are different claims, and
   // neither is "we did not look" — that is the column being NULL.
   stopCount: 0,
+  // No stop at ANY point in the cycle, so none at the open either (REF-113
+  // Stage 6). The pair of fields is what tells this from the trade that got a
+  // stop late: that one carries `stopAtEntry: false` with `noStopPlaced: false`.
+  stopAtEntry: false,
+  lateStop: null,
+  coveredQty: 0,
+  partialCoverage: true,
+};
+
+/**
+ * The trader entered and placed the stop afterwards. REF-113 Stage 6, Case B.
+ *
+ * A STOP EXISTED, SO THE VERDICT IS `'kept'` AND NOT `'none'` — and `initialStop`
+ * is null all the same, because `broker_stop_loss` is "the stop the position
+ * OPENED under" and the position opened under nothing. The price is on
+ * `lateStop`, which no column holds and which the sentence reads.
+ */
+const LATE_HISTORY: StopHistory = {
+  ...KEPT_HISTORY,
+  initialStop: null,
+  initialStopSide: null,
+  finalStop: 4504,
+  stopAtEntry: false,
+  lateStop: 4504,
+  preFillVersions: 0,
+  anchoredAtFill: true,
+  source: 'inferred',
+  coveredQty: 0,
+  partialCoverage: true,
 };
 
 /** We could not read the orders. NOT the same claim as NONE_HISTORY. */
@@ -4479,6 +4518,21 @@ async function stopNotDeletedGroup() {
   });
   const noneRow = none.rows[0] ?? {};
 
+  // REF-113 Stage 6. A stop that arrived after the position did: the document is
+  // stored, `moved_sl` is written because a stop existed and was not moved, and
+  // the PRICE COLUMN IS OMITTED rather than nulled — which needed no code in
+  // ./import.ts, because it already omits it whenever `initialStop` is null.
+  const late = new FakeDb();
+  await quietImport({
+    client: late.client(),
+    userId: USER,
+    trades: [TRADE],
+    isTradeSource: true,
+    env: ON,
+    stopHistories: historyFor(TRADE, LATE_HISTORY),
+  });
+  const lateRow = late.rows[0] ?? {};
+
   group('a run that could not read the orders never erases one that could', [
     c('(1) a pull with no stop history sends ZERO statements', nightly.unchanged, 1),
     c('(2) and the stored history is untouched',
@@ -4508,6 +4562,28 @@ async function stopNotDeletedGroup() {
     // already filter `!== null`.
     c('(7) and `none` leaves moved_sl unnamed — NULL, not false',
       ['moved_sl', 'kept_sl'].filter((column) => column in noneRow), []),
+
+    // ── REF-113 Stage 6: the late stop ──────────────────────────────────────
+    //
+    // THE COLUMN IS OMITTED AND NOT NULLED, which is the same discipline every
+    // other absent price here keeps: a NULL would erase whatever an earlier run
+    // had captured, and this number was never `broker_stop_loss`'s to hold.
+    c('(8) a LATE stop names no broker_stop_loss, and does not null it either',
+      ['broker_stop_loss' in lateRow, lateRow.broker_stop_loss ?? 'absent'],
+      [false, 'absent']),
+    c('(8b) but the document IS stored, with the price on `lateStop`',
+      [(lateRow.stop_history as StopHistory)?.verdict,
+       (lateRow.stop_history as StopHistory)?.stopAtEntry,
+       (lateRow.stop_history as StopHistory)?.lateStop,
+       (lateRow.stop_history as StopHistory)?.noStopPlaced],
+      ['kept', false, 4504, false]),
+    // §4.4: NO DEDUCTION FOR A LATE STOP THAT WAS NOT MOVED, and it needed no
+    // code. `'kept'` writes `moved_sl = false`, `tradeScore` awards the full
+    // twelve for a false, and that is exactly what the trade scored before this
+    // stage existed. A late stop that is then MOVED is `'moved'` and costs the
+    // twelve, which is honest and is a behaviour change worth naming.
+    c('(8c) and `moved_sl` is false, so the score is unchanged by the finding',
+      [lateRow.moved_sl, lateRow.kept_sl], [false, true]),
   ]);
 }
 
@@ -5207,6 +5283,54 @@ function stopSentenceGroup() {
     // the trader was risking, and a stop is a worst case.
     c('(25) the broker price is still shown above one stop',
       brokerStopToShow(readStopHistory(stopDoc({ stopCount: 2 })), 29_671.25), 29_671.25),
+
+    // ── REF-113 Stage 6: entered without a stop, and the stop that was pulled ─
+    //
+    // THE THIRD STATE IS THE ONE THAT MATTERS HERE. Every row the feature has
+    // ever written carries no `stopAtEntry` key, there is no backfill, and
+    // resolving the absence to `true` would be harmless while resolving it to
+    // `false` would announce this finding on all of them. So the reader answers
+    // null and the sentence branches on `=== false`.
+    c('(26) an absent `stopAtEntry` says nothing — every row before Stage 6',
+      [readStopHistory(stopDoc())?.stopAtEntry, sentenceOf(stopDoc())],
+      [null, 'הסטופ הוזז 2 פעמים — גם הורחק וגם הודק']),
+    c('(27) a LATE stop names the entry and not the price, and warns',
+      [sentenceOf(stopDoc({
+        verdict: 'kept', movedCount: 0, direction: null,
+        initialStop: null, initialStopSide: null, stopAtEntry: false, lateStop: 29_671.25,
+      })),
+       toneOf(stopDoc({
+         verdict: 'kept', movedCount: 0, direction: null,
+         initialStop: null, stopAtEntry: false, lateStop: 29_671.25,
+       }))],
+      ['נכנסת בלי סטופ — הסטופ הוצב אחרי הכניסה', 'warning']),
+    // A late stop that was THEN moved is a different sentence and a different
+    // score: `'moved'` writes `moved_sl = true` and costs the twelve, which is
+    // honest — they did move their risk — and is a behaviour change worth naming.
+    c('(28) and a late stop that was then MOVED says both things',
+      sentenceOf(stopDoc({
+        verdict: 'moved', movedCount: 1, direction: 'widened',
+        initialStop: null, initialStopSide: null, stopAtEntry: false, lateStop: 29_671.25,
+      })),
+      'נכנסת בלי סטופ — הסטופ הוצב אחרי הכניסה והוזז לאחר מכן'),
+    // THE RANGE A CANCELLATION CANNOT HAVE. `finalStop` is the last price the
+    // stop was SUBMITTED at, so without its own branch this row renders as
+    // "הסטופ הורחק מנקודת הכניסה — הסיכון גדל (מ-29671.25 ל-29671.25)" — a
+    // from→to range describing a stop that was pulled.
+    c('(29) a stop cancelled with nothing in its place has its own words',
+      [sentenceOf(stopDoc({
+        verdict: 'moved', movedCount: 1, direction: 'widened',
+        finalStop: 29_671.25, stopCount: 1, cancelledUnreplaced: true,
+      })),
+       toneOf(stopDoc({
+         verdict: 'moved', movedCount: 1, direction: 'widened', cancelledUnreplaced: true,
+       }))],
+      ['הסטופ בוטל ולא הוצב סטופ אחר', 'warning']),
+    c('(29b) and an absent flag leaves every other row exactly as it read',
+      sentenceOf(stopDoc({
+        direction: 'widened', movedCount: 1, finalStop: 29_651.25,
+      })),
+      'הסטופ הורחק מנקודת הכניסה — הסיכון גדל (מ-29671.25 ל-29651.25)'),
   ]);
 }
 

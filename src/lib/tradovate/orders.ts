@@ -43,9 +43,10 @@
  * ------------------------------------------------------
  *
  * Linking a protective order to a trade is the hard half of this ticket, and it
- * is three separate arguments rather than one chain. Each is tried in order and
- * the first that produces candidates wins, so an inference never overrides a
- * fact:
+ * is three separate arguments rather than one chain. ALL THREE OFFER THEIR
+ * CANDIDATES AND THE STRENGTH IS A RANKING RATHER THAN A GATE (REF-113 Stage 6,
+ * and see the tracks section below for the four lines that changed and the two
+ * production defects they were causing):
  *
  *   A. **The stop IS the exit.** `BrokerTrade.entryOrderIds` holds every order
  *      that produced a fill in the group — entry and exit both — so if one of
@@ -58,14 +59,16 @@
  *      `orderStrategyId`, measured — so this costs one call per strategy to
  *      build the reverse map. `source: 'linked'`.
  *
- *   C. **The window**, and only when A and B found nothing. A trader who placed
- *      a stop by hand after entering is a first-class case, not an edge: same
- *      account, same contract, the opposite action, not one of the trade's own
- *      orders, submitted inside the trade's life, and no larger than the
- *      position. `source: 'inferred'`.
+ *   C. **The window.** A trader who placed a stop by hand after entering, or
+ *      cancelled their bracket's stop and typed in another, is a first-class
+ *      case and not an edge: same account, same contract, the opposite action,
+ *      not one of the trade's own orders, submitted inside the trade's life, and
+ *      no larger than the position. `source: 'inferred'`.
  *
  * LINKAGE UPGRADES CONFIDENCE AND IS NEVER A PRECONDITION. That sentence is from
- * the investigation and it is why C exists at all.
+ * the investigation, it is why C exists at all, and for three stages the code
+ * under it said something stronger that the investigation never asked for — see
+ * the tracks section.
  *
  *
  * AND EVERY LAYER TESTS THE SIDE, WHICH IT DID NOT AT FIRST
@@ -124,11 +127,106 @@
  * whenever it is above one, for the reason `'mixed'` already drops it: two
  * prices cannot describe two stops.
  *
- * AND THE VERSIONS OF TWO ORDERS ARE NEVER CONCATENATED. That was the silent
- * regression REF-117 §6.2 flagged: chained, the second bracket's FIRST stop
- * price reads as a move of the first bracket's — a move that did not happen, on
- * a trade where the trader touched nothing. Each order's version list is cut and
- * counted on its own; only the three booleans meet.
+ * AND THE VERSIONS OF TWO **CONCURRENT** ORDERS ARE NEVER CONCATENATED. That was
+ * the silent regression REF-117 §6.2 flagged: chained, the second bracket's
+ * FIRST stop price reads as a move of the first bracket's — a move that did not
+ * happen, on a trade where the trader touched nothing. The word that was missing
+ * from that sentence until Stage 6 is "concurrent", and the section below is
+ * what it buys.
+ *
+ *
+ * A CANCELLED STOP AND ITS REPLACEMENT ARE ONE STOP: TRACKS (REF-113 STAGE 6)
+ * --------------------------------------------------------------------------
+ *
+ * Two concurrent brackets are TWO stops. A cancelled stop and the order that
+ * took its place are ONE stop expressed as two orders. The discriminator is
+ * CONCURRENCY, and it is the whole design:
+ *
+ *     candidates → group into TRACKS → countMoves per track → combineMoves
+ *
+ * Within a track the steps CHAIN, so a replacement priced further from the entry
+ * than the order it replaced is a WIDENING. Across tracks only the three
+ * booleans meet — exactly {@link combineMoves}, which needed no change at all.
+ * A one-bracket trade is one track and reproduces the Stage 5 answer field for
+ * field; a scaled-in trade is two tracks and reproduces it too.
+ *
+ * WHAT THIS CLOSED, AND IT WAS FOUR LINES. `pool` used to be a CHOICE between
+ * the linked orders and everything:
+ *
+ *     const useWindow = linkedStops.length === 0 && linkedTargets.length === 0;
+ *     const pool      = useWindow ? scanned : linked;
+ *
+ * The policy that gate was implementing is right — "an inference must never
+ * outrank a link" — but the code implemented something stronger and different:
+ * AN INFERENCE WAS NOT EVEN LOOKED AT WHEN ANY LINK EXISTED. So a bracket stop
+ * that was cancelled and replaced (the cancelled order is still returned by
+ * `/order/list`, deliberately — ./types.ts) made `linkedStops.length === 1`, and
+ * the replacement — already in the candidate set, offered by layer C — was
+ * dropped unexamined. The verdict was then read off a cancelled order with one
+ * version: `kept`, `movedCount: 0`, and `./import.ts` wrote `moved_sl = false`.
+ * A WIDENING VIA CANCEL-AND-REPLACE COLLECTED THE FULL TWELVE DISCIPLINE POINTS
+ * ON EVIDENCE THAT SAID THE OPPOSITE. Seen from the other side, a trader who
+ * entered with a take-profit and no stop and then placed one by hand had
+ * `linkedTargets.length === 1`, so the late stop was discarded and the row said
+ * `'none'` — "you traded without a stop" — which is a measurement that is wrong
+ * rather than merely missing.
+ *
+ * Both pools now enter, and the link is enforced WHERE IT BELONGS: in the
+ * ranking that picks the track whose prices are reported, and in `source`. The
+ * union is safe because of REF-117 and not because of a hope: a cycle runs from
+ * one zero crossing of `(accountId, contractId)` to the next, so two cycles of
+ * one account and one contract cannot overlap in time, and therefore ANY
+ * protective-side stop order on that contract submitted between the entry and
+ * the close belongs to this cycle and to no other.
+ *
+ * HOW A TRACK IS BUILT, AND WHY EVERY AMBIGUITY OPENS A NEW ONE. In submission
+ * order, a stop order replaces the earlier stop order whose life ENDED LATEST at
+ * or before this one was submitted — see {@link stopTracks}. "Ended" means
+ * cancelled, not filled, AND DATED: the cancel instant comes from
+ * `/command/list`, which is already read, by the argument
+ * {@link StopEvidence.commandTimes} already makes for the anchor (a cancel is a
+ * command, it mints no version, and it is last). No new endpoint, no
+ * `commandType` — ./types.ts does not declare what the measurement has not seen
+ * — and nothing new in the fan-out.
+ *
+ * THE INSTANT IS WHAT MAKES CONCURRENCY DECIDABLE, so without it nothing chains.
+ * That failure direction is the point: an undated cancel leaves the successor as
+ * a PARALLEL stop, which invents no move. Two brackets cancelled together by the
+ * flatten that closed the trade are not each other's replacement, because
+ * neither was submitted after the other had ended. And a predecessor may be
+ * claimed by SEVERAL successors — a three-lot stop replaced by a two-lot and a
+ * one-lot is one stop that became two, and both legs are moves of it — while a
+ * successor claimed by several predecessors chains to none of them.
+ *
+ * AND `stopCount` IS NOW THE NUMBER OF TRACKS. It has to be: under a flat
+ * reading a single stop replaced once would report two, and
+ * lib/journal/stopHistory.ts drops the from→to range above one — so the fix
+ * would have taken the range away from the trader whose one stop it describes
+ * exactly. See {@link StopHistory.stopCount}.
+ *
+ *
+ * AND THE POSITION CAN OPEN WITH NO STOP AT ALL (REF-113 STAGE 6)
+ * --------------------------------------------------------------
+ *
+ * {@link StopHistory.stopAtEntry} is the new fact, and `false` is the finding: a
+ * protective stop existed in this cycle but NOT WHEN THE POSITION OPENED. It is
+ * read off an ORDER-level comparison — `order.timestamp` against
+ * `trade.openedAtMs` — which needs no positional pairing and is therefore
+ * stronger evidence than the version anchor beside it. A bracket stop is
+ * submitted WITH its entry, so its timestamp precedes the fill even behind a
+ * resting entry; "placed before the fill" correctly includes brackets and
+ * correctly excludes a stop typed in afterwards.
+ *
+ * THE VERDICT STAYS `kept` OR `moved` AND THE REASON IS NOT `'unknown'`. A late
+ * stop is a MEASUREMENT — we read the orders and this is what the trader did —
+ * and `'unknown'` is our own failure; collapsing the two is what this module
+ * refuses everywhere. `'none'` keeps its meaning and gets stricter: no
+ * protective stop order existed at ANY point in the cycle.
+ *
+ * AND `broker_stop_loss` STAYS ABSENT, which falls out rather than being
+ * special-cased: that column is "the stop THE POSITION OPENED UNDER", there was
+ * none, {@link StopHistory.initialStop} is null, and ./import.ts already omits
+ * the column when it is.
  *
  *
  * AND THE INITIAL STOP IS ANCHORED AT THE ENTRY FILL, NOT AT VERSION ONE
@@ -297,6 +395,40 @@ import type {
 export const MAX_ORDER_DEPS_PER_RUN = 60;
 
 /**
+ * How many WINDOW candidates one trade may offer before the trade is refused.
+ * REF-113 Stage 6, and it is the fan-out the tracks model opened.
+ *
+ * `orderType` IS VERSION-LEVEL, so there is no free way to tell a stop from a
+ * limit before spending a `deps` call: the order-level fields (`action`,
+ * `ordStatus`, `timestamp`) cannot discriminate. With layer C no longer gated
+ * behind "no link exists" (see the header), the candidate set grows from *linked
+ * orders only* to *linked plus every closing-side order on the contract in the
+ * window*. On a typical bracketed day that is nothing new. THE BAD SHAPE IS A
+ * LADDER-DRAGGING FRONT-END: if a trader's platform implements every drag as
+ * cancel + replace, twenty drags are twenty orders and twenty `deps` calls on
+ * ONE cycle, and three such trades would exhaust
+ * {@link MAX_ORDER_DEPS_PER_RUN} for every other trade in the run.
+ *
+ * So the ceiling gets a per-trade companion. Twelve, which is far more cancel
+ * and replace than a human does to one position and far less than a ladder
+ * drag. ONE TRADER'S PATHOLOGICAL DAY THEN COSTS THAT TRADER AN `'unknown'`
+ * INSTEAD OF COSTING EVERY TRADE IN THE RUN ITS BUDGET.
+ *
+ * AND OVER THE CAP THE ANSWER IS `'unknown'` OUTRIGHT, not a verdict read off
+ * the first twelve. The tracks model is a reading of a CHAIN, and a chain with
+ * holes in it can compare two real prices that were never consecutive — which
+ * is how a there-and-back drag would read as a widening, arm
+ * `moved_sl_widened_last_trade`, and block a trader out of the app over
+ * something they did not do. `'capped'` is transient, so the row is dropped
+ * rather than stored and the next run of the same trading day tries again.
+ *
+ * APPLIED IN ONE PLACE FOR BOTH HALVES — {@link cappedCandidates} — because the
+ * reader and the derivation have to agree about the candidate set exactly, for
+ * the reason {@link candidateOrders} is shared at all.
+ */
+export const MAX_WINDOW_CANDIDATES_PER_TRADE = 12;
+
+/**
  * How far outside a trade's life a protective order may be submitted and still
  * be attributed to it, in the window layer.
  *
@@ -343,6 +475,12 @@ export interface StopHistory {
    * {@link deriveStopHistory}, for the reason argued there. A mean of the two
    * would be a price that was never a stop. {@link stopCount} is how a reader
    * knows to say "one of two" rather than "the stop".
+   *
+   * AND NULL ON A LATE STOP (REF-113 Stage 6), which is the whole mechanism of
+   * {@link stopAtEntry}: a stop placed after the fill is not a stop the position
+   * opened under, and writing it here would claim it was — to this field, to
+   * `broker_stop_loss`, and to the side-by-side display against the stop the
+   * trader planned. {@link lateStop} carries the price instead.
    */
   initialStop: number | null;
   /**
@@ -448,13 +586,21 @@ export interface StopHistory {
   /** Which layer attributed the orders. See the header. */
   source: 'linked' | 'inferred' | 'none';
   /**
-   * EVERY stop price the chosen order stated, oldest first. The evidence.
+   * EVERY stop price the chosen TRACK stated, oldest first. The evidence.
    *
    * THE WHOLE LIST AND NOT THE COUNTED WINDOW, on purpose. The verdict fields
    * above are a reading of this list, and a reading that threw away its own
    * input would leave nobody able to check it — which is how the 19.10 defect
    * survived a sync: the row said `movedCount: 5` and held nothing that could
    * say which five. Without instants, in v1.
+   *
+   * ONE TRACK'S EFFECTIVE PRICE SEQUENCE RATHER THAN ONE ORDER'S VERSION LIST
+   * (REF-113 Stage 6), which is a documented shape change and not a silent one.
+   * On a stop that was cancelled and replaced the list spans both orders, in
+   * submission order, because that is the sequence the verdict was read from;
+   * it remains "every stop price, oldest first", and it remains the evidence a
+   * reader can check the verdict against, which is the property this field
+   * exists for.
    */
   versions: { stopPrice: number }[];
   /**
@@ -498,15 +644,29 @@ export interface StopHistory {
   /** The targets that were not chosen, nearest first (§1.3 of decision 3). */
   otherTargets: number[];
   /**
-   * How many DISTINCT protective orders this row's verdict was read from
-   * (REF-113 Stage 5).
+   * How many CONCURRENT protective stops this row's verdict was read from —
+   * TRACKS, not orders (REF-113 Stage 5, redefined in Stage 6).
+   *
+   * IT COUNTED ORDERS UNTIL STAGE 6 AND THAT WOULD NOW BE A REGRESSION. A
+   * cancelled stop and the order that replaced it are ONE stop expressed as two
+   * orders (see the header), so counting orders would report `2` for a single
+   * stop the trader moved once — and lib/journal/stopHistory.ts drops the
+   * from→to range above one, so the trader would lose the range and be told
+   * "(2 פקודות הגנה)" about one stop. A replacement chain is one track, keeps
+   * `1`, and keeps its range, which is now honest in a second way: "from the old
+   * stop to the new one" is exactly what happened.
+   *
+   * NO READER NEEDED EDITING FOR THAT CHANGE, because every reader branches only
+   * on `> 1` and the field is already documented as describing THIS WRITER
+   * rather than the stored history.
    *
    * One on a trade entered in one piece, which is most of them. Above one is
    * the signature of a position scaled into over several entries, each with its
-   * own bracket, and it is the field that makes the rest of this document
-   * readable: {@link movedCount} and {@link direction} span all of them, while
-   * {@link initialStop}, {@link finalStop} and {@link versions} describe ONE —
-   * the order stating the most risk.
+   * own bracket — or of one stop split into two legs — and it is the field that
+   * makes the rest of this document readable: {@link movedCount} and
+   * {@link direction} span all of them, while {@link initialStop},
+   * {@link finalStop} and {@link versions} describe ONE track — the one stating
+   * the most risk.
    *
    * SO ANY READER PUTTING TWO PRICES IN FRONT OF A TRADER MUST BRANCH ON THIS,
    * exactly as it must branch on {@link initialStopSide}. "הסטופ הודק (מ-4504
@@ -523,7 +683,111 @@ export interface StopHistory {
    * value must be read as UNKNOWN rather than as one.
    */
   stopCount: number;
-  /** Present when the run hit {@link MAX_ORDER_DEPS_PER_RUN}. */
+  /**
+   * Whether a protective stop was IN FORCE WHEN THE POSITION OPENED. REF-113
+   * Stage 6, and `false` is the finding.
+   *
+   * `true` on every normal trade, bracketed or not: a bracket's stop is
+   * submitted with its entry, so it is in force at the fill even behind an entry
+   * that rested for an hour. `false` says a stop existed in this cycle and the
+   * position was NOT PROTECTED WHEN IT OPENED — the trader entered and typed the
+   * stop in afterwards. It is decided by an ORDER-level comparison and not by
+   * the version clock: `order.timestamp` against `trade.openedAtMs`, which needs
+   * no positional pairing and is the stronger of the two readings.
+   *
+   * MEANINGFUL ONLY ON `'kept'`, `'moved'` AND `'none'`, exactly as
+   * {@link anchoredAtFill} and {@link noStopPlaced} are: on an `'unknown'` we
+   * did not read the orders, and the `false` this carries there says nothing.
+   * Every reader branches on the verdict first — lib/journal/stopHistory.ts does
+   * so in its first two lines — and the one that does not must.
+   *
+   * ON `'none'` IT IS `false` AND THAT IS NOT A DUPLICATE OF `noStopPlaced`:
+   * "no stop at the open" is true of both the trade that had none at all and
+   * the trade that got one late, and the pair of fields is what tells them
+   * apart.
+   *
+   * AND `undefined` IS A THIRD STATE FOR A READER OF THE STORED COLUMN, for
+   * {@link anchoredAtFill}'s reason and with the same remedy: every row written
+   * before this stage carries no such key, there is no backfill, and an absent
+   * value MUST NOT be resolved to `true`. lib/journal/stopHistory.ts reads it as
+   * `boolean | null` for that reason.
+   */
+  stopAtEntry: boolean;
+  /**
+   * The first stop placed after the position opened, when there was none at the
+   * open. Null otherwise. REF-113 Stage 6.
+   *
+   * THE PRICE THAT DELIBERATELY DOES NOT GO IN `broker_stop_loss`. That column
+   * is the stop the position opened under; there was none, so naming it would
+   * claim the position opened under a price it did not, and would feed the
+   * side-by-side display against the stop the trader planned. This field is
+   * where the number lives instead, for the sentence that explains it.
+   *
+   * THE EARLIEST, AND NOT THE CHOSEN TRACK'S. "The stop was placed late" is a
+   * fact about the first protective order of the cycle, which on a trade that
+   * went on to place two is not necessarily the one the rest of this document
+   * describes.
+   */
+  lateStop: number | null;
+  /**
+   * How many contracts the stops in force at the open covered, capped at the
+   * position size. DISPLAY ONLY (REF-113 Stage 6).
+   *
+   * Null when no stop in force at the open stated a readable quantity; zero when
+   * none was in force at all ({@link stopAtEntry} is then `false`).
+   *
+   * NOTHING DERIVES A DIRECTION FROM THIS, AND THAT IS A DECISION RATHER THAN AN
+   * OMISSION — see {@link partialCoverage}.
+   */
+  coveredQty: number | null;
+  /**
+   * Whether the stops in force at the open left part of the position naked.
+   * DISPLAY ONLY (REF-113 Stage 6).
+   *
+   * `coveredQty !== null && coveredQty < trade.qty`. The interesting value is
+   * the trader who replaces a three-lot stop with a two-lot one and leaves a
+   * contract uncovered.
+   *
+   * AND A COVERAGE DECREASE IS NEVER READ AS A RISK INCREASE, which is the one
+   * place this stage disagrees with the obvious design. A drop in coverage looks
+   * like a risk increase and sometimes is — but it is ALSO what every ordinary
+   * scale-out looks like: the trader exits one of three contracts and the bracket
+   * reduces or cancels a leg. Telling the two apart needs the position size at
+   * the instant of the change, which needs per-leg fill instants, and
+   * {@link BrokerTrade} does not carry them — `TradeStage` is a quantity and a
+   * price with no clock, the same limitation {@link withoutExitDrag} already
+   * states about `exitPrice`. Shipping a coverage-derived direction without them
+   * would manufacture widenings on normal scale-outs, and a widening arms
+   * `moved_sl_widened_last_trade`, which can be `block_day`. Between a muted
+   * rule and a trader locked out of the app over something they did not do, this
+   * module's standing answer is mute.
+   */
+  partialCoverage: boolean;
+  /**
+   * Whether the trade's only protective stop was CANCELLED WITH NOTHING IN ITS
+   * PLACE, well before the trade closed. REF-113 Stage 6.
+   *
+   * The trader pulled their stop and rode the rest of the position naked, which
+   * is counted as one widening step — see {@link Track.bareCancel} for the two
+   * guards that keep it off the innocent shapes, and {@link countMoves} for why
+   * it is a step with no price.
+   *
+   * AND IT IS STORED BECAUSE THE SENTENCE CANNOT BE WRITTEN WITHOUT IT. A
+   * widening with no "to" price has no from→to range to print, and
+   * {@link finalStop} is the last price the stop was SUBMITTED at — so a reader
+   * holding only the verdict would render "the stop was widened (from 4504 to
+   * 4504)", which is a range describing a cancellation. lib/journal/stopHistory.ts
+   * gives this state its own sentence instead.
+   *
+   * A PLAIN BOOLEAN AND NOT A THIRD STATE, unlike {@link stopAtEntry}: an absent
+   * key and a `false` withhold the same sentence, so there is nothing for a
+   * third value to tell a reader.
+   */
+  cancelledUnreplaced: boolean;
+  /**
+   * Present when the run hit {@link MAX_ORDER_DEPS_PER_RUN}, or when one trade
+   * hit {@link MAX_WINDOW_CANDIDATES_PER_TRADE}.
+   */
   capped?: true;
 }
 
@@ -823,6 +1087,45 @@ export function candidateOrders(params: {
 }
 
 /**
+ * {@link candidateOrders}' output under the per-trade fan-out cap. REF-113
+ * Stage 6.
+ *
+ * SHARED BETWEEN THE READER AND THE DERIVATION FOR {@link candidateOrders}'
+ * REASON, and it is the second half of that argument: a cap applied in the
+ * reader alone would have the derivation reach for versions nobody fetched (an
+ * `'unknown'` for the wrong reason), and a cap applied in the derivation alone
+ * would not save a single request, which is the whole point of having one.
+ *
+ * ONLY THE WINDOW LAYER IS CAPPED. Layers A and B are bounded by the trade's own
+ * orders and its bracket, which is a shape the trader's front-end cannot inflate
+ * — see {@link MAX_WINDOW_CANDIDATES_PER_TRADE} for the one that can.
+ *
+ * TAKES THE CANDIDATES IN THE ORDER THEY WERE OFFERED and does not sort. Both
+ * callers see the same array from the same `orders` map, so "the first twelve"
+ * is the same twelve in both; a sort would be a second ordering rule to keep in
+ * step for no gain, since the answer when this bites is `'unknown'` and not a
+ * verdict read off whichever twelve survived.
+ */
+export function cappedCandidates(candidates: readonly Candidate[]): {
+  candidates: Candidate[];
+  windowCapped: boolean;
+} {
+  const kept: Candidate[] = [];
+  let windows = 0;
+
+  for (const candidate of candidates) {
+    if (candidate.layer !== 'window') {
+      kept.push(candidate);
+      continue;
+    }
+    windows += 1;
+    if (windows <= MAX_WINDOW_CANDIDATES_PER_TRADE) kept.push(candidate);
+  }
+
+  return { candidates: kept, windowCapped: windows > MAX_WINDOW_CANDIDATES_PER_TRADE };
+}
+
+/**
  * `relatedTrades`, `lifespan` AND `sharedWithTrades` LIVED HERE AND ARE GONE
  * (REF-113 Stage 5).
  *
@@ -860,32 +1163,50 @@ interface ProtectiveOrder {
   /**
    * The order's own `ordStatus`, carried from the order rather than the version.
    *
-   * Read by {@link withoutExitDrag} alone, and read there because a cancelled
-   * stop is the state a hand-forced exit leaves behind. It is the order's field
-   * and not the version's — the versions name the terms, the order names what
-   * became of it.
+   * Read by {@link withoutExitDrag} and by {@link stopTracks}, and read there
+   * because a cancelled stop is both the state a hand-forced exit leaves behind
+   * and the state that makes a later stop a REPLACEMENT rather than a second
+   * stop. It is the order's field and not the version's — the versions name the
+   * terms, the order names what became of it.
    */
   ordStatus?: string;
+  /**
+   * When the order was SUBMITTED, off `order.timestamp`. REF-113 Stage 6.
+   *
+   * THE ONLY CLOCK IN THIS MODULE THAT NEEDS NO PAIRING, which is why two of
+   * Stage 6's three answers are read off it: whether a stop was in force when
+   * the position opened ({@link StopHistory.stopAtEntry}) and whether one stop
+   * replaced another ({@link stopTracks}). Null when the host sent no readable
+   * timestamp, and null is a value: a stop that cannot be placed in the sequence
+   * neither seeds a late-stop finding nor chains to anything.
+   */
+  submittedMs: number | null;
 }
 
 /**
- * One stop candidate's versions, placed against the entry fill.
+ * ONE PROTECTIVE STOP, which may be several orders. REF-113 Stage 6.
  *
- * The output of the two cuts the header describes, and it is computed PER
- * CANDIDATE rather than once for the winner, because the selection ranks
- * candidates by the risk their initial stop states — and after the anchor, that
- * is the anchored version's risk and not version one's. Ranking on one number
- * and reporting another is how the 19.10 row came to describe a price it had
- * never chosen.
+ * A track is a cancelled stop and the orders that replaced it, read as the one
+ * stop it was; a trade's tracks are its CONCURRENT stops. See the header for why
+ * concurrency is the discriminator and {@link stopTracks} for how it is decided.
+ * A trade with one untouched stop is one track of one member and every field
+ * below is what Stage 5 computed for that order.
+ *
+ * COMPUTED PER TRACK RATHER THAN ONCE FOR THE WINNER, because the ranking in
+ * {@link deriveStopHistory} reads the risk each track's INITIAL stop states —
+ * and after the anchor that is the anchored version's risk and not version
+ * one's. Ranking on one number and reporting another is how the 19.10 row came
+ * to describe a price it had never chosen.
  */
-interface AnchoredStop {
-  order: ProtectiveOrder;
-  /** Every stated stop price, oldest first. {@link StopHistory.versions}. */
+interface Track {
+  /** The orders this stop was expressed as, in submission order. */
+  members: readonly ProtectiveOrder[];
+  /** Every stated stop price across the track, oldest first. {@link StopHistory.versions}. */
   all: number[];
   /**
-   * The versions the verdict is computed over: the anchor onward, less an exit
+   * The prices the verdict is computed over: the anchor onward, less an exit
    * drag. NEVER EMPTY — every caller indexes it, and the cuts are written so
-   * that they cannot take the last version away.
+   * that they cannot take the last price away.
    *
    * CARRIES THE PRICE RATHER THAN LETTING EACH READER RE-DERIVE IT. `finite`
    * over `stopPrice` is the one place "a version with no stated price is not a
@@ -898,6 +1219,36 @@ interface AnchoredStop {
   preFill: number;
   /** Whether a clock decided {@link preFill}. {@link StopHistory.anchoredAtFill}. */
   anchoredAtFill: boolean;
+  /**
+   * Whether this stop was in force when the position opened.
+   * {@link StopHistory.stopAtEntry}, read off the ROOT member's submission.
+   */
+  atEntry: boolean;
+  /**
+   * The track ended in a CANCEL WE COULD DATE, well before the trade closed —
+   * the trader pulled their stop and placed nothing in its place.
+   *
+   * Counted as one widening step, and only under the two guards
+   * {@link deriveStopHistory} applies: the cancel must be datable at all, and it
+   * must be the trade's ONLY track. The common terminal shape is innocent — the
+   * trader flattens by hand and the OCO cancels the stop behind them, which is
+   * what the margin against `closedAtMs` excludes — and a cancelled leg beside
+   * a stop that is still there is a scale-out, which is what the one-track guard
+   * excludes. See {@link StopHistory.partialCoverage} for why the second one
+   * cannot be decided any better than that.
+   */
+  bareCancel: boolean;
+  /** The ROOT's anchored quantity. {@link StopHistory.coveredQty} sums these. */
+  anchorQty: number | null;
+  /**
+   * Whether any member came from the window layer. {@link StopHistory.source}.
+   *
+   * THE WEAKEST LINK, which is the honest reading: a bracket stop whose
+   * replacement was found by inference is a stop this module partly inferred.
+   */
+  inferred: boolean;
+  /** Whether the stop in force at the end of the track was a trailing one. */
+  trailing: boolean;
 }
 
 /** One version of a stop that stated a price, with the instant we could put on it. */
@@ -931,6 +1282,16 @@ function unknownHistory(
     anchoredAtFill: false,
     otherTargets: [],
     stopCount: 0,
+    // NEITHER OF THESE IS A FINDING ON AN `'unknown'` and the shape cannot say
+    // so in its own types — the fields are non-optional, exactly as
+    // `noStopPlaced: false` and `anchoredAtFill: false` are here. What makes
+    // that safe is that every reader branches on the verdict before it reads
+    // anything else; see {@link StopHistory.stopAtEntry}.
+    stopAtEntry: false,
+    lateStop: null,
+    coveredQty: null,
+    partialCoverage: false,
+    cancelledUnreplaced: false,
     ...extra,
   };
 }
@@ -973,7 +1334,14 @@ export function deriveStopHistory(params: {
   if (contractId === null) return unknownHistory('interday');
 
   // ── Classify the candidates ───────────────────────────────────────────────
-  const candidates = candidateOrders({ trade, evidence });
+  // THE PER-TRADE FAN-OUT CAP IS READ FIRST, and over it the answer is
+  // `'unknown'` rather than a verdict read off whichever candidates fit. See
+  // {@link MAX_WINDOW_CANDIDATES_PER_TRADE}: a chain with holes in it can
+  // compare two prices that were never consecutive, and that is a widening this
+  // module would have invented.
+  const { candidates, windowCapped } = cappedCandidates(candidateOrders({ trade, evidence }));
+  if (windowCapped) return unknownHistory('capped', { capped: true });
+
   const scanned: ProtectiveOrder[] = [];
   let missing = false;
 
@@ -986,23 +1354,36 @@ export function deriveStopHistory(params: {
       continue;
     }
     const ordered = inVersionOrder(versions);
+    const row = evidence.orders.get(orderId);
+    const type = orderTypeOf(ordered);
+    // A CANDIDATE WE READ AND COULD NOT CLASSIFY IS A GAP, EXACTLY AS AN
+    // UNFETCHED ONE IS (REF-113 Stage 6). `orderTypeOf` answers null when no
+    // version names a type, and such an order falls out of both `stops` and
+    // `targets` below — so before this line, "the versions came back and stated
+    // no `orderType`" reached the same place as "there was no stop": `'none'`,
+    // `noStopPlaced: true`, the trader told they traded without a stop on
+    // evidence that said nothing at all. It is the one wrong answer this module
+    // must never give, and it is one line to close.
+    if (type === null) missing = true;
     scanned.push({
       orderId,
       layer,
       versions: ordered,
-      type: orderTypeOf(ordered),
-      ordStatus: evidence.orders.get(orderId)?.ordStatus,
+      type,
+      ordStatus: row?.ordStatus,
+      submittedMs: instant(row?.timestamp),
     });
   }
 
-  // Layers A and B before C, and C only if the first two produced nothing. An
-  // inference must never outrank a link — see the header.
-  const linked = scanned.filter((order) => order.layer !== 'window');
-  const linkedStops = linked.filter((order) => isStopType(order.type));
-  const linkedTargets = linked.filter((order) => isTargetType(order.type));
-
-  const useWindow = linkedStops.length === 0 && linkedTargets.length === 0;
-  const pool = useWindow ? scanned : linked;
+  // EVERY LAYER'S CANDIDATES ENTER THE POOL (REF-113 Stage 6). This was a
+  // CHOICE between the linked orders and all of them, made before anything was
+  // compared, and it is the four lines that hid both a replacement stop and a
+  // late stop — see the header, which argues it at length because the policy it
+  // was reaching for is right and the code was stronger than the policy. The
+  // link still outranks the inference: it wins the ranking below and it decides
+  // `source`. Safe because a cycle cannot overlap another on the same
+  // `(accountId, contractId)` — REF-117.
+  const pool = scanned;
 
   const stops = pool.filter((order) => isStopType(order.type)).filter(
     (order) => stopPrices(order.versions).length > 0
@@ -1057,6 +1438,15 @@ export function deriveStopHistory(params: {
       // verdict rather than adding to it — and it keeps the field non-optional,
       // which is what stops a reader having to tell "no stops" from "no key".
       stopCount: 0,
+      // `'none'` IS NOW THE STRICTER CLAIM (REF-113 Stage 6): no protective stop
+      // order existed at ANY point in the cycle, so there was none at the open
+      // either. `stopAtEntry: false` beside `noStopPlaced: true` is the pair
+      // that tells this from the trade that got a stop late.
+      stopAtEntry: false,
+      lateStop: null,
+      coveredQty: 0,
+      partialCoverage: trade.qty > 0,
+      cancelledUnreplaced: false,
       ...capped,
     };
   }
@@ -1088,18 +1478,27 @@ export function deriveStopHistory(params: {
   // ANCHORED FIRST, THEN RANKED, and the order of those two matters: the risk a
   // candidate states is the risk of the version that was in force when the
   // position opened, not of a revision the broker superseded before the fill.
-  const anchored = stopOrders.map((order) =>
-    anchorStop({ order, trade, commandTimes: evidence.commandTimes })
-  );
-  const onRiskSide = anchored.filter((entry) => riskOf(entry, trade) > 0);
-  const ranked = onRiskSide.length > 0 ? onRiskSide : anchored;
-  const stop = ranked.reduce((worst, entry) =>
-    riskOf(entry, trade) > riskOf(worst, trade) ? entry : worst
+  //
+  // AND GROUPED INTO TRACKS BEFORE EITHER (REF-113 Stage 6). A cancelled stop
+  // and its replacement are one stop, so they are anchored, counted and ranked
+  // as one; two concurrent stops are two tracks and nothing crosses between
+  // them. See {@link stopTracks}.
+  const filledIds = new Set(trade.entryOrderIds);
+  const tracks = stopTracks({
+    stops: stopOrders,
+    filledIds,
+    commandTimes: evidence.commandTimes,
+  }).map((members) =>
+    buildTrack({ members, trade, filledIds, commandTimes: evidence.commandTimes })
   );
 
-  // ── The verdict: every believed order, counted apart, then combined ───────
+  const onRiskSide = tracks.filter((entry) => riskOf(entry, trade) > 0);
+  const ranked = onRiskSide.length > 0 ? onRiskSide : tracks;
+  const stop = ranked.reduce((worst, entry) => (outranks(entry, worst, trade) ? entry : worst));
+
+  // ── The verdict: every believed track, counted apart, then combined ───────
   //
-  // `ranked` AND NOT `anchored`, so the risk-side partition decides what the
+  // `ranked` AND NOT `tracks`, so the risk-side partition decides what the
   // verdict is read from as well as which price is reported. A wrong-side
   // candidate is one our own attribution got wrong (see the reduce above), and
   // counting its revisions would report moves on an order that was never a
@@ -1107,16 +1506,33 @@ export function deriveStopHistory(params: {
   // through the price. When every candidate is wrong-side the partition keeps
   // them all, so nothing is lost and `initialStopSide` still says it is bad.
   //
-  // PER ORDER AND THEN UNIONED. Each order carries its own `trailing` flag,
-  // because a trail is a property of the order and not of the trade, and its
-  // own cut window from {@link anchorStop}. Nothing crosses between the lists.
+  // PER TRACK AND THEN UNIONED. Each track carries its own `trailing` flag,
+  // because a trail is a property of the order and not of the trade, and its own
+  // cut window from {@link buildTrack}. Nothing crosses between the lists.
+  //
+  // AND EVERY FIGURE BELOW READS `ranked` TOO, which is what makes `stopCount`
+  // and the coverage pair agree with the verdict beside them. A wrong-side
+  // candidate is one our own attribution got wrong, so counting it as a
+  // concurrent protective stop would take the from→to range away from a trade
+  // that has exactly one real stop — the same regression redefining `stopCount`
+  // as tracks exists to prevent, arriving through the partition instead.
+  //
+  // THE BARE CANCEL IS COUNTED ONLY ON A LONE TRACK, which is the narrower of
+  // the two readings and is the one that cannot fire on a scale-out. See
+  // {@link Track.bareCancel}. Read once here so that the counted step and the
+  // stored flag cannot disagree about what happened; with one track `ranked`
+  // holds exactly that track, so passing it to every entry below is passing it
+  // to the only one it can be true of.
+  const bareCancel = ranked.length === 1 && ranked[0].bareCancel;
+
   const steps = combineMoves(
     ranked.map((entry) =>
       countMoves({
         steps: entry.counted,
         direction: trade.direction,
-        trailing: isTrailingType(entry.order.type),
+        trailing: entry.trailing,
         automated: evidence.automated,
+        bareCancel,
       })
     )
   );
@@ -1124,31 +1540,267 @@ export function deriveStopHistory(params: {
   const counted = stop.counted.map((entry) => entry.price);
   const chosenTarget = nearestTarget(targetOrders, trade);
 
+  // THE CHOSEN TRACK'S `atEntry` IS THE TRADE'S, and that identity is not a
+  // coincidence: `atEntry` is the FIRST key {@link outranks} compares, so if any
+  // track IN `ranked` was in force at the open, the chosen one was.
+  //
+  // `ranked` AND NOT `tracks`, WHICH IS A DELIBERATE EDGE AND NOT AN OVERSIGHT.
+  // A trade whose only stop at the open was on the WRONG side of the entry — a
+  // price the book would have filled on arrival, so a candidate our own
+  // attribution got wrong — and which then has a real stop placed late reads as
+  // a late stop. That is the risk-side partition doing the job it exists for: it
+  // is already what decides the verdict, the prices and the count, and letting a
+  // candidate this module disbelieves assert that the position opened protected
+  // would be believing it for one field only.
+  const stopAtEntry = stop.atEntry;
+
+  // The EARLIEST stop of the cycle and not the chosen track's — see the field.
+  const lateStop = stopAtEntry
+    ? null
+    : ranked.reduce((first, entry) =>
+        (entry.members[0].submittedMs ?? Infinity) < (first.members[0].submittedMs ?? Infinity)
+          ? entry
+          : first
+      ).all[0] ?? null;
+
+  // Summed over DISTINCT ROOTS: a three-lot stop replaced by a two-lot and a
+  // one-lot is two tracks sharing one root, and counting it twice would report
+  // six contracts covered by three.
+  const atEntryRoots = new Map<number, number | null>();
+  for (const entry of ranked) {
+    if (entry.atEntry) atEntryRoots.set(entry.members[0].orderId, entry.anchorQty);
+  }
+  const quantities = [...atEntryRoots.values()];
+  const coveredQty = quantities.some((qty) => qty === null)
+    ? null
+    : Math.min(
+        trade.qty,
+        quantities.reduce<number>((sum, qty) => sum + (qty ?? 0), 0)
+      );
+
   return {
     verdict: steps.movedCount > 0 ? 'moved' : 'kept',
     reason: null,
-    initialStop: counted[0],
-    initialStopSide: riskOf(stop, trade) > 0 ? 'risk' : 'wrong',
+    // NULL ON A LATE STOP, and `broker_stop_loss` then falls away with it
+    // (./import.ts omits the column when this is null). The position did not
+    // open under this price and the column says it did.
+    initialStop: stopAtEntry ? counted[0] : null,
+    initialStopSide: stopAtEntry ? (riskOf(stop, trade) > 0 ? 'risk' : 'wrong') : null,
     finalStop: counted[counted.length - 1],
     initialTarget: chosenTarget.initialTarget,
     movedCount: steps.movedCount,
     direction: steps.direction,
     movedAtMs: null,
-    // THE CHOSEN ORDER'S, like the prices beside it and unlike the verdict. A
+    // THE CHOSEN TRACK'S, like the prices beside it and unlike the verdict. A
     // trail is the server stepping one order's stop, so unioning this over a
     // cycle whose other bracket was dragged by hand would mute a real move —
     // and `trailing` is what suppresses `moved_sl` (./import.ts). Narrow, and
     // the same value every single-stop trade has always reported.
-    trailing: isTrailingType(stop.order.type),
+    trailing: stop.trailing,
     noStopPlaced: false,
-    source: stop.order.layer === 'window' ? 'inferred' : 'linked',
+    source: stop.inferred ? 'inferred' : 'linked',
     versions: stop.all.map((stopPrice) => ({ stopPrice })),
-    preFillVersions: stop.preFill,
+    // ZERO ON A LATE STOP: there is nothing before a stop that was placed after
+    // the position opened, and {@link StopHistory.stopAtEntry} is what says so
+    // rather than this field pretending to.
+    preFillVersions: stopAtEntry ? stop.preFill : 0,
     anchoredAtFill: stop.anchoredAtFill,
     otherTargets: chosenTarget.otherTargets,
     stopCount: ranked.length,
+    stopAtEntry,
+    lateStop,
+    coveredQty,
+    partialCoverage: coveredQty !== null && coveredQty < trade.qty,
+    cancelledUnreplaced: bareCancel,
     ...capped,
   };
+}
+
+/**
+ * Whether one track outranks another for the prices this row reports. REF-113
+ * Stage 6.
+ *
+ * FOUR KEYS, IN ORDER, AND EACH ONE IS A PARTITION RATHER THAN A WEIGHT. The
+ * reduce that reads this keeps the incumbent on a tie, so the comparison must be
+ * strict and the order of the keys is the policy:
+ *
+ *   1. **In force at the open.** {@link StopHistory.initialStop} is the stop the
+ *      position OPENED under and `broker_stop_loss` holds it, so a track that
+ *      began after the fill must never supply that number while one that was
+ *      there exists. This key is also what makes
+ *      `stopAtEntry === chosen.atEntry` true, which the caller relies on.
+ *   2. **Linked over inferred.** "An inference must never outrank a link" lives
+ *      here now that it no longer lives in a gate over the candidate set — see
+ *      the header. A bracket's stop beats a window candidate that happens to sit
+ *      further from the entry, which is the property the suite has asserted
+ *      since layer C existed.
+ *   3. **The risk side.** A PARTITION AND NOT A FILTER, for the reason the
+ *      reduce in {@link deriveStopHistory} gives at length: dropping wrong-side
+ *      candidates could empty the set, and an empty set reads as `'none'`.
+ *   4. **The most risk, then the most risk AT THE END.** A stop is a worst case.
+ *      The tie-break on the final price is what Stage 6 added and it is only
+ *      reachable when two tracks share an anchored price — which is exactly the
+ *      shape a stop SPLIT into two legs produces (one root, two tracks): there
+ *      the honest answer to "what was I left risking" is the lower of the two
+ *      legs, and without this key it would be whichever leg came first.
+ */
+function outranks(entry: Track, incumbent: Track, trade: BrokerTrade): boolean {
+  const keys = (track: Track): readonly number[] => [
+    Number(track.atEntry),
+    Number(!track.inferred),
+    Number(riskOf(track, trade) > 0),
+    riskOf(track, trade),
+    finalRiskOf(track, trade),
+  ];
+
+  const mine = keys(entry);
+  const theirs = keys(incumbent);
+  for (let i = 0; i < mine.length; i += 1) {
+    if (mine[i] !== theirs[i]) return mine[i] > theirs[i];
+  }
+  return false;
+}
+
+/**
+ * The stop orders of one trade, grouped into tracks. REF-113 Stage 6, and the
+ * header is where the model is argued.
+ *
+ * A stop order REPLACES the earlier stop order whose life ended LATEST at or
+ * before this one was submitted. "Ended" is three conditions and all of them
+ * are necessary:
+ *
+ *   - **cancelled**, by `ordStatus` — a stop that is still working was replaced
+ *     by nothing;
+ *   - **and produced no fill in this cycle**, because a stop that filled is how
+ *     the trade got OUT and not something the trader took away;
+ *   - **and datable**, by {@link cancelInstant}. This is the one that makes
+ *     concurrency decidable, and without it nothing chains.
+ *
+ * THE UNDATED CASE IS THE COMMON ONE AND IT FAILS TO A PARALLEL STOP, which
+ * invents no move. That is deliberate rather than reluctant: two brackets
+ * cancelled together by the flatten that closed the trade would otherwise be
+ * each other's replacement, and chaining them is precisely the regression
+ * REF-117 §6.2 named — the second bracket's first price read as a move of the
+ * first bracket's, on a trade where the trader touched nothing.
+ *
+ * ONE PREDECESSOR MAY BE CLAIMED BY SEVERAL SUCCESSORS AND NOT THE OTHER WAY
+ * ROUND, and the asymmetry is the two shapes it has to tell apart. A three-lot
+ * stop replaced by a two-lot and a one-lot is ONE stop that became TWO, and both
+ * legs are moves of it — so the root seeds both tracks, which is also how that
+ * trade comes to read `'mixed'` when one leg went each way. A successor with two
+ * candidate predecessors, by contrast, is an ambiguity we cannot settle, so it
+ * chains to neither and opens its own track.
+ *
+ * THE RELATION IS A STRICT ORDER, which is what makes it acyclic: a predecessor
+ * must come earlier in `(submittedMs, orderId)`, so no pair can claim each other
+ * and no chain can close on itself.
+ */
+function stopTracks(params: {
+  stops: readonly ProtectiveOrder[];
+  /** Orders that produced a fill in this cycle. `trade.entryOrderIds`. */
+  filledIds: ReadonlySet<number>;
+  commandTimes: StopEvidence['commandTimes'];
+}): readonly ProtectiveOrder[][] {
+  const { stops, filledIds, commandTimes } = params;
+
+  // An order with no readable submission sorts last and chains to nothing: it
+  // cannot be placed in the sequence at all, and guessing its position is how a
+  // replacement gets invented out of an ordering.
+  const ordered = [...stops].sort(
+    (a, b) =>
+      (a.submittedMs ?? Number.POSITIVE_INFINITY) - (b.submittedMs ?? Number.POSITIVE_INFINITY) ||
+      a.orderId - b.orderId
+  );
+
+  /** `orderId` → the instant its life ended, for the orders whose did. */
+  const endedAt = new Map<number, number>();
+  for (const order of ordered) {
+    if (filledIds.has(order.orderId)) continue;
+    const ms = cancelInstant(order, commandTimes);
+    if (ms !== null) endedAt.set(order.orderId, ms);
+  }
+
+  /** `orderId` → the order it replaced. */
+  const replaces = new Map<number, number>();
+  ordered.forEach((order, i) => {
+    const submitted = order.submittedMs;
+    if (submitted === null) return;
+
+    let latest: number | null = null;
+    let claims = 0;
+    let predecessor = 0;
+    for (const earlier of ordered.slice(0, i)) {
+      const ended = endedAt.get(earlier.orderId);
+      if (ended === undefined || ended > submitted) continue;
+      if (latest === null || ended > latest) {
+        latest = ended;
+        claims = 1;
+        predecessor = earlier.orderId;
+      } else if (ended === latest) {
+        claims += 1;
+      }
+    }
+    // Two orders that ended at the same instant are an ambiguity rather than a
+    // chain, and a new track is the conservative answer: it invents no move.
+    if (claims === 1) replaces.set(order.orderId, predecessor);
+  });
+
+  const byId = new Map(ordered.map((order) => [order.orderId, order]));
+  const replaced = new Set(replaces.values());
+
+  // ONE TRACK PER LEAF. A leaf is a stop nothing replaced — the order that was
+  // in force when the track ended — and walking back up the chain from it gives
+  // the members in submission order.
+  const tracks: ProtectiveOrder[][] = [];
+  for (const leaf of ordered) {
+    if (replaced.has(leaf.orderId)) continue;
+    const path: ProtectiveOrder[] = [leaf];
+    for (let id = replaces.get(leaf.orderId); id !== undefined; id = replaces.get(id)) {
+      const member = byId.get(id);
+      if (member === undefined) break;
+      path.unshift(member);
+    }
+    tracks.push(path);
+  }
+
+  return tracks;
+}
+
+/**
+ * When a stop order was cancelled, or null. REF-113 Stage 6.
+ *
+ * NO NEW READ AND NO NEW FIELD. `/command/list` is already fetched for the fill
+ * anchor, and the argument is the one {@link StopEvidence.commandTimes} already
+ * makes for the pairing it supports: a cancel IS a command, it mints no version,
+ * and IT IS LAST. So when the order is cancel-shaped and carries exactly one
+ * command more than it has versions, the last command instant is the cancel.
+ *
+ * `=== versions.length + 1` AND NOT `>=`, which is the same refusal
+ * {@link versionInstants} makes and for the same reason: anything else — a
+ * rejected modify, which is a command in the MIDDLE that minted no version, or a
+ * version this module dropped for an unusable `id` — means the list is not the
+ * shape this argument assumes, and the last entry of it is not known to be the
+ * cancel. A wrong instant here does not produce a worse number, it produces a
+ * replacement chain that did not happen.
+ *
+ * `commandType` WOULD REPLACE ALL OF THIS WITH A JOIN AND IS DELIBERATELY NOT
+ * DECLARED. The field is on Tradovate's low-cardinality enum list and
+ * ./types.ts carries only `id`, `orderId` and `timestamp` — it does not widen a
+ * type from guesswork, and that rule holds here. What stands in for it is the
+ * conservative derivation above plus the two facts the candidate set already
+ * guarantees about any successor: same side, same cycle. The remaining
+ * condition — placed after the cancel — is this instant.
+ */
+function cancelInstant(
+  order: ProtectiveOrder,
+  commandTimes: StopEvidence['commandTimes']
+): number | null {
+  if (!cancelShaped(order.ordStatus)) return null;
+  const commands = commandTimes?.get(order.orderId);
+  if (commands === undefined) return null;
+  if (commands.length !== order.versions.length + 1) return null;
+  // Ascending — the reader sorts. See {@link readCommandTimes}.
+  return commands[commands.length - 1];
 }
 
 /**
@@ -1276,40 +1928,113 @@ const terminalShaped = (ordStatus: string | undefined): boolean =>
  * was already in has nothing before it to skip — and that case is flagged
  * `true`, because the clock did answer. The two look the same in `preFill` and
  * are told apart by the flag, which is the only reason the flag exists.
+ *
+ *
+ * AND A TRACK ROOTED AFTER THE FILL NEEDS NO VERSION CLOCK AT ALL (STAGE 6)
+ * ------------------------------------------------------------------------
+ *
+ * When the ROOT order was SUBMITTED after the position opened, every version it
+ * will ever have postdates the fill — so the anchor is version one, nothing
+ * precedes it, and `anchoredAtFill` is `true` because a clock did answer: the
+ * order's own `timestamp`, which needs no positional pairing and is therefore
+ * the stronger of the two readings this module has. That is the whole mechanism
+ * behind {@link StopHistory.stopAtEntry}, and it is why a late stop does not
+ * depend on `/command/list` having been readable.
+ *
+ * THE LATER MEMBERS OF A TRACK CONTRIBUTE EVERY VERSION THEY STATE. They are
+ * replacements, submitted after the cancel of the order they replaced, so there
+ * is no pre-fill re-pricing among them to skip — the anchor is the ROOT's
+ * business alone.
+ *
+ * AND THE EXIT DRAG IS CUT FROM THE LAST MEMBER ONLY, which needs the last two
+ * counted prices to BOTH be that member's. A cancelled mid-track member is a
+ * replacement and not a drag onto the market, so cutting its last version would
+ * delete the very move this stage exists to see — and on a track whose last
+ * member states ONE price, the step into it is the replacement itself. On a
+ * one-member track the test is `counted.length >= 2`, which is
+ * {@link withoutExitDrag}'s own guard, so nothing about a single stop changed.
  */
-function anchorStop(params: {
-  order: ProtectiveOrder;
+function buildTrack(params: {
+  members: readonly ProtectiveOrder[];
   trade: BrokerTrade;
-  /** The clock alone. The order's own status travels on {@link ProtectiveOrder}. */
+  /** Orders that produced a fill in this cycle. `trade.entryOrderIds`. */
+  filledIds: ReadonlySet<number>;
+  /** The clock alone. The orders' own statuses travel on {@link ProtectiveOrder}. */
   commandTimes: StopEvidence['commandTimes'];
-}): AnchoredStop {
-  const { order, trade, commandTimes } = params;
+}): Track {
+  const { members, trade, filledIds, commandTimes } = params;
 
-  const times = versionInstants(order, commandTimes);
+  const root = members[0];
+  const last = members[members.length - 1];
   const fillMs = finite(trade.openedAtMs);
 
-  // The versions that STATE a price, each carrying the instant of ITS POSITION
-  // IN THE FULL LIST — a cancellation states no price and cannot be an anchor,
-  // but it did consume a command, so the pairing happens before this filter and
-  // never after it. The price is carried through rather than re-derived: it is
-  // `initialStop`, it is `finalStop`, and it is what `riskOf` ranks on.
+  // IN FORCE AT THE OPEN, off the order's submission and not off any version.
+  // The tolerance is the same minute layer C's window uses, for the same reason:
+  // it absorbs the skew between an order's `timestamp` and a fill's, and a
+  // bracket submitted WITH a market entry can stamp a second either side of it.
+  // An unreadable submission is not a finding — it fails to `true`, which is the
+  // answer every normal trade has.
+  const atEntry =
+    root.submittedMs === null ||
+    fillMs === null ||
+    root.submittedMs <= fillMs + WINDOW_TOLERANCE_MS;
+
+  const per = members.map((member) => statedStops(member, commandTimes));
+
+  const rootTimed = per[0].timed && fillMs !== null;
+  const preFill = rootTimed && atEntry && fillMs !== null ? anchorIndex(per[0].stated, fillMs) : 0;
+
+  const segments = per.map((entry, i) => (i === 0 ? entry.stated.slice(preFill) : entry.stated));
+  const fromAnchor = segments.flat();
+  const tail = segments[segments.length - 1].length;
+
+  const endedAt = filledIds.has(last.orderId) ? null : cancelInstant(last, commandTimes);
+
+  return {
+    members,
+    all: per.flatMap((entry) => entry.stated).map((entry) => entry.price),
+    counted: tail >= 2 ? withoutExitDrag(fromAnchor, last, trade) : fromAnchor,
+    preFill,
+    // A late stop's clock IS the order's submission — see the section above.
+    anchoredAtFill: atEntry ? rootTimed : true,
+    atEntry,
+    // The margin is {@link WINDOW_TOLERANCE_MS} rather than a second tolerance,
+    // and it is what keeps the most common terminal shape innocent: the trader
+    // flattens by hand and the OCO cancels the stop behind them, within seconds
+    // of the close.
+    bareCancel: endedAt !== null && endedAt < trade.closedAtMs - WINDOW_TOLERANCE_MS,
+    anchorQty: finite(per[0].stated[preFill]?.version.orderQty),
+    inferred: members.some((member) => member.layer === 'window'),
+    // THE LAST MEMBER'S. The stop in force at the end of the track is what a
+    // trail is a property of, and on a one-member track this is the same value
+    // every single-stop trade has always reported.
+    trailing: isTrailingType(last.type),
+  };
+}
+
+/**
+ * One order's versions that stated a price, with the instants we could put on
+ * them, and whether a clock answered at all.
+ *
+ * A cancellation states no price and cannot be an anchor, but it did consume a
+ * command — so the pairing happens BEFORE this filter and never after it, and
+ * each entry carries the instant of ITS POSITION IN THE FULL VERSION LIST. The
+ * price is carried through rather than re-derived: it is `initialStop`, it is
+ * `finalStop`, and it is what {@link riskOf} ranks on.
+ */
+function statedStops(
+  order: ProtectiveOrder,
+  commandTimes: StopEvidence['commandTimes']
+): { stated: StatedStop[]; timed: boolean } {
+  const times = versionInstants(order, commandTimes);
+
   const stated: StatedStop[] = [];
   order.versions.forEach((version, i) => {
     const price = finite(version.stopPrice);
     if (price !== null) stated.push({ version, price, atMs: times?.[i] ?? null });
   });
 
-  const timed = times !== null && fillMs !== null;
-  const preFill = timed ? anchorIndex(stated, fillMs) : 0;
-  const counted = withoutExitDrag(stated.slice(preFill), order, trade);
-
-  return {
-    order,
-    all: stated.map((entry) => entry.price),
-    counted,
-    preFill,
-    anchoredAtFill: timed,
-  };
+  return { stated, timed: times !== null };
 }
 
 /**
@@ -1476,13 +2201,30 @@ function stopPrices(versions: readonly TradovateOrderVersion[]): number[] {
  * the fill anchor, and that is what made the 19.10 trade rank its candidates on
  * a price the broker had already superseded.
  *
- * Safe to index: {@link AnchoredStop.counted} is never empty, and every caller
- * has already filtered to orders with at least one stated stop price
+ * Safe to index: {@link Track.counted} is never empty, and every caller has
+ * already filtered to orders with at least one stated stop price
  * (`stopPrices(...).length > 0` in {@link deriveStopHistory}).
  */
-function riskOf(stop: AnchoredStop, trade: BrokerTrade): number {
-  const anchor = stop.counted[0].price;
-  return trade.direction === 'long' ? trade.entryPrice - anchor : anchor - trade.entryPrice;
+function riskOf(stop: Track, trade: BrokerTrade): number {
+  return signedRisk(stop.counted[0].price, trade);
+}
+
+/**
+ * The risk the track's LAST counted price states. {@link outranks}' tie-break.
+ *
+ * Reached only when two tracks state the same risk at the open, which is the
+ * shape one stop SPLIT INTO TWO LEGS produces: both tracks share a root, so both
+ * anchor on the same price and the honest answer to "what am I left risking" is
+ * the leg that ended further out. Never a blend of the two — "the mean of two
+ * stop prices is a price that was never a stop".
+ */
+function finalRiskOf(stop: Track, trade: BrokerTrade): number {
+  return signedRisk(stop.counted[stop.counted.length - 1].price, trade);
+}
+
+/** One subtraction, read off the trade's direction and never off the prices. */
+function signedRisk(price: number, trade: BrokerTrade): number {
+  return trade.direction === 'long' ? trade.entryPrice - price : price - trade.entryPrice;
 }
 
 /** A target's price: the limit price of its first version. */
@@ -1584,12 +2326,26 @@ function countMoves(params: {
   direction: BrokerTrade['direction'];
   trailing: boolean;
   automated?: ReadonlyMap<number, boolean>;
+  /**
+   * The track ended in a dated cancel with nothing in its place. REF-113
+   * Stage 6, and it is ONE WIDENING STEP WITH NO PRICE: the trader pulled their
+   * stop and rode the rest of the position naked, which is a genuine increase in
+   * risk that no pair of prices can express. The caller decides when this is
+   * knowable — see {@link Track.bareCancel} — and this function's only job is
+   * that it counts as a widening and not as a direction read off two prices.
+   *
+   * A WIDENING WITH NO "TO" PRICE, which is why `finalStop` stays the last
+   * stated price and lib/journal/stopHistory.ts must not print a from→to range
+   * for it. `'mixed'` already drops the range, and a bare cancel on a stop that
+   * was also moved is exactly that.
+   */
+  bareCancel?: boolean;
 }): Moves {
-  const { steps: stated, direction, trailing, automated } = params;
+  const { steps: stated, direction, trailing, automated, bareCancel } = params;
 
-  let movedCount = 0;
+  let movedCount = bareCancel === true ? 1 : 0;
   let tightened = false;
-  let widened = false;
+  let widened = bareCancel === true;
 
   for (let i = 1; i < stated.length; i += 1) {
     const before = stated[i - 1].price;
@@ -1886,14 +2642,16 @@ async function readHostEvidence(params: {
   // ── The candidate set, deduplicated across trades ────────────────────────
   // "One map per run" (§4.3 guard 1): a bracket order that closes two trades is
   // fetched once. Same discipline as `loadContractUnits`.
+  // AND UNDER THE SAME PER-TRADE CAP THE DERIVATION APPLIES, through the one
+  // function both halves share: a trade over it reads `'unknown'`, so fetching
+  // the versions it would not look at is a fan-out spent on nothing — and it is
+  // the fan-out the cap exists to stop. See {@link cappedCandidates}.
   const wanted = new Set<number>();
   for (const trade of trades) {
-    for (const { orderId } of candidateOrders({
-      trade,
-      evidence: { orders, strategyByOrder },
-    })) {
-      wanted.add(orderId);
-    }
+    const { candidates } = cappedCandidates(
+      candidateOrders({ trade, evidence: { orders, strategyByOrder } })
+    );
+    for (const { orderId } of candidates) wanted.add(orderId);
   }
   tally.candidates += wanted.size;
 
