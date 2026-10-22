@@ -68,9 +68,17 @@ import {
 // the document (REF-113 Stage 6).
 import {
   readStopHistory,
+  stopDirectionOf,
   stopMoveSentence,
   stopWasWidened,
 } from '../src/lib/journal/stopHistory';
+// THE SCORE, FROM THE DERIVED DOCUMENT AND NOT FROM A HAND-WRITTEN ONE. The
+// tightening exemption lives in `tradeScore` and not in the column, so the only
+// way to prove a DERIVED tightening keeps its twelve points is to run a fixture
+// all the way through: orders → document → `stopDirectionOf` → the score.
+// broker-import-check's own score group feeds `stopDirection` in by hand, which
+// pins the decision but not the wiring.
+import { computeTradeScore, type TradeScoreInput } from '../src/lib/scoring/tradeScore';
 import type { BrokerTrade, TradovateReader } from '../src/lib/tradovate/fills';
 import { TradovateRequestError } from '../src/lib/tradovate/errors';
 import type {
@@ -1689,6 +1697,102 @@ function tracksGroup() {
   const MEAN = (S_LOW + E) / 2;
   const WEIGHTED = (S_LOW * 1 + E * 2) / 3;
 
+  // ── (4e) THE SAME SPLIT WITH BOTH LEGS TIGHTER ───────────────────────────
+  //
+  // One price different from (4): the one-lot leg goes to S_2 instead of S_LOW,
+  // so BOTH replacements are closer to the entry than the stop they replaced.
+  //
+  // THE PAIR THAT PROVES `'mixed'` IS READ OFF THE PRICES AND NOTHING ELSE.
+  // (4) and (4b) have the same quantities, the same coverage, the same dated
+  // mid-trade cancel of the root and the same two-track shape — they differ in
+  // one number. So a `'mixed'` here would be a direction derived from the split
+  // itself, or from the root's cancel, which is what §3.4 forbids and what
+  // fixture (8) guards from the other side.
+  const splitTighter = derive({
+    trade: THREE,
+    orders: [
+      order(ENTRY_ORDER, { action: 'Buy', ordStatus: 'Filled' }),
+      order(EXIT_ORDER, { ordStatus: 'Filled', timestamp: at(CLOSED - 1_000) }),
+      order(STOP_ORDER, { ordStatus: 'Canceled' }),
+      order(REPLACEMENT, { ordStatus: 'Canceled', timestamp: at(REPLACED_AT) }),
+      order(REPLACEMENT_2, { ordStatus: 'Canceled', timestamp: at(REPLACED_AT + 1_000) }),
+    ],
+    versions: [
+      version(90_001, ENTRY_ORDER, { orderType: 'Market', orderQty: 3 }),
+      version(90_006, EXIT_ORDER, { orderType: 'Market', orderQty: 3 }),
+      version(90_002, STOP_ORDER, { orderType: 'Stop', stopPrice: STOP_1, orderQty: 3 }),
+      version(90_050, REPLACEMENT, { orderType: 'Stop', stopPrice: STOP_2, orderQty: 1 }),
+      version(90_051, REPLACEMENT_2, { orderType: 'Stop', stopPrice: E, orderQty: 2 }),
+    ],
+    links: [ENTRY_ORDER, STOP_ORDER],
+    commandTimes: { [STOP_ORDER]: cancelledAt(CANCEL_AT) },
+  });
+
+  // ── (11) A LATE stop that was then MOVED, derived end to end ─────────────
+  //
+  // Nothing at the fill; a stop placed by hand two minutes in; that stop
+  // cancelled with a DATED instant and replaced. Fixture (3) stops at
+  // `movedCount: 0`, so until this one no fixture DERIVED Case B with a move on
+  // top — the sentence was pinned in broker-import-check from a hand-written
+  // document, and the score from a hand-fed `stopDirection`.
+  //
+  // THE TWO VARIANTS DIFFER IN ONE PRICE AND `moved_sl` IS TRUE FOR BOTH. That
+  // is the division of labour this suite exists to hold: the COLUMN records
+  // that the trader moved their stop, and the DIRECTION on the document decides
+  // what it costs (lib/scoring/tradeScore.ts). A tightening that wrote
+  // `moved_sl = false` would read as "I held my stop" on the stats pages and
+  // would disagree with the link panel's own checkbox (lib/journal/link.ts).
+  const LATE_PLACED = FILL + 120_000;
+  const LATE_CANCEL = FILL + 180_000;
+  const LATE_MOVED_AT = FILL + 200_000;
+  const lateMovedBase = {
+    orders: [
+      ...bookends,
+      order(LATE_ORDER, { ordStatus: 'Canceled', timestamp: at(LATE_PLACED) }),
+      order(REPLACEMENT, { ordStatus: 'Canceled', timestamp: at(LATE_MOVED_AT) }),
+    ],
+    links: [ENTRY_ORDER],
+    // One version plus the cancel, the cancel last — the same spare
+    // `cancelledAt` supplies, with a placement instant that is AFTER the fill
+    // because this order was. The REPLACEMENT's own cancel is left undated, so
+    // `bareCancel` cannot fire and add a widening of its own.
+    commandTimes: { [LATE_ORDER]: [LATE_PLACED, LATE_CANCEL] },
+  };
+  const lateMovedVersions = (price: number) => [
+    ...bookendVersions,
+    version(90_060, LATE_ORDER, { orderType: 'Stop', stopPrice: STOP_1, orderQty: 1 }),
+    version(90_061, REPLACEMENT, { orderType: 'Stop', stopPrice: price, orderQty: 1 }),
+  ];
+  const lateTightened = derive({ ...lateMovedBase, versions: lateMovedVersions(STOP_2) });
+  const lateWidened = derive({ ...lateMovedBase, versions: lateMovedVersions(S_LOW) });
+
+  /**
+   * The discipline score a derived document produces, through the SAME two
+   * inputs the debrief route passes: `moved_sl` off the column that
+   * `fillWhenEmpty` would write, and `stopDirection` off the document
+   * (src/app/api/ai-debrief/route.ts:199). Forty of forty is the full block.
+   */
+  const SCORE_BASE: TradeScoreInput = {
+    stop_loss: STOP_1,
+    take_profit: TARGET,
+    rr_ratio: 2.5,
+    required_min_rr: 2,
+    strategy_conditions_checked: null,
+    moved_sl: false,
+    exited_early: false,
+    fomo_entry: false,
+    revenge_trade: false,
+    exit_price: 4518.5,
+    entry_price: ENTRY_PRICE,
+    direction: 'long',
+  };
+  const disciplineOf = (history: StopHistory): number =>
+    computeTradeScore({
+      ...SCORE_BASE,
+      moved_sl: movedSlOf(history) === true,
+      stopDirection: stopDirectionOf(history),
+    }).breakdown.discipline.score;
+
   // ── (5) A cancel with NOTHING in its place ───────────────────────────────
   // The trader pulled the stop mid-trade and rode the rest naked. One widening
   // step, and it has no "to" price.
@@ -1858,6 +1962,53 @@ function tracksGroup() {
       [STOP_1, true, 3, false]),
     c('(4d) and two tracks drop the from→to range from the sentence',
       sentenceOf(split), 'הסטופ הוזז 2 פעמים — גם הורחק וגם הודק (2 פקודות הגנה)'),
+
+    // PAIR FOR (4): the same split with both legs CLOSER to the entry. One
+    // price different, and `'mixed'` becomes `'tightened'` — which is what says
+    // the direction came from the prices and not from the split, the coverage
+    // or the root's dated cancel.
+    c('(4e) PAIR: a split whose BOTH legs are tighter is `tightened`, not mixed',
+      [splitTighter.stopCount, splitTighter.movedCount, splitTighter.direction],
+      [2, 2, 'tightened']),
+    c('(4f) and it reaches neither the widened rule nor a false `moved_sl`',
+      [stopWasWidened(splitTighter), movedSlOf(splitTighter)], [false, true]),
+    // THE TWELVE POINTS, FROM THE DERIVED DOCUMENT. The column says the stop
+    // moved — twice — and the direction is what keeps the block whole.
+    c('(4g) the trader keeps the full discipline block, the same as (4) loses it',
+      [disciplineOf(splitTighter), disciplineOf(split)], [40, 28]),
+    c('(4h) and the sentence stays neutral, with the count instead of a range',
+      [sentenceOf(splitTighter), toneOf(splitTighter)],
+      ['הסטופ הודק לכיוון הרווח (2 פקודות הגנה)', 'neutral']),
+
+    // ── Case B with a move on top ───────────────────────────────────────────
+    c('(11) a LATE stop that was then moved is `moved`, and still says `late`',
+      [lateTightened.verdict, lateTightened.stopAtEntry, lateTightened.lateStop,
+       lateTightened.initialStop, lateTightened.movedCount, lateTightened.direction],
+      ['moved', false, STOP_1, null, 1, 'tightened']),
+    c('(11b) the widening variant differs in the DIRECTION and nothing else',
+      [lateWidened.verdict, lateWidened.stopAtEntry, lateWidened.lateStop,
+       lateWidened.initialStop, lateWidened.movedCount, lateWidened.direction],
+      ['moved', false, STOP_1, null, 1, 'widened']),
+    // `moved_sl` IS THE SAME FOR BOTH and the score is not. A tightening that
+    // wrote `false` here would read as "I held my stop" on the stats pages.
+    c('(11c) both write `moved_sl` TRUE, and only the widening costs the twelve',
+      [movedSlOf(lateTightened), movedSlOf(lateWidened),
+       disciplineOf(lateTightened), disciplineOf(lateWidened)],
+      [true, true, 40, 28]),
+    c('(11d) and only the widening arms the `block_day` rule',
+      [stopWasWidened(lateTightened), stopWasWidened(lateWidened)], [false, true]),
+    // The late stop OUTRANKS the direction in the sentence, which is branch 2b:
+    // a stop that arrived after the position did is the headline, so BOTH
+    // variants read the same line and it warns.
+    c('(11e) both get the late-stop sentence, which outranks the direction',
+      [sentenceOf(lateTightened), toneOf(lateTightened),
+       sentenceOf(lateWidened), toneOf(lateWidened)],
+      ['נכנסת בלי סטופ — הסטופ הוצב אחרי הכניסה והוזז לאחר מכן', 'warning',
+       'נכנסת בלי סטופ — הסטופ הוצב אחרי הכניסה והוזז לאחר מכן', 'warning']),
+    c('(11f) nothing was covered at the open, and no bare cancel fired',
+      [lateTightened.coveredQty, lateTightened.partialCoverage,
+       lateTightened.cancelledUnreplaced, lateTightened.stopCount],
+      [0, true, false, 1]),
 
     // ── The bare cancel, and the three shapes it must not fire on ───────────
     c('(5) a DATED cancel with nothing in its place is one widening',
