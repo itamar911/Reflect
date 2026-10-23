@@ -1055,20 +1055,104 @@ function describeCycle(
     // verdict). Nothing here needs it.
     entryOrderIds: cycle.orderIds,
     cycleClosed: cycle.cycleClosed,
-    // The legs, reduced to what a sentence needs (REF-117 Stage 6). ./cycles.ts
+    // The legs, reduced to what a sentence needs (REF-117 Stage 6), and GROUPED
+    // BY ORDER rather than left 1:1 with the fills (Stage 7). ./cycles.ts
     // already has them in time order and already split entry from exit by
     // whether the leg moved `netPos` AWAY from zero — which is the only
     // definition that survives a flip, where one FILL contributes a leg to each
     // of two cycles.
     stages: {
-      entries: cycle.legs.filter((leg) => leg.entry).map(asStage),
-      exits: cycle.legs.filter((leg) => !leg.entry).map(asStage),
+      entries: stagesFromLegs(cycle.legs.filter((leg) => leg.entry)),
+      exits: stagesFromLegs(cycle.legs.filter((leg) => !leg.entry)),
     },
   };
 }
 
-/** A leg, less the four fields a row has no business carrying. {@link TradeStage}. */
-const asStage = (leg: CycleLeg): TradeStage => ({ qty: leg.qty, price: leg.price });
+/**
+ * One side's legs as the pieces a TRADER chose, not the pieces a BROKER filled.
+ *
+ * WHY THIS IS NOT `legs.map(asStage)` ANY MORE (REF-117 Stage 7). A market order
+ * for three contracts can come back as three partial fills, and the walk in
+ * ./cycles.ts makes one leg per fill because that is what a leg is. Projecting
+ * 1:1 then said `נכנסת ב-3 שלבים` about a trader who placed ONE order, and the
+ * whole claim of the feature is "how many DECISIONS produced these four
+ * numbers". So the grouping key is `orderId`, which the broker states on every
+ * fill and {@link CycleLeg} carries all the way here. No timestamp window, no
+ * tolerance: two separate orders inside one second are routine at the open, and
+ * a resting order can fill over minutes, so proximity is wrong in both
+ * directions. The cycle already aggregates by order for `orderIds` — this is
+ * that same aggregation, finally performed for the stages.
+ *
+ * A LEG WITH NO ORDER IS ITS OWN STAGE, and this guard is load-bearing. Keying
+ * the map on `leg.orderId` directly would collapse every order-less leg into one
+ * `undefined` bucket and merge fills from genuinely different decisions — the
+ * one outcome worse than counting too many. Degrading to one-stage-per-leg is
+ * the honest floor: exactly the old behaviour, for exactly the legs that carry
+ * no evidence.
+ *
+ * THE MERGED PRICE IS THE QUANTITY-WEIGHTED MEAN, which is a decision and not an
+ * implementation detail. It is the same arithmetic as `entryPrice` and
+ * `exitPrice` — see this module's note above {@link describeCycle} — so a merged
+ * stage reproduces the row's average exactly: `price_g × qty_g ≡ Σ pᵢqᵢ`. The
+ * consequence to know before reading it as a bug: a mean of fills at different
+ * ticks is generally NOT ON A TICK. Two 1-lots one tick apart average to a half
+ * tick, and `stagePieces` in lib/journal/stages.ts renders it with `toFixed(2)`,
+ * so a trader reconciling the detail line against a broker statement can find a
+ * price the exchange never printed. That is accepted: one decision gets one
+ * price, consistent with the row it sits under. A single-leg group is returned
+ * verbatim rather than put through the division, so every stage that was not
+ * merged keeps the real fill price it had before this stage, bit for bit.
+ *
+ * KNOWN UNDER-MERGE, DELIBERATELY NOT FIXED HERE: Tradovate issues a NEW
+ * `orderId` when a working order is modified, so an order partially filled and
+ * then cancel-and-replaced reports two stages for what the trader experienced as
+ * one decision. It is out of scope for Stage 7. It fails in the same direction
+ * as the old code — too many stages, not too few — and that is the safe side: an
+ * over-count over-reports scaling, which is wrong but legible, where an
+ * over-merge erases a real decision. The replacement chain lives in
+ * ./orders.ts, is built from a separate `/order/list` pass that can legitimately
+ * resolve nothing, and reaching for it would make `broker_stages` conditional —
+ * which `CONDITIONAL_FACTS` in scripts/broker-import-check.ts argues it must not
+ * become, since it comes off the same `/fill/list` pass that produced the row.
+ *
+ * Groups are emitted in the order of their EARLIEST leg, which falls out of
+ * creating a group's slot at its first leg. Order is data here: both
+ * `040_broker_stages.sql` and `stableJson` in ./import.ts depend on it.
+ */
+export function stagesFromLegs(legs: readonly CycleLeg[]): TradeStage[] {
+  const byOrder = new Map<number, CycleLeg[]>();
+  const groups: CycleLeg[][] = [];
+
+  for (const leg of legs) {
+    // `undefined` never reaches the map, so order-less legs share no bucket.
+    const open = leg.orderId === undefined ? undefined : byOrder.get(leg.orderId);
+    if (open) {
+      open.push(leg);
+      continue;
+    }
+    const started = [leg];
+    groups.push(started);
+    if (leg.orderId !== undefined) byOrder.set(leg.orderId, started);
+  }
+
+  return groups.map((group) => {
+    // The old projection, unchanged, for the overwhelmingly common case.
+    if (group.length === 1) return { qty: group[0].qty, price: group[0].price };
+
+    const qty = group.reduce((total, leg) => total + leg.qty, 0);
+    return {
+      qty,
+      // Guarded the same way and for the same reason as `weighted()` in
+      // ./cycles.ts: a zero-quantity group would divide to NaN, and the
+      // all-or-nothing reader in lib/journal/stages.ts would then drop the whole
+      // document rather than one piece of it.
+      price:
+        qty === 0
+          ? group[0].price
+          : group.reduce((acc, leg) => acc + leg.price * leg.qty, 0) / qty,
+    };
+  });
+}
 
 /**
  * One cycle's P&L in dollars, from the PAIRS, checked against the FILLS.

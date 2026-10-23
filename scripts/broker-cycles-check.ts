@@ -11,6 +11,13 @@
  * no reader, no client, no `process.env`, no clock — so every case below is
  * three arrays in and one object out.
  *
+ * The one exception is `stagesFromLegs`, imported from
+ * `src/lib/tradovate/fills.ts` for the STAGES group (REF-117 Stage 7). That
+ * module is not pure as a whole — it is the one that calls the broker — but that
+ * function is: legs in, pieces out, no reader and no clock. It is imported
+ * rather than reimplemented because a second copy of the grouping rule in the
+ * test would assert the copy and not the code.
+ *
  *
  * WHY EACH GROUP IS HERE
  * ----------------------
@@ -48,6 +55,10 @@
  *     one fabricated cycle.
  *   - **HELD** — the reconciliation identity, which is what licenses trusting
  *     any of the above. Four ways to fail it, each with its own reason code.
+ *   - **STAGES** — REF-117 Stage 7, and the only group that is about the
+ *     PROJECTION rather than the walk. One order filled in three pieces is one
+ *     stage, three orders in the same second are three, and an order-less leg is
+ *     its own. The reported bug said `נכנסת ב-3 שלבים` about one market order.
  *
  * And one group that is not a case but a property: the P&L computed from the
  * FILLS equals the P&L computed from the PAIRS, on every fixture that has both.
@@ -65,6 +76,7 @@ import {
   type CyclePosition,
   type LogicalPosition,
 } from '../src/lib/tradovate/cycles';
+import { stagesFromLegs } from '../src/lib/tradovate/fills';
 
 // ── Harness ─────────────────────────────────────────────────────────────────
 //
@@ -122,15 +134,18 @@ function fill(
   action: 'Buy' | 'Sell',
   qty: number,
   price: number,
-  opts: { contract?: number; order?: number } = {}
+  opts: { contract?: number; order?: number; at?: string } = {}
 ): CycleFill {
   tick += 1;
   return {
     id,
+    // `order: 0` survives the `??` and is what the STAGES group uses to make a
+    // leg carry NO order — `usable()` rejects it, so nothing is carried as zero.
     orderId: opts.order ?? 900_000 + id,
     contractId: opts.contract ?? MNQ,
-    // One minute apart, so the walk's order is unambiguous and readable.
-    timestamp: new Date(Date.UTC(2026, 9, 20, 14, tick)).toISOString(),
+    // One minute apart, so the walk's order is unambiguous and readable. `at`
+    // overrides it for the one fixture that needs fills inside ONE second.
+    timestamp: opts.at ?? new Date(Date.UTC(2026, 9, 20, 14, tick)).toISOString(),
     action,
     qty,
     price,
@@ -594,6 +609,213 @@ group('reconcile() alone, since it is the one rule that gates every import', [
     reconcile({ walked: 2, netPos: 2, prevPos: Number.NaN }).ok,
     reconcile({ walked: 2, netPos: 2, prevPos: Number.NaN }).seedNet,
   ], [true, 0]),
+]);
+
+// ── 11. STAGES: one ORDER is one stage, however many fills it took ──────────
+//
+// REF-117 Stage 7, and the only group here about the PROJECTION rather than the
+// walk. The reported bug: a market order for three contracts came back as three
+// partial fills, and the card said `נכנסת ב-3 שלבים` about one decision.
+//
+// `stagesFromLegs` is the production function; these two lines are
+// describeCycle's own call site, per side, and nothing else.
+const stagesOf = (cycle: LogicalPosition) => ({
+  entries: stagesFromLegs(cycle.legs.filter((leg) => leg.entry)),
+  exits: stagesFromLegs(cycle.legs.filter((leg) => !leg.entry)),
+});
+
+// No pairs anywhere in this group: the projection reads none, and attribution
+// falls back to the sole account trading the contract — the INTERDAY precedent.
+const noPairs: CyclePair[] = [];
+
+// One order id, shared. Outside the `900_000 + id` range `fill()` defaults to,
+// so a fixture that MEANT to share cannot accidentally collide with one that
+// did not.
+const SHARED_ENTRY_ORDER = 910_001;
+const SHARED_EXIT_ORDER = 910_002;
+const SHARED_FLIP_ORDER = 910_003;
+
+// 11a. THE REPORTED CASE. Three 1-lot entry fills, two distinct prices, one
+// order. Placed beside CASE א deliberately: both cycles have FOUR legs, and the
+// only difference between 1+1 stages and 2+2 stages is the order id.
+tick = 0;
+const pieceA = fill(8001, 'Buy', 1, 100, { order: SHARED_ENTRY_ORDER });
+const pieceB = fill(8002, 'Buy', 1, 100, { order: SHARED_ENTRY_ORDER });
+const pieceC = fill(8003, 'Buy', 1, 101, { order: SHARED_ENTRY_ORDER });
+const pieceExit = fill(8004, 'Sell', 3, 110);
+const onePiece = scan([pieceA, pieceB, pieceC, pieceExit], noPairs);
+const onePieceStages = stagesOf(onePiece.cycles[0]);
+
+group('STAGES: one order filled in three pieces is ONE stage (the reported bug)', [
+  c('(1) still one cycle, three in and three out', [
+    onePiece.cycles.length,
+    onePiece.cycles[0].entryQty,
+    onePiece.cycles[0].qty,
+  ], [1, 3, 3]),
+  // The walk is unchanged: one leg per fill, as a leg is defined.
+  c('(2) FOUR legs — three entry, one exit — exactly as before', [
+    onePiece.cycles[0].legs.filter((l) => l.entry).length,
+    onePiece.cycles[0].legs.filter((l) => !l.entry).length,
+  ], [3, 1]),
+  c('(3) ONE entry stage, quantity summed and price quantity-weighted',
+    onePieceStages.entries, [{ qty: 3, price: (100 + 100 + 101) / 3 }]),
+  c('(4) one exit stage, the single fill carried verbatim',
+    onePieceStages.exits, [{ qty: 3, price: 110 }]),
+  // §2.2 and migration 040's VERIFY 6: the arrays still sum to `quantity`.
+  c('(5) the stages sum to the row quantity on both sides', [
+    onePieceStages.entries.reduce((t, s) => t + s.qty, 0),
+    onePieceStages.exits.reduce((t, s) => t + s.qty, 0),
+  ], [onePiece.cycles[0].entryQty, onePiece.cycles[0].qty]),
+  // The grouped stage reproduces the row's average, which is what licenses
+  // showing a mean in the detail line under two means in the row.
+  c('(6) the grouped stage price IS the row entry price', [
+    onePieceStages.entries[0].price,
+    onePiece.cycles[0].avgEntry,
+  ], [(100 + 100 + 101) / 3, (100 + 100 + 101) / 3]),
+  // CASE א re-derived here rather than referenced, so the contrast is one read.
+  c('(7) CASE א is untouched: four legs, 2+2 stages, because FOUR orders', [
+    stagesOf(caseA.cycles[0]).entries.length,
+    stagesOf(caseA.cycles[0]).exits.length,
+    caseA.cycles[0].legs.length,
+  ], [2, 2, 4]),
+]);
+
+// 11b. THE OVER-MERGE GUARD. Three 1-lot entry fills under THREE orders, inside
+// ONE SECOND. This is the fixture that fails under a same-second timestamp
+// heuristic, which is why the refusal is pinned in a test and not only in prose:
+// two separate market orders inside one second are routine at the open, and
+// merging them would erase a decision rather than miscount one.
+tick = 0;
+const ONE_SECOND = new Date(Date.UTC(2026, 9, 20, 14, 31, 7)).toISOString();
+// The exit is stated explicitly too. `at` leaves `tick` behind, so a defaulted
+// exit would land BEFORE this second and the walk would read the whole fixture
+// as a short entered at 110 — which is how the first draft of this fixture
+// failed, and worth the extra line to make impossible.
+const AFTER_THAT_SECOND = new Date(Date.UTC(2026, 9, 20, 14, 32, 0)).toISOString();
+const secA = fill(8101, 'Buy', 1, 100, { at: ONE_SECOND });
+const secB = fill(8102, 'Buy', 1, 100, { at: ONE_SECOND });
+const secC = fill(8103, 'Buy', 1, 101, { at: ONE_SECOND });
+const secExit = fill(8104, 'Sell', 3, 110, { at: AFTER_THAT_SECOND });
+const sameSecond = scan([secA, secB, secC, secExit], noPairs);
+const sameSecondStages = stagesOf(sameSecond.cycles[0]);
+
+group('STAGES: three orders in ONE SECOND stay three stages', [
+  c('(1) the three entry fills really do share an instant',
+    new Set([secA.timestamp, secB.timestamp, secC.timestamp]).size, 1),
+  // Pins the fixture itself: a long entered in three and exited in one. Without
+  // this the mis-ordering above would read as a passing 1-stage entry.
+  c('(1b) and the fixture is the long it claims to be', [
+    sameSecond.cycles[0].direction,
+    sameSecond.cycles[0].legs.filter((l) => l.entry).length,
+    sameSecond.cycles[0].legs.filter((l) => !l.entry).length,
+  ], ['long', 3, 1]),
+  c('(2) three distinct orders, so THREE entry stages',
+    sameSecondStages.entries.length, 3),
+  c('(3) each stage is its own fill, nothing averaged',
+    sameSecondStages.entries, [
+      { qty: 1, price: 100 },
+      { qty: 1, price: 100 },
+      { qty: 1, price: 101 },
+    ]),
+  // Identical fills, identical prices, identical second as 11a — the order id is
+  // the ONLY input that differs, and it decides 3 stages against 1.
+  c('(4) same shape as 11a, and only the order id decides the count', [
+    sameSecondStages.entries.length,
+    onePieceStages.entries.length,
+  ], [3, 1]),
+]);
+
+// 11c. THE MIRROR, on the exit side (§3). Same code, same fix: a 3-lot scale-out
+// order filled in pieces is one exit, not three.
+tick = 0;
+const mirrorEntry = fill(8201, 'Buy', 3, 100);
+const mirrorX1 = fill(8202, 'Sell', 1, 110, { order: SHARED_EXIT_ORDER });
+const mirrorX2 = fill(8203, 'Sell', 1, 111, { order: SHARED_EXIT_ORDER });
+const mirrorX3 = fill(8204, 'Sell', 1, 111, { order: SHARED_EXIT_ORDER });
+const mirror = scan([mirrorEntry, mirrorX1, mirrorX2, mirrorX3], noPairs);
+const mirrorStages = stagesOf(mirror.cycles[0]);
+
+group('STAGES: the mirror — one exit order filled in pieces is ONE stage', [
+  c('(1) one entry leg and THREE exit legs, as the walk sees it', [
+    mirror.cycles[0].legs.filter((l) => l.entry).length,
+    mirror.cycles[0].legs.filter((l) => !l.entry).length,
+  ], [1, 3]),
+  c('(2) 1 → 1 stages, where the old projection said 1 → 3', [
+    mirrorStages.entries.length,
+    mirrorStages.exits.length,
+  ], [1, 1]),
+  c('(3) the exit stage is summed and weighted',
+    mirrorStages.exits, [{ qty: 3, price: (110 + 111 + 111) / 3 }]),
+  c('(4) and it reproduces the row exit price',
+    mirrorStages.exits[0].price, mirror.cycles[0].avgExit),
+]);
+
+// 11d. ORDER-LESS LEGS. `{ order: 0 }` is rejected by `usable()`, so the leg
+// carries no order at all. Each such leg is ITS OWN stage, never pooled into one
+// `undefined` bucket — which would merge fills from different decisions, the one
+// outcome worse than counting too many.
+tick = 0;
+const bareA = fill(8301, 'Buy', 1, 100, { order: 0 });
+const bareB = fill(8302, 'Buy', 1, 101, { order: 0 });
+const bareExit = fill(8303, 'Sell', 2, 110);
+const orderless = scan([bareA, bareB, bareExit], noPairs);
+const orderlessStages = stagesOf(orderless.cycles[0]);
+
+group('STAGES: legs with no order are never merged with each other', [
+  c('(1) neither entry leg carries an order',
+    orderless.cycles[0].legs.filter((l) => l.entry).map((l) => l.orderId), [undefined, undefined]),
+  c('(2) TWO entry stages, not one — the degraded floor is the old behaviour',
+    orderlessStages.entries, [{ qty: 1, price: 100 }, { qty: 1, price: 101 }]),
+  c('(3) and the cycle states no entry order either',
+    orderless.cycles[0].entryOrderIds.length, 0),
+]);
+
+// 11e. THE FLIP, filled in pieces. Long 3, then ONE order to sell 6 that comes
+// back as 2+2+2 and reverses through zero, then a buy to close the short. §2.3's
+// benign case, pinned so a future refactor cannot quietly average across the
+// zero crossing: the crossing fill's two halves carry the SAME price, and the
+// grouping is per-cycle AND per-side, so they are never candidates to merge.
+tick = 0;
+const flipEntry = fill(8401, 'Buy', 3, 100);
+const flipS1 = fill(8402, 'Sell', 2, 110, { order: SHARED_FLIP_ORDER });
+const flipS2 = fill(8403, 'Sell', 2, 111, { order: SHARED_FLIP_ORDER });
+const flipS3 = fill(8404, 'Sell', 2, 112, { order: SHARED_FLIP_ORDER });
+const flipClose = fill(8405, 'Buy', 3, 105);
+const flipPieces = scan([flipEntry, flipS1, flipS2, flipS3, flipClose], noPairs);
+const flipA = stagesOf(flipPieces.cycles[0]);
+const flipB = stagesOf(flipPieces.cycles[1]);
+
+group('STAGES: a reversing order filled in pieces is one stage on each side', [
+  c('(1) still two cycles, a long then a short, three contracts each', [
+    flipPieces.cycles.length,
+    flipPieces.cycles.map((cycle) => cycle.direction),
+    flipPieces.cycles.map((cycle) => cycle.qty),
+  ], [2, ['long', 'short'], [3, 3]]),
+  // The old projection: 1 → 2 on the long, 2 → 1 on the short.
+  c('(2) the long reports 1 → 1, not 1 → 2', [
+    flipA.entries.length,
+    flipA.exits.length,
+  ], [1, 1]),
+  c('(3) the short reports 1 → 1, not 2 → 1', [
+    flipB.entries.length,
+    flipB.exits.length,
+  ], [1, 1]),
+  // The 111 fill is the one split at the crossing: 1 to the long's exit, 1 to
+  // the short's entry, both at 111. So the long's exit averages 110 and 111 and
+  // the short's entry averages 111 and 112 — and 111 is never averaged ACROSS
+  // the two cycles, which is what the per-cycle grouping guarantees.
+  c('(4) the exit of the long weights 2@110 with the split 1@111',
+    flipA.exits, [{ qty: 3, price: (110 * 2 + 111) / 3 }]),
+  c('(5) the entry of the short weights the split 1@111 with 2@112',
+    flipB.entries, [{ qty: 3, price: (111 + 112 * 2) / 3 }]),
+  c('(6) both still reproduce their row prices', [
+    flipA.exits[0].price,
+    flipB.entries[0].price,
+  ], [flipPieces.cycles[0].avgExit, flipPieces.cycles[1].avgEntry]),
+  c('(7) the split is still marked in both halves', [
+    flipPieces.cycles[0].legs.filter((l) => l.splitFromFill).length,
+    flipPieces.cycles[1].legs.filter((l) => l.splitFromFill).length,
+  ], [1, 1]),
 ]);
 
 // ── The oracle: fills and pairs must agree about the money ──────────────────
