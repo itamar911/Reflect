@@ -202,6 +202,7 @@ import {
 } from '../src/app/api/ai-debrief/route';
 import {
   chooseAlertJobs,
+  endOfDayHour,
   importBeforeSummary,
   summarise,
 } from '../src/app/api/cron/send-alerts/route';
@@ -4269,8 +4270,118 @@ async function alertWindowGroup() {
   ]);
 }
 
+/**
+ * The 21:00 default does not land every trader in one invocation
+ * (REF-112 §4.6 item 3).
+ *
+ * THE DEFECT: `end_of_day_time` defaults to 21:00 for every user who has never
+ * touched the setting, so the whole user base lands in ONE invocation — and
+ * each of them costs a day pull plus a stop read at concurrency 4. The
+ * investigation measured ~100 users at ~75 seconds against a 60-second
+ * `maxDuration`, and because the import and the send share the job, THE TAIL OF
+ * THE BATCH GETS NO EMAIL AT ALL. Not a late email: none.
+ *
+ * TWO HALVES, AND THE SECOND IS THE ONE THAT MAKES THE PROMISE KEEPABLE:
+ *
+ *   1. the DEFAULT is spread across three hours by a hash of the user id, so an
+ *      hour is not crowded in the first place — and a trader who CHOSE 21:00
+ *      keeps it, which is the half that would be indefensible to get wrong;
+ *   2. the IMPORT is rationed per invocation, and the EMAIL NEVER IS. Case (6)
+ *      is the whole ticket: a hundred traders who all chose 21:00 by hand still
+ *      get a hundred emails.
+ *
+ * `hashBucket` is not exported, so the spread is asserted through
+ * {@link endOfDayHour} — which is the function that actually decides, and the
+ * only one whose behaviour anybody depends on.
+ */
+function alertSpreadGroup() {
+  // Thirty ids, enough that all three buckets are populated unless the hash is
+  // broken. Shaped like real uuids because that is what it will hash in
+  // production, and a hash's distribution is a property of its input alphabet.
+  const many = Array.from(
+    { length: 30 },
+    (_, i) => `${String(i).padStart(8, '0')}-0000-4000-8000-00000000000${(i % 10).toString()}`
+  );
+
+  const spread = many.map((id) => endOfDayHour(null, id));
+  const hoursUsed = [...new Set(spread)].sort((a, b) => a - b);
+  const biggestBucket = Math.max(...hoursUsed.map((h) => spread.filter((x) => x === h).length));
+
+  // A trader who CHOSE a time keeps it, including one who chose the default.
+  const chose2100 = many.map((id) => endOfDayHour('21:00', id));
+  const chose0800 = endOfDayHour('08:00', many[0]);
+
+  // Stability: the same trader, every night, forever. An email that arrives at
+  // a different hour each evening is worse than one that arrives late.
+  const stable = many.every((id) => endOfDayHour(null, id) === endOfDayHour(null, id));
+
+  // ── Nobody loses their email ─────────────────────────────────────────────
+
+  // A hundred traders who all chose 21:00 BY HAND, so the spread cannot help
+  // and only the budget can. Every one of them is connected and eligible.
+  const hundred = Array.from(
+    { length: 100 },
+    (_, i) => `${String(i).padStart(8, 'f')}-0000-4000-8000-000000000000`
+  );
+  const crowded = chooseAlertJobs(
+    hundred.map((id) => ({ user_id: id, end_of_day_enabled: true, end_of_day_time: '21:00' })),
+    { ilHour: 21, isSunday: false, importable: hundred, importLimit: 40 }
+  );
+  const importedFirst = crowded.filter((job) => job.importFirst).map((job) => job.userId);
+
+  // The SECOND invocation, after the cursor moved the first forty to the back.
+  // This is what the route's `markCronProgress` call produces, modelled as the
+  // reordering it is.
+  const nextNight = chooseAlertJobs(
+    hundred.map((id) => ({ user_id: id, end_of_day_enabled: true, end_of_day_time: '21:00' })),
+    {
+      ilHour: 21,
+      isSunday: false,
+      importable: [...hundred.slice(40), ...hundred.slice(0, 40)],
+      importLimit: 40,
+    }
+  );
+  const importedSecond = nextNight.filter((job) => job.importFirst).map((job) => job.userId);
+
+  // No cap at all behaves exactly as it did before this stage.
+  const uncapped = chooseAlertJobs(
+    hundred.map((id) => ({ user_id: id, end_of_day_enabled: true, end_of_day_time: '21:00' })),
+    { ilHour: 21, isSunday: false, importable: hundred }
+  );
+
+  group('the 21:00 default does not land everyone in one invocation', [
+    c('(1) a trader who never chose a time is spread over three hours',
+      hoursUsed, [21, 22, 23]),
+    // Not a uniformity assertion — a hash over thirty ids will not be even —
+    // but a bound: no hour may hold everybody, which is the actual bug.
+    c('(2) and no single hour holds more than half of them',
+      biggestBucket <= 15, true),
+    // THE HALF THAT MUST NOT BREAK. A stored "21:00" is a CHOICE.
+    c('(3) a trader who chose 21:00 stays at 21:00, all of them',
+      [...new Set(chose2100)], [21]),
+    c('(4) and a trader who chose another hour is untouched', chose0800, 8),
+    c('(5) the hour is stable for a given trader', stable, true),
+
+    // THE TICKET, IN ONE ASSERTION. A hundred emails, forty imports.
+    c('(6) a hundred traders at one hour still get a hundred emails',
+      crowded.length, 100),
+    c('(7) and exactly the budget’s worth of imports', importedFirst.length, 40),
+    c('(8) spent on the front of the queue — the ones who waited longest',
+      importedFirst, hundred.slice(0, 40)),
+    // The rotation: last night's rationed users lead tonight's queue.
+    c('(9) the next invocation imports for forty DIFFERENT traders',
+      [importedSecond.length, importedSecond.some((id) => importedFirst.includes(id))],
+      [40, false]),
+    c('(10) with no cap, nothing is rationed — the pre-REF-112 behaviour',
+      uncapped.filter((job) => job.importFirst).length, 100),
+  ]);
+}
+
 async function alertImportGroup() {
-  const connected = new Set([USER]);
+  // AN ORDERED LIST SINCE REF-112 §4.6 item 3, not a Set. The order is
+  // least-recently-imported first, and it is what `importLimit` spends itself
+  // along; `chooseAlertJobs`' own note has the argument.
+  const connected = [USER];
 
   const everything = chooseAlertJobs(
     [
@@ -6576,6 +6687,8 @@ async function main() {
   await alertSummaryGroup();
   await alertWindowGroup();
   await alertImportGroup();
+  // REF-112 §4.6 item 3 — the default hour, spread, and the email nobody loses.
+  alertSpreadGroup();
 
   // Stage 3b — the matcher, the merge, the counter and the debrief gate.
   await matchRuleGroup();

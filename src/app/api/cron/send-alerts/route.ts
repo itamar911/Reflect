@@ -32,7 +32,7 @@ import { isImportEnabled } from '@/lib/tradovate/import';
 import { visibleTrades, withHidden } from '@/lib/trades/visible';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { isUserAllowed } from '@/lib/tradovate/allowlist';
-import { listConnectionsForImport } from '@/lib/tradovate/connections';
+import { listConnectionsForImport, markCronProgress } from '@/lib/tradovate/connections';
 import { syncUserTrades } from '@/lib/tradovate/sync';
 import { isWinningTrade, pnlRow, tradeMoneyPnl } from '@/lib/pnl';
 import { alertRangeStart, zonedDayStart } from '@/lib/email/alertWindow';
@@ -325,6 +325,99 @@ function parseHour(time: string | null | undefined, fallback: string): number {
   return Number.isFinite(hour) ? hour : Number(fallback.split(':')[0]);
 }
 
+/**
+ * The hours a trader who never chose one can land on (REF-112 §4.6 item 3).
+ *
+ * THE PROBLEM IS THE DEFAULT AND NOT THE CHOICE. `end_of_day_time` defaults to
+ * 21:00 for every user who has not touched the setting, so the whole user base
+ * lands in ONE invocation — and each of those users costs a `DAY_PULL` plus a
+ * `STOP_READ` at {@link IMPORT_CONCURRENCY} 4. At around a hundred users that
+ * is roughly seventy-five seconds against a sixty-second
+ * {@link maxDuration}, and because the import and the send share the job, THE
+ * TAIL OF THE BATCH GETS NO EMAIL AT ALL.
+ *
+ * 21, 22 AND 23 — FORWARD AND NOT AROUND. A later hour is not merely a
+ * different one, it is a better one: 21:00 Israel is 13:00 CT, which
+ * lib/tradovate/orders-cron.ts points out is TWO HOURS BEFORE the American
+ * session closes, so a summary sent at 21:00 reports a day that is still
+ * running. Spreading backwards would make that worse for a third of users;
+ * spreading forwards makes it better for two thirds.
+ *
+ * THREE HOURS AND NOT MORE, because the summary is still supposed to be an
+ * end-of-day email. Midnight is a different product.
+ */
+const DEFAULT_END_OF_DAY_HOURS = [21, 22, 23] as const;
+
+/**
+ * A stable bucket for a user id.
+ *
+ * FNV-1a, which is here because it needs to be DETERMINISTIC AND STABLE rather
+ * than because it needs to be good. A trader must land in the same hour every
+ * night — an email that arrives at a different time each evening is worse than
+ * one that arrives late — so this cannot be random, cannot depend on the number
+ * of users, and cannot change when the list does. Hashing the id gives all
+ * three for free and needs no stored assignment.
+ *
+ * NOT A CRYPTOGRAPHIC CHOICE AND NOTHING SECURITY-BEARING RESTS ON IT. The
+ * input is a uuid the user already knows and the output is which hour their own
+ * email arrives in.
+ */
+function hashBucket(userId: string, buckets: number): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < userId.length; i += 1) {
+    hash ^= userId.charCodeAt(i);
+    // `Math.imul` keeps it a 32-bit multiply; `>>> 0` keeps it unsigned, so the
+    // modulo below cannot come out negative.
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash % buckets;
+}
+
+/**
+ * Which Israel hour this trader's end-of-day summary belongs in.
+ *
+ * A TRADER WHO CHOSE A TIME KEEPS IT, EXACTLY. That is the whole shape of this
+ * function: the spread applies only where there was no choice to respect, so
+ * nobody who went to Settings and set 21:00 is moved off it. Reading a stored
+ * "21:00" as "you did not choose" would be the one version of this that is
+ * indefensible.
+ *
+ * Exported for the regression suite, which asserts both halves and the
+ * stability of the bucket.
+ */
+export function endOfDayHour(time: string | null | undefined, userId: string): number {
+  // A malformed value is treated as a choice that cannot be read rather than
+  // as an absence — `parseHour` already falls back to 21:00 for it, and moving
+  // it would be guessing twice.
+  if (time) return parseHour(time, '21:00');
+
+  return DEFAULT_END_OF_DAY_HOURS[hashBucket(userId, DEFAULT_END_OF_DAY_HOURS.length)];
+}
+
+/**
+ * How many imports one invocation will run (REF-112 §4.6 item 3).
+ *
+ * THE SECOND HALF OF THE FIX, AND IT RATIONS THE IMPORT ONLY. The spread above
+ * is what stops an hour being crowded in the first place; this is the floor
+ * under it, for the hour that is crowded anyway — a hundred traders who all
+ * chose 21:00 by hand, or a user base that has grown past what three buckets
+ * can absorb.
+ *
+ * **THE EMAIL IS NEVER RATIONED.** Every planned alert is dispatched, every
+ * time, and only `importFirst` is capped. That is not a compromise: a summary
+ * built from the rows already in the journal is exactly what
+ * `importBeforeSummary` was written to fall back to — "an email reporting them
+ * without the broker's is strictly better than no email" — whereas a trader who
+ * gets no email at all has lost the thing they asked for.
+ *
+ * FORTY, from the route's own arithmetic. An import is two to four seconds
+ * measured, at concurrency 4, inside `maxDuration = 60` — so forty imports is
+ * roughly thirty seconds of the budget, leaving the sends and the per-user
+ * reads comfortably inside it. The investigation's ~100-user figure overran at
+ * ~75 seconds; this is sized to stay under half of that.
+ */
+const ALERT_IMPORT_LIMIT = 40;
+
 /** One row of `alert_settings`, as this route reads it. */
 export interface AlertSetting {
   user_id: string;
@@ -355,22 +448,55 @@ export interface PlannedAlert {
  * happened) and for `weekly_summary` (the daily cron has already covered
  * every day in its window). Only the end-of-day summary is the moment a
  * trader's day has just finished, which is the whole argument of §H.
+ *
+ *
+ * TWO THINGS CHANGED IN REF-112 §4.6 ITEM 3, AND NEITHER DROPS AN EMAIL
+ * --------------------------------------------------------------------
+ *
+ * 1. **The end-of-day hour comes from {@link endOfDayHour}**, so a trader who
+ *    never chose a time is spread across three hours by a hash of their id
+ *    instead of every one of them landing in the 21:00 invocation. A trader who
+ *    DID choose keeps their hour exactly.
+ *
+ * 2. **`importFirst` is rationed by `importLimit`**, granted in `importable`'s
+ *    order — which the caller supplies least-recently-imported first, so the
+ *    users who missed out last night are at the front tonight. **THE EMAIL IS
+ *    NOT RATIONED.** Every job this function plans is dispatched; the cap only
+ *    decides which of them pay for a broker pull first. That is the difference
+ *    between "your summary is missing today's broker trades" and "you got no
+ *    summary", and only one of those is acceptable.
+ *
+ * `importable` IS AN ORDERED LIST AND NOT A SET, which is the only reason this
+ * signature changed. A Set answers membership, and membership was enough while
+ * every eligible user got an import; rationing needs to know WHO GOES FIRST,
+ * and that order is a property of the database read rather than of this
+ * function.
  */
 export function chooseAlertJobs(
   settings: readonly AlertSetting[],
-  context: { ilHour: number; isSunday: boolean; importable: ReadonlySet<string> }
+  context: {
+    ilHour: number;
+    isSunday: boolean;
+    /** Eligible users, LEAST RECENTLY IMPORTED FIRST. Order is load-bearing. */
+    importable: readonly string[];
+    /** How many imports this invocation may run. Omitted means no cap. */
+    importLimit?: number;
+  }
 ): PlannedAlert[] {
   const planned: PlannedAlert[] = [];
+  // Rank, not membership — see the note above. Built once rather than per user,
+  // because `indexOf` inside the loop would be quadratic over the user base.
+  const rank = new Map(context.importable.map((userId, index) => [userId, index]));
 
   for (const s of settings) {
     if (s.pre_market_enabled && parseHour(s.pre_market_time, '08:30') === context.ilHour)
       planned.push({ userId: s.user_id, type: 'pre_market', importFirst: false });
 
-    if (s.end_of_day_enabled && parseHour(s.end_of_day_time, '21:00') === context.ilHour)
+    if (s.end_of_day_enabled && endOfDayHour(s.end_of_day_time, s.user_id) === context.ilHour)
       planned.push({
         userId: s.user_id,
         type: 'end_of_day',
-        importFirst: context.importable.has(s.user_id),
+        importFirst: rank.has(s.user_id),
       });
 
     if (
@@ -379,6 +505,20 @@ export function chooseAlertJobs(
       parseHour(s.weekly_summary_time, '09:00') === context.ilHour
     )
       planned.push({ userId: s.user_id, type: 'weekly_summary', importFirst: false });
+  }
+
+  // THE BUDGET, APPLIED AFTER PLANNING AND ONLY TO `importFirst`. The jobs
+  // themselves are untouched, so `planned.length` — the number of emails — is
+  // the same with and without a cap. Sorted by the caller's order and not by
+  // the order the settings rows arrived in, so "who waited longest" decides
+  // rather than whatever PostgREST returned first.
+  const limit = context.importLimit;
+  if (limit !== undefined) {
+    const importing = planned
+      .filter((job) => job.importFirst)
+      .sort((a, b) => (rank.get(a.userId) ?? 0) - (rank.get(b.userId) ?? 0));
+
+    for (const job of importing.slice(limit)) job.importFirst = false;
   }
 
   return planned;
@@ -441,27 +581,36 @@ export async function GET(request: Request) {
   //
   // A listing failure is not fatal: no user is eligible, every email still
   // goes out, and the run reports zero imports rather than zero emails.
-  let importable = new Set<string>();
+  let importable: string[] = [];
   if (isImportEnabled()) {
     try {
-      // NO CURSOR AND NO LIMIT HERE, unlike the two crons (REF-112 §4.6 item
-      // 1). This listing answers "who is ELIGIBLE for an import", not "who is
-      // next" — it is intersected with the users whose chosen hour this
-      // invocation is, which is already a small subset — so a batch taken here
-      // would ration the wrong population.
-      const { connections } = await listConnectionsForImport({ admin: supabase });
-      importable = new Set(
-        connections
-          .filter((c) => c.is_trade_source && isUserAllowed(c.user_id))
-          .map((c) => c.user_id)
-      );
+      // A CURSOR BUT NO LIMIT (REF-112 §4.6 items 1 and 3), and the asymmetry
+      // is deliberate. The two crons take a bounded BATCH because they process
+      // every active connection; this listing answers "who is ELIGIBLE", and it
+      // is then intersected with the users whose chosen hour this invocation is
+      // — already a small subset — so limiting here would ration the wrong
+      // population. What it does need is the ORDER: least recently imported
+      // first, so `chooseAlertJobs`' budget spends itself on the traders who
+      // missed out last night rather than on whoever PostgREST returned first.
+      const { connections } = await listConnectionsForImport({
+        admin: supabase,
+        cursor: 'last_alert_import_at',
+      });
+      importable = connections
+        .filter((c) => c.is_trade_source && isUserAllowed(c.user_id))
+        .map((c) => c.user_id);
     } catch {
       // The message would name the table and nothing useful beyond it.
       console.warn('[send-alerts] could not list connections; sending without an import');
     }
   }
 
-  const planned = chooseAlertJobs(settings as AlertSetting[], { ilHour, isSunday, importable });
+  const planned = chooseAlertJobs(settings as AlertSetting[], {
+    ilHour,
+    isSunday,
+    importable,
+    importLimit: ALERT_IMPORT_LIMIT,
+  });
 
   const results = await settleWithLimit(
     planned.map((job) => () =>
@@ -475,5 +624,33 @@ export async function GET(request: Request) {
     .filter((r) => r.status === 'rejected')
     .map((r) => (r as PromiseRejectedResult).reason?.message ?? 'unknown');
 
-  return NextResponse.json({ sent, failed, ilHour, isSunday, imported: importable.size });
+  // The users who actually paid for a pull move to the back of the queue
+  // (REF-112 §4.6 item 3). Only them: a trader whose import was rationed away
+  // this hour has not been served, and stamping them would send them to the
+  // back of a queue they never reached the front of.
+  //
+  // AFTER THE DISPATCH, so an invocation killed by the function timeout stamps
+  // nothing and the same users lead the next one. `markCronProgress` never
+  // throws — the emails are already sent and a bookkeeping failure must not
+  // turn this into a 500 that Vercel retries.
+  const imported = planned.filter((job) => job.importFirst).map((job) => job.userId);
+  await markCronProgress({
+    admin: supabase,
+    cursor: 'last_alert_import_at',
+    userIds: imported,
+    now: now.getTime(),
+  });
+
+  // COUNTS ONLY, as everywhere else in this integration. `eligible` against
+  // `imported` is what shows the budget biting: eligible far above imported for
+  // several hours running means the user base has outgrown three default
+  // buckets and the spread needs widening.
+  return NextResponse.json({
+    sent,
+    failed,
+    ilHour,
+    isSunday,
+    eligible: importable.length,
+    imported: imported.length,
+  });
 }
