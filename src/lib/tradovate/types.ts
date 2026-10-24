@@ -198,6 +198,31 @@ export interface TradovateMeResponse {
   email?: string;
   emailVerified?: boolean;
   isTrial?: boolean;
+  /**
+   * Whether this user has live / funded provisioning (REF-112 §5.17, item 5).
+   *
+   * NOT IN THE PUBLISHED `/auth/me` SCHEMA, and typed here anyway. That is
+   * the same situation `saysArchived()` in ./account-sync.ts is in — a field
+   * the wire may carry that the documentation does not list — and it is
+   * handled the same way: OPTIONAL, read with `=== false` rather than for
+   * falsiness, and ABSENCE MAKES NO CLAIM. See
+   * {@link import('./oauth').saysNoLiveEntitlement}.
+   *
+   * The documented carrier is `AccessTokenResponse` above, the password-grant
+   * and renewal shape, which is the dead path (§5.21) — so this one request
+   * is the only place in the OAuth flow they could arrive at all. §5.17's
+   * finding is that all four entitlement flags are typed and READ BY NOTHING,
+   * so there is no check anywhere that a connecting user has live
+   * provisioning, and "connected but no live account" is indistinguishable
+   * from "connected and flat".
+   *
+   * THE FAIL-SAFE DIRECTION IS SILENCE. If Tradovate does not send these
+   * here, nothing is claimed and nothing is shown — which is exactly today's
+   * behaviour. The sentence appears only when the broker has said, in so many
+   * words, that there is neither a live nor a funded entitlement.
+   */
+  hasLive?: boolean;
+  hasFunded?: boolean;
 }
 
 /** A connected user's token, as ./connections.ts hands it out. */

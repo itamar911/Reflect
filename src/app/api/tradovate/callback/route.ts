@@ -32,7 +32,12 @@ import {
   TradovateOAuthError,
   TradovatePenaltyError,
 } from '@/lib/tradovate/errors';
-import { ACCESS_DENIED, exchangeCodeForToken, fetchTradovateUser } from '@/lib/tradovate/oauth';
+import {
+  ACCESS_DENIED,
+  exchangeCodeForToken,
+  fetchTradovateUser,
+  saysNoLiveEntitlement,
+} from '@/lib/tradovate/oauth';
 import { loadOAuthConfig } from '@/lib/tradovate/oauth-config';
 import {
   resultUrl,
@@ -139,7 +144,14 @@ export async function GET(request: NextRequest) {
       apiHosts: token.apiHosts,
     });
 
-    return finish(TradovateResult.Connected);
+    // REF-112 §5.17, item 5. READ AFTER THE SAVE, NEVER BEFORE IT. This is a
+    // sentence and not a gate: the connection is already stored, the tokens
+    // are already live, and a trader whose broker under-reports its own
+    // entitlement flags must not lose a working connection over it. The only
+    // thing that changes is which of two success pages they land on.
+    return finish(
+      saysNoLiveEntitlement(me) ? TradovateResult.ConnectedNoLive : TradovateResult.Connected
+    );
   } catch (error) {
     if (error instanceof TradovatePenaltyError) return finish(TradovateResult.RateLimited);
 

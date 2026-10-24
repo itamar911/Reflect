@@ -7,13 +7,33 @@ import DeleteAccountSection from '@/components/settings/DeleteAccountSection';
 import TradovateConnectionCard from '@/components/settings/TradovateConnectionCard';
 import { isUserAllowed } from '@/lib/tradovate/allowlist';
 import { readConnectionSummary, type ConnectionStatus } from '@/lib/tradovate/connections';
+import { TRADOVATE_RESULT_PARAM, TradovateResult } from '@/lib/tradovate/oauth-results';
 
 export const metadata = { title: 'הגדרות — Reflect' };
 
-export default async function SettingsPage() {
+export default async function SettingsPage({ searchParams }: {
+  /** A Promise on Next 16 — see the note in app/(app)/trades/page.tsx. */
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const supabase = await createClient();
   const { data: { user } } = await getCachedUser();
   if (!user) redirect('/login');
+
+  // REF-112 §5.17, item 5. THE FIRST READER `?tradovate=` HAS EVER HAD.
+  // oauth-results.ts has said "the UI for this is not built yet; the codes
+  // are stable" since it was written, and §2 of the investigation lists the
+  // unread codes as a defect in their own right — a refusal nobody translates
+  // is a refusal the trader cannot act on. This builds the reader for the one
+  // code item 5 adds; the other six are REF-112 §2's to finish.
+  //
+  // ONE SHOT, BY CONSTRUCTION. It is a query parameter on the redirect the
+  // callback issued, so it survives exactly as long as the trader stays on
+  // that URL — which is the "show once on connect" this item asks for, with
+  // nothing stored and nothing to clear.
+  const resultParam = (await searchParams)[TRADOVATE_RESULT_PARAM];
+  const noLiveAccounts =
+    (Array.isArray(resultParam) ? resultParam[0] : resultParam) ===
+    TradovateResult.ConnectedNoLive;
 
   const [profileRes, alertRes] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', user.id).single(),
@@ -104,6 +124,9 @@ export default async function SettingsPage() {
             hasConnection={tradovateStatus !== null}
             isActive={tradovateStatus === 'active'}
             readFailed={tradovateReadFailed}
+            // REF-112 item 5. Only ever true on the redirect the callback
+            // just issued; see the note where it is computed.
+            noLiveAccounts={noLiveAccounts}
           />
         </Card>
       </div>

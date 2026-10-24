@@ -46,6 +46,10 @@ import { Plug, Unplug } from 'lucide-react';
 import { useState } from 'react';
 
 import Button from '@/components/ui/Button';
+// Browser-safe and pure, like lib/tradovate/sync-response.ts: a sentence and
+// nothing else. It does not reach connections.ts, so the rule in the header
+// above — a client component never names that module — still holds.
+import { NO_LIVE_ENTITLEMENT_NOTE } from '@/lib/tradovate/notices';
 
 /**
  * The one thing the disconnect action cannot do, stated in full.
@@ -187,6 +191,21 @@ export interface TradovateConnectionCardProps {
    * same way is how a connected user gets told they are not connected.
    */
   readFailed: boolean;
+  /**
+   * Whether the connection that just completed reported no live and no funded
+   * entitlement (REF-112 §5.17, item 5).
+   *
+   * ONE SHOT AND NOT A STATE. It comes off `?tradovate=connected_no_live` on
+   * the redirect the callback issued, so it is true on exactly one page view
+   * and gone the moment the trader navigates — which is what "show once on
+   * connect" means with nothing stored and nothing to clear.
+   *
+   * IT DOES NOT CHANGE THE BADGE, and that is the decision rather than an
+   * omission: the connection IS made, "מחובר" is correct, and the missing
+   * accounts are a separate fact underneath it. See the sentence in
+   * lib/tradovate/notices.ts on why both halves are news.
+   */
+  noLiveAccounts?: boolean;
 }
 
 export default function TradovateConnectionCard({
@@ -194,6 +213,7 @@ export default function TradovateConnectionCard({
   hasConnection,
   isActive,
   readFailed,
+  noLiveAccounts = false,
 }: TradovateConnectionCardProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -305,7 +325,21 @@ export default function TradovateConnectionCard({
                 announce anything; it is there to keep the parent's gap from
                 opening around an element with nothing in it. */}
             <div role="status" aria-live="polite" className="flex flex-col gap-2 empty:hidden">
-              {connectedNow && <p className="text-xs font-semibold text-tg-text">החשבון מחובר.</p>}
+              {connectedNow && !noLiveAccounts && (
+                <p className="text-xs font-semibold text-tg-text">החשבון מחובר.</p>
+              )}
+
+              {/* REF-112 §5.17, item 5. REPLACES "החשבון מחובר." rather than
+                  sitting under it, because it says that and more: "החשבון
+                  מחובר, אבל…" is one sentence, and printing the short form
+                  above the long one would be the same news twice. Warning
+                  colour, because a connection with nothing behind it is not
+                  the outcome the trader pressed the button for. */}
+              {connectedNow && noLiveAccounts && (
+                <p className="text-xs font-semibold" style={{ color: 'var(--color-tg-warning)' }}>
+                  {NO_LIVE_ENTITLEMENT_NOTE}
+                </p>
+              )}
 
               {showDisconnect && !connectedNow && (
                 <p className="text-xs font-semibold" style={{ color: 'var(--color-tg-warning)' }}>

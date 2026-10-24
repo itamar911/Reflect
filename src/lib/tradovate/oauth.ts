@@ -365,3 +365,37 @@ export async function fetchTradovateUser(
   }
   return me;
 }
+
+/**
+ * Whether the broker has SAID this user has neither a live nor a funded
+ * entitlement (REF-112 §5.17, item 5).
+ *
+ * THE FIRST READER THESE FLAGS HAVE EVER HAD. §5.17's finding is that
+ * `hasLive`, `hasFunded`, `hasMarketData` and `hasSimPlus` are declared in
+ * ./types.ts and read by nothing — so a user could complete the whole OAuth
+ * flow with no live provisioning at all, and "connected but no live account"
+ * was indistinguishable from "connected and flat" on every screen.
+ *
+ * `=== false` ON BOTH, AND NOTHING ELSE WILL DO. Three reasons, and they are
+ * the whole of this function:
+ *
+ *   1. The fields are NOT in the published `/auth/me` schema (see
+ *      {@link import('./types').TradovateMeResponse}). A host that does not
+ *      send them leaves both `undefined`, and `!me.hasLive` would read that
+ *      as a denial and tell every trader on such a host that their accounts
+ *      are missing. Absence has to mean silence.
+ *   2. The body is a plain cast like every other in this integration, so the
+ *      string `"false"` is expressible on the wire and is not a denial — the
+ *      same rule `readSyncResponse` applies to `ran`.
+ *   3. BOTH, not either. A funded-only trader has `hasLive: false` and is
+ *      exactly who this product is for; a live-only trader has
+ *      `hasFunded: false`. Either one alone is an ordinary account.
+ *
+ * NOT A GATE. Nothing is refused on the strength of this: the connection is
+ * saved, the tokens are stored, and the next pull finds whatever is there. It
+ * decides one sentence, on one screen, once — which is the right weight for a
+ * claim built on a field no schema promises.
+ */
+export function saysNoLiveEntitlement(me: TradovateMeResponse): boolean {
+  return me.hasLive === false && me.hasFunded === false;
+}

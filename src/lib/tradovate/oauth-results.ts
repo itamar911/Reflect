@@ -21,6 +21,21 @@ export const TradovateResult = {
   /** Connected successfully. */
   Connected: 'connected',
   /**
+   * Connected, and the broker says there is no live or funded entitlement
+   * (REF-112 §5.17, item 5).
+   *
+   * A SUCCESS, NOT A FAILURE, and the code sits next to `Connected` to say
+   * so: the tokens are stored, the connection is live, and nothing was
+   * refused. What it adds is the one sentence that separates "connected and
+   * flat" from "connected to an account with nothing to pull" — two states
+   * that were identical on every screen in the product, and which a trader
+   * who has just finished a consent screen has no other way to tell apart.
+   *
+   * SAFE IN A URL, like the rest of them: it names a capability the trader
+   * already knows about and no identifier.
+   */
+  ConnectedNoLive: 'connected_no_live',
+  /**
    * The user declined on Tradovate's consent screen. A normal outcome — the
    * callback route treats this as a completed flow, not an error.
    */

@@ -171,6 +171,30 @@ export function noticeLine(notice: BrokerNotice): string {
   }
 }
 
+/**
+ * What a trader is told when the connection worked and there is nothing live
+ * behind it (REF-112 §5.17, item 5).
+ *
+ * NOT A MEMBER OF {@link BrokerNotice}, and the difference is what it is
+ * about. Every member of that union is a STANDING condition — true now, true
+ * on the next page view, true until something changes — which is why they are
+ * ordered, de-duplicated and re-derived on every render. This is a
+ * one-off: the answer to a question the trader asked by pressing "connect",
+ * shown once on the page they land on and never again. Putting it in the
+ * union would mean inventing a rule for how it ranks against five conditions
+ * it can never co-occur with.
+ *
+ * It lives here anyway because this module is where this integration's
+ * refusals are worded, and a sentence kept next to its siblings is a sentence
+ * that stays in the same voice.
+ *
+ * "אבל" AND NOT A FULL STOP. Both halves are news and the second does not
+ * cancel the first: the connection IS made and nothing has to be redone. A
+ * trader reading only "לא נמצאו חשבונות" would try to connect again.
+ */
+export const NO_LIVE_ENTITLEMENT_NOTE =
+  'החשבון מחובר, אבל לא נמצאו חשבונות מסחר פעילים';
+
 /** Every notice as a line, in severity order and without repeats. */
 export function noticeLines(notices: readonly BrokerNotice[]): string[] {
   return orderNotices(notices).map(noticeLine);

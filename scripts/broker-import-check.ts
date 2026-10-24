@@ -151,10 +151,13 @@ import {
   brokerStateNotices,
   noticeLine,
   noticeLines,
+  NO_LIVE_ENTITLEMENT_NOTE,
   orderNotices,
   readNotices,
   type BrokerNotice,
 } from '../src/lib/tradovate/notices';
+// REF-112 §5.17 item 5 — the first reader hasLive/hasFunded have ever had.
+import { saysNoLiveEntitlement } from '../src/lib/tradovate/oauth';
 // REF-112 §4: the caps. `claimSyncSlot` is the sync cooldown's one statement;
 // `forgetRateWarnings` resets the once-per-process log guard, which is a
 // module-level variable and therefore leaks between groups without it.
@@ -2928,6 +2931,65 @@ async function noticeCopyGroup() {
         connection: 'none', environmentMismatch: false, brokerAccounts: 0,
       }),
       []),
+    // THE DASHBOARD PASSES null, which is not zero: it does not read the
+    // accounts table and "you have no portfolios" belongs on the screen whose
+    // subject is portfolios.
+    c('(28) a caller that did not count accounts gets no zero-accounts line',
+      brokerStateNotices({
+        connection: 'active', environmentMismatch: false, brokerAccounts: null,
+      }),
+      []),
+    c('(29) but still gets the connection one',
+      brokerStateNotices({
+        connection: 'active', environmentMismatch: true, brokerAccounts: null,
+      }).map((n) => n.kind),
+      ['connection_environment']),
+
+    // ── REF-112 §5.17 item 5: the entitlement flags finally have a reader ──
+    //
+    // `hasLive`, `hasFunded`, `hasMarketData` and `hasSimPlus` have been
+    // declared in types.ts and read by NOTHING, so a user could finish the
+    // whole OAuth flow with no live provisioning and "connected but no live
+    // account" was indistinguishable from "connected and flat".
+    c('(30) both flags explicitly false is the one case that speaks',
+      saysNoLiveEntitlement({ userId: 1, hasLive: false, hasFunded: false }), true),
+    // ABSENCE MAKES NO CLAIM, and this is the assertion that matters most:
+    // the fields are NOT in the published /auth/me schema, so a host that
+    // does not send them must not make us tell every trader on it that their
+    // accounts are missing.
+    c('(31) absence makes no claim',
+      [
+        saysNoLiveEntitlement({ userId: 1 }),
+        saysNoLiveEntitlement({ userId: 1, hasLive: false }),
+        saysNoLiveEntitlement({ userId: 1, hasFunded: false }),
+      ],
+      [false, false, false]),
+    // A funded-only trader has hasLive: false and is exactly who this product
+    // is for. Either flag alone is an ordinary account.
+    c('(32) a funded-only or live-only trader is an ordinary account',
+      [
+        saysNoLiveEntitlement({ userId: 1, hasLive: false, hasFunded: true }),
+        saysNoLiveEntitlement({ userId: 1, hasLive: true, hasFunded: false }),
+      ],
+      [false, false]),
+    // The body is a plain cast like every other in this integration, so the
+    // STRING "false" is expressible on the wire and is not a denial — the
+    // same rule readSyncResponse applies to `ran`.
+    c('(33) a string "false" is not a denial',
+      saysNoLiveEntitlement({
+        userId: 1,
+        ...({ hasLive: 'false', hasFunded: 'false' } as unknown as {
+          hasLive?: boolean;
+          hasFunded?: boolean;
+        }),
+      }),
+      false),
+    // "אבל" AND NOT A FULL STOP: both halves are news, and a trader reading
+    // only "לא נמצאו חשבונות" would try to connect again.
+    c('(34) the sentence says the connection worked',
+      NO_LIVE_ENTITLEMENT_NOTE, 'החשבון מחובר, אבל לא נמצאו חשבונות מסחר פעילים'),
+    c('(35) and carries no id, number or host',
+      /\d|tradovateapi|https?:/i.test(NO_LIVE_ENTITLEMENT_NOTE), false),
   ]);
 }
 
