@@ -35,8 +35,16 @@
  * and it is the kind of omission that is invisible in review and impossible
  * to find later. It is a type error here instead of a comment telling the
  * next author to remember.
+ *
+ * IT REQUIRES `userId` TOO, SINCE REF-112, and it is the same invariant rather
+ * than a second one: a user's token travels with the host it is addressed to
+ * AND with whose it is. Both are facts about "this request is on one
+ * particular trader's behalf", and the second is what makes the request
+ * countable — see {@link UserTokenRequestOptions.userId} and ./call-meter.ts.
+ * The id is never sent: it reaches the meter and nothing else.
  */
 
+import { noteUserCall } from './call-meter';
 import { getAccessToken, clearToken } from './session';
 import { describeConfigError, loadConfig } from './config';
 import {
@@ -72,6 +80,14 @@ export interface AppSessionRequestOptions extends CommonRequestOptions {
    * so that reading `options.accessToken` still type-checks across the union.
    */
   accessToken?: never;
+  /**
+   * Not available here either, and the absence is the point: a request made
+   * with the APPLICATION'S own password-grant session is not made on anybody's
+   * behalf, so there is nobody to attribute it to and ./call-meter.ts does not
+   * count it. Declared for the same reason `accessToken` is — so that reading
+   * `options.userId` type-checks across the union.
+   */
+  userId?: never;
   /** Override just the REST base URL. Optional: configuration supplies one. */
   apiUrl?: string;
   /** Override the resolved configuration; mainly for tests and the CLI. */
@@ -96,6 +112,35 @@ export interface AppSessionRequestOptions extends CommonRequestOptions {
 export interface UserTokenRequestOptions extends CommonRequestOptions {
   accessToken: string;
   apiUrl: string;
+  /**
+   * WHOSE token this is — the Supabase user id (REF-112 §4.5 item 1).
+   *
+   * REQUIRED, FOR EXACTLY THE REASON `apiUrl` IS. The invariant above says a
+   * user's token must travel with the host it is addressed to; this says it
+   * must also travel with whose it is. Both are properties of the same fact —
+   * this request is being made on one particular trader's behalf — and both
+   * are enforced by the compiler rather than by a comment asking the next
+   * author to remember.
+   *
+   * WHAT IT IS FOR: counting. REF-112 §4.5's first finding is that nothing in
+   * this product can answer "how many calls did user X make yesterday", and
+   * that §4.3's whole table of per-user call volumes was derived by READING THE
+   * CODE rather than by measuring. {@link tradovateRequest} is the one function
+   * every per-user request passes through, so it is the only place where "a
+   * request happened" is a fact instead of an arithmetic estimate — and a
+   * request that cannot say whose it was cannot be counted.
+   *
+   * It is NOT sent anywhere. It never reaches a URL, a header or a body; it is
+   * handed to ./call-meter.ts and nothing else. Tradovate has its own numeric
+   * user id (`tradovate_user_id`) and this is not it.
+   *
+   * Making it required is a deliberate cost: five call sites had to name the
+   * trader, one of them by growing a parameter (`fetchTradovateUser`). An
+   * optional field would have been free and would have been forgotten, and a
+   * counter that is silently missing a caller is worse than no counter — it
+   * reads as a measurement.
+   */
+  userId: string;
   /**
    * Not available here, for the same reason `apiUrl` is mandatory: a
    * TradovateConfig carries the deployment's host and the application's own
@@ -206,7 +251,16 @@ function buildUrl(apiUrl: string, path: string, query: RequestOptions['query']):
  *   once, which covers a session evicted by the two-session cap.
  */
 export async function tradovateRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { query, body, method, config, accessToken, apiUrl: apiUrlOverride, signal } = options;
+  const {
+    query,
+    body,
+    method,
+    config,
+    accessToken,
+    apiUrl: apiUrlOverride,
+    signal,
+    userId,
+  } = options;
   const verb = method ?? (body !== undefined ? 'POST' : 'GET');
 
   // The invariant again, at runtime. UserTokenRequestOptions already makes
@@ -245,6 +299,17 @@ export async function tradovateRequest<T>(path: string, options: RequestOptions 
     // is a property of the CALL, and recomputing it from the body is what
     // turned the deleted spike's penalised GETs into POSTs.
     const sent = withPenaltyTicket(body, penaltyTicket);
+
+    // COUNTED HERE, AND A RETRY COUNTS AGAIN (REF-112 §4.5 item 1). This is
+    // immediately before the `fetch` rather than after it, and per attempt
+    // rather than per call, because what the limiter sees is REQUESTS SENT —
+    // a penalty retry and a 401 re-auth are each another request against the
+    // same quota, and a counter that only counted successful round trips would
+    // under-report exactly the user who is in trouble.
+    //
+    // Synchronous and cannot throw; nothing is written to the database here.
+    // See ./call-meter.ts on why the count is buffered and when it lands.
+    if (userId !== undefined) noteUserCall(userId);
 
     const res = await fetch(url, {
       method: verb,

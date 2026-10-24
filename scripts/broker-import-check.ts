@@ -149,6 +149,17 @@ import {
 // REF-112 §4: the caps. `claimSyncSlot` is the sync cooldown's one statement;
 // `forgetRateWarnings` resets the once-per-process log guard, which is a
 // module-level variable and therefore leaks between groups without it.
+// REF-112 §4.5 item 1 — the counter, its buffer, and the reduction that keeps
+// a user id out of a nightly log line.
+import {
+  bufferedCalls,
+  callDay,
+  flushUserCalls,
+  FLUSH_MIN_GAP_MS,
+  forgetCallMeter,
+  noteUserCall,
+  summariseCalls,
+} from '../src/lib/tradovate/call-meter';
 import {
   claimSyncSlot,
   forgetRateWarnings,
@@ -256,6 +267,26 @@ function group(name: string, cases: Case[]) {
 }
 
 const c = (label: string, got: unknown, want: unknown): Case => ({ label, got, want });
+/**
+ * `tradovate_call_counts`, empty (REF-112 §4.5 item 1).
+ *
+ * The two crons read the call counter to put two integers in their summary
+ * line, so every stub that drives a cron has to answer for that table. The
+ * groups below are not about the counter — `callCounterGroup` is — so they
+ * answer with no rows, which is also what a database without migration 042
+ * effectively produces.
+ */
+function emptyCounts() {
+  const q = {
+    select: () => q,
+    eq: () => q,
+    in: () => q,
+    then: (resolve: (v: { data: unknown; error: unknown }) => unknown) =>
+      Promise.resolve({ data: [], error: null }).then(resolve),
+  };
+  return q;
+}
+
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -1404,6 +1435,10 @@ async function cronSkipGroup() {
   // is enough to prove it.
   const admin = {
     from: (table: string) => {
+      // REF-112 §4.5 item 1 reads the call counter for the summary line. These
+      // groups are not about the counter, so it answers empty — which is also
+      // what a pre-042 database would effectively produce.
+      if (table === 'tradovate_call_counts') return emptyCounts();
       if (table !== 'tradovate_connections') throw new Error(`unexpected table ${table}`);
       const rows = [
         { user_id: USER, is_trade_source: true },
@@ -1599,6 +1634,146 @@ async function syncRouteGroup() {
 }
 
 /**
+ * How many calls a trader cost us, counted rather than estimated
+ * (REF-112 §4.5 item 1).
+ *
+ * THE FINDING: "Nothing counts. There is no way today to answer 'how many calls
+ * did user X make yesterday'." §4.3's whole table of per-user volumes — 45/day
+ * idle, 4,500-5,500 typical, 8,000-12,000+ heavy — was derived by READING THE
+ * CALL SITES, and §4.1 adds that the "5,000 requests per hour" those estimates
+ * are compared against appears nowhere in the vendor documentation. So the
+ * design rests on an estimate against an invented limit.
+ *
+ * WHAT IS ASSERTED HERE IS THE BUFFER AND THE REDUCTION, not the database. The
+ * counting itself is one line in lib/tradovate/client.ts and is covered where
+ * the transport is driven for real (`penaltyTicketGroup` in
+ * scripts/tradovate-today-check.ts, which asserts a retry counts AGAIN —
+ * because what a limiter sees is requests sent). What is worth pinning here is
+ * everything that could leak or lie:
+ *
+ *   - the flush is rate-limited, so the live poll does not write per poll;
+ *   - `force` overrides that, because a cron runs once and then the instance
+ *     may never serve again;
+ *   - a flush CLEARS BEFORE IT WRITES, so a failed write under-counts rather
+ *     than double-counting — an over-count would make the whole output
+ *     unusable as evidence, which is the one direction a counter must not be
+ *     wrong in;
+ *   - the day boundary is UTC and says so;
+ *   - and `summariseCalls` reduces a keyed map to TWO INTEGERS, so no user id
+ *     can reach a nightly log line.
+ */
+async function callCounterGroup() {
+  const ONE = 'aaaaaaaa-0000-4000-8000-00000000000a';
+  const TWO = 'bbbbbbbb-0000-4000-8000-00000000000b';
+  const NOW = Date.parse('2026-10-15T14:00:00.000Z');
+
+  /** Records every `bump_tradovate_calls` the meter sent. */
+  function meterAdmin(options: { failWith?: string } = {}) {
+    const bumps: { userId: string; day: string; calls: number }[] = [];
+    const admin = {
+      rpc: (fn: string, args: Record<string, unknown>) => {
+        if (fn !== 'bump_tradovate_calls') throw new Error(`unexpected rpc ${fn}`);
+        bumps.push({
+          userId: args.p_user_id as string,
+          day: args.p_day as string,
+          calls: args.p_calls as number,
+        });
+        return Promise.resolve({
+          data: null,
+          error: options.failWith ? { code: options.failWith, message: 'nope' } : null,
+        });
+      },
+    } as unknown as SupabaseClient;
+    return { admin, bumps };
+  }
+
+  // ── The buffer ───────────────────────────────────────────────────────────
+
+  forgetCallMeter();
+  noteUserCall(ONE);
+  noteUserCall(ONE);
+  noteUserCall(TWO);
+  const buffered = [bufferedCalls(ONE), bufferedCalls(TWO)];
+
+  const first = meterAdmin();
+  await flushUserCalls({ admin: first.admin, now: NOW });
+  const afterFlush = [bufferedCalls(ONE), bufferedCalls(TWO)];
+
+  // ── The gap ──────────────────────────────────────────────────────────────
+
+  noteUserCall(ONE);
+  const tooSoon = meterAdmin();
+  await flushUserCalls({ admin: tooSoon.admin, now: NOW + 30_000 });
+
+  // `force` ignores it — what a cron does.
+  const forced = meterAdmin();
+  await flushUserCalls({ admin: forced.admin, now: NOW + 30_000, force: true });
+
+  // And past the gap it writes on its own.
+  noteUserCall(ONE);
+  const later = meterAdmin();
+  await flushUserCalls({ admin: later.admin, now: NOW + 30_000 + FLUSH_MIN_GAP_MS });
+
+  // ── One user's flush does not write another's total ──────────────────────
+
+  forgetCallMeter();
+  noteUserCall(ONE);
+  noteUserCall(TWO);
+  const scoped = meterAdmin();
+  await flushUserCalls({ admin: scoped.admin, userIds: [ONE], now: NOW });
+  const stillBuffered = bufferedCalls(TWO);
+
+  // ── A failed write loses the count rather than repeating it ──────────────
+
+  forgetCallMeter();
+  noteUserCall(ONE);
+  noteUserCall(ONE);
+  noteUserCall(ONE);
+  const broken = meterAdmin({ failWith: 'PGRST205' });
+  const { lines: brokenLines } = await captureLogs(() =>
+    flushUserCalls({ admin: broken.admin, now: NOW })
+  );
+  const lostNotDoubled = bufferedCalls(ONE);
+  // A second flush says nothing more, and sends nothing more.
+  const { lines: quietLines } = await captureLogs(() =>
+    flushUserCalls({ admin: broken.admin, now: NOW + FLUSH_MIN_GAP_MS * 2, force: true })
+  );
+
+  forgetCallMeter();
+
+  group('a trader’s call volume is counted, not estimated', [
+    c('(1) calls buffer per user', buffered, [2, 1]),
+    c('(2) a flush writes each user once, with the count and the UTC day',
+      first.bumps, [
+        { userId: ONE, day: '2026-10-15', calls: 2 },
+        { userId: TWO, day: '2026-10-15', calls: 1 },
+      ]),
+    c('(3) and clears the buffer', afterFlush, [0, 0]),
+    // THE LIVE POLL'S PROTECTION. 240 requests an hour must not be 240 writes.
+    c('(4) a second flush inside the gap writes nothing', tooSoon.bumps.length, 0),
+    c('(5) but `force` writes anyway — what a cron needs',
+      forced.bumps.map((b) => b.calls), [1]),
+    c('(6) and past the gap it writes on its own', later.bumps.length, 1),
+    c('(7) a flush for one user leaves the other’s total buffered',
+      [scoped.bumps.map((b) => b.userId), stillBuffered], [[ONE], 1]),
+    // THE ONE DIRECTION A COUNTER MUST NOT BE WRONG IN. The buffer is cleared
+    // BEFORE the await, so a failed write cannot be replayed as a second count.
+    c('(8) a failed write under-counts rather than double-counting',
+      [lostNotDoubled, broken.bumps.length], [0, 1]),
+    c('(9) it says so once, naming no user',
+      [brokenLines.length, quietLines.length,
+       brokenLines.some((l) => l.includes(ONE))], [1, 0, false]),
+    // The reduction that keeps ids out of a nightly log.
+    c('(10) a cron sees two integers: the total and the heaviest user',
+      summariseCalls(new Map([[ONE, 4_200], [TWO, 45]])), { total: 4_245, heaviest: 4_200 }),
+    c('(11) and an empty day is two zeroes, not a crash',
+      summariseCalls(new Map()), { total: 0, heaviest: 0 }),
+    c('(12) the day is UTC, which is the crons’ boundary and not the trader’s',
+      callDay(Date.parse('2026-10-15T23:30:00.000Z')), '2026-10-15'),
+  ]);
+}
+
+/**
  * Every trader is reached across runs, and nobody is always last
  * (REF-112 §4.6 item 1).
  *
@@ -1643,6 +1818,7 @@ async function cronRotationGroup() {
 
     const admin = {
       from: (table: string) => {
+        if (table === 'tradovate_call_counts') return emptyCounts();
         if (table !== 'tradovate_connections') throw new Error(`unexpected table ${table}`);
         return {
           select: (columns: string) => {
@@ -6417,6 +6593,10 @@ async function ordersCronWindowGroup() {
   // rather than about a broker.
   const admin = {
     from: (table: string) => {
+      // REF-112 §4.5 item 1 reads the call counter for the summary line. These
+      // groups are not about the counter, so it answers empty — which is also
+      // what a pre-042 database would effectively produce.
+      if (table === 'tradovate_call_counts') return emptyCounts();
       if (table !== 'tradovate_connections') throw new Error(`unexpected table ${table}`);
       const rows = [
         { user_id: USER, is_trade_source: true },
@@ -6679,6 +6859,7 @@ async function main() {
   await syncCooldownGroup();
   await penaltyBackoffGroup();
   await cronRotationGroup();
+  await callCounterGroup();
 
   // Stage 3a — the debrief's storage and the alert emails.
   await debriefReaderGroup();

@@ -114,7 +114,10 @@ export async function GET(request: NextRequest) {
   // Step 4 — from here on, `code` and everything derived from it is secret.
   try {
     const token = await exchangeCodeForToken(config.config, code);
-    const me = await fetchTradovateUser(config.config, token.accessToken);
+    // `user.id` is the signed-in Reflect user, for the call counter — see
+    // `reflectUserId` on fetchTradovateUser. It is the same id `verifyState`
+    // bound the state cookie to above, so this cannot be anybody else's.
+    const me = await fetchTradovateUser(config.config, token.accessToken, user.id);
 
     await saveConnection({
       userId: user.id,

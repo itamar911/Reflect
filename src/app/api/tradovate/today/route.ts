@@ -101,6 +101,7 @@ import {
 } from '@/lib/rules/brokerDayContext';
 import { isUserAllowed } from '@/lib/tradovate/allowlist';
 import { tradovateGet } from '@/lib/tradovate/client';
+import { flushUserCalls } from '@/lib/tradovate/call-meter';
 import { getUserTradingApi, notingPenalty, readIsTradeSource } from '@/lib/tradovate/connections';
 import { loadBrokerDay, type BrokerTrade, type TradovateReader } from '@/lib/tradovate/fills';
 import { importBrokerTrades, isImportEnabled } from '@/lib/tradovate/import';
@@ -250,7 +251,7 @@ export async function GET(request: Request) {
     const readerFor = (apiUrl: string): TradovateReader => ({
       get: (path, query) =>
         notingPenalty(user.id, () =>
-          tradovateGet(path, query, { accessToken: api.accessToken, apiUrl })
+          tradovateGet(path, query, { accessToken: api.accessToken, apiUrl, userId: user.id })
         ),
     });
 
@@ -291,5 +292,12 @@ export async function GET(request: Request) {
     );
 
     return answer(brokerPullFromSource(source), isTradeSource);
+  } finally {
+    // The call counter, for a route that does not go through `syncUserTrades`
+    // (REF-112 §4.5 item 1). In a `finally` rather than beside either `return`
+    // because a pull that FAILED still made every request up to the failure,
+    // and that is the user whose number matters most. Subject to
+    // FLUSH_MIN_GAP_MS, so opening the trade form twice writes once.
+    await flushUserCalls({ userIds: [user.id] });
   }
 }

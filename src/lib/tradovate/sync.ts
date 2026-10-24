@@ -51,6 +51,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { syncBrokerAccounts, type AccountSyncCounts } from './account-sync';
+import { flushUserCalls } from './call-meter';
 import { tradovateGet } from './client';
 import { getUserTradingApi, notingPenalty, readIsTradeSource } from './connections';
 import { loadBrokerDay, type TradovateReader } from './fills';
@@ -195,6 +196,28 @@ export interface SyncResult {
  * the one behavioural difference between the triggers.
  */
 export async function syncUserTrades(request: SyncRequest): Promise<SyncResult> {
+  try {
+    return await pullAndImport(request);
+  } finally {
+    // THE CALL COUNTER LANDS HERE, FOR FOUR CALLERS AT ONCE (REF-112 §4.5
+    // item 1). This function is what the import cron, the orders cron,
+    // send-alerts and POST /api/tradovate/sync all go through, so one `finally`
+    // covers every one of them.
+    //
+    // IN A `finally` AND NOT AFTER THE RETURN, because the pull that FAILED is
+    // the one whose count matters most: a trader who tripped a penalty made
+    // every request up to it, and a counter that only recorded successful pulls
+    // would be blind to exactly the user who caused the problem.
+    //
+    // `flushUserCalls` never throws and never rejects — see its own note — so
+    // it cannot replace the pull's error with a bookkeeping one. Subject to
+    // FLUSH_MIN_GAP_MS, so a trader pressing Sync twice in a minute writes once.
+    await flushUserCalls({ admin: request.admin, userIds: [request.userId] });
+  }
+}
+
+/** The body. Split only so {@link syncUserTrades} can own the `finally`. */
+async function pullAndImport(request: SyncRequest): Promise<SyncResult> {
   const {
     userId,
     client,
@@ -249,7 +272,7 @@ export async function syncUserTrades(request: SyncRequest): Promise<SyncResult> 
     get: (path, query) =>
       notingPenalty(
         userId,
-        () => tradovateGet(path, query, { accessToken: api.accessToken, apiUrl }),
+        () => tradovateGet(path, query, { accessToken: api.accessToken, apiUrl, userId }),
         { admin }
       ),
   });

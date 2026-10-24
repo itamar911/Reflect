@@ -68,6 +68,7 @@ import {
 } from '@/lib/rules/brokerDayContext';
 import { isUserAllowed } from '@/lib/tradovate/allowlist';
 import { tradovateGet } from '@/lib/tradovate/client';
+import { flushUserCalls } from '@/lib/tradovate/call-meter';
 import { getUserTradingApi, notingPenalty } from '@/lib/tradovate/connections';
 import { loadBrokerDay, type BrokerTrade, type TradovateReader } from '@/lib/tradovate/fills';
 import { redactSecrets } from '@/lib/tradovate/redact';
@@ -271,27 +272,34 @@ export async function GET(request: Request) {
       const readerFor = (apiUrl: string): TradovateReader => ({
         get: (path, query) =>
           notingPenalty(userId, () =>
-            tradovateGet(path, query, { accessToken: api.accessToken, apiUrl })
+            tradovateGet(path, query, { accessToken: api.accessToken, apiUrl, userId })
           ),
       });
 
-      const { day, trades } = await loadBrokerDay({
-        readers: {
-          live: readerFor(api.hosts.live.url),
-          demo: readerFor(api.hosts.demo.url),
-        },
-        environment: api.environment,
-        dayStartMs: window.dayStartMs,
-        // The only parameter this route passes that /today does not, and the
-        // only one that changes what the pull prices.
-        windowStartMs: window.windowStartMs,
-        tradovateUserId: api.tradovateUserId,
-      });
+      try {
+        const { day, trades } = await loadBrokerDay({
+          readers: {
+            live: readerFor(api.hosts.live.url),
+            demo: readerFor(api.hosts.demo.url),
+          },
+          environment: api.environment,
+          dayStartMs: window.dayStartMs,
+          // The only parameter this route passes that /today does not, and the
+          // only one that changes what the pull prices.
+          windowStartMs: window.windowStartMs,
+          tradovateUserId: api.tradovateUserId,
+        });
 
-      // `day` is dropped here, and the suite asserts the two routes agree:
-      // these rows reduce to those scalars, because the scalars ARE this list's
-      // reduction (fills.ts). Nothing recomputes a figure on this path.
-      return { trades, asOf: day.asOf };
+        // `day` is dropped here, and the suite asserts the two routes agree:
+        // these rows reduce to those scalars, because the scalars ARE this
+        // list's reduction (fills.ts). Nothing recomputes a figure here.
+        return { trades, asOf: day.asOf };
+      } finally {
+        // The call counter, for a route that does not go through
+        // `syncUserTrades` (REF-112 §4.5 item 1). In a `finally` because a pull
+        // that failed still made every request up to the failure.
+        await flushUserCalls({ userIds: [userId] });
+      }
     },
   });
 }

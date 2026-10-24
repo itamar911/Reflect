@@ -330,15 +330,31 @@ export async function exchangeRefreshToken(
  *
  * Only `userId` is stored. The response also carries `email`, `fullName` and
  * `organizationName`; none of it is read, kept, or logged.
+ *
+ * `reflectUserId` IS THE SIGNED-IN REFLECT USER AND NOT TRADOVATE'S (REF-112
+ * §4.5 item 1). It is here because `UserTokenRequestOptions.userId` is required
+ * — every per-user Tradovate request has to say whose behalf it is on, so that
+ * ./call-meter.ts can count it — and this is the one call site where that fact
+ * was not already in hand. The caller has it from the session, and the callback
+ * route verifies a state cookie bound to exactly this id before reaching here.
+ *
+ * IT IS THE ONLY PARAMETER THIS FUNCTION GREW, AND IT IS NOT SENT ANYWHERE. The
+ * request is byte-identical: `/auth/me` takes no arguments, and the id reaches
+ * the meter and nothing else. Note the collision of names this function now
+ * holds on purpose — `reflectUserId` is a Supabase uuid and
+ * `TradovateMeResponse.userId` is Tradovate's integer, and the second is the
+ * one that gets stored.
  */
 export async function fetchTradovateUser(
   config: TradovateOAuthConfig,
   accessToken: string,
+  reflectUserId: string,
   signal?: AbortSignal
 ): Promise<TradovateMeResponse> {
   const me = await tradovateGet<TradovateMeResponse>('/auth/me', undefined, {
     apiUrl: config.liveApiUrl,
     accessToken,
+    userId: reflectUserId,
     signal,
   });
 

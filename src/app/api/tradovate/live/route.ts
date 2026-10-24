@@ -144,6 +144,7 @@ import {
 } from '@/lib/rules/brokerDayContext';
 import { isUserAllowed } from '@/lib/tradovate/allowlist';
 import { tradovateGet, tradovatePost } from '@/lib/tradovate/client';
+import { flushUserCalls } from '@/lib/tradovate/call-meter';
 import { getUserTradingApi, notingPenalty } from '@/lib/tradovate/connections';
 import { isImportEnabled } from '@/lib/tradovate/import';
 import { ORDERS_LOOKBACK_MS } from '@/lib/tradovate/orders-cron';
@@ -609,22 +610,30 @@ export async function GET() {
       const readerFor = (apiUrl: string): LiveReader => ({
         get: (path, query) =>
           notingPenalty(userId, () =>
-            tradovateGet(path, query, { accessToken: api.accessToken, apiUrl })
+            tradovateGet(path, query, { accessToken: api.accessToken, apiUrl, userId })
           ),
         post: (path, body) =>
           notingPenalty(userId, () =>
-            tradovatePost(path, body, { accessToken: api.accessToken, apiUrl })
+            tradovatePost(path, body, { accessToken: api.accessToken, apiUrl, userId })
           ),
       });
 
-      return loadOpenPositions({
-        readers: {
-          live: readerFor(api.hosts.live.url),
-          demo: readerFor(api.hosts.demo.url),
-        },
-        environment: api.environment,
-        tradovateUserId: api.tradovateUserId,
-      });
+      try {
+        return await loadOpenPositions({
+          readers: {
+            live: readerFor(api.hosts.live.url),
+            demo: readerFor(api.hosts.demo.url),
+          },
+          environment: api.environment,
+          tradovateUserId: api.tradovateUserId,
+        });
+      } finally {
+        // The call counter, for a route that does not go through
+        // `syncUserTrades` (REF-112 §4.5 item 1). In a `finally` because a pull
+        // that failed still made every request up to the failure, and subject to
+        // FLUSH_MIN_GAP_MS so the poll does not write once per poll.
+        await flushUserCalls({ userIds: [userId] });
+      }
     },
 
     resolveAccounts: async (userId) => {

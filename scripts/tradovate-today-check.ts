@@ -62,6 +62,7 @@ import {
 // user-token request needs neither configuration nor lib/tradovate/session.ts,
 // which is what makes `tradovateRequest` reachable from a suite at all.
 import { tradovateGet, tradovatePost } from '../src/lib/tradovate/client';
+import { bufferedCalls, forgetCallMeter } from '../src/lib/tradovate/call-meter';
 import {
   forgetContractUnits,
   loadBrokerDay,
@@ -4478,6 +4479,9 @@ async function liveFlatTransitionGroup() {
  */
 async function penaltyTicketGroup() {
   const realFetch = globalThis.fetch;
+  // The meter is a module-level map and lives for the process, so it leaks
+  // between groups without this — the same hazard `forgetLivePull` exists for.
+  forgetCallMeter();
 
   /** Every request the stub saw: verb, and the parsed body if there was one. */
   interface Seen {
@@ -4514,6 +4518,10 @@ async function penaltyTicketGroup() {
   }
 
   const TOKEN = 'a-token-that-is-never-logged';
+  // REF-112 §4.5 item 1. `userId` is required on a user-token request, so this
+  // group names one — and that makes it the only place a suite can watch
+  // `noteUserCall` fire per ATTEMPT rather than per call.
+  const METERED_USER = 'aaaaaaaa-0000-4000-8000-00000000000c';
   const HOST = 'https://example.test';
   const PENALTY = { 'p-ticket': 'TICKET-1', 'p-time': 0 };
 
@@ -4523,7 +4531,7 @@ async function penaltyTicketGroup() {
   const postResult = await tradovatePost<{ ok: boolean }>(
     '/cashBalance/getcashbalancesnapshot',
     { accountId: 7001 },
-    { accessToken: TOKEN, apiUrl: HOST }
+    { accessToken: TOKEN, apiUrl: HOST, userId: METERED_USER }
   );
 
   // ── Two penalties in a row: the SECOND ticket replaces the first ──────────
@@ -4533,6 +4541,7 @@ async function penaltyTicketGroup() {
   await tradovatePost('/cashBalance/getcashbalancesnapshot', { accountId: 7001 }, {
     accessToken: TOKEN,
     apiUrl: HOST,
+    userId: METERED_USER,
   });
 
   // ── A penalty with no ticket at all: the retry is the original request ────
@@ -4541,6 +4550,7 @@ async function penaltyTicketGroup() {
   await tradovatePost('/cashBalance/getcashbalancesnapshot', { accountId: 7001 }, {
     accessToken: TOKEN,
     apiUrl: HOST,
+    userId: METERED_USER,
   });
 
   // ── A GET: there is no body, so the retry is unchanged ────────────────────
@@ -4549,6 +4559,7 @@ async function penaltyTicketGroup() {
   await tradovateGet('/account/list', undefined, {
     accessToken: TOKEN,
     apiUrl: HOST,
+    userId: METERED_USER,
   });
 
   // ── The budget still ends in a thrown penalty, ticket or no ticket ────────
@@ -4558,6 +4569,7 @@ async function penaltyTicketGroup() {
     tradovatePost('/cashBalance/getcashbalancesnapshot', { accountId: 7001 }, {
       accessToken: TOKEN,
       apiUrl: HOST,
+      userId: METERED_USER,
     })
   );
 
@@ -4568,10 +4580,19 @@ async function penaltyTicketGroup() {
     tradovatePost('/cashBalance/getcashbalancesnapshot', { accountId: 7001 }, {
       accessToken: TOKEN,
       apiUrl: HOST,
+      userId: METERED_USER,
     })
   );
 
   globalThis.fetch = realFetch;
+
+  // REF-112 §4.5 item 1. The counter sits immediately before the `fetch`, per
+  // ATTEMPT, so the two retries the exhausted-budget case made are counted as
+  // the three requests Tradovate's limiter actually saw. A counter that only
+  // recorded successful round trips would be blind to exactly the trader who
+  // is in trouble. `bufferedCalls` reads the buffer rather than the database;
+  // nothing here writes.
+  const metered = bufferedCalls(METERED_USER);
 
   group('REF-112: a penalty retry carries the ticket it was given', [
     c('(1) the first attempt is the plain request',
@@ -4604,6 +4625,16 @@ async function penaltyTicketGroup() {
     // is not an invitation to try.
     c('(8) a captcha throws on the first answer and is never retried',
       [captchaSeen.length, captcha], [1, 'TradovatePenaltyError']),
+
+    // REF-112 §4.5 item 1, and this group is the only place it is provable: a
+    // RETRY IS ANOTHER REQUEST against the same limiter, so it is counted
+    // again. Fourteen is the sum of every attempt the stub saw above —
+    // 2 + 3 + 2 + 2 + 3 + 1 — and `userId` being required on a user-token
+    // request is what makes the attribution possible at all.
+    c('(9) every ATTEMPT is counted, retries included',
+      metered,
+      postSeen.length + twiceSeen.length + untickedSeen.length + getSeen.length +
+        exhaustedSeen.length + captchaSeen.length),
   ]);
 }
 

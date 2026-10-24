@@ -72,6 +72,7 @@ import {
   markCronProgress,
   ORDERS_BATCH_LIMIT,
 } from './connections';
+import { flushUserCalls, readDailyCalls, summariseCalls } from './call-meter';
 import { isImportEnabled, type BrokerImportCounts } from './import';
 import { redactSecrets } from './redact';
 import { syncUserTrades } from './sync';
@@ -345,12 +346,22 @@ export async function runStopCapture(params: {
 
   // Every connection in the batch, skipped and failed ones included, after the
   // loop. See `markCronProgress`, and the import cron's own note.
-  await markCronProgress({
-    admin,
-    cursor: 'last_orders_at',
-    userIds: connections.map((connection) => connection.user_id),
-    now,
-  });
+  const batchIds = connections.map((connection) => connection.user_id);
+
+  await markCronProgress({ admin, cursor: 'last_orders_at', userIds: batchIds, now });
+
+  // THE COUNTER'S WHOLE PURPOSE: a number in the summary (REF-112 §4.5 item 1).
+  // `force` because a cron runs once and the instance may never serve again,
+  // so its totals have to land rather than wait out FLUSH_MIN_GAP_MS.
+  await flushUserCalls({ admin, userIds: batchIds, now, force: true });
+
+  // TWO INTEGERS AND NEVER A USER ID. `readDailyCalls` returns a keyed map
+  // because the MAXIMUM is the interesting figure — §4.3's point is that an
+  // idle trader (~45/day) and a heavy one (8,000-12,000+) differ by two orders
+  // of magnitude, so a mean hides the user who is actually the problem — and
+  // `summariseCalls` reduces it to a total and that maximum before anything is
+  // written. The map's keys do not reach this function.
+  const calls = summariseCalls(await readDailyCalls({ admin, userIds: batchIds, now }));
 
   const line =
     `[tradovate][orders-cron] found=${run.found} active=${run.active} ` +
@@ -358,7 +369,8 @@ export async function runStopCapture(params: {
     `imported=${run.imported} updated=${run.updated} unchanged=${run.unchanged} ` +
     `skippedOpen=${run.skippedOpen} skippedHidden=${run.skippedHidden} ` +
     `failed=${run.failed} skippedUsers=${run.skippedUsers} ` +
-    `failedUsers=${run.failedUsers}` +
+    `failedUsers=${run.failedUsers} ` +
+    `calls=${calls.total} heaviestUser=${calls.heaviest}` +
     (failureKinds.length > 0 ? ` kinds=${[...new Set(failureKinds)].join(',')}` : '');
 
   if (run.failedUsers > 0 || run.failed > 0) console.warn(redactSecrets(line));
