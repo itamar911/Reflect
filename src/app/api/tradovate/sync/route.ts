@@ -107,6 +107,7 @@ import { syncUserTrades, type SyncResult } from '@/lib/tradovate/sync';
 // The copy lives with the rest of this route's sentences, in a browser-safe
 // module the client component also reads — see SYNC_COOLDOWN_NOTE's own note.
 import { SYNC_COOLDOWN_NOTE } from '@/lib/tradovate/sync-response';
+import type { BrokerNotice } from '@/lib/tradovate/notices';
 import type { BrokerImportCounts } from '@/lib/tradovate/import';
 import {
   MAX_SINCE_AGE_MS,
@@ -185,6 +186,27 @@ export type BrokerSyncResult =
       heldSymbols?: string[];
       /** How many groups were held, including any with no readable symbol. */
       heldCount?: number;
+      /**
+       * What this run could not do for the trader (REF-112 §5).
+       *
+       * THE SECOND TRADE-SHAPED THING THIS ROUTE SENDS, and the bound is the
+       * one `heldSymbols` established, restated in the type itself: a
+       * {@link BrokerNotice} has an account LABEL and a symbol ROOT and no
+       * other field. No account id, no host, no price, no quantity — the
+       * server-side `PullNotice` carries the first two and
+       * lib/tradovate/sync.ts drops them before this shape is built, so a leak
+       * here would have to be a new field rather than a forgotten line.
+       *
+       * WHY IT IS SENT AT ALL: every member of that union is a state in which
+       * the trader's journal is INCOMPLETE and nothing else on the screen
+       * would say so. REF-112 §5 found five of them and they all present
+       * identically — as an honest-looking zero — which is the one failure a
+       * discipline product must not have.
+       *
+       * Absent when empty, like `heldSymbols`: an ordinary day produces a
+       * response byte-identical to the one before this change.
+       */
+      notices?: BrokerNotice[];
     } & BrokerImportCounts)
   | { source: 'broker_expired' }
   | { source: 'broker_unavailable' }
@@ -301,10 +323,10 @@ export async function respondToSyncRequest(
   try {
     // Spelled out rather than passed whole: the parse also carries `ok` and
     // `clamped`, which are this function's business and not the sync's.
-    const { counts, asOf, importEnabled, heldSymbols, heldCount } = await deps.runSync(userId, {
-      dayStartMs: requested.dayStartMs,
-      windowStartMs: requested.windowStartMs,
-    });
+    const { counts, asOf, importEnabled, heldSymbols, heldCount, notices } = await deps.runSync(
+      userId,
+      { dayStartMs: requested.dayStartMs, windowStartMs: requested.windowStartMs }
+    );
 
     return answer({
       source: 'broker_verified',
@@ -316,6 +338,8 @@ export async function respondToSyncRequest(
       // reads the absence as "nothing held", the same rule it applies to
       // `importEnabled`.
       ...(heldCount > 0 ? { heldSymbols, heldCount } : {}),
+      // Same rule, same reason (REF-112 §5).
+      ...(notices.length > 0 ? { notices } : {}),
       ...counts,
     });
   } catch (error) {

@@ -989,18 +989,12 @@ async function main() {
       await thrown(() => pull(withTrips([oneTrip], { products: [{ ...PRODUCT, valuePerPoint: 0 }] }))),
       'unpriceable:no_value_per_point'
     ),
-    c(
-      'a euro-denominated product cannot join a dollar total',
-      await thrown(() =>
-        pull(
-          withTrips([oneTrip], {
-            products: [{ ...PRODUCT, currencyId: 2 }],
-            currencies: [USD, { id: 2, name: 'EUR' }],
-          })
-        )
-      ),
-      'unpriceable:foreign_currency'
-    ),
+    // THE EURO CASE MOVED OUT OF THIS GROUP (REF-112 §5.10). It asserted that
+    // a non-USD product throws and fails the whole pull; it now skips the
+    // ACCOUNT that traded it and says so. See `foreignCurrencyGroup` below,
+    // which asserts the new contract in full — including that nothing
+    // non-USD is ever priced, which is the part of the old rule that had to
+    // survive.
     c(
       'a currency id with no name is an unknown unit',
       await thrown(() => pull(withTrips([oneTrip], { products: [{ ...PRODUCT, currencyId: 77 }] }))),
@@ -2449,6 +2443,10 @@ async function main() {
   // ── REF-112 §4.5 item 4: the penalty ticket is replayed ───────────────────
 
   await penaltyTicketGroup();
+
+  // ── REF-112 §5: live accounts this integration cannot serve ───────────────
+
+  await foreignCurrencyGroup();
 
   console.log();
   if (failures.length) {
@@ -4477,6 +4475,122 @@ async function liveFlatTransitionGroup() {
  * "fixed" it by manufacturing a body, which is what the deleted spike did and
  * which turned its penalised GETs into POSTs.
  */
+/**
+ * REF-112 §5.10 — a non-USD account is skipped, not a day that is refused.
+ *
+ * WHAT THIS GROUP REPLACES. A single case in "a figure that cannot be stated
+ * in dollars is refused" asserted `unpriceable:foreign_currency` out of
+ * `loadBrokerDay`, which ./errors.ts maps to `broker_unavailable`. The
+ * reasoning was right about the unit bug and wrong about the blast radius: a
+ * live trader who touched one EUREX product got NO broker data at all — no
+ * journal rows, no rule figures — every day, forever, and the journal fell
+ * back to Reflect-only data without saying why. §5.10 calls it the most likely
+ * real-world live breakage after the host issues.
+ *
+ * THE PART OF THE OLD RULE THAT HAD TO SURVIVE is case (5): nothing
+ * denominated in anything but dollars is ever priced. The skip is what
+ * changed; the arithmetic's guarantee is not negotiable (REF-99).
+ *
+ * The scene is the one the ticket is actually about: a prop trader with TWO
+ * accounts, one trading a euro-denominated product and one trading ES.
+ */
+async function foreignCurrencyGroup() {
+  const EUR = { id: 2, name: 'EUR' };
+  const EUR_ACCOUNT: TradovateAccount = {
+    id: 7002,
+    name: 'FDAX-EUR-7002',
+    userId: ACCOUNT.userId,
+    accountType: 'Customer',
+  };
+  const EUR_CONTRACT_ID = 2606999;
+  const EUR_MATURITY_ID = 880099;
+  const EUR_PRODUCT_ID = 99;
+  const EUR_POSITION: TradovatePosition = {
+    id: 9002,
+    accountId: EUR_ACCOUNT.id,
+    contractId: EUR_CONTRACT_ID,
+    timestamp: '2026-10-14T05:00:00.000Z',
+    tradeDate: { year: 2026, month: 10, day: 14 },
+    netPos: 0,
+  };
+
+  // The dollar account's trade, and the euro account's. Both close today.
+  const dollarTrip = roundTrip({
+    side: 'long',
+    openAt: '2026-10-14T05:00:00Z',
+    closeAt: '2026-10-14T06:00:00Z',
+    entry: 5000,
+    exit: 4990,
+  });
+  const euroTrip = roundTrip({
+    side: 'long',
+    openAt: '2026-10-14T05:10:00Z',
+    closeAt: '2026-10-14T06:10:00Z',
+    entry: 18000,
+    exit: 18050,
+    contractId: EUR_CONTRACT_ID,
+    positionId: EUR_POSITION.id,
+  });
+
+  const mixed = withTrips([dollarTrip, euroTrip], {
+    accounts: [ACCOUNT, EUR_ACCOUNT],
+    positions: [POSITION, EUR_POSITION],
+    contracts: [CONTRACT, { id: EUR_CONTRACT_ID, name: 'FDAXZ6', contractMaturityId: EUR_MATURITY_ID }],
+    maturities: [MATURITY, { id: EUR_MATURITY_ID, productId: EUR_PRODUCT_ID }],
+    products: [PRODUCT, { id: EUR_PRODUCT_ID, name: 'FDAX', currencyId: EUR.id, valuePerPoint: 25 }],
+    currencies: [USD, EUR],
+  });
+
+  const day = await pullFull(mixed);
+
+  // The same trader with ONLY the euro account: the day that used to be a
+  // total outage is now an empty day that says why.
+  const euroOnly = withTrips([euroTrip], {
+    accounts: [EUR_ACCOUNT],
+    positions: [EUR_POSITION],
+    contracts: [{ id: EUR_CONTRACT_ID, name: 'FDAXZ6', contractMaturityId: EUR_MATURITY_ID }],
+    maturities: [{ id: EUR_MATURITY_ID, productId: EUR_PRODUCT_ID }],
+    products: [{ id: EUR_PRODUCT_ID, name: 'FDAX', currencyId: EUR.id, valuePerPoint: 25 }],
+    currencies: [USD, EUR],
+  });
+  const alone = await pullFull(euroOnly);
+
+  group('REF-112 §5.10: a non-USD account is skipped and named, not fatal', [
+    // THE HEADLINE. This threw before, and the throw cost the trader the whole
+    // day across every account they have.
+    c('(1) the pull succeeds', day.day.asOf.length > 0, true),
+    c('(2) the dollar account still imports its trade',
+      day.trades.map((t) => t.accountId), [ACCOUNT.id]),
+    c('(3) and the euro account contributes nothing',
+      day.trades.some((t) => t.accountId === EUR_ACCOUNT.id), false),
+    // The scalars are the reduction of `trades`, so this is the same fact one
+    // level down — and it is the one the rule engine reads.
+    c('(4) the day counts only what it could state', day.day.closedCount, 1),
+    // REF-99, AND THE ONLY PART OF THE OLD REFUSAL THAT WAS NEVER NEGOTIABLE:
+    // a euro figure must never be added to a dollar total. A skipped account
+    // cannot contribute one, which is why the skip is per ACCOUNT.
+    c('(5) no euro amount reaches the dollar total', day.day.net, -500),
+
+    // ── What the trader is told ──────────────────────────────────────────
+    c('(6) a notice names the account and the reason',
+      day.notices,
+      [{ kind: 'account_currency', host: 'live', accountId: EUR_ACCOUNT.id, name: EUR_ACCOUNT.name }]),
+    c('(7) one notice per account, not per trade or per contract',
+      day.notices.length, 1),
+    c('(8) a trader with only a euro account gets an empty day AND the notice',
+      [alone.trades.length, alone.day.closedCount, alone.notices.map((n) => n.kind)],
+      [0, 0, ['account_currency']]),
+    // THE FAILURE THIS TICKET EXISTS TO REMOVE: before, case (8) was
+    // `broker_unavailable`; the alternative nobody wanted was a silent zero.
+    // It is now a zero that says why.
+    c('(9) and that is not a silent zero', alone.notices.length > 0, true),
+
+    // ── An ordinary day is untouched ─────────────────────────────────────
+    c('(10) a dollar-only day carries no notices',
+      (await pullFull(withTrips([dollarTrip]))).notices, []),
+  ]);
+}
+
 async function penaltyTicketGroup() {
   const realFetch = globalThis.fetch;
   // The meter is a module-level map and lives for the process, so it leaks

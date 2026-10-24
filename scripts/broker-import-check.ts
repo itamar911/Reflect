@@ -146,6 +146,15 @@ import {
   SYNC_UNAVAILABLE,
   type BrokerSyncOutcome,
 } from '../src/lib/tradovate/sync-response';
+// REF-112 §5: what the pull could not do, and the sentence for it.
+import {
+  brokerStateNotices,
+  noticeLine,
+  noticeLines,
+  orderNotices,
+  readNotices,
+  type BrokerNotice,
+} from '../src/lib/tradovate/notices';
 // REF-112 §4: the caps. `claimSyncSlot` is the sync cooldown's one statement;
 // `forgetRateWarnings` resets the once-per-process log guard, which is a
 // module-level variable and therefore leaks between groups without it.
@@ -1557,9 +1566,11 @@ function syncDeps(over: Partial<SyncRouteDeps> = {}): SyncRouteDeps {
       asOf: '2026-10-15T13:59:00.000Z',
       isTradeSource: true,
       importEnabled: true,
-      // The ordinary day: nothing was held (REF-117 Stage 6).
+      // The ordinary day: nothing was held (REF-117 Stage 6) and nothing was
+      // skipped (REF-112 §5).
       heldSymbols: [],
       heldCount: 0,
+      notices: [],
     }),
     ...over,
   };
@@ -2593,6 +2604,7 @@ async function syncCopyGroup() {
       importEnabled?: boolean;
       heldSymbols?: string[];
       heldCount?: number;
+      notices?: BrokerNotice[];
     } = {}
   ) =>
     describeSyncOutcome({
@@ -2610,6 +2622,7 @@ async function syncCopyGroup() {
       failed: 0,
       heldSymbols: [],
       heldCount: 0,
+      notices: [],
       ...over,
     } as BrokerSyncOutcome);
 
@@ -2703,6 +2716,218 @@ async function syncCopyGroup() {
         held.details[0]!.includes(word)
       ),
       false),
+  ]);
+
+  await noticeCopyGroup();
+}
+
+/**
+ * REF-112 §5 — the sentences for a trader whose account Reflect cannot handle.
+ *
+ * THE WHOLE POINT OF THE TICKET IN ONE GROUP. Every state asserted below used
+ * to present identically, as a believable "no trades today": the pull either
+ * failed whole and was reported as a broker outage, or quietly skipped and
+ * was reported as an ordinary empty day. Neither told the trader that a
+ * portfolio of theirs is missing from the figures.
+ */
+async function noticeCopyGroup() {
+  /** A run that imported nothing and refused nothing, plus the notices. */
+  const verified = (notices: BrokerNotice[]) =>
+    describeSyncOutcome({
+      source: 'broker_verified',
+      windowStart: SYNC_DAY_START,
+      asOf: '2026-10-15T13:59:00.000Z',
+      importEnabled: true,
+      ran: true,
+      offered: 0,
+      imported: 0,
+      linkedAuto: 0,
+      queued: 0,
+      updated: 0,
+      unchanged: 0,
+      skippedOpen: 0,
+      skippedHidden: 0,
+      failed: 0,
+      heldSymbols: [],
+      heldCount: 0,
+      notices,
+    });
+
+  const currency = verified([{ kind: 'account_currency', account: 'Lucid Eval 42' }]);
+  const type = verified([{ kind: 'account_type', account: 'Lucid Eval 42' }]);
+  const none = verified([{ kind: 'no_accounts' }]);
+  const degraded = verified([{ kind: 'host_degraded' }]);
+  const unpriced = verified([{ kind: 'unpriced_product', root: 'MNQ' }]);
+  const unnamedProduct = verified([{ kind: 'unpriced_product', root: null }]);
+  const unnamedAccount = verified([{ kind: 'account_currency', account: null }]);
+
+  group('REF-112 §5: a trader Reflect cannot serve is told so, in Hebrew', [
+    c('(1) a non-USD account names itself and the limit',
+      currency.details,
+      ['החשבון Lucid Eval 42 במטבע שאינו דולר — Reflect תומכת כרגע רק בחשבונות USD']),
+    // "צור קשר ונבדוק" AND NOT "לא נתמך" ALONE. An account type we have not
+    // provisioned for is a thing WE have to look at, not a verdict on the
+    // trader's broker setup — and a refusal with no way out of it is the one
+    // thing worse than instructing (see SYNC_COOLDOWN_NOTE).
+    c('(2) an unsupported account type offers a way out',
+      type.details, ['החשבון Lucid Eval 42 מסוג שאינו נתמך — צור קשר ונבדוק']),
+    c('(3) zero eligible accounts is a sentence, not an empty list',
+      none.details, ['לא נמצאו חשבונות מסחר נתמכים בחיבור לברוקר — צור קשר ונבדוק']),
+    // GENERIC BY DESIGN. Which host failed, what it answered and how many
+    // accounts it holds are operator facts (§5.2).
+    c('(4) a failed host says the day may be short, and names nothing',
+      degraded.details, ['חלק מהנתונים מהברוקר לא נטענו — ננסה שוב בסנכרון הבא']),
+    c('(5) an unresolved product names the ROOT and not the contract',
+      unpriced.details, ['עסקה ב-MNQ לא יובאה — מוצר לא מזוהה']),
+    // THE ASSERTION THAT KEEPS §5.11 HONEST. `brokerSymbolRoot` answers null
+    // for a spread, an option or a combo leg — exactly the names fills.ts
+    // refuses to parse — and the sentence has to survive that.
+    c('(6) a product with no readable root still gets a sentence',
+      unnamedProduct.details, ['עסקה אחת לא יובאה — מוצר לא מזוהה']),
+    c('(7) and so does an account with no readable label',
+      unnamedAccount.details,
+      ['אחד מחשבונות הברוקר במטבע שאינו דולר — Reflect תומכת כרגע רק בחשבונות USD']),
+
+    // ── The thing that must never happen again ───────────────────────────
+    //
+    // "הכל מעודכן" in the muted colour over "your account was skipped" would
+    // be two lines contradicting each other, and the muted one is the one a
+    // trader reads. A notice is a WHOLE PORTFOLIO missing from the day.
+    c('(8) any notice makes the run a problem',
+      [currency.problem, none.problem, degraded.problem, unpriced.problem],
+      [true, true, true, true]),
+    c('(9) and the headline is still honest about the rows',
+      currency.text, 'הכל מעודכן'),
+    c('(10) no notice offers the reconnect link except the connection one',
+      [currency.reconnect, none.reconnect, degraded.reconnect], [false, false, false]),
+
+    // ── Ordering, de-duplication, and the parser ─────────────────────────
+    c('(11) notices come before the held line and the open-position line',
+      describeSyncOutcome({
+        source: 'broker_verified', windowStart: SYNC_DAY_START,
+        asOf: '2026-10-15T13:59:00.000Z', importEnabled: true, ran: true,
+        offered: 0, imported: 0, linkedAuto: 0, queued: 0, updated: 0, unchanged: 0,
+        skippedHidden: 0, failed: 0,
+        skippedOpen: 1, heldSymbols: ['MNQZ6'], heldCount: 1,
+        notices: [{ kind: 'host_degraded' }],
+      }).details,
+      ['חלק מהנתונים מהברוקר לא נטענו — ננסה שוב בסנכרון הבא',
+       'עסקאות ב-MNQZ6 ממתינות — הנתונים מהברוקר לא תאמו, ננסה שוב בסנכרון הבא.',
+       'פוזיציה פתוחה נכנסת ליומן רק לאחר סגירתה.']),
+    // TWO HOSTS CAN REPORT THE SAME ACCOUNT. Two identical sentences one above
+    // the other is the shape a reader skips.
+    c('(12) the same notice twice is one line',
+      noticeLines([
+        { kind: 'account_type', account: 'Eval 1' },
+        { kind: 'account_type', account: 'Eval 1' },
+      ]).length,
+      1),
+    c('(13) but two different accounts are two lines',
+      noticeLines([
+        { kind: 'account_type', account: 'Eval 2' },
+        { kind: 'account_type', account: 'Eval 1' },
+      ]),
+      ['החשבון Eval 1 מסוג שאינו נתמך — צור קשר ונבדוק',
+       'החשבון Eval 2 מסוג שאינו נתמך — צור קשר ונבדוק']),
+    c('(14) severity decides the order, not arrival',
+      orderNotices([
+        { kind: 'unpriced_product', root: 'MNQ' },
+        { kind: 'no_accounts' },
+        { kind: 'connection_environment' },
+      ]).map((n) => n.kind),
+      ['connection_environment', 'no_accounts', 'unpriced_product']),
+
+    // THE PARSER TRUSTS NOTHING, and it DEGRADES rather than refusing: an
+    // unknown kind is a deployment newer than the open tab, and failing the
+    // whole body over it would render "לא הצלחנו למשוך עסקאות" for a sync
+    // that worked.
+    c('(15) an unknown kind is dropped and the rest survive',
+      readNotices([{ kind: 'from_the_future' }, { kind: 'host_degraded' }]).map((n) => n.kind),
+      ['host_degraded']),
+    c('(16) a non-array is no notices', readNotices('host_degraded'), []),
+    c('(17) a junk account label degrades to the unnamed sentence',
+      readNotices([{ kind: 'account_type', account: 42 }]),
+      [{ kind: 'account_type', account: null }]),
+    c('(18) and so does an empty string',
+      readNotices([{ kind: 'account_currency', account: '' }]),
+      [{ kind: 'account_currency', account: null }]),
+    c('(19) absence of the field is no notices at all',
+      readSyncResponse({
+        source: 'broker_verified', windowStart: SYNC_DAY_START,
+        asOf: '2026-10-15T13:59:00.000Z', ran: true,
+        offered: 0, imported: 0, updated: 0, unchanged: 0,
+        skippedOpen: 0, skippedHidden: 0, failed: 0,
+      }),
+      {
+        source: 'broker_verified', windowStart: SYNC_DAY_START,
+        asOf: '2026-10-15T13:59:00.000Z', importEnabled: false,
+        heldSymbols: [], heldCount: 0, notices: [], ran: true,
+        offered: 0, imported: 0, linkedAuto: 0, queued: 0, updated: 0,
+        unchanged: 0, skippedOpen: 0, skippedHidden: 0, failed: 0,
+      }),
+
+    // ── No ids, no prices, no hostnames, ever ────────────────────────────
+    //
+    // The leak assertion for this surface. Every sentence this module can
+    // produce, searched for the shapes that must not be in one.
+    c('(20) no sentence carries a number, an id or a host',
+      [
+        ...noticeLines([
+          { kind: 'connection_environment' },
+          { kind: 'no_accounts' },
+          { kind: 'host_degraded' },
+          { kind: 'account_currency', account: null },
+          { kind: 'account_type', account: null },
+          { kind: 'unpriced_product', root: null },
+        ]),
+      ].some((line) => /\d|tradovateapi|https?:|live:|demo:/i.test(line)),
+      false),
+    // No emojis (CLAUDE.md), across every sentence this module owns.
+    c('(21) no emojis',
+      noticeLines([
+        { kind: 'connection_environment' }, { kind: 'no_accounts' },
+        { kind: 'host_degraded' }, { kind: 'account_currency', account: 'A' },
+        { kind: 'account_type', account: 'A' }, { kind: 'unpriced_product', root: 'MNQ' },
+      ]).some((line) => /\p{Extended_Pictographic}/u.test(line)),
+      false),
+
+    // ── What a screen with no pull in hand can still say (§5.4, §5.12) ───
+    c('(22) an environment mismatch is the reconnect sentence',
+      brokerStateNotices({
+        connection: 'active', environmentMismatch: true, brokerAccounts: 3,
+      }).map(noticeLine),
+      ['החיבור לברוקר פג — חבר מחדש']),
+    // THE MISMATCH WINS AND RETURNS ALONE. A connection that cannot refresh
+    // explains an empty accounts list completely, and saying both would send
+    // the trader looking for support over something one click fixes.
+    c('(23) and it suppresses the zero-accounts line',
+      brokerStateNotices({
+        connection: 'active', environmentMismatch: true, brokerAccounts: 0,
+      }).length,
+      1),
+    c('(24) a connected trader with no accounts is an error state',
+      brokerStateNotices({
+        connection: 'active', environmentMismatch: false, brokerAccounts: 0,
+      }).map((n) => n.kind),
+      ['no_accounts']),
+    c('(25) a connected trader WITH accounts is told nothing',
+      brokerStateNotices({
+        connection: 'active', environmentMismatch: false, brokerAccounts: 2,
+      }),
+      []),
+    // "I could not ask" IS NOT "you are not connected" — ConnectionRead exists
+    // to keep those apart, and a database hiccup must not tell a trader their
+    // broker link is dead.
+    c('(26) an unreadable connection says nothing',
+      brokerStateNotices({
+        connection: 'unreadable', environmentMismatch: true, brokerAccounts: 0,
+      }),
+      []),
+    c('(27) and neither does having no connection at all',
+      brokerStateNotices({
+        connection: 'none', environmentMismatch: false, brokerAccounts: 0,
+      }),
+      []),
   ]);
 }
 

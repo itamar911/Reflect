@@ -406,9 +406,64 @@ export interface TradeStages {
  * and `trades` is the list it reduced to produce it — not a second pass over the
  * same pairs. See the module header on why that matters more than the shape.
  */
+/**
+ * One thing this pull could not do, with the ids it takes to finish the job
+ * (REF-112 §5).
+ *
+ * THE SERVER-SIDE HALF OF {@link import('./notices').BrokerNotice}, and the two
+ * are separate types on purpose — the same separation {@link HeldGroup} and
+ * `SyncResult.heldSymbols` already have. This one carries `host` and
+ * `accountId`, because ./sync.ts needs them to look up what the trader called
+ * that account; the wire type carries the resolved label and nothing else. An
+ * id cannot reach the browser by forgetting to strip it, because the type that
+ * crosses the wire has no field to put it in.
+ *
+ * `name` IS THE BROKER'S OWN `Account.name` and is the fallback label. For a
+ * non-`Customer` account it is the ONLY label there will ever be: that account
+ * is filtered out before ./account-sync.ts sees it, so it has no row and
+ * therefore no nickname.
+ */
+export type PullNotice =
+  /**
+   * TWO MEMBERS AND NOT ONE WITH A TWO-VALUE `kind`, although they carry
+   * identical fields. A single member whose discriminant is itself a union
+   * cannot be narrowed away by `kind !== …`, so ./sync.ts' reducer would have
+   * to cast — and a cast is exactly what must not stand between a type that
+   * holds a broker account id and a type that crosses the wire.
+   */
+  | SkippedAccountNotice<'account_currency'>
+  | SkippedAccountNotice<'account_type'>
+  | { kind: 'no_accounts' }
+  | { kind: 'host_degraded' }
+  | { kind: 'unpriced_product'; root: string | null };
+
+/** One account left out of the pull, with what it takes to name it. */
+interface SkippedAccountNotice<K extends 'account_currency' | 'account_type'> {
+  kind: K;
+  host: TradovateEnvironment;
+  accountId: number;
+  name: string;
+}
+
 export interface BrokerDay {
   day: BrokerDayContext;
   trades: BrokerTrade[];
+  /**
+   * What this pull could not do, pooled across hosts (REF-112 §5).
+   *
+   * BESIDE {@link held} RATHER THAN FOLDED INTO IT, although both describe an
+   * under-count and both exist for the same reason. A held group is a
+   * reconciliation that failed on data we could read: the next sync re-offers
+   * the same window and the usual cause does not repeat, so its sentence says
+   * "ממתינות". These are things about the ACCOUNT or the PRODUCT that will
+   * still be true tomorrow — a EUR-denominated product stays EUR-denominated,
+   * an `Omnibus` account stays `Omnibus` — so their sentences say what Reflect
+   * does not support and, where there is one, what the trader can do. Two
+   * different promises; one list could only make one of them.
+   *
+   * Empty on an ordinary day, which is what makes it free to carry.
+   */
+  notices: PullNotice[];
   /**
    * The logical positions this pull REFUSED to state, per group (REF-117 Stage 2).
    *
@@ -611,6 +666,37 @@ interface ContractUnit {
    * {@link unitByContractName}.
    */
   name: string | null;
+}
+
+/**
+ * Why one contract could not be priced, when that is not fatal to the pull
+ * (REF-112 §5.10, §5.11).
+ *
+ * `name` IS CARRIED EVEN THOUGH THE UNIT IS NOT, and it is the only reason
+ * this is a record rather than a bare reason. A refusal has to be able to say
+ * which instrument it is about, and the `/contract/item` body — which every
+ * path below has already read by the time it can refuse — is where the name
+ * comes from. Null when the body named nothing usable.
+ */
+interface UnitRefusal {
+  reason: TradovateUnpriceableError['reason'];
+  name: string | null;
+}
+
+/**
+ * What the pricing chain could state, and what it could not.
+ *
+ * TWO MAPS AND NOT A MAP OF A UNION, because the callers are different
+ * questions and conflating them is how a refused contract gets priced by
+ * accident: `units.get(id)` is "what is this worth", and a contract in
+ * `refused` is absent from it entirely.
+ *
+ * A CONTRACT IS IN EXACTLY ONE OF THEM. Nothing writes to `refused` after
+ * `units`, and every refusal path returns.
+ */
+interface ContractUnits {
+  units: Map<number, ContractUnit>;
+  refused: Map<number, UnitRefusal>;
 }
 
 /**
@@ -832,10 +918,16 @@ export async function loadHostTrades(params: {
  * trades, and this module's oldest rule is that an under-counted day makes every
  * rule MORE PERMISSIVE. So the absence travels beside the rows instead of being
  * swallowed, and {@link BrokerDay.held} is where it arrives.
+ *
+ * AND A THIRD (REF-112 §5). `notices` is what the pull could not do for
+ * reasons that are about the ACCOUNT or the PRODUCT rather than about a
+ * reconciliation — see {@link BrokerDay.notices} on why that is a second list
+ * and not more `held` reasons.
  */
 export async function scanHost(params: Parameters<typeof loadHostTrades>[0]): Promise<{
   trades: BrokerTrade[];
   held: HeldGroup[];
+  notices: PullNotice[];
 }> {
   const { reader, host, accounts, dayStartMs } = params;
 
@@ -847,7 +939,7 @@ export async function scanHost(params: Parameters<typeof loadHostTrades>[0]): Pr
   // zero, not a failure: see the closing note in ./accounts.ts. The caller does
   // not even get here — it drops such a host before asking — but the guard
   // stays, because this function's contract should not depend on that.
-  if (accounts.length === 0) return { trades: [], held: [] };
+  if (accounts.length === 0) return { trades: [], held: [], notices: [] };
 
   const accountIds = new Set(accounts.map((account) => account.id));
 
@@ -867,12 +959,12 @@ export async function scanHost(params: Parameters<typeof loadHostTrades>[0]): Pr
   // reconciliation identity that licenses trusting any cycle at all.
   const positions = await reader.get<TradovatePosition[]>('/position/list');
   const myPositions = (positions ?? []).filter((position) => accountIds.has(position.accountId));
-  if (myPositions.length === 0) return { trades: [], held: [] };
+  if (myPositions.length === 0) return { trades: [], held: [], notices: [] };
 
   const myPositionIds = new Set(myPositions.map((position) => position.id));
   const allPairs = await reader.get<TradovateFillPair[]>('/fillPair/list');
   const myPairs = (allPairs ?? []).filter((pair) => myPositionIds.has(pair.positionId));
-  if (myPairs.length === 0) return { trades: [], held: [] };
+  if (myPairs.length === 0) return { trades: [], held: [], notices: [] };
 
   const fills = await reader.get<TradovateFill[]>('/fill/list');
 
@@ -976,14 +1068,51 @@ export async function scanHost(params: Parameters<typeof loadHostTrades>[0]): Pr
   const streakWindow = trades.slice(0, STREAK_WINDOW);
   const needed = new Set([...inWindow, ...streakWindow]);
 
-  const units = await loadContractUnits(
+  const { units, refused } = await loadContractUnits(
     reader,
     new Set([...needed].map((cycle) => cycle.contractId))
   );
 
+  // ── What could not be priced, and who it belongs to (REF-112 §5.10) ───────
+  //
+  // THE SKIP IS PER ACCOUNT AND NOT PER TRADE, which is the one place item 1
+  // is wider than it first looks and is deliberate. The currency is a property
+  // of the PRODUCT — `/account/list` carries no currency field at all
+  // (./types.ts) — so "a non-USD account" is only ever observed as "an account
+  // that traded a non-USD product". Importing that account's dollar trades and
+  // dropping its euro ones would produce a P&L that looks complete, reads
+  // plausibly, and is short by every trade on the other side of the account:
+  // a believable "no trades today" one level down, which is the exact failure
+  // REF-112 exists to remove. Leaving the whole account out is legible, and
+  // the sentence names it.
+  //
+  // THE OTHER ACCOUNTS ARE UNAFFECTED, which is the half that was broken: this
+  // used to be a thrown `broker_unavailable` for the entire pull.
+  const skippedAccounts = new Map<number, string>();
+  for (const cycle of needed) {
+    if (refused.get(cycle.contractId)?.reason !== 'foreign_currency') continue;
+    const account = accounts.find((candidate) => candidate.id === cycle.accountId);
+    // An account that is not in this host's accepted list cannot have produced
+    // a cycle here, so this is unreachable — and if it ever is reached, the
+    // fail-safe is to skip without claiming a name rather than to invent one.
+    skippedAccounts.set(cycle.accountId, account?.name ?? '');
+  }
+
+  const notices: PullNotice[] = [...skippedAccounts].map(([accountId, name]) => ({
+    kind: 'account_currency' as const,
+    host,
+    accountId,
+    name,
+  }));
+
+  // Priced LAST, so that `describeCycle` is never handed a cycle whose contract
+  // is in `refused` — it reads `units` and a missing unit is not a case it has.
+  const priced = [...needed].filter((cycle) => !skippedAccounts.has(cycle.accountId));
+
   return {
-    trades: [...needed].map((cycle) => describeCycle(cycle, host, units, pairById)),
+    trades: priced.map((cycle) => describeCycle(cycle, host, units, pairById)),
     held,
+    notices,
   };
 }
 
@@ -1272,10 +1401,14 @@ export interface BrokerDayRequest {
  * available here; an under-count falls back to Reflect's own data. Stage 3's
  * picker resolves the collision explicitly instead of preferring.
  *
- * Throws TradovateUnpriceableError when a trade that would be counted cannot be
- * expressed in dollars. Everything else it throws comes from a reader —
- * TradovateRequestError, TradovatePenaltyError, a network fault — and the route
- * maps those to `broker_unavailable`.
+ * A NON-USD PRODUCT NO LONGER THROWS (REF-112 §5.10). It skips the account
+ * that traded it, imports every other account, and leaves a notice naming it
+ * — see {@link scanHost} and {@link BrokerDay.notices}. What still throws
+ * TradovateUnpriceableError is a trade that reaches {@link describeCycle} with
+ * no unit, which is a backstop rather than a path: the pricing chain's
+ * refusals are filtered out above it. Everything else it throws comes from a
+ * reader — TradovateRequestError, TradovatePenaltyError, a network fault — and
+ * the route maps those to `broker_unavailable`.
  */
 export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDay> {
   const { readers, environment, dayStartMs, tradovateUserId, windowStartMs } = request;
@@ -1291,6 +1424,8 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
   const pooled: BrokerTrade[] = [];
   /** What no host could state. See {@link HeldGroup}. */
   const held: HeldGroup[] = [];
+  /** What this pull could not do for the trader. See {@link BrokerDay.notices}. */
+  const notices: PullNotice[] = [];
   /** One entry per host that ANSWERED discovery. See {@link HostAccounts}. */
   const accounts: HostAccounts[] = [];
 
@@ -1336,6 +1471,7 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
     });
     pooled.push(...scanned.trades);
     held.push(...scanned.held);
+    notices.push(...scanned.notices);
   }
 
   // ── Pooled, and from here on there is one trader and one day ──────────────
@@ -1395,6 +1531,7 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
     },
     trades,
     held,
+    notices,
     accounts,
   };
 }
@@ -1457,9 +1594,10 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
 async function loadContractUnits(
   reader: TradovateReader,
   contractIds: ReadonlySet<number>
-): Promise<Map<number, ContractUnit>> {
+): Promise<ContractUnits> {
   const units = new Map<number, ContractUnit>();
-  if (contractIds.size === 0) return units;
+  const refused = new Map<number, UnitRefusal>();
+  if (contractIds.size === 0) return { units, refused };
 
   const currencies = await reader.get<TradovateCurrency[]>('/currency/list');
   const currencyNames = new Map<number, string>();
@@ -1574,12 +1712,27 @@ async function loadContractUnits(
         'unknown_currency'
       );
     }
+    // REF-112 §5.10. NOT A THROW ANY MORE, AND THAT IS THE WHOLE OF ITEM 1.
+    //
+    // It was one, and the reasoning was sound as far as it went: a figure in
+    // euros added to a dollar total is the unit bug this module exists to
+    // prevent, and `foreign_currency` is explicitly non-transient — a non-USD
+    // account stays non-USD. What that reasoning missed is what the refusal
+    // COSTS. Mapped through ./errors.ts to `broker_unavailable`, it failed the
+    // ENTIRE day pull, for every account and every contract, every day,
+    // forever: a trader who touches one EUREX product gets a journal that
+    // silently falls back to Reflect-only data and a rule engine with no
+    // broker figures at all. REF-112 §5.10 calls it the most likely real-world
+    // live breakage after the host issues.
+    //
+    // So the refusal is now PER CONTRACT and {@link scanHost} turns it into a
+    // per-ACCOUNT skip: that account's trades are left out, every other
+    // account imports normally, and the trader is told which account and why.
+    // The unit bug is still impossible — nothing non-USD reaches `units`, so
+    // nothing non-USD can be priced — and what changed is the blast radius.
     if (currencyName.toUpperCase() !== 'USD') {
-      throw new TradovateUnpriceableError(
-        `Product ${product.id} is denominated in ${currencyName}, and every trading amount ` +
-          'in Reflect is US dollars (REF-99). Refusing to add it to a dollar total.',
-        'foreign_currency'
-      );
+      refused.set(contractId, { reason: 'foreign_currency', name });
+      return;
     }
 
     // Remembered only HERE, past every refusal above. A contract that could not
@@ -1591,5 +1744,5 @@ async function loadContractUnits(
     units.set(contractId, unit);
   }));
 
-  return units;
+  return { units, refused };
 }

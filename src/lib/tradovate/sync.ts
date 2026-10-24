@@ -50,11 +50,15 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+import { portfolioLabel } from '../portfolios/portfolio';
+import { readPortfolios } from '../portfolios/read';
+import { accountIdentity } from './accounts';
 import { syncBrokerAccounts, type AccountSyncCounts } from './account-sync';
 import { flushUserCalls } from './call-meter';
 import { tradovateGet } from './client';
 import { getUserTradingApi, notingPenalty, readIsTradeSource } from './connections';
-import { loadBrokerDay, type TradovateReader } from './fills';
+import { loadBrokerDay, type PullNotice, type TradovateReader } from './fills';
+import { orderNotices, type BrokerNotice } from './notices';
 import {
   importBrokerTrades,
   isImportEnabled,
@@ -178,6 +182,87 @@ export interface SyncResult {
    * exactly that case.
    */
   heldCount: number;
+  /**
+   * What this run could not do for the trader, ready for the wire
+   * (REF-112 §5).
+   *
+   * ALREADY REDUCED FROM {@link import('./fills').PullNotice}: the host and
+   * the broker account id are gone, and the account label has been resolved to
+   * what the trader calls it. That reduction happens HERE, in the module that
+   * has both the pull and a database client, for the same reason
+   * {@link heldSymbols} is reduced here — it is the last place that holds the
+   * operator diagnostics, so it is the last place they can be dropped.
+   *
+   * Empty on every ordinary day.
+   */
+  notices: BrokerNotice[];
+}
+
+/**
+ * Turn the pull's notices into the ones a trader reads (REF-112 §5).
+ *
+ * THE ONE THING THIS DOES THAT A PURE MAP COULD NOT: it resolves the account
+ * LABEL. The pull knows a broker account by `(host, id)` and by the name
+ * `/account/list` printed on it; the trader may have renamed that card on
+ * "התיקים שלי" months ago, and a message naming the broker's string for an
+ * account they renamed away from reads as being about somebody else's money.
+ * So the label is `nickname ?? display_name` — the same `portfolioLabel` the
+ * card and the filter chip use — and it falls back to the broker's name when
+ * there is no row at all.
+ *
+ * THERE IS OFTEN NO ROW, AND THAT IS NOT AN ERROR. A non-`Customer` account is
+ * filtered out before ./account-sync.ts ever sees it (./accounts.ts), so it
+ * has no `accounts` row, no nickname, and the broker's name is the only label
+ * that will ever exist for it.
+ *
+ * ONE SELECT, AND ONLY WHEN THERE IS SOMETHING TO LABEL. An ordinary day has
+ * no notices and issues no statement; a day with a host failure or an
+ * unpriceable product has notices that carry no account and still issues none.
+ * The read is the trader's own, under their own RLS, and it is the same one
+ * /accounts makes on every page view.
+ *
+ * IT CANNOT FAIL THE SYNC. `readPortfolios` answers an empty list on a failed
+ * read by design, which degrades every label to the broker's name — the
+ * sentence is still said, with a name the trader still recognises.
+ */
+async function toWireNotices(params: {
+  client: SupabaseClient;
+  userId: string;
+  enabled: boolean;
+  notices: readonly PullNotice[];
+}): Promise<BrokerNotice[]> {
+  const { client, userId, enabled, notices } = params;
+  if (notices.length === 0) return [];
+
+  const named = notices.some(
+    (notice) => notice.kind === 'account_currency' || notice.kind === 'account_type'
+  );
+
+  const labels = new Map<string, string>();
+  if (named) {
+    for (const portfolio of await readPortfolios(client, userId, enabled)) {
+      if (portfolio.brokerAccountId === null || portfolio.brokerHost === null) continue;
+      labels.set(
+        accountIdentity(portfolio.brokerHost, portfolio.brokerAccountId),
+        portfolioLabel(portfolio)
+      );
+    }
+  }
+
+  return orderNotices(
+    notices.map((notice) => {
+      if (notice.kind !== 'account_currency' && notice.kind !== 'account_type') {
+        // `no_accounts`, `host_degraded` and `unpriced_product` carry nothing
+        // that needs resolving, and the last of the three already holds a root
+        // rather than a contract.
+        return notice;
+      }
+      const label = labels.get(accountIdentity(notice.host, notice.accountId)) ?? notice.name;
+      // NULL AND NOT `''`: the unnamed sentence is a real member of the union
+      // and the empty string would render as a gap in the middle of a line.
+      return { kind: notice.kind, account: label === '' ? null : label };
+    })
+  );
 }
 
 /**
@@ -248,10 +333,12 @@ async function pullAndImport(request: SyncRequest): Promise<SyncResult> {
       asOf: new Date().toISOString(),
       isTradeSource,
       importEnabled: enabled,
-      // No pull happened, so nothing was held. An honest empty rather than an
-      // absence, for the reason every other field in this shape is stated.
+      // No pull happened, so nothing was held and nothing was refused. An
+      // honest empty rather than an absence, for the reason every other field
+      // in this shape is stated.
       heldSymbols: [],
       heldCount: 0,
+      notices: [],
     };
   }
 
@@ -277,7 +364,7 @@ async function pullAndImport(request: SyncRequest): Promise<SyncResult> {
       ),
   });
 
-  const { day, trades, held, accounts: hosts } = await loadBrokerDay({
+  const { day, trades, held, notices: pulled, accounts: hosts } = await loadBrokerDay({
     readers: {
       live: readerFor(api.hosts.live.url),
       demo: readerFor(api.hosts.demo.url),
@@ -363,5 +450,10 @@ async function pullAndImport(request: SyncRequest): Promise<SyncResult> {
     importEnabled: enabled,
     heldSymbols,
     heldCount: held.length,
+    // AFTER the account pass, deliberately: a trader's FIRST sync is also the
+    // one that creates their `accounts` rows, and asking for a nickname before
+    // those rows exist would label every notice with the broker's name on the
+    // one run where the trader is most likely to be reading it.
+    notices: await toWireNotices({ client, userId, enabled, notices: pulled }),
   };
 }

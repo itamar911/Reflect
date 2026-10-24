@@ -40,6 +40,7 @@
  */
 
 import type { BrokerImportCounts } from './import';
+import { noticeLines, readNotices, type BrokerNotice } from './notices';
 
 /**
  * The sync route's answer, after parsing.
@@ -77,6 +78,14 @@ export type BrokerSyncOutcome =
        * length instead would silently turn that into an ordinary day.
        */
       heldCount: number;
+      /**
+       * What this run could not do for the trader (REF-112 §5).
+       *
+       * Required here although the wire field is optional — the parser
+       * resolves the absence to an empty list once, the same rule
+       * `heldSymbols` follows. Empty is the ordinary day.
+       */
+      notices: BrokerNotice[];
     } & BrokerImportCounts)
   | { source: 'broker_expired' }
   | { source: 'broker_unavailable' }
@@ -187,6 +196,10 @@ export function readSyncResponse(body: unknown): BrokerSyncOutcome {
       typeof b.heldCount === 'number' && Number.isFinite(b.heldCount) && b.heldCount > 0
         ? b.heldCount
         : 0,
+    // REF-112 §5. `readNotices` drops what it does not recognise rather than
+    // refusing the body — see its own note on why that rule is the opposite of
+    // the one COUNT_FIELDS follows, and why the difference is deliberate.
+    notices: readNotices(b.notices),
     ran: b.ran,
     offered: counts.offered,
     imported: counts.imported,
@@ -413,10 +426,19 @@ export function describeSyncOutcome(outcome: BrokerSyncOutcome): SyncMessage {
       : plain('ייבוא עסקאות אינו פעיל בחשבון הזה');
   }
 
-  // Both qualifiers, most newsworthy first — see {@link SyncMessage.details}.
-  // A held group is a gap in the day's figures; an open position is the
-  // mechanism working as designed.
+  // Every qualifier, most newsworthy first — see {@link SyncMessage.details}.
+  //
+  // THE NOTICES OUTRANK BOTH OF THE OTHERS (REF-112 §5), and the ordering is
+  // the same judgement the other two were ranked by. A held group is a gap in
+  // ONE contract's figures that the next sync is expected to close; an open
+  // position is the mechanism working as designed. A notice is a part of the
+  // trader's account that Reflect cannot read AT ALL and will not be able to
+  // tomorrow either — an account in the wrong currency, an account type
+  // nobody provisioned for, a product the chain cannot resolve. That is the
+  // one of the three that might make them stop using the journal, so it goes
+  // first. lib/tradovate/notices.ts orders them among themselves.
   const details = [
+    ...noticeLines(outcome.notices),
     ...(outcome.heldCount > 0 ? [heldNote(outcome.heldSymbols)] : []),
     ...(outcome.skippedOpen > 0 ? [OPEN_POSITION_NOTE] : []),
   ];
@@ -451,7 +473,11 @@ export function describeSyncOutcome(outcome: BrokerSyncOutcome): SyncMessage {
     // grey above "עסקאות ב-MNQZ6 ממתינות" would be two lines contradicting
     // each other. Not everything IS updated: a contract's trades are missing
     // from the day, and the figures every rule reads are short by them.
-    problem: outcome.heldCount > 0,
+    //
+    // AND SO DOES A NOTICE (REF-112 §5), for the same reason and more
+    // strongly: a skipped account is a whole portfolio missing from the day,
+    // not one contract.
+    problem: outcome.heldCount > 0 || outcome.notices.length > 0,
   };
 }
 
