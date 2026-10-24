@@ -1200,9 +1200,18 @@ async function main() {
     ),
   });
 
-  // (6) The same accountId eligible on both hosts: counted once, preferring the
-  // mint host. Double-counting would block a trader over money they did not
-  // lose, which ./accounts.ts names as the worst failure available here.
+  // (6) The same bare accountId eligible on both hosts (REF-112 §5.3).
+  //
+  // THIS FIXTURE'S EXPECTED ANSWER CHANGED, and the change is item 3. It used
+  // to be deduped to one account, preferring the mint host, on the argument
+  // that double-counting a trade blocks a trader over money they did not
+  // lose. The cost of that choice was written down beside it — "if they are
+  // host-local it drops a real account" — and host-local is what every other
+  // part of this integration already assumes: `accountIdentity`, 034's
+  // stamped rows, 037's unique index, and `HostAccounts`, which is explicitly
+  // not deduplicated across hosts. So the day and the accounts table
+  // disagreed about what an account IS, and the day was the one that lost a
+  // trader their live positions.
   const sameAccountDemo = reader(withTrips([closedToday1]));
   const dedupe = await coldDay({
     readers: { live: reader(withTrips([closedToday1])), demo: sameAccountDemo },
@@ -1213,8 +1222,9 @@ async function main() {
   });
 
   // (7) Discovery fails on the non-mint host. An organization with no demo
-  // provisioning must not start failing pulls that work today.
-  const demoRefused = await coldDay({
+  // provisioning must not start failing pulls that work today — and since
+  // REF-112 §5.2, the trader hears about it either way.
+  const demoRefusedFull = await coldPull({
     readers: {
       live: reader(withTrips([closedToday1])),
       demo: failingReader(
@@ -1228,6 +1238,7 @@ async function main() {
     tradovateUserId: ACCOUNT.userId,
     now: NOW,
   });
+  const demoRefused = demoRefusedFull.day;
 
   // (8) A failure on a host that DID return eligible accounts. Never a partial
   // day: an under-counted day makes every rule more permissive.
@@ -1327,17 +1338,22 @@ async function main() {
     ),
     c('and the day still counts all three closes', streakAcross.closedCount, 3),
 
-    // (6) The dedupe is visible in the day itself: doubled, this would read two
-    // closes and −$1,000.
+    // (6) REF-112 §5.3 — THE REVERSAL. A colliding bare id is two accounts,
+    // because `(host, id)` is what an account identity has been everywhere
+    // else in this integration since 034. Under the old rule the second host
+    // was dropped before `/position/list`, which is exactly how a trader with
+    // a demo account and a live account whose ids collide got no positions,
+    // no pairs and no dollars from the live one — silently.
     c(
-      'the same accountId on both hosts is counted once, not doubled',
+      'the same bare accountId on two hosts is two accounts, and neither is dropped',
       [dedupe.closedCount, dedupe.net],
-      [1, -500]
+      [2, -1000]
     ),
     c(
-      'and the host that lost the collision is not asked for positions',
+      'so the second host is asked for its own positions, not skipped',
       sameAccountDemo.calls,
-      ['/account/list']
+      ['/account/list', '/position/list', '/fillPair/list', '/fill/list',
+       '/currency/list', '/contract/item']
     ),
 
     // (7)
@@ -1345,6 +1361,20 @@ async function main() {
       'discovery failing on the non-mint host drops it and the pull succeeds',
       [demoRefused.closedCount, demoRefused.net],
       [1, -500]
+    ),
+    // REF-112 §5.2 — AND IT IS NO LONGER SILENT ABOUT IT. The drop is right;
+    // the silence was what turned a 5xx on the live host of a demo-minted
+    // connection into an honest-looking "no trades today".
+    c(
+      'and the trader is told the day may be short',
+      demoRefusedFull.notices.map((n) => n.kind),
+      ['host_degraded']
+    ),
+    c(
+      'a pull where both hosts answered says nothing about hosts',
+      (await pullHostsFull({ live: withTrips([closedToday1]), demo: demoScene }))
+        .notices.some((n) => n.kind === 'host_degraded'),
+      false
     ),
 
     // (8)

@@ -116,6 +116,7 @@ import { loadContractNames } from './contract-names';
 import { TradovateRequestError, TradovateUnpriceableError, withoutResponseBody } from './errors';
 import { closedToday, minutesSince } from './trading-day';
 import {
+  accountIdentity,
   claimedAccounts,
   partitionAccounts,
   permissionsCouldHelp,
@@ -1396,21 +1397,59 @@ export interface BrokerDayRequest {
  * ----------------------------------------------------------------
  *
  * 1. **Discovery fails on the host that is NOT the connection's mint host** →
- *    drop that host and carry on. Without this, an organization with no
- *    demo provisioning — a 401 or 403 on demo — would start failing every pull
- *    that works today. The mint host is known-good; the other host is additive.
+ *    drop that host, SAY SO, and carry on. Without the dropping, an
+ *    organization with no demo provisioning — a 401 or 403 on demo — would
+ *    start failing every pull that works today. The mint host is known-good;
+ *    the other host is additive.
  * 2. **Any failure on a host that DID return eligible accounts** → fail the
  *    whole pull → `broker_unavailable`. A swallowed failure under-counts the
  *    day, and an under-counted day makes every rule MORE PERMISSIVE — the one
  *    direction this integration must never fail in.
  *
- * The dedupe follows the same fail-safe direction. If the same `accountId` is
- * eligible on both hosts it is counted ONCE, preferring the mint host: if id
- * spaces are shared that is correct, and if they are host-local it drops a real
- * account. Double-counting a trade inflates today's loss and blocks a trader
- * over money they did not lose, which ./accounts.ts names as the worst failure
- * available here; an under-count falls back to Reflect's own data. Stage 3's
- * picker resolves the collision explicitly instead of preferring.
+ * RULE 1 USED TO BE SILENT, AND THAT IS WHAT REF-112 §5.2 IS ABOUT (item 3).
+ * The design is sound for the case it was written for — a deployment on demo
+ * whose users have no live provisioning — and it inverts once live money is on
+ * the other side of it. A demo-minted connection with a real live account
+ * means any 401, 403, 5xx or timeout on the LIVE host drops that host, and
+ * the pull returns an honest-looking zero: no trades, no rule trips, no
+ * warning. This module's own text says an under-count "makes every rule MORE
+ * PERMISSIVE — the one direction this integration must never fail in", and
+ * the global-environment design of §5.1 puts live money on exactly that side.
+ * The host is still dropped. It is no longer dropped quietly: a
+ * `host_degraded` notice goes on {@link BrokerDay.notices} and one counted
+ * line goes to the log.
+ *
+ *
+ * THE DEDUPE IS HOST-QUALIFIED, AND THAT IS A REVERSAL (REF-112 §5.3, item 3)
+ * ---------------------------------------------------------------------------
+ *
+ * It was a bare `Set<number>` of account ids, deduped across hosts with the
+ * mint host winning, and the paragraph that stood here admitted the cost: "if
+ * they are host-local it drops a real account". It chose that direction
+ * because double-counting a trade inflates today's loss and blocks a trader
+ * over money they did not lose.
+ *
+ * BOTH HALVES OF THAT TRADE WERE WRONG, and the evidence was already in this
+ * file. An account identity in this integration is `(broker_account_id,
+ * broker_host)` — ./accounts.ts' `accountIdentity` says so, 034 stamps the
+ * host on every imported row, 037's unique index carries it, and
+ * {@link HostAccounts} is explicitly NOT deduplicated across hosts for exactly
+ * this reason. So the two sides of the same pull disagreed: the accounts table
+ * treated a colliding id as two accounts and the day treated it as one.
+ *
+ * And the double-count it was guarding against cannot happen the way it
+ * feared. The hosts are different servers with their own `/fill/list` and
+ * `/fillPair/list`; a trade is keyed `${host}:${keyFillId}`. For one trade to
+ * be counted twice, both hosts would have to return the same fills — which is
+ * the same assumption about a shared id space that nothing documents. What
+ * WAS happening, on the other hand, is concrete: a trader with a demo account
+ * and a live account whose ids collide got no positions, no pairs and no
+ * dollars from the live one, silently.
+ *
+ * So the key is `accountIdentity(host, id)` and nothing is dropped. A bare-id
+ * collision between hosts is COUNTED and logged, because it is the one
+ * observation that would tell us the id spaces really are shared — and
+ * nothing has ever recorded it.
  *
  * A NON-USD PRODUCT NO LONGER THROWS (REF-112 §5.10). It skips the account
  * that traded it, imports every other account, and leaves a notice naming it
@@ -1426,12 +1465,27 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
   const now = request.now ?? Date.now();
   const asOf = new Date(now).toISOString();
 
-  // The mint host first, and the order is load-bearing: it is the host that
-  // wins a collision, so it has to claim its account ids before the other one
-  // is looked at.
+  // The mint host first. The order no longer decides who wins a collision —
+  // nothing is dropped on one any more (see the header) — but it is still the
+  // host whose failure is fatal, so asking it first means a dead connection
+  // fails before the other host is spent on it.
   const order = ([environment, otherHost(environment)] as const).filter((env) => readers[env]);
 
-  const claimed = new Set<number>();
+  /** `${host}:${id}`, never a bare id. See the header on §5.3. */
+  const claimed = new Set<string>();
+  /**
+   * Bare account ids, for the one thing the host-qualified set cannot see.
+   *
+   * COUNTED AND NEVER ACTED ON. Nothing branches on this; it exists so that
+   * the log line can report how many ids appeared on BOTH hosts, which is the
+   * only evidence that would ever justify going back to a shared id space.
+   * Under the old rule this number was the number of accounts being silently
+   * dropped, and nothing anywhere recorded it.
+   */
+  const bareIds = new Set<number>();
+  let crossHostCollisions = 0;
+  /** How many hosts were dropped by rule 1. Counted for the log line. */
+  let hostsDropped = 0;
   const pooled: BrokerTrade[] = [];
   /** What no host could state. See {@link HeldGroup}. */
   const held: HeldGroup[] = [];
@@ -1478,18 +1532,31 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
       // has always had; the other host is new, additive, and must not be able
       // to take a working pull down with it.
       if (env === environment) throw error;
+
+      // REF-112 §5.2. STILL DROPPED, NO LONGER SILENT. The trader gets one
+      // generic line — which host, what it answered and how many accounts it
+      // holds are operator facts, and the question a trader has is only
+      // whether what they are looking at is complete.
+      hostsDropped += 1;
+      notices.push({ kind: 'host_degraded' });
       continue;
     }
 
-    // The dedupe, before the chain rather than after it: an account already
-    // claimed must not contribute positions, pairs or dollars.
-    const fresh = accepted.filter((account) => !claimed.has(account.id));
-    for (const account of fresh) claimed.add(account.id);
+    // The dedupe is now WITHIN a host and not across them (REF-112 §5.3). The
+    // key is host-qualified, so the only thing it can still collapse is the
+    // same id twice in one `/account/list` — which is what a dedupe is for.
+    const fresh = accepted.filter((account) => !claimed.has(accountIdentity(env, account.id)));
+    for (const account of fresh) {
+      claimed.add(accountIdentity(env, account.id));
+      // Counted, never acted on. See `bareIds`.
+      if (bareIds.has(account.id)) crossHostCollisions += 1;
+      bareIds.add(account.id);
+    }
 
-    // Nothing eligible here — either the host holds none of this trader's
-    // accounts, or every one it holds was the first host's. Either way there is
-    // nothing to continue with, so the six remaining reads are not made. This
-    // is (a′)'s whole saving.
+    // Nothing eligible here: this host holds none of this trader's accounts.
+    // There is nothing to continue with, so the six remaining reads are not
+    // made — (a′)'s whole saving, and all that is left of it now that an
+    // account on the second host is never "the first host's".
     if (fresh.length === 0) continue;
 
     // Rule 2: no try/catch. This host returned eligible accounts, so a failure
@@ -1530,6 +1597,25 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
   // never saw.
   if (accounts.length > 0 && claimed.size === 0) {
     notices.push({ kind: 'no_accounts' });
+  }
+
+  // ── The one line this pull leaves behind (REF-112 §5.2, §5.3) ────────────
+  //
+  // COUNTS ONLY, AND ONLY WHEN SOMETHING HAPPENED. This module had no
+  // `console.*` at all, which is how both of the failures above stayed
+  // invisible for as long as they did — a dropped host and a dropped account
+  // were each one `continue` with nothing on the other side of it.
+  //
+  // NOT ONE IDENTIFIER. No account id, no host name, no symbol, no figure: the
+  // whole point of `crossHostCollisions` is its SIZE, and `hostsDropped` is a
+  // count out of two. An operator reading a non-zero collision count learns
+  // the one thing nobody has ever been able to measure — whether the two id
+  // spaces overlap in practice — without learning anything about the trader.
+  if (hostsDropped > 0 || crossHostCollisions > 0) {
+    console.warn(
+      `[tradovate][day] hostsAsked=${order.length} hostsDropped=${hostsDropped} ` +
+        `accounts=${claimed.size} crossHostIdCollisions=${crossHostCollisions}`
+    );
   }
 
   // ── Pooled, and from here on there is one trader and one day ──────────────

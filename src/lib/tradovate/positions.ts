@@ -302,6 +302,24 @@ export async function loadOpenPositions(
       // Rule 1. See the header: the mint host is known-good and its failure is
       // the failure this read has; the other host is additive.
       if (host === environment) throw error;
+
+      // REF-112 §5.2 — the same swallow as ./fills.ts, and the same fix as
+      // far as it goes here: COUNTED RATHER THAN SILENT.
+      //
+      // IT DOES NOT REACH THE TRADER, and that is a scope line rather than an
+      // omission. This is a 15-second poll of what is open right now, so a
+      // notice raised from it would appear and vanish four times a minute;
+      // the day pull raises the real one on the same failure, on the surface
+      // that reports what went into the journal.
+      //
+      // THE ERROR NAME AND NOTHING ELSE. The body of a failed `/account/list`
+      // is a list of the trader's account names — see the comment above, and
+      // `withoutResponseBody` in ./errors.ts, which is what keeps it out of
+      // the error in the first place.
+      console.warn(
+        '[tradovate][live] a non-mint host did not answer discovery ' +
+          `(${error instanceof Error ? error.name : 'non-Error throw'})`
+      );
       continue;
     }
 
