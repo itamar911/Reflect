@@ -123,6 +123,63 @@ const MAX_PENALTY_WAIT_MS = 60_000;
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+/**
+ * The retried request's body, carrying the penalty ticket (REF-112 §4.5 item 4).
+ *
+ * THE PROTOCOL, VERBATIM, FROM THE ONE PLACE IT IS WRITTEN DOWN —
+ * docs/tradovate-measurements.md §6, quoting the vendor FAQ:
+ *
+ *     p-ticket | include in the body of the retried request, alongside the
+ *              | original fields
+ *
+ * "ALONGSIDE THE ORIGINAL FIELDS" is why this merges rather than replaces. A
+ * retry that sent `{ 'p-ticket': … }` alone would be a different request from
+ * the one being retried, and the endpoint would answer a complaint about the
+ * parameters it is now missing rather than the payload.
+ *
+ *
+ * A GET HAS NO BODY, AND THAT IS NOT SOMETHING THIS FUNCTION CAN FIX
+ * -----------------------------------------------------------------
+ *
+ * **The ticket is only replayable on a request that already has a body**, and
+ * that has to be said plainly because almost every call in this integration is
+ * a GET. `/account/list`, `/fill/list`, `/fillPair/list`, `/position/list`,
+ * `/order/list`, the three pricing items, `/currency/list` and `/auth/me` are
+ * all GETs with their arguments in the query string. For those, the FAQ
+ * prescribes a field in a body that does not exist, and NOTHING DOCUMENTS A
+ * QUERY PARAMETER OR A HEADER AS AN ALTERNATIVE — not the FAQ, not the REST
+ * reference, and not the measurements doc.
+ *
+ * So a GET retries without the ticket, exactly as it did before this change.
+ * Inventing `?p-ticket=` or an `X-P-Ticket` header would be a guess sent to a
+ * limiter we cannot afford to annoy, and a guess that LOOKS like compliance in
+ * review is worse than a documented gap.
+ *
+ * MANUFACTURING A BODY WAS THE OTHER TEMPTING WRONG ANSWER, and the deleted
+ * spike shows why. `scripts/spike/tradovate-spike.mjs`' `rest()` (recoverable
+ * at commit ad45b36) retried with `body: { ...(body ?? {}), 'p-ticket': … }`
+ * and recomputed its verb as `body ? 'POST' : 'GET'` — so a penalised GET came
+ * back as a **POST**, silently, to a read endpoint. Here the verb is computed
+ * ONCE before the loop, which means the same move would instead hand `fetch` a
+ * GET with a body and throw a TypeError on top of a rate limit.
+ *
+ * WHAT THIS IS WORTH TODAY, honestly: one endpoint.
+ * `/cashBalance/getcashbalancesnapshot` is the only body-carrying call that
+ * reaches this function ({@link tradovatePost}, from the live route) — the two
+ * auth POSTs in ./auth.ts and ./oauth.ts use `fetch` directly and do not come
+ * through here. That one endpoint is on the fifteen-second poll, which is the
+ * highest-frequency caller in the product and therefore the likeliest to be
+ * penalised, so it is the one that matters most.
+ *
+ * Non-objects pass through untouched. A body that is an array or a string
+ * cannot have a field added to it, and spreading one would reshape the request.
+ */
+function withPenaltyTicket(body: unknown, ticket: string | null): unknown {
+  if (ticket === null || body === undefined) return body;
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return body;
+  return { ...(body as Record<string, unknown>), 'p-ticket': ticket };
+}
+
 function buildUrl(apiUrl: string, path: string, query: RequestOptions['query']): string {
   const url = new URL(apiUrl + (path.startsWith('/') ? path : `/${path}`));
   if (query) {
@@ -141,7 +198,10 @@ function buildUrl(apiUrl: string, path: string, query: RequestOptions['query']):
  * - **Token attachment and renewal**, via ./session.ts.
  * - **Time penalties.** Tradovate signals rate limiting in the body with
  *   `p-ticket`/`p-time` and an ordinary status code, so a plain `res.ok` check
- *   would parse a penalty as a successful payload. We wait and retry.
+ *   would parse a penalty as a successful payload. We wait `p-time` and retry
+ *   with the `p-ticket` in the body, which is the handling the FAQ prescribes —
+ *   see {@link withPenaltyTicket}, including the honest limit on how far that
+ *   can be taken for a GET.
  * - **A stale token.** On a 401 the cache is dropped and the request retried
  *   once, which covers a session evicted by the two-session cap.
  */
@@ -171,16 +231,28 @@ export async function tradovateRequest<T>(path: string, options: RequestOptions 
   let retriedAfter401 = false;
   let penaltyAttempts = 0;
 
+  // The ticket from the penalty we are retrying, replayed in the next body as
+  // the FAQ prescribes (REF-112 §4.5 item 4). Null on the first attempt and on
+  // every retry of a request that has no body to put it in — see
+  // {@link withPenaltyTicket}, which is where that limitation is argued.
+  let penaltyTicket: string | null = null;
+
   for (;;) {
     const bearer = accessToken ?? (await getAccessToken({ config })).accessToken;
+
+    // Rebuilt per attempt rather than hoisted, because the ticket changes
+    // between attempts. `verb` deliberately does NOT move with it: the method
+    // is a property of the CALL, and recomputing it from the body is what
+    // turned the deleted spike's penalised GETs into POSTs.
+    const sent = withPenaltyTicket(body, penaltyTicket);
 
     const res = await fetch(url, {
       method: verb,
       headers: {
         Authorization: `Bearer ${bearer}`,
-        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        ...(sent !== undefined ? { 'Content-Type': 'application/json' } : {}),
       },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      body: sent !== undefined ? JSON.stringify(sent) : undefined,
       cache: 'no-store',
       signal,
     });
@@ -225,6 +297,12 @@ export async function tradovateRequest<T>(path: string, options: RequestOptions 
         );
       }
       penaltyAttempts++;
+      // CARRY THE TICKET INTO THE NEXT ATTEMPT (REF-112 §4.5 item 4). Until
+      // this stage the retry was a bare `continue`, which re-sent the original
+      // request and therefore spent another attempt against the same limiter
+      // with nothing to show it had been told to wait. A non-string ticket, or
+      // none at all, leaves this null and the retry is the one we always sent.
+      penaltyTicket = typeof p['p-ticket'] === 'string' ? p['p-ticket'] : null;
       await sleep(waitMs);
       continue;
     }

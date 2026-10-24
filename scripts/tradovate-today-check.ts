@@ -58,6 +58,10 @@ import {
   TradovateTransientError,
   TradovateUnpriceableError,
 } from '../src/lib/tradovate/errors';
+// REF-112 §4.5 item 4. The transport itself, driven with a stubbed `fetch` — a
+// user-token request needs neither configuration nor lib/tradovate/session.ts,
+// which is what makes `tradovateRequest` reachable from a suite at all.
+import { tradovateGet, tradovatePost } from '../src/lib/tradovate/client';
 import {
   forgetContractUnits,
   loadBrokerDay,
@@ -2441,6 +2445,10 @@ async function main() {
   await liveClockGroup();
   liveNeverReachesRulesGroup();
 
+  // ── REF-112 §4.5 item 4: the penalty ticket is replayed ───────────────────
+
+  await penaltyTicketGroup();
+
   console.log();
   if (failures.length) {
     console.log(`${failures.length} failing case(s):`);
@@ -4441,6 +4449,162 @@ async function liveFlatTransitionGroup() {
   ]);
 
   forgetLivePull();
+}
+
+/**
+ * The penalty ticket goes back in the body of the retry (REF-112 §4.5 item 4).
+ *
+ * THE ONLY GROUP IN ANY SUITE THAT DRIVES `tradovateRequest` ITSELF, and it can
+ * because a USER-TOKEN request needs neither configuration nor ./session.ts: an
+ * `accessToken` with an `apiUrl` skips both, so a stubbed `fetch` is the whole
+ * fixture. `globalThis.fetch` is saved and restored, which is the same
+ * discipline the two CRON_SECRET groups in scripts/broker-import-check.ts apply
+ * to `process.env`.
+ *
+ * WHAT WAS WRONG: `client.ts` honoured `p-time` and then retried with a bare
+ * `continue`, re-sending the ORIGINAL request. The FAQ
+ * (docs/tradovate-measurements.md §6) says to include `p-ticket` "in the body
+ * of the retried request, alongside the original fields", so every retry spent
+ * another attempt against the same limiter with nothing to show it had been
+ * told to wait.
+ *
+ * AND WHAT IS STILL NOT DONE, asserted here rather than left to a comment: a
+ * GET HAS NO BODY TO PUT THE TICKET IN, nothing documents a query parameter or
+ * a header as an alternative, and this group pins that a penalised GET retries
+ * UNCHANGED. That is a deliberate gap, not an oversight — see
+ * `withPenaltyTicket`. Case (6) is the one that would fail if somebody
+ * "fixed" it by manufacturing a body, which is what the deleted spike did and
+ * which turned its penalised GETs into POSTs.
+ */
+async function penaltyTicketGroup() {
+  const realFetch = globalThis.fetch;
+
+  /** Every request the stub saw: verb, and the parsed body if there was one. */
+  interface Seen {
+    method: string;
+    body: unknown;
+  }
+
+  /**
+   * Answer the first call with a penalty and the rest with `answers`.
+   *
+   * `p-time: 0` throughout, so the real `sleep` returns on the next tick and
+   * the suite does not actually wait. The wait itself is not what this group is
+   * about — `MAX_PENALTY_WAIT_MS` is pinned by inspection — and a group that
+   * slept for its own fixtures would be the slowest file here.
+   */
+  function stubFetch(answers: unknown[]): Seen[] {
+    const seen: Seen[] = [];
+    let next = 0;
+
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      seen.push({
+        method: String(init.method),
+        body: typeof init.body === 'string' ? JSON.parse(init.body) : undefined,
+      });
+      const answer = answers[Math.min(next++, answers.length - 1)];
+      return {
+        status: 200,
+        ok: true,
+        text: async () => JSON.stringify(answer),
+      } as Response;
+    }) as unknown as typeof globalThis.fetch;
+
+    return seen;
+  }
+
+  const TOKEN = 'a-token-that-is-never-logged';
+  const HOST = 'https://example.test';
+  const PENALTY = { 'p-ticket': 'TICKET-1', 'p-time': 0 };
+
+  // ── A POST: the ticket is replayed alongside the original fields ──────────
+
+  const postSeen = stubFetch([PENALTY, { ok: true }]);
+  const postResult = await tradovatePost<{ ok: boolean }>(
+    '/cashBalance/getcashbalancesnapshot',
+    { accountId: 7001 },
+    { accessToken: TOKEN, apiUrl: HOST }
+  );
+
+  // ── Two penalties in a row: the SECOND ticket replaces the first ──────────
+
+  const secondPenalty = { 'p-ticket': 'TICKET-2', 'p-time': 0 };
+  const twiceSeen = stubFetch([PENALTY, secondPenalty, { ok: true }]);
+  await tradovatePost('/cashBalance/getcashbalancesnapshot', { accountId: 7001 }, {
+    accessToken: TOKEN,
+    apiUrl: HOST,
+  });
+
+  // ── A penalty with no ticket at all: the retry is the original request ────
+
+  const untickedSeen = stubFetch([{ 'p-time': 0 }, { ok: true }]);
+  await tradovatePost('/cashBalance/getcashbalancesnapshot', { accountId: 7001 }, {
+    accessToken: TOKEN,
+    apiUrl: HOST,
+  });
+
+  // ── A GET: there is no body, so the retry is unchanged ────────────────────
+
+  const getSeen = stubFetch([PENALTY, [{ id: 1 }]]);
+  await tradovateGet('/account/list', undefined, {
+    accessToken: TOKEN,
+    apiUrl: HOST,
+  });
+
+  // ── The budget still ends in a thrown penalty, ticket or no ticket ────────
+
+  const exhaustedSeen = stubFetch([PENALTY]);
+  const exhausted = await thrown(() =>
+    tradovatePost('/cashBalance/getcashbalancesnapshot', { accountId: 7001 }, {
+      accessToken: TOKEN,
+      apiUrl: HOST,
+    })
+  );
+
+  // ── A captcha is never retried, with or without a ticket ──────────────────
+
+  const captchaSeen = stubFetch([{ 'p-captcha': true, 'p-ticket': 'TICKET-X' }]);
+  const captcha = await thrown(() =>
+    tradovatePost('/cashBalance/getcashbalancesnapshot', { accountId: 7001 }, {
+      accessToken: TOKEN,
+      apiUrl: HOST,
+    })
+  );
+
+  globalThis.fetch = realFetch;
+
+  group('REF-112: a penalty retry carries the ticket it was given', [
+    c('(1) the first attempt is the plain request',
+      [postSeen[0]?.method, postSeen[0]?.body], ['POST', { accountId: 7001 }]),
+    // THE FIX. "alongside the original fields" — `accountId` survives.
+    c('(2) the retry carries the ticket AND the original fields',
+      postSeen[1]?.body, { accountId: 7001, 'p-ticket': 'TICKET-1' }),
+    c('(3) and the caller gets the real answer, not the penalty body',
+      [postSeen.length, postResult], [2, { ok: true }]),
+    // A second penalty issues a second ticket; replaying the first would be
+    // presenting a spent one.
+    c('(4) a second penalty replaces the ticket rather than stacking it',
+      [twiceSeen.length, twiceSeen[2]?.body],
+      [3, { accountId: 7001, 'p-ticket': 'TICKET-2' }]),
+    c('(5) a penalty with no ticket retries the original body unchanged',
+      [untickedSeen.length, untickedSeen[1]?.body], [2, { accountId: 7001 }]),
+
+    // THE DOCUMENTED GAP, pinned so it cannot be "fixed" by guessing. A GET
+    // retries as a GET with no body — not as a POST, which is what the deleted
+    // spike's verb-from-body recomputation silently did.
+    c('(6) a penalised GET retries unchanged: same verb, still no body',
+      [getSeen.length, getSeen[0]?.method, getSeen[1]?.method, getSeen[1]?.body],
+      [2, 'GET', 'GET', undefined]),
+
+    // The budget is unchanged: two retries, then the error. The ticket buys a
+    // better retry, not more of them.
+    c('(7) the retry budget still ends in a penalty error',
+      [exhaustedSeen.length, exhausted], [3, 'TradovatePenaltyError']),
+    // A captcha cannot be answered by a third-party app, so a ticket beside it
+    // is not an invitation to try.
+    c('(8) a captcha throws on the first answer and is never retried',
+      [captchaSeen.length, captcha], [1, 'TradovatePenaltyError']),
+  ]);
 }
 
 // ── REF-108 Stage 2: the client clock ──────────────────────────────────────
