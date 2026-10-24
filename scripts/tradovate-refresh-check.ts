@@ -1288,7 +1288,13 @@ async function observeCronCounts(): Promise<{ actual: string; expected: string; 
     actual =
       `checked=${counts.checked} refreshed=${counts.refreshed} ` +
       `superseded=${counts.superseded} transient=${counts.transient} ` +
-      `expired=${counts.expired} skipped=${counts.skipped}`;
+      `expired=${counts.expired} skipped=${counts.skipped} ` +
+      // REF-112 §5.4. SPLIT OUT OF `skipped`, and the split IS the assertion:
+      // this fixture holds one allowlist miss and one wrong-environment
+      // connection, and at `skipped=2` they were indistinguishable. The second
+      // one is a connection that will expire and can never refresh its way
+      // back — at a cutover it is every pre-existing connection at once.
+      `stranded=${counts.strandedByEnvironment}`;
     note = `statuses=[${writes.statusUpdates.join(',') || 'none'}] cas:applied×${writes.casApplied}`;
   } catch (thrown: unknown) {
     actual = `threw ${thrown instanceof Error ? thrown.message : String(thrown)}`;
@@ -1301,7 +1307,7 @@ async function observeCronCounts(): Promise<{ actual: string; expected: string; 
   return {
     actual,
     expected:
-      'checked=3 refreshed=1 superseded=0 transient=1 expired=1 skipped=2',
+      'checked=3 refreshed=1 superseded=0 transient=1 expired=1 skipped=1 stranded=1',
     note,
   };
 }

@@ -9,6 +9,9 @@ import { isImportEnabled } from '@/lib/tradovate/import';
 import { visibleTrades, withAccount, withHidden } from '@/lib/trades/visible';
 import { resolveAccountParam, type RawSearchParams } from '@/lib/portfolios/filter';
 import { readPortfolioLabel } from '@/lib/portfolios/read';
+import { readBrokerState } from '@/lib/tradovate/broker-state';
+import { brokerStateNotices } from '@/lib/tradovate/notices';
+import BrokerNotices from '@/components/tradovate/BrokerNotices';
 
 export const metadata = { title: 'דשבורד — Reflect' };
 
@@ -71,8 +74,31 @@ export default async function DashboardPage({ searchParams }: {
   // both halves are, and the same reason the two props above are here.
   const canSync = canConnectBroker && hiddenColumnExists;
 
+  // REF-112 §5.4 — the one broker state this screen can report that nothing
+  // else will. A connection whose environment no longer matches the
+  // deployment's still says 'active', so neither the sync panel nor /settings
+  // calls it expired; it simply stops refreshing and dies at token lifetime,
+  // counted by the keep-alive as a routine skip the whole way down.
+  //
+  // `brokerAccounts: null` — NOT COUNTED, deliberately. The dashboard does not
+  // read the `accounts` table and must not start for this: "you have no
+  // portfolios" belongs on the screen whose subject is portfolios, and
+  // /accounts says it there.
+  const brokerNotices = brokerStateNotices(
+    await readBrokerState({ userId: user.id, brokerAccounts: null }),
+  );
+
   return (
     <>
+      {/* Outside DashboardClient for the chip's reason below: a paragraph with
+          no state, and threading it through a 1,900-line client component
+          would make that component know about the connection for the first
+          time. */}
+      {brokerNotices.length > 0 && (
+        <div dir="rtl" className="px-4 pt-4">
+          <BrokerNotices notices={brokerNotices} />
+        </div>
+      )}
       {/* Outside DashboardClient rather than inside it: the chip is a link
           and a label, it needs no state, and threading it through a
           1,900-line client component to render six words would be the only

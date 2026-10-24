@@ -53,8 +53,8 @@ import type { BrokerState } from './notices';
  */
 export async function readBrokerState(params: {
   userId: string;
-  /** How many broker-sourced rows the trader has. See above. */
-  brokerAccounts: number;
+  /** How many broker-sourced rows the trader has, or null for "not counted". */
+  brokerAccounts: number | null;
   /** Test seam. Production reads process.env through loadOAuthConfig. */
   env?: NodeJS.ProcessEnv;
   admin?: SupabaseClient;

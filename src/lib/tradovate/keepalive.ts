@@ -77,10 +77,32 @@ export interface KeepAliveCounts {
   /** Tradovate refused the refresh token. Marked 'expired'. */
   expired: number;
   /**
-   * Selected but not attempted: not on the allowlist, minted by the other
-   * Tradovate environment, or no longer active. Nothing was sent for these.
+   * Selected but not attempted: not on the allowlist, or no longer active.
+   * Nothing was sent for these.
+   *
+   * THE ENVIRONMENT MISMATCH IS NO LONGER COUNTED HERE (REF-112 §5.4). See
+   * {@link KeepAliveCounts.strandedByEnvironment}.
    */
   skipped: number;
+  /**
+   * Connections this deployment CAN NEVER REFRESH, because the environment
+   * that minted them is not the one it talks to (REF-112 §5.4).
+   *
+   * ITS OWN COUNTER, AND THAT IS ITEM 4 ON THIS SIDE. It was folded into
+   * `skipped` with the note that "the distinction is not worth a second
+   * counter", which was true of the other two things in there: an allowlist
+   * miss and a row that moved on are both ordinary, both recur harmlessly,
+   * and both resolve themselves.
+   *
+   * THIS ONE DOES NOT RESOLVE ITSELF. The row still says 'active', its
+   * refresh token is quietly running out, and at a cutover EVERY pre-existing
+   * connection lands here at once — migration 030 backfilled them all to
+   * demo — and then expires at token lifetime, counted the whole time as
+   * routine. It is a number an operator has to be able to watch go from 0 to
+   * N on the first run after a deploy, which is the one moment it can still
+   * be acted on.
+   */
+  strandedByEnvironment: number;
 }
 
 /**
@@ -112,6 +134,7 @@ export async function runKeepAlive(params: {
     transient: 0,
     expired: 0,
     skipped: 0,
+    strandedByEnvironment: 0,
   };
 
   const due = await listConnectionsDueForRefresh({ admin, withinMs });
@@ -172,10 +195,14 @@ export async function runKeepAlive(params: {
         break;
       case 'skipped':
         // Counted here rather than above because these were attempted far
-        // enough to learn something — the environment did not match, or the row
-        // moved — and the distinction is not worth a second counter.
+        // enough to learn something.
         counts.checked -= 1;
-        counts.skipped += 1;
+        // REF-112 §5.4 — and this one IS worth a second counter. See
+        // {@link KeepAliveCounts.strandedByEnvironment}: the other two skips
+        // resolve themselves and this one is a connection that will expire
+        // and never come back.
+        if (result.reason === 'environment') counts.strandedByEnvironment += 1;
+        else counts.skipped += 1;
         break;
     }
   }
@@ -184,8 +211,25 @@ export async function runKeepAlive(params: {
   console.info(
     `[tradovate][keepalive] due=${due.length} checked=${counts.checked} ` +
       `refreshed=${counts.refreshed} superseded=${counts.superseded} ` +
-      `transient=${counts.transient} expired=${counts.expired} skipped=${counts.skipped}`
+      `transient=${counts.transient} expired=${counts.expired} skipped=${counts.skipped} ` +
+      `strandedByEnvironment=${counts.strandedByEnvironment}`
   );
+
+  // REF-112 §5.4. A SECOND LINE, AT WARN, BECAUSE THE FIRST ONE IS NOT READ
+  // UNTIL SOMETHING IS ALREADY WRONG. Every connection in this count is going
+  // to expire and cannot refresh its way out; the trader sees nothing until
+  // the access token dies. At a cutover this is every pre-existing connection
+  // at once, so the number is the alarm and the sentence is what makes it
+  // legible in a log full of info lines. Counts only — no user id, no
+  // environment name, nothing that identifies a row.
+  if (counts.strandedByEnvironment > 0) {
+    console.warn(
+      `[tradovate][keepalive] ${counts.strandedByEnvironment} connection(s) cannot be ` +
+        'refreshed by this deployment: they were minted against the other Tradovate ' +
+        'environment and will expire at token lifetime. Each trader is shown ' +
+        '"reconnect" on /accounts and the dashboard.'
+    );
+  }
 
   return counts;
 }

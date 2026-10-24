@@ -295,8 +295,16 @@ export interface BrokerState {
    * until then, which is why this is a separate flag and not a status.
    */
   environmentMismatch: boolean;
-  /** How many broker-sourced rows the trader has in `accounts`. */
-  brokerAccounts: number;
+  /**
+   * How many broker-sourced rows the trader has in `accounts`, or null.
+   *
+   * NULL MEANS "NOT COUNTED", AND IT IS NOT THE SAME AS ZERO. The dashboard
+   * does not read the `accounts` table and must not start: its subject is a
+   * journal, and "you have no portfolios" is a sentence for the screen whose
+   * whole subject is portfolios. So it passes null and gets the connection
+   * notices only. /accounts has the number in hand already.
+   */
+  brokerAccounts: number | null;
 }
 
 /**
