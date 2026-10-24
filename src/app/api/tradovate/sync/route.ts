@@ -55,7 +55,41 @@
  *
  * 200 for all four provenance states, as on the other two routes and for the
  * reason given there: "your connection lapsed" is an answer. 401 for a caller
- * with no session. 400 for a window that cannot be read.
+ * with no session. 400 for a window that cannot be read. 429 for a second call
+ * inside {@link SYNC_COOLDOWN_MS} — see below.
+ *
+ *
+ * AND 429, WHICH IS THE ONE STATUS CODE HERE THAT IS NOT A PROVENANCE
+ * ------------------------------------------------------------------
+ *
+ * REF-112 §4.5 item 2 calls a server-side cooldown on this route "the single
+ * cheapest missing cap", and the reasoning is about this route specifically:
+ * it is fifteen to twenty upstream requests, a trader triggers it on purpose,
+ * and the client's throttle is DESIGNED to be bypassed on an explicit click
+ * (lib/tradovate/syncClock.ts). Holding the button down was therefore a
+ * one-user denial of service against that trader's own Tradovate quota, with
+ * nothing anywhere counting it.
+ *
+ * THE CLIENT GUARD STAYS AND THIS IS THE BACKSTOP. `AUTO_SYNC_THROTTLE_MS` is
+ * still three minutes, a click still skips it, and `shareBrokerSync` still
+ * collapses a double-click into one request. None of that is weakened. This
+ * catches what a browser cannot: a second tab, a page left open since before
+ * the deploy, and a caller that is not the button.
+ *
+ * **429 AND NOT A 200 WITH A NARROWED `source`**, which is the opposite of
+ * every other refusal on this route and is deliberate. The four-state `source`
+ * vocabulary answers "what does Reflect know about your broker", and the answer
+ * to that is unchanged by a cooldown — the connection is fine, the broker is
+ * fine, and we simply will not ask again this minute. Spending `reflect_only`
+ * on it would tell the trader they have no broker view, and spending
+ * `broker_unavailable` would blame Tradovate for our own cap. So the cooldown
+ * leaves the union alone and answers in the error shape the 401 and the 400
+ * already use, with `Retry-After` for anything that is not a browser.
+ *
+ * The message is Hebrew because it is the only refusal on this route that a
+ * trader can both cause and fix, and it is the one place in this integration
+ * where the right sentence is "we just did that" rather than an explanation of
+ * a failure.
  */
 
 import { NextResponse } from 'next/server';
@@ -67,8 +101,12 @@ import {
   describeDayPullFailureKind,
 } from '@/lib/rules/brokerDayContext';
 import { isUserAllowed } from '@/lib/tradovate/allowlist';
+import { claimSyncSlot, type SyncSlot } from '@/lib/tradovate/connections';
 import { redactSecrets } from '@/lib/tradovate/redact';
 import { syncUserTrades, type SyncResult } from '@/lib/tradovate/sync';
+// The copy lives with the rest of this route's sentences, in a browser-safe
+// module the client component also reads — see SYNC_COOLDOWN_NOTE's own note.
+import { SYNC_COOLDOWN_NOTE } from '@/lib/tradovate/sync-response';
 import type { BrokerImportCounts } from '@/lib/tradovate/import';
 import {
   MAX_SINCE_AGE_MS,
@@ -180,6 +218,21 @@ export interface SyncRouteDeps {
   /** The signed-in user's id, or null. From the session cookie, never the request. */
   currentUserId: () => Promise<string | null>;
   isAllowed: (userId: string) => boolean;
+  /**
+   * Take this trader's sync slot, or report how long they must wait
+   * (REF-112 §4.5 item 2).
+   *
+   * A SEAM FOR THE SAME REASON THE OTHER FOUR ARE ONE, and with one extra: the
+   * real implementation writes to `tradovate_connections`, so a suite without
+   * it could only assert the cooldown by reaching a database. `claimSyncSlot`
+   * in lib/tradovate/connections.ts is the production one.
+   *
+   * OPTIONAL, AND ABSENCE MEANS "NO COOLDOWN". Every group written before this
+   * stage asserts something else about this route, and none of them should
+   * have to know the cap exists to keep passing. {@link POST} supplies the
+   * real one, so production is never the defaulted path.
+   */
+  claimSlot?: (userId: string) => Promise<SyncSlot>;
   /** The pull and the import it feeds. Throws what the pull throws. */
   runSync: (
     userId: string,
@@ -200,6 +253,19 @@ export interface SyncRouteDeps {
  * first, then the allowlist (answered BEFORE any window parsing, so a
  * deployment with the integration off does no work and leaks no 400s about
  * parameters it would never have used), then the window, then the sync.
+ *
+ * THE COOLDOWN GOES BETWEEN THE WINDOW AND THE SYNC, which is the one position
+ * in that list it can occupy, and both neighbours are the reason:
+ *
+ *   - AFTER THE ALLOWLIST, because a refused user must not cause a write. The
+ *     allowlist answers `reflect_only` without touching the database, and
+ *     claiming a slot for somebody who was never going to pull would both spend
+ *     a statement and record a sync that did not happen.
+ *   - AFTER THE WINDOW PARSE, because the claim is a WRITE and a 400 is free.
+ *     A client sending a malformed `dayStart` in a loop would otherwise burn
+ *     the trader's real slot on requests that never reach Tradovate — the cap
+ *     would be doing the attacker's work.
+ *   - BEFORE THE SYNC, because that is the thing being capped.
  */
 export async function respondToSyncRequest(
   request: Request,
@@ -222,6 +288,15 @@ export async function respondToSyncRequest(
   // can get sends `since` too, bounded to seven days.
   const requested = parseTradesWindow(new URL(request.url).searchParams, deps.now());
   if (!requested.ok) return badWindow(requested);
+
+  // REF-112 §4.5 item 2. See the header on why this is a 429 rather than a
+  // fifth `source`, and the note on {@link respondToSyncRequest} on why it sits
+  // exactly here. A deployment without migration 042 claims every slot — the
+  // backstop is absent rather than broken (lib/tradovate/connections.ts).
+  if (deps.claimSlot) {
+    const slot = await deps.claimSlot(userId);
+    if (!slot.allowed) return tooSoon(slot);
+  }
 
   try {
     // Spelled out rather than passed whole: the parse also carries `ok` and
@@ -266,6 +341,12 @@ export async function POST(request: Request) {
   // the same identity for RLS to mean what lib/tradovate/sync.ts says it means.
   const supabase = await createClient();
 
+  // Built once and shared by the cooldown and the sync, rather than one each.
+  // The claim is a write to `tradovate_connections`, which has no UPDATE policy
+  // for `authenticated` at all (migration 017) — so it is the service role or
+  // nothing, and the trader cannot clear their own cooldown.
+  const admin = createAdminClient();
+
   return respondToSyncRequest(request, {
     currentUserId: async () => {
       const {
@@ -278,6 +359,8 @@ export async function POST(request: Request) {
 
     now: Date.now,
 
+    claimSlot: (userId) => claimSyncSlot(userId, { admin }),
+
     runSync: (userId, window) =>
       syncUserTrades({
         userId,
@@ -285,7 +368,7 @@ export async function POST(request: Request) {
         // and the service-role client for the token and host reads it cannot
         // make. See lib/tradovate/sync.ts on why these are two parameters.
         client: supabase,
-        admin: createAdminClient(),
+        admin,
         dayStartMs: window.dayStartMs,
         windowStartMs: window.windowStartMs,
         // The trader pressed the button, which means they are here on the
@@ -296,6 +379,34 @@ export async function POST(request: Request) {
         readStops: true,
       }),
   });
+}
+
+/**
+ * A second sync inside the window.
+ *
+ * THE ERROR SHAPE AND NOT A `BrokerSyncResult`, like the 401 and the 400 above
+ * it: `source` answers "what does Reflect know about your broker", and the
+ * answer to that did not change. `error` is the English machine-readable code
+ * every other non-200 on this route carries, `message` is the Hebrew the client
+ * renders, and `retryAfterSeconds` is the same number as the header so a
+ * caller that reads JSON does not have to also read headers.
+ *
+ * `Retry-After` IS SENT because this is the one refusal here that a non-browser
+ * caller can act on correctly, and it is the standard way to say it. Seconds
+ * rather than a date, which is the form fetch libraries actually implement.
+ */
+function tooSoon(slot: SyncSlot): NextResponse {
+  return NextResponse.json(
+    {
+      error: 'Sync cooldown',
+      message: SYNC_COOLDOWN_NOTE,
+      retryAfterSeconds: slot.retryAfterSeconds,
+    },
+    {
+      status: 429,
+      headers: { ...NO_STORE, 'Retry-After': String(slot.retryAfterSeconds) },
+    }
+  );
 }
 
 /** A window that could not be read. Names the parameter and the reason only. */

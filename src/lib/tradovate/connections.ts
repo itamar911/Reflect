@@ -1502,6 +1502,161 @@ export async function listConnectionsForImport(params: {
   return data ?? [];
 }
 
+// ── REF-112 §4: the rate and cost caps ──────────────────────────────────────
+//
+// Everything from here to {@link redeemRefreshTokenIfDue} is bookkeeping about
+// HOW OFTEN we may talk to Tradovate on one trader's behalf. It lives in this
+// module for the reason the header gives — this is the only module that reads
+// or writes `tradovate_connections` — and it is grouped rather than scattered
+// because the five columns it touches arrive together in migration 042 and
+// share one property that every one of these functions depends on:
+//
+//     **A STATEMENT THAT CANNOT FIND ITS COLUMN MEANS "THE CAP IS NOT THERE",
+//     NEVER "THE PULL FAILED".**
+//
+// Migration 042 has not been run when this ships. Every read below therefore
+// treats its own failure as the absence of state, and every write logs a kind
+// and carries on. That is what makes the code safe to deploy before the
+// migration — see the deploy-order section in
+// supabase/migrations/042_rate_and_penalty.sql, which is the authority on it.
+//
+// It also means these functions are quiet about a REAL database fault, so each
+// one logs once per process rather than once per call: a 42703 repeated 240
+// times an hour by the live poll would bury the line that matters.
+
+/**
+ * How long POST /api/tradovate/sync refuses a second call from one trader.
+ *
+ * SIXTY SECONDS, AND IT IS A BACKSTOP RATHER THAN THE GUARD. The guard is
+ * `AUTO_SYNC_THROTTLE_MS` (180s, ./syncClock.ts) and it is DELIBERATELY
+ * bypassed on an explicit click, because a trader who pressed "סנכרן עכשיו" is
+ * asking and refusing them is worse than a pull. That argument is still right.
+ * What it did not account for is that the same bypass makes holding the button
+ * down a one-user denial of service against that trader's own Tradovate quota:
+ * one sync is fifteen to twenty upstream requests (REF-112 §4.3), and nothing
+ * anywhere counted them.
+ *
+ * So this is the floor under the bypass and not a replacement for the window
+ * above it. The client still throttles the AUTOMATIC trigger at three minutes
+ * and still lets a click through; this stops the second click inside a minute,
+ * and a tab that has been open since before the deploy, and a second tab, and
+ * `curl`.
+ *
+ * WHY ONE MINUTE AND NOT THREE. A trader who clicks, reads "הכל מעודכן", closes
+ * a position and clicks again is making a reasonable request, and three minutes
+ * of silence would make the button look broken. One minute is long enough that
+ * no sequence of clicks can outrun a pull that takes two to four seconds, and
+ * short enough that the trader's next genuine question gets an answer. It is
+ * also the number the Hebrew sentence says out loud, so changing it means
+ * changing the copy.
+ *
+ * Exported because the regression suite asserts both sides of the boundary, and
+ * a test that hard-coded 60000 would pass after somebody moved the constant.
+ */
+export const SYNC_COOLDOWN_MS = 60_000;
+
+/** Whether this trader may spend a sync now, and how long until they may. */
+export interface SyncSlot {
+  allowed: boolean;
+  /**
+   * Whole seconds until the window opens. Zero whenever `allowed`.
+   *
+   * ROUNDED UP, so it is never zero on a refusal — "retry in 0 seconds" beside
+   * a refusal is the kind of answer that makes a client loop. Capped at
+   * {@link SYNC_COOLDOWN_MS} in seconds, because a clock that moved backwards
+   * must not produce a `Retry-After` measured in hours.
+   */
+  retryAfterSeconds: number;
+}
+
+/** Logged once per process per concern. See the section header. */
+const warnedOnce = new Set<string>();
+
+function warnOnce(concern: string, line: string): void {
+  if (warnedOnce.has(concern)) return;
+  warnedOnce.add(concern);
+  console.warn(redactSecrets(line));
+}
+
+/** Forget which lines have been said. Test seam, and nothing else. */
+export function forgetRateWarnings(): void {
+  warnedOnce.clear();
+}
+
+/**
+ * Claim this trader's sync slot, or report how long they have to wait
+ * (REF-112 §4.5 item 2).
+ *
+ * ONE CONDITIONAL UPDATE, WHICH IS WHY IT IS A CLAIM AND NOT A CHECK. The
+ * window is tested and stamped by the same statement, so two requests arriving
+ * in the same tick cannot both read an old timestamp and both pass — the second
+ * one's `WHERE` no longer matches and it gets zero rows back. A read followed
+ * by a write would be the obvious shape and would let exactly the burst this
+ * function exists to stop through its own boundary. `saveConnection`'s
+ * compare-and-swap makes the same argument about a different race.
+ *
+ * ZERO ROWS HAS TWO CAUSES AND THEY ARE NOT THE SAME ANSWER, so the follow-up
+ * read is not optional: the row exists and is inside the window (refuse), or
+ * there is no connection row at all (allow). A user with no connection is
+ * allowed through deliberately — `syncUserTrades` answers them with
+ * `TradovateNotConnectedError` before it opens a socket, so there is no
+ * upstream exposure to cap, and refusing them would invent a cooldown for a
+ * trader who has never synced.
+ *
+ * ALLOWS ON ANY ERROR, loudly once. A 42703 here is migration 042 not having
+ * run yet and the correct behaviour is today's — no backstop — rather than a
+ * route that refuses every sync on a deployment whose owner has not run a file.
+ */
+export async function claimSyncSlot(
+  userId: string,
+  options: { admin?: SupabaseClient; now?: number; cooldownMs?: number } = {}
+): Promise<SyncSlot> {
+  const admin = options.admin ?? createAdminClient();
+  const now = options.now ?? Date.now();
+  const cooldownMs = options.cooldownMs ?? SYNC_COOLDOWN_MS;
+  const cutoff = new Date(now - cooldownMs).toISOString();
+
+  // The value is double-quoted inside the `or` expression. PostgREST splits a
+  // condition on its first two dots, and an ISO 8601 instant is full of them;
+  // quoting makes the parse unambiguous rather than merely usually right.
+  const { data, error } = await admin
+    .from('tradovate_connections')
+    .update({ last_sync_at: new Date(now).toISOString() })
+    .eq('user_id', userId)
+    .or(`last_sync_at.is.null,last_sync_at.lte."${cutoff}"`)
+    .select('user_id');
+
+  if (error) {
+    warnOnce(
+      'sync-cooldown',
+      `[tradovate] the sync cooldown could not be claimed (${error.code ?? 'no code'}); ` +
+        'allowing the sync. Migration 042 may not have run.'
+    );
+    return { allowed: true, retryAfterSeconds: 0 };
+  }
+
+  if (data && data.length > 0) return { allowed: true, retryAfterSeconds: 0 };
+
+  // Zero rows. Find out which of the two reasons it was — see the note above.
+  const { data: row, error: readError } = await admin
+    .from('tradovate_connections')
+    .select('last_sync_at')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (readError || !row || !row.last_sync_at) return { allowed: true, retryAfterSeconds: 0 };
+
+  const last = Date.parse(row.last_sync_at as string);
+  if (!Number.isFinite(last)) return { allowed: true, retryAfterSeconds: 0 };
+
+  const remainingMs = Math.min(Math.max(last + cooldownMs - now, 0), cooldownMs);
+  return {
+    allowed: false,
+    // Ceiling, and at least one. See {@link SyncSlot.retryAfterSeconds}.
+    retryAfterSeconds: Math.max(1, Math.ceil(remainingMs / 1000)),
+  };
+}
+
 /**
  * Redeem this connection's refresh token if it is close enough to expiring, on
  * the way to serving an ordinary request. Returns null when nothing was due.

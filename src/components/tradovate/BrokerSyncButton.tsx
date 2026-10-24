@@ -64,6 +64,7 @@ import {
   readSyncResponse,
   REFLECT_ONLY_NOTE,
   syncChangedRows,
+  SYNC_COOLDOWN,
   SYNC_REFLECT_ONLY,
   SYNC_UNAVAILABLE,
   type BrokerSyncOutcome,
@@ -230,13 +231,26 @@ export default function BrokerSyncButton({
 /**
  * One POST, parsed into an outcome. Never throws and never rejects.
  *
- * A failed request IS one of the four states — that is what the union is for —
- * and a rejection here would propagate into {@link shareBrokerSync}, where
- * every other caller holding the shared promise would receive it too. The
- * mapping matches lib/rules/brokerDayContext.ts' `requestBrokerDay`: a 401 or
- * 403 is `reflect_only` (no broker view, and the session is the app shell's
- * problem, not this button's), anything else unreadable is
- * `broker_unavailable`.
+ * A failed request IS one of the states — that is what the union is for — and
+ * a rejection here would propagate into {@link shareBrokerSync}, where every
+ * other caller holding the shared promise would receive it too. The mapping
+ * matches lib/rules/brokerDayContext.ts' `requestBrokerDay`: a 401 or 403 is
+ * `reflect_only` (no broker view, and the session is the app shell's problem,
+ * not this button's), anything else unreadable is `broker_unavailable`.
+ *
+ * 429 IS READ, AND IT IS WHY THIS FUNCTION HAD TO CHANGE (REF-112 §4.5 item 2).
+ * The route's server-side cooldown answers 429, which fell into `!res.ok` and
+ * therefore rendered "לא הצלחנו למשוך עסקאות מ-Tradovate" — a sentence that
+ * blames the broker for our own cap, in front of a trader whose connection is
+ * working perfectly. That is the same defect §2 of the REF-112 investigation
+ * records on the OAuth paths, where `?tradovate=not_available` has no reader at
+ * all: a refusal nobody translates is a refusal the trader cannot act on.
+ *
+ * THE STATUS CODE AND NOT THE BODY. `message` is on the response and is the
+ * same string, but reading it would mean trusting server copy to render in a
+ * client component — and the body is also what an edge proxy is most likely to
+ * replace on a 429 with its own HTML. The code is the contract; the sentence
+ * comes from lib/tradovate/sync-response.ts like every other sentence here.
  */
 async function requestSync({ explicit }: { explicit: boolean }): Promise<BrokerSyncOutcome> {
   const params = new URLSearchParams({ [DAY_START_PARAM]: startOfTodayIso() });
@@ -254,6 +268,8 @@ async function requestSync({ explicit }: { explicit: boolean }): Promise<BrokerS
     });
 
     if (res.status === 401 || res.status === 403) return SYNC_REFLECT_ONLY;
+    // Before the `!res.ok` catch-all, which is what used to swallow it.
+    if (res.status === 429) return SYNC_COOLDOWN;
     if (!res.ok) return SYNC_UNAVAILABLE;
 
     return readSyncResponse(await res.json());

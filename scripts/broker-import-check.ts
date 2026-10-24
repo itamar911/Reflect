@@ -137,9 +137,19 @@ import {
 import {
   describeSyncOutcome,
   readSyncResponse,
+  SYNC_COOLDOWN,
+  SYNC_COOLDOWN_NOTE,
   SYNC_UNAVAILABLE,
   type BrokerSyncOutcome,
 } from '../src/lib/tradovate/sync-response';
+// REF-112 §4: the caps. `claimSyncSlot` is the sync cooldown's one statement;
+// `forgetRateWarnings` resets the once-per-process log guard, which is a
+// module-level variable and therefore leaks between groups without it.
+import {
+  claimSyncSlot,
+  forgetRateWarnings,
+  SYNC_COOLDOWN_MS,
+} from '../src/lib/tradovate/connections';
 import {
   AUTO_DEBRIEF_PER_LOAD,
   debriefOnResolve,
@@ -1566,6 +1576,229 @@ async function syncRouteGroup() {
     c('(10) a connection that never existed is reflect_only', missing, 'reflect_only'),
     c('(11) a transient failure is broker_unavailable', transient, 'broker_unavailable'),
     c('(12) an unpriceable product is broker_unavailable too', unpriceable, 'broker_unavailable'),
+  ]);
+}
+
+/**
+ * The server-side cooldown on the one route a trader can hold down
+ * (REF-112 §4.5 item 2).
+ *
+ * TWO HALVES, AND THE SECOND ONE IS THE PART THAT GOES WRONG IN PRACTICE. The
+ * claim itself — `claimSyncSlot` against a recording stub — is the mechanism.
+ * The route half is about ORDER, which is where a cap like this fails: a
+ * cooldown claimed before the window is parsed lets a client burn a trader's
+ * real minute with malformed requests, and one claimed before the allowlist
+ * writes a row for somebody the route is about to refuse anyway.
+ *
+ * THE STUB IS HAND-BUILT RATHER THAN `FakeDb` because `claimSyncSlot` uses
+ * `.or(...)`, which `FakeQuery` does not model — and should not. A stub that
+ * accepted every operator and implemented none would make this group pass over
+ * a query Postgres would reject, which is the argument `FakeQuery.not` already
+ * makes about itself. So this one implements the ONE expression the function
+ * actually sends, parses it, and throws on anything else.
+ */
+async function syncCooldownGroup() {
+  const COOLDOWN = 60_000;
+
+  /**
+   * A `tradovate_connections` of one row, with the conditional UPDATE applied
+   * for real. `last` is the stored `last_sync_at`, null for a connection that
+   * has never synced; `missing` is a user with no row at all.
+   */
+  function cooldownAdmin(options: { last: number | null; missing?: boolean; failWith?: string }) {
+    const state = { last: options.last };
+    const statements: string[] = [];
+
+    const admin = {
+      from: (table: string) => {
+        if (table !== 'tradovate_connections') throw new Error(`unexpected table ${table}`);
+        return {
+          // The claim: the test and the stamp in one statement.
+          update: (values: Record<string, unknown>) => {
+            let cutoff: number | null = null;
+            const q = {
+              eq: () => q,
+              or: (expression: string) => {
+                // Parsed rather than ignored — this is what makes (2) mean
+                // something about the statement that was actually sent.
+                const match = /^last_sync_at\.is\.null,last_sync_at\.lte\."(.+)"$/.exec(expression);
+                if (!match) throw new Error(`unexpected or(): ${expression}`);
+                cutoff = Date.parse(match[1]);
+                return q;
+              },
+              select: () => q,
+              then: (resolve: (v: { data: unknown; error: unknown }) => unknown) => {
+                statements.push('update');
+                if (options.failWith) {
+                  return Promise.resolve({
+                    data: null,
+                    error: { code: options.failWith, message: 'column does not exist' },
+                  }).then(resolve);
+                }
+                if (options.missing) return Promise.resolve({ data: [], error: null }).then(resolve);
+                // WHERE last_sync_at IS NULL OR last_sync_at <= cutoff
+                const matched = state.last === null || (cutoff !== null && state.last <= cutoff);
+                if (matched) state.last = Date.parse(values.last_sync_at as string);
+                return Promise.resolve({
+                  data: matched ? [{ user_id: USER }] : [],
+                  error: null,
+                }).then(resolve);
+              },
+            };
+            return q;
+          },
+          // The follow-up read that tells "on cooldown" from "no connection".
+          select: () => {
+            const q = {
+              eq: () => q,
+              maybeSingle: () => {
+                statements.push('select');
+                if (options.missing) return Promise.resolve({ data: null, error: null });
+                return Promise.resolve({
+                  data: {
+                    last_sync_at: state.last === null ? null : new Date(state.last).toISOString(),
+                  },
+                  error: null,
+                });
+              },
+            };
+            return q;
+          },
+        };
+      },
+    } as unknown as SupabaseClient;
+
+    return { admin, statements, state };
+  }
+
+  const NOW = Date.parse('2026-10-15T14:00:00.000Z');
+  const claim = (admin: SupabaseClient) =>
+    claimSyncSlot(USER, { admin, now: NOW, cooldownMs: COOLDOWN });
+
+  // A connection that has never synced: allowed, and stamped.
+  const fresh = cooldownAdmin({ last: null });
+  const first = await claim(fresh.admin);
+
+  // Thirty seconds later, the same connection. Refused, with the remainder.
+  const second = await claim(cooldownAdmin({ last: NOW - 30_000 }).admin);
+
+  // Exactly on the boundary. ALLOWED — the window is `<=`, so a trader whose
+  // last sync was precisely a minute ago is not made to wait another second.
+  const boundary = await claim(cooldownAdmin({ last: NOW - COOLDOWN }).admin);
+
+  // One millisecond inside it.
+  const inside = await claim(cooldownAdmin({ last: NOW - COOLDOWN + 1 }).admin);
+
+  // No connection row at all. ALLOWED, and no cooldown is invented: the pull
+  // throws TradovateNotConnectedError before it opens a socket, so there is no
+  // upstream exposure to cap.
+  const noRow = await claim(cooldownAdmin({ last: null, missing: true }).admin);
+
+  // Migration 042 has not run. ALLOWED, once, loudly — the backstop is absent
+  // rather than the route broken. This is the property 042's deploy-order
+  // section rests on.
+  forgetRateWarnings();
+  const unmigrated = cooldownAdmin({ last: null, failWith: '42703' });
+  const { result: pre042, lines: pre042Lines } = await captureLogs(() => claim(unmigrated.admin));
+  // A second call says nothing: the alternative is this line 240 times an hour.
+  const { lines: secondLines } = await captureLogs(() => claim(unmigrated.admin));
+  forgetRateWarnings();
+
+  group('the sync route will not ask Tradovate twice in a minute', [
+    c('(1) a connection that never synced is allowed',
+      [first.allowed, first.retryAfterSeconds], [true, 0]),
+    c('(2) and the claim STAMPED the row in the statement that tested it',
+      [fresh.state.last, fresh.statements], [NOW, ['update']]),
+    c('(3) thirty seconds later it is refused, with the remainder',
+      [second.allowed, second.retryAfterSeconds], [false, 30]),
+    c('(4) exactly a minute later is allowed — the window is inclusive',
+      boundary.allowed, true),
+    c('(5) one millisecond inside it is not, and it never asks for zero seconds',
+      [inside.allowed, inside.retryAfterSeconds], [false, 1]),
+    c('(6) a user with no connection gets no invented cooldown',
+      [noRow.allowed, noRow.retryAfterSeconds], [true, 0]),
+    c('(7) without migration 042 every sync is allowed', pre042.allowed, true),
+    c('(8) and it says so once, naming no user',
+      [pre042Lines.length, pre042Lines.some((l) => l.includes(USER)), secondLines.length],
+      [1, false, 0]),
+  ]);
+
+  // ── The route half: where the check sits in the order ────────────────────
+
+  let claims = 0;
+  const refuse = async () => {
+    claims += 1;
+    return { allowed: false, retryAfterSeconds: 42 };
+  };
+
+  const callWith = async (query: string, over: Partial<SyncRouteDeps> = {}) => {
+    const res = await respondToSyncRequest(new Request(syncUrl(query)), syncDeps(over));
+    return {
+      status: res.status,
+      retryAfter: res.headers.get('retry-after'),
+      cache: res.headers.get('cache-control'),
+      body: await res.json(),
+    };
+  };
+
+  const good = `?dayStart=${encodeURIComponent(SYNC_DAY_START)}`;
+
+  claims = 0;
+  const refused = await callWith(good, { claimSlot: refuse });
+  const claimedOnRefusal = claims;
+
+  // A refused user: the allowlist answers first, so no slot is claimed for
+  // somebody who was never going to pull.
+  claims = 0;
+  await callWith(good, { claimSlot: refuse, isAllowed: () => false });
+  const claimedOutsideAllowlist = claims;
+
+  // A malformed window: the 400 is free and must stay free. A slot claimed
+  // here would let a loop of bad requests spend the trader's real minute —
+  // the cap doing the attacker's work.
+  claims = 0;
+  const badWindow = await callWith('?dayStart=not-a-date', { claimSlot: refuse });
+  const claimedOnBadWindow = claims;
+
+  // And the pull is not reached when the slot is refused.
+  let pulled = 0;
+  claims = 0;
+  await callWith(good, {
+    claimSlot: refuse,
+    runSync: async () => {
+      pulled += 1;
+      throw new Error('the cooldown must answer before the pull');
+    },
+  });
+
+  // A deployment with no `claimSlot` at all behaves exactly as it did before
+  // this stage — which is what keeps every group written before it honest.
+  const noSeam = await callWith(good);
+
+  group('the cooldown answers after the window and before the pull', [
+    c('(1) a refused slot is a 429', refused.status, 429),
+    c('(2) with the Hebrew sentence and a machine-readable code',
+      [refused.body.error, refused.body.message], ['Sync cooldown', SYNC_COOLDOWN_NOTE]),
+    c('(3) and Retry-After in seconds, matching the body',
+      [refused.retryAfter, refused.body.retryAfterSeconds], ['42', 42]),
+    c('(4) still no-store: it is one trader’s bookkeeping',
+      refused.cache, 'no-store, private'),
+    // `source` IS ABSENT. A cooldown is not a provenance — see the route header.
+    c('(5) the 429 carries no `source`', refused.body.source, undefined),
+    c('(6) a user outside the allowlist has no slot claimed', claimedOutsideAllowlist, 0),
+    c('(7) a malformed window does not spend the trader’s minute',
+      [badWindow.status, claimedOnBadWindow], [400, 0]),
+    c('(8) so (6) and (7) are not vacuous: a good request claims exactly one',
+      claimedOnRefusal, 1),
+    c('(9) and a refusal never reaches the pull', pulled, 0),
+    c('(10) a route with no cooldown seam is unchanged',
+      [noSeam.status, noSeam.body.source], [200, 'broker_verified']),
+    // The copy, pinned where the rest of this route's copy is pinned.
+    c('(11) the sentence names the same minute the constant does',
+      [SYNC_COOLDOWN_MS, SYNC_COOLDOWN_NOTE.includes('דקה')], [60_000, true]),
+    c('(12) and the client does not report it as a problem',
+      [describeSyncOutcome(SYNC_COOLDOWN).text, describeSyncOutcome(SYNC_COOLDOWN).problem],
+      [SYNC_COOLDOWN_NOTE, false]),
   ]);
 }
 
@@ -5841,6 +6074,9 @@ async function main() {
   await syncCopyGroup();
   await syncThrottleGroup();
   await syncPrivacyGroup();
+
+  // REF-112 §4.5 item 2 — the server-side backstop under the click bypass.
+  await syncCooldownGroup();
 
   // Stage 3a — the debrief's storage and the alert emails.
   await debriefReaderGroup();

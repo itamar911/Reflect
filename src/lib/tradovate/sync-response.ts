@@ -80,12 +80,34 @@ export type BrokerSyncOutcome =
     } & BrokerImportCounts)
   | { source: 'broker_expired' }
   | { source: 'broker_unavailable' }
-  | { source: 'reflect_only' };
+  | { source: 'reflect_only' }
+  /**
+   * The route refused a second sync inside its cooldown (REF-112 §4.5 item 2).
+   *
+   * THE ONE MEMBER OF THIS UNION THAT IS NOT A `RuleContextSource`, and that is
+   * the point rather than an inconsistency. The other four are the shared
+   * four-state provenance vocabulary /today and /trades answer with, and they
+   * describe what Reflect knows about the broker. A cooldown describes
+   * something about REFLECT: the connection is fine, Tradovate is fine, and we
+   * declined to ask again this minute.
+   *
+   * It therefore lives HERE and not in lib/types.ts' `RuleContextSource`, which
+   * must not grow a fifth value — the rule engine, the day panel and the
+   * journal branch over those four exhaustively and none of them has a sentence
+   * for this one.
+   *
+   * IT NEVER COMES OFF A 200 BODY. {@link readSyncResponse} cannot produce it,
+   * because the route answers 429 with an error shape rather than a `source`.
+   * The only thing that constructs it is the component's fetch wrapper, from
+   * the status code.
+   */
+  | { source: 'sync_cooldown' };
 
-/** The three stateless outcomes, as singletons: there is nothing to vary. */
+/** The four stateless outcomes, as singletons: there is nothing to vary. */
 export const SYNC_EXPIRED: BrokerSyncOutcome = Object.freeze({ source: 'broker_expired' });
 export const SYNC_UNAVAILABLE: BrokerSyncOutcome = Object.freeze({ source: 'broker_unavailable' });
 export const SYNC_REFLECT_ONLY: BrokerSyncOutcome = Object.freeze({ source: 'reflect_only' });
+export const SYNC_COOLDOWN: BrokerSyncOutcome = Object.freeze({ source: 'sync_cooldown' });
 
 /**
  * The seven NUMERIC fields of {@link BrokerImportCounts} THAT HAVE ALWAYS BEEN
@@ -194,6 +216,35 @@ export function readSyncResponse(body: unknown): BrokerSyncOutcome {
  * identify a person. So the page states what it is showing and stops.
  */
 export const REFLECT_ONLY_NOTE = 'מוצגות רק עסקאות שתיעדת ב-Reflect.';
+
+/**
+ * The sentence for a second sync inside the server's cooldown
+ * (REF-112 §4.5 item 2).
+ *
+ * HERE RATHER THAN IN THE ROUTE, although the route is what sends it. This
+ * module is the home of this route's copy — it holds `REFLECT_ONLY_NOTE` and
+ * every sentence {@link describeSyncOutcome} returns — and it is browser-safe
+ * and pure, so the component can render the sentence without importing a
+ * server route and the route can send it without duplicating a string. One
+ * definition is also what lets the suite pin it once.
+ *
+ * "סנכרנו לפני רגע" AND NOT "יותר מדי בקשות". The trader pressed a button and
+ * the honest answer is that we already did the thing: what they are looking at
+ * is a few seconds old, not withheld. A rate-limit sentence would describe our
+ * own bookkeeping rather than their situation, and would read as a telling-off
+ * for using the product.
+ *
+ * "נסה שוב בעוד דקה" IS THE ONE INSTRUCTION HERE, and it is allowed where §8's
+ * "describes, does not instruct" rule — a NinjaTrader vendor compliance
+ * requirement — is not. That rule is about TRADING guidance; this instructs
+ * about Reflect's own button, names no market, no position and no price. A
+ * refusal with no way out of it is the one thing worse than instructing.
+ *
+ * IT NAMES THE SAME MINUTE `SYNC_COOLDOWN_MS` DOES (./connections.ts), so the
+ * two move together. No emojis (CLAUDE.md). The em-dash matches
+ * {@link heldNote} and the rest of this module.
+ */
+export const SYNC_COOLDOWN_NOTE = 'סנכרנו לפני רגע — נסה שוב בעוד דקה';
 
 /** What the trader is told after a sync, and whether to offer a way out of it. */
 export interface SyncMessage {
@@ -344,6 +395,13 @@ export function describeSyncOutcome(outcome: BrokerSyncOutcome): SyncMessage {
   }
   if (outcome.source === 'reflect_only') {
     return plain(REFLECT_ONLY_NOTE);
+  }
+  if (outcome.source === 'sync_cooldown') {
+    // `problem: false`, WHICH IS THE ONLY `false` AMONG THESE BRANCHES. Nothing
+    // went wrong: the journal is as up to date as the last sync left it, which
+    // was under a minute ago. `problem: true` paints the line in the warning
+    // colour and tells the trader to worry about a cap working as designed.
+    return plain(SYNC_COOLDOWN_NOTE, false);
   }
 
   if (!outcome.ran) {
