@@ -137,7 +137,9 @@ import {
   readBrokerDayResponse,
   type BrokerDayPull,
 } from '../src/lib/rules/brokerDayContext';
-import { redactSecrets } from '../src/lib/tradovate/redact';
+// `redactSecrets` was imported here to build the log line today/route.ts
+// writes for a thrown TradovateUnpriceableError. The pricing chain's refusals
+// no longer throw (REF-112 §5.11), so no group builds that line any more.
 import { loadTradeRuleContext, type TradeRuleContext } from '../src/lib/rules/tradeRuleContext';
 import {
   checkActiveViolation,
@@ -979,16 +981,34 @@ async function main() {
     exit: 4990,
   });
 
+  /** The day and the notices, for the refusals that no longer throw. */
+  const refusedDay = async (overrides: Partial<Scene>) => {
+    const full = await pullFull(withTrips([oneTrip], overrides));
+    return [full.day.closedCount, full.day.net, full.notices] as const;
+  };
+
+  /** One trade dropped, nothing counted, and the instrument named by root. */
+  const oneUnpriced = [0, 0, [{ kind: 'unpriced_product', root: 'ES' }]] as const;
+
+  // THE WHOLE GROUP CHANGED SHAPE (REF-112 §5.11, item 6), AND THE RULE IT
+  // WAS WRITTEN FOR DID NOT. "Refuse rather than under-report" is still the
+  // principle — a figure in points measured against a dollar threshold is the
+  // unit bug this module exists to prevent, and nothing unpriceable is priced
+  // here any more than it was before. What changed is the SIZE of the
+  // refusal: it was the whole day, for every account and every contract, and
+  // it is now the one trade on the contract that could not be resolved, with
+  // a sentence naming it. Two of these three cases also moved out of this
+  // group entirely — see the note below and `foreignCurrencyGroup`.
   group('a figure that cannot be stated in dollars is refused', [
     c(
-      'no valuePerPoint: points are not money',
-      await thrown(() => pull(withTrips([oneTrip], { products: [{ ...PRODUCT, valuePerPoint: undefined }] }))),
-      'unpriceable:no_value_per_point'
+      'no valuePerPoint: points are not money, so the trade does not count',
+      await refusedDay({ products: [{ ...PRODUCT, valuePerPoint: undefined }] }),
+      oneUnpriced
     ),
     c(
       'a zero valuePerPoint is not a value',
-      await thrown(() => pull(withTrips([oneTrip], { products: [{ ...PRODUCT, valuePerPoint: 0 }] }))),
-      'unpriceable:no_value_per_point'
+      await refusedDay({ products: [{ ...PRODUCT, valuePerPoint: 0 }] }),
+      oneUnpriced
     ),
     // THE EURO CASE MOVED OUT OF THIS GROUP (REF-112 §5.10). It asserted that
     // a non-USD product throws and fails the whole pull; it now skips the
@@ -996,10 +1016,17 @@ async function main() {
     // which asserts the new contract in full — including that nothing
     // non-USD is ever priced, which is the part of the old rule that had to
     // survive.
+    //
+    // A CURRENCY ID WITH NO NAME IS NOT THAT CASE, and the two are now
+    // deliberately different outcomes: a foreign DENOMINATION is a standing
+    // property of an account's whole book, so the account is skipped; a
+    // currency id `/currency/list` does not name means we cannot say what
+    // unit this one product is in, which is an unresolved product and costs
+    // one trade.
     c(
-      'a currency id with no name is an unknown unit',
-      await thrown(() => pull(withTrips([oneTrip], { products: [{ ...PRODUCT, currencyId: 77 }] }))),
-      'unpriceable:unknown_currency'
+      'a currency id with no name is an unknown unit, and costs that product alone',
+      await refusedDay({ products: [{ ...PRODUCT, currencyId: 77 }] }),
+      oneUnpriced
     ),
     c(
       // REWRITTEN ON PURPOSE (REF-117 Stage 2). This asserted
@@ -1903,8 +1930,41 @@ async function main() {
     return [reason, host.calls.includes('/contractMaturity/item')];
   };
 
-  /** The refusal (2)–(4) must reach, without a second call. */
-  const refusedUnasked: [string, boolean] = ['unpriceable:no_value_per_point', false];
+  /**
+   * (2)–(4) with the pull's answer, since it no longer throws (REF-112 §5.11).
+   *
+   * The two properties the old tuple pinned both survive and are both here:
+   * the day is not priced from a contract whose chain did not resolve, and
+   * the maturity call that could never have worked is still not made. What is
+   * new is the third — the trader is told, by root.
+   */
+  const unpricedOn = async (body: unknown) => {
+    const host = contractItemReader(body);
+    const pull = await coldPull({
+      readers: { live: host },
+      environment: 'live',
+      dayStartMs: DAY_START,
+      tradovateUserId: ACCOUNT.userId,
+      now: NOW,
+    });
+    return {
+      notices: pull.notices.map((n) =>
+        n.kind === 'unpriced_product' ? `unpriced:${n.root}` : n.kind
+      ),
+      trades: pull.trades.length,
+      askedMaturity: host.calls.includes('/contractMaturity/item'),
+    };
+  };
+
+  /**
+   * What (2)–(4) must reach: one trade dropped, named by its root, and the
+   * second call never made.
+   *
+   * `unpriced:ES` — the ROOT and not `ESZ6`. The expiry says which month a
+   * trader was in; only the root says which instrument, and the sentence
+   * needs the second.
+   */
+  const refusedUnasked = { notices: ['unpriced:ES'], trades: 0, askedMaturity: false };
 
   /** One host whose /product/item fails with `status`, everything else fine. */
   const productFails = (status: number) =>
@@ -1922,39 +1982,35 @@ async function main() {
       now: NOW,
     });
 
-  const errorFrom = async (run: () => Promise<unknown>): Promise<unknown> => {
-    try {
-      await run();
-      return null;
-    } catch (error) {
-      return error;
-    }
-  };
+  // `errorFrom` LIVED HERE AND IS GONE (REF-112 §5.11). It wrapped the pull
+  // so a group could inspect the TradovateUnpriceableError the pricing chain
+  // threw; the chain no longer throws for any of these cases, so there is no
+  // error to catch and the assertions read the pull's own answer instead.
+  // `thrown()` is still used for the 401 and 500 cases below, which must
+  // keep failing the pull.
 
-  // (5) A genuine reference-data 404, on a productId that was perfectly usable.
-  const genuine404 = await errorFrom(() => productFails(404));
-  /** The one line today/route.ts logs for it, built exactly as the route does. */
-  const warnLine = redactSecrets(describeDayPullFailure(genuine404));
+  // (5) A genuine reference-data 404, on a productId that was perfectly
+  // usable. It no longer throws (REF-112 §5.11) — it costs this contract's
+  // trade and says so.
+  const genuine404Pull = await productFails(404);
 
   // (6) The REF-90 production shape: the mint host holds nothing, the account
   // and the trade are on demo, and demo cannot resolve the product.
   const idleLive = reader(scene({ accounts: [] }));
-  const noRetry = await errorFrom(() =>
-    coldPull({
-      readers: {
-        live: idleLive,
-        demo: failingReader(
-          demoScene,
-          '/product/item',
-          () => new TradovateRequestError('/product/item', 404, '')
-        ),
-      },
-      environment: 'live',
-      dayStartMs: DAY_START,
-      tradovateUserId: ACCOUNT.userId,
-      now: NOW,
-    })
-  );
+  const noRetryPull = await coldPull({
+    readers: {
+      live: idleLive,
+      demo: failingReader(
+        demoScene,
+        '/product/item',
+        () => new TradovateRequestError('/product/item', 404, '')
+      ),
+    },
+    environment: 'live',
+    dayStartMs: DAY_START,
+    tradovateUserId: ACCOUNT.userId,
+    now: NOW,
+  });
 
   // (8) The Q1 regression guard: pricing goes to the host that reported the
   // fill, and the other host is not asked for reference data at all.
@@ -1989,29 +2045,50 @@ async function main() {
     // (2)–(4) The malformed lookup, never sent. Still true, and now about the
     // field the documentation actually promises. The second element of each
     // tuple is the whole point of Fix 1: no further call was made.
-    c('(2) a null contract body states no contractMaturityId either', await onContractBody(null), refusedUnasked),
-    c('(3) a null contractMaturityId is not dropped by buildUrl, so no ?id=null goes out', await onContractBody({ ...CONTRACT, contractMaturityId: null }), refusedUnasked),
-    c('(4) zero is finite and is still not an entity id', await onContractBody({ ...CONTRACT, contractMaturityId: 0 }), refusedUnasked),
+    // A NULL BODY NAMES NOTHING, so there is no root to put in the sentence
+    // and the line degrades to the one without a symbol — the same rule
+    // `HeldGroup.symbol` follows. The trade is still dropped and still
+    // reported.
+    c('(2) a null contract body states no contractMaturityId either',
+      await unpricedOn(null),
+      { notices: ['unpriced:null'], trades: 0, askedMaturity: false }),
+    c('(3) a null contractMaturityId is not dropped by buildUrl, so no ?id=null goes out',
+      await unpricedOn({ ...CONTRACT, contractMaturityId: null }), refusedUnasked),
+    c('(4) zero is finite and is still not an entity id',
+      await unpricedOn({ ...CONTRACT, contractMaturityId: 0 }), refusedUnasked),
 
     // (5) Mechanism (c): the product really is not on that host.
-    c('(5) a genuine 404 is the day the user is shown', classifyDayPullFailure(genuine404), 'broker_unavailable'),
-    c(
-      'and it is ours, naming the ids the upstream 404 never did',
-      [
-        genuine404 instanceof TradovateUnpriceableError,
-        warnLine.includes('no_value_per_point'),
-        warnLine.includes(String(PRODUCT_ID)),
-        warnLine.includes(String(CONTRACT_ID)),
-        // Ids are not secrets; a symbol, a price or a hostname would be.
-        ['ESZ6', '5000', '4990', 'tradovate.com'].filter((leak) => warnLine.includes(leak)),
-      ],
-      [true, true, true, true, []]
-    ),
+    //
+    // REWRITTEN BY REF-112 §5.11 (item 6). This asserted that a genuine 404
+    // on `/product/item` is `broker_unavailable` — the whole day gone, every
+    // account, every contract, because one product did not resolve. §5.11
+    // names the cases nothing has ever shown this chain resolving for (a
+    // spread, an option, a combo leg), so that was a trader legging a
+    // calendar losing every figure they had. It is now one trade and one
+    // sentence.
+    c('(5) a genuine 404 costs the trade on that contract, not the day',
+      [genuine404Pull.trades.length, genuine404Pull.day.closedCount], [0, 0]),
+    c('and the trader is told which instrument, by root',
+      genuine404Pull.notices, [{ kind: 'unpriced_product', root: 'ES' }]),
+    // THE ROOT, NOT THE CONTRACT, AND NOTHING ELSE. The old refusal named the
+    // product id and the contract id in an Error message, which was the right
+    // call when the message existed only for an operator and was reduced to
+    // its KIND before anything logged it (see today/route.ts). This string
+    // goes to a trader, so the bound is the one `heldSymbols` set.
+    c('and the notice carries no id, no expiry, no price and no host',
+      JSON.stringify(genuine404Pull.notices).match(
+        new RegExp(`ESZ6|5000|4990|tradovate\\.com|${PRODUCT_ID}|${CONTRACT_ID}`)
+      ),
+      null),
 
-    // (6) The Q3 decision in executable form.
+    // (6) The Q3 decision in executable form. Unchanged: no cross-host retry.
     c('(6) demo cannot price it and live is never asked to', itemCalls(idleLive.calls), []),
     c('and the healthy live host paid one call, not none and not seven', idleLive.calls, ['/account/list']),
-    c('and the pull fails whole rather than reporting a partial day', classifyDayPullFailure(noRetry), 'broker_unavailable'),
+    // The partial day IS the answer now, and it is a named one. The thing
+    // that must not happen is a partial day that says nothing.
+    c('and the pull reports the gap rather than failing whole',
+      [noRetryPull.trades.length, noRetryPull.notices.map((n) => n.kind)],
+      [0, ['unpriced_product']]),
 
     // (7) Fix 2's narrowness. A 401 must stay a TradovateRequestError or the
     // penalty and transient handling above this layer stops seeing it.
@@ -2064,22 +2141,34 @@ async function main() {
     };
   };
 
-  /** One host: the refusal it reached, what the message named, and what it read. */
+  /**
+   * One host: what the pull refused to price, how it named it, and what it
+   * read on the way.
+   *
+   * REWRITTEN BY REF-112 §5.11 (item 6). It used to read the THROWN error —
+   * its reason, and whether the message named the contract id and the
+   * maturity id — because every one of these cases failed the whole day. The
+   * ids were there for an operator, and the route reduced the message to its
+   * KIND before logging it, so they never actually reached a log line.
+   *
+   * Nothing throws now, so there is no message to inspect; what is asserted
+   * instead is what a trader is shown and what the pull did with the day. The
+   * two properties that mattered either way are both still here: the trade is
+   * NOT priced, and the request that could never have worked is NOT made.
+   */
   const refusalOn = async (host: TradovateReader & { calls: string[] }) => {
-    const error = await errorFrom(() =>
-      coldPull({
-        readers: { live: host },
-        environment: 'live',
-        dayStartMs: DAY_START,
-        tradovateUserId: ACCOUNT.userId,
-        now: NOW,
-      })
-    );
-    const message = error instanceof Error ? error.message : '';
+    const pull = await coldPull({
+      readers: { live: host },
+      environment: 'live',
+      dayStartMs: DAY_START,
+      tradovateUserId: ACCOUNT.userId,
+      now: NOW,
+    });
     return {
-      reason: error instanceof TradovateUnpriceableError ? `unpriceable:${error.reason}` : String(error),
-      namesContract: message.includes(String(CONTRACT_ID)),
-      namesMaturity: message.includes(String(MATURITY_ID)),
+      notices: pull.notices.map((n) =>
+        n.kind === 'unpriced_product' ? `unpriced:${n.root}` : n.kind
+      ),
+      trades: pull.trades.length,
       reads: itemCalls(host.calls),
     };
   };
@@ -2173,8 +2262,7 @@ async function main() {
       now: NOW,
     });
 
-  const maturity404 = await errorFrom(() => maturityFails(404));
-  const maturity404Line = redactSecrets(describeDayPullFailure(maturity404));
+  const maturity404Pull = await maturityFails(404);
 
   // (10) One name, two hosts, one pull. The hosts run in sequence, so demo's
   // `ESZ6` meets a warm key and never asks what it is worth — which is sound
@@ -2275,14 +2363,12 @@ async function main() {
   // hiccup, has to be re-asked — otherwise one 404 would refuse this trader's
   // day for the life of the process.
   forgetContractUnits();
-  const failedThenFixed = await thrown(() =>
-    loadBrokerDay(
-      warmRequest(
-        failingReader(
-          withTrips([oneTrip]),
-          '/product/item',
-          () => new TradovateRequestError('/product/item', 404, '')
-        )
+  const failedThenFixed = await loadBrokerDay(
+    warmRequest(
+      failingReader(
+        withTrips([oneTrip]),
+        '/product/item',
+        () => new TradovateRequestError('/product/item', 404, '')
       )
     )
   );
@@ -2311,16 +2397,12 @@ async function main() {
       [-500, 500]
     ),
 
-    // (4)
+    // (4) REF-112 §5.11 — the day survives, the trade does not, and the
+    // request that could never have worked is still not made.
     c(
-      '(4) no contractMaturityId: refused, named, and the maturity never asked for',
+      '(4) no contractMaturityId: the trade is dropped, named by root, and the maturity never asked for',
       noMaturityId,
-      {
-        reason: 'unpriceable:no_value_per_point',
-        namesContract: true,
-        namesMaturity: false,
-        reads: ['/contract/item'],
-      }
+      { notices: ['unpriced:ES'], trades: 0, reads: ['/contract/item'] }
     ),
 
     // (5) The same boundary, one function, three shapes of the same lie.
@@ -2328,36 +2410,28 @@ async function main() {
       '(5) null and 0 are not ids either, and cost no request',
       [nullMaturityId, zeroMaturityId],
       [
-        { reason: 'unpriceable:no_value_per_point', namesContract: true, namesMaturity: false, reads: ['/contract/item'] },
-        { reason: 'unpriceable:no_value_per_point', namesContract: true, namesMaturity: false, reads: ['/contract/item'] },
+        { notices: ['unpriced:ES'], trades: 0, reads: ['/contract/item'] },
+        { notices: ['unpriced:ES'], trades: 0, reads: ['/contract/item'] },
       ]
     ),
 
-    // (6) Both ends named, and the product never asked for.
+    // (6) The product is never asked for, and the trade is reported missing.
     c(
-      '(6) a maturity that states no usable productId names the maturity AND the contract',
+      '(6) a maturity that states no usable productId drops the trade and asks no further',
       [noProductId, nullProductId, zeroProductId],
       Array.from({ length: 3 }, () => ({
-        reason: 'unpriceable:no_value_per_point',
-        namesContract: true,
-        namesMaturity: true,
+        notices: ['unpriced:ES'],
+        trades: 0,
         reads: ['/contract/item', '/contractMaturity/item'],
       }))
     ),
 
-    // (7) The 404-only catch, extended to the new call.
+    // (7) The 404-only catch, extended to the new call — and no longer a day
+    // that fails whole (REF-112 §5.11).
     c(
-      '(7) a 404 on the maturity is an unpriceable day naming both ids',
-      [
-        maturity404 instanceof TradovateUnpriceableError,
-        classifyDayPullFailure(maturity404),
-        maturity404Line.includes(String(MATURITY_ID)),
-        maturity404Line.includes(String(CONTRACT_ID)),
-        // Same discipline as the product 404: ids are not secrets, a symbol or
-        // a price or a hostname would be.
-        ['ESZ6', '5000', '4990', 'tradovate.com'].filter((leak) => maturity404Line.includes(leak)),
-      ],
-      [true, 'broker_unavailable', true, true, []]
+      '(7) a 404 on the maturity costs the trade and names the instrument',
+      [maturity404Pull.trades.length, maturity404Pull.notices],
+      [0, [{ kind: 'unpriced_product', root: 'ES' }]]
     ),
 
     // (8) And the narrowness of it.
@@ -2404,11 +2478,14 @@ async function main() {
       [2, 500 + 1000, 2]
     ),
 
-    // (13) Nothing is remembered on failure.
+    // (13) Nothing is remembered on failure. The refusal is now a dropped
+    // trade rather than a thrown day (REF-112 §5.11), and the property it was
+    // written for is unchanged and matters more: a 404 must not refuse this
+    // contract for the life of the process.
     c(
       '(13) a failed lookup is not remembered, so the next pull prices',
-      [failedThenFixed, afterFailure.net],
-      ['unpriceable:no_value_per_point', -500]
+      [failedThenFixed.trades.length, failedThenFixed.notices.length, afterFailure.net],
+      [0, 1, -500]
     ),
 
     // (14) THE ONE TO WRITE FIRST, and the only way a name-keyed cache could go
@@ -2508,6 +2585,7 @@ async function main() {
 
   await foreignCurrencyGroup();
   await unsupportedTypeGroup();
+  await unpricedProductGroup();
 
   console.log();
   if (failures.length) {
@@ -4754,6 +4832,109 @@ async function unsupportedTypeGroup() {
       nothingAtAll.notices.map((n) => n.kind), ['no_accounts']),
     c('(9) and a trader with a working account never sees it',
       mixed.notices.some((n) => n.kind === 'no_accounts'), false),
+  ]);
+}
+
+/**
+ * REF-112 §5.11 — an unresolvable product costs one trade, not the day.
+ *
+ * §5.11 lists what nothing has ever demonstrated this chain resolving for: a
+ * spread, an option, a continuous contract, a combo leg. Every failure in it
+ * was fatal to the whole pull, so a trader legging a calendar spread
+ * plausibly lost every figure they had, every day, with the journal falling
+ * back to Reflect-only data and nothing anywhere saying why.
+ *
+ * THE TWO PROPERTIES THIS GROUP EXISTS TO HOLD TOGETHER, because they pull in
+ * opposite directions and the ticket is only solved if both are true:
+ *
+ *   1. The rest of the day is still stated, correctly, to the cent.
+ *   2. Nothing unpriced is priced — not at zero, not in points, not at
+ *      another contract's value per point (REF-90's silent unit bug).
+ */
+async function unpricedProductGroup() {
+  const SPREAD_CONTRACT_ID = 2607777;
+  const SPREAD_MATURITY_ID = 880777;
+  const SPREAD_POSITION: TradovatePosition = {
+    ...POSITION,
+    id: 9007,
+    contractId: SPREAD_CONTRACT_ID,
+  };
+
+  const goodTrip = roundTrip({
+    side: 'long',
+    openAt: '2026-10-14T05:00:00Z',
+    closeAt: '2026-10-14T06:00:00Z',
+    entry: 5000,
+    exit: 4990,
+  });
+  // The calendar spread §5.11 names. Its name is not `<ROOT><MONTH><YEAR>`,
+  // which is exactly why lib/symbols.ts refuses to read a root out of it.
+  const spreadTrip = roundTrip({
+    side: 'long',
+    openAt: '2026-10-14T05:30:00Z',
+    closeAt: '2026-10-14T06:30:00Z',
+    entry: 12,
+    exit: 20,
+    contractId: SPREAD_CONTRACT_ID,
+    positionId: SPREAD_POSITION.id,
+  });
+
+  /** One ordinary ES trade and one spread whose maturity names no product. */
+  const mixed = await pullFull(
+    withTrips([goodTrip, spreadTrip], {
+      positions: [POSITION, SPREAD_POSITION],
+      contracts: [
+        CONTRACT,
+        { id: SPREAD_CONTRACT_ID, name: 'ESZ6-ESH7', contractMaturityId: SPREAD_MATURITY_ID },
+      ],
+      // The maturity resolves and states no productId — the chain's own
+      // boundary, reached with a perfectly well-formed request.
+      //
+      // CAST BECAUSE THE TYPE SAYS `productId` IS REQUIRED and this fixture
+      // is about the wire disagreeing with the documentation, which is the
+      // whole subject of REF-90. A typed fixture could not express the body
+      // it exists to reproduce — the same reason `Scene.snapshots` is
+      // `unknown`.
+      maturities: [MATURITY, { id: SPREAD_MATURITY_ID } as TradovateContractMaturity],
+    })
+  );
+
+  group('REF-112 §5.11: an unresolvable product costs one trade, not the day', [
+    // (1) THE HEADLINE. This threw before, and the throw was the trader's
+    // whole day across every contract they touched.
+    c('(1) the ordinary trade is still imported, to the cent',
+      [mixed.trades.length, mixed.day.closedCount, mixed.day.net], [1, 1, -500]),
+    c('(2) and the spread contributes nothing rather than a wrong number',
+      mixed.trades.some((t) => t.symbol === 'ESZ6-ESH7'), false),
+    // THE UNIT BUG REF-90 EXISTS TO PREVENT, restated for the new path: ES is
+    // $50 a point and the spread filled 8 points. Priced at ES's unit it
+    // would be +$400 and the day would read −$100 instead of −$500.
+    c('(3) and above all it is not priced at the other contract\'s value per point',
+      mixed.day.net, -500),
+
+    // (4) The sentence, and the one thing it may carry.
+    c('(4) the trader is told, and the contract names no root it can read',
+      mixed.notices, [{ kind: 'unpriced_product', root: null }]),
+    // `brokerSymbolRoot` is a table-checked reader of <ROOT><MONTH><YEAR> and
+    // null is the correct answer for a spread leg — which is why the sentence
+    // has a form that works without one. Guessing "ES" off the front of
+    // `ESZ6-ESH7` is exactly the name parsing REF-90 §2 refused.
+    c('(5) no root is guessed off the front of a spread name',
+      JSON.stringify(mixed.notices).includes('ES'), false),
+
+    // (6) An ordinary contract that fails the chain DOES get its root, which
+    // is the case the sentence is mostly for.
+    c('(6) a plain contract that cannot be priced is named by root',
+      (await pullFull(
+        withTrips([goodTrip], {
+          maturities: [{ id: MATURITY_ID } as TradovateContractMaturity],
+        })
+      )).notices,
+      [{ kind: 'unpriced_product', root: 'ES' }]),
+
+    // (7) A clean day says nothing, which is what keeps this free.
+    c('(7) a day where everything resolved carries no notice',
+      (await pullFull(withTrips([goodTrip]))).notices, []),
   ]);
 }
 

@@ -113,6 +113,10 @@ import {
   type LogicalPosition,
 } from './cycles';
 import { loadContractNames } from './contract-names';
+// DISPLAY ONLY — never a lookup. See the note at its one call site in
+// {@link scanHost}, and this module's header on why there is no name parsing
+// anywhere in the pricing chain itself.
+import { brokerSymbolRoot } from '../symbols';
 import { TradovateRequestError, TradovateUnpriceableError, withoutResponseBody } from './errors';
 import { closedToday, minutesSince } from './trading-day';
 import {
@@ -1117,9 +1121,54 @@ export async function scanHost(params: Parameters<typeof loadHostTrades>[0]): Pr
     name,
   }));
 
-  // Priced LAST, so that `describeCycle` is never handed a cycle whose contract
-  // is in `refused` — it reads `units` and a missing unit is not a case it has.
-  const priced = [...needed].filter((cycle) => !skippedAccounts.has(cycle.accountId));
+  // ── An unresolved product costs ONE TRADE (REF-112 §5.11, item 6) ────────
+  //
+  // Everything left in `refused` is a contract whose chain did not resolve:
+  // no usable maturity id, a 404 on the maturity or the product, no usable
+  // `valuePerPoint`, a currency id `/currency/list` does not name. Each was
+  // fatal to the entire day pull — §5.11 lists the cases nothing has ever
+  // demonstrated this chain resolving for, and a trader legging a calendar
+  // spread plausibly lost every figure they had, every day.
+  //
+  // PER CONTRACT AND NOT PER ACCOUNT, which is the opposite of §5.10 above
+  // and for a reason the two cases do not share. A currency is a standing
+  // property of an account's whole book, so half of it would be missing and
+  // the P&L would read as complete. An unresolvable product is one
+  // instrument: the rest of that account's trades are priced correctly and
+  // the figure is short by one named thing, which the sentence names.
+  //
+  // THE ROOT, NEVER THE CONTRACT. `brokerSymbolRoot` is a table-checked
+  // reader of `<ROOT><MONTH><YEAR>` and nothing else, and it answers null for
+  // every name this chain actually fails on — a spread, an option, a combo
+  // leg. That is the right answer twice over: the expiry says which month a
+  // trader was in and only the root says which instrument, and a name shaped
+  // like nothing lib/symbols.ts recognises is one this module has no business
+  // guessing at. Null degrades the sentence; it does not remove it.
+  //
+  // AND IT IS DISPLAY ONLY. This module's header says there is NO NAME
+  // PARSING anywhere in it, because "spreads, options and continuous
+  // contracts all carry names that such a rule reads wrongly" — every failure
+  // of such a rule being a silent wrong product or a 404 on a well-formed
+  // request (REF-90 §2). That rule is about ROUTING and is untouched: nothing
+  // below is looked up, fetched, cached or priced by this string. It is read
+  // once, to put a word in a sentence, after the lookup has already failed.
+  for (const [contractId, refusal] of refused) {
+    if (refusal.reason === 'foreign_currency') continue;
+    // A contract nothing in the window traded cannot be in `refused` —
+    // `loadContractUnits` is asked for exactly the needed set — but the guard
+    // keeps the notice count equal to the number of trades actually dropped.
+    if (![...needed].some((cycle) => cycle.contractId === contractId)) continue;
+    notices.push({ kind: 'unpriced_product', root: brokerSymbolRoot(refusal.name) });
+  }
+
+  // Priced LAST, so that `describeCycle` is never handed a cycle whose
+  // contract is in `refused` — it reads `units`, and a missing unit is not a
+  // case it has. Both filters are here rather than one each: an account
+  // skipped for its currency takes its other contracts with it, and a
+  // contract that would not resolve takes only itself.
+  const priced = [...needed].filter(
+    (cycle) => !skippedAccounts.has(cycle.accountId) && !refused.has(cycle.contractId)
+  );
 
   return {
     trades: priced.map((cycle) => describeCycle(cycle, host, units, pairById)),
@@ -1611,10 +1660,21 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
   // count out of two. An operator reading a non-zero collision count learns
   // the one thing nobody has ever been able to measure — whether the two id
   // spaces overlap in practice — without learning anything about the trader.
-  if (hostsDropped > 0 || crossHostCollisions > 0) {
+  //
+  // THE TWO SKIP COUNTS ARE HERE FOR WHAT THEY REPLACED (§5.10, §5.11). Those
+  // refusals used to be thrown errors whose messages named the contract and
+  // product ids, which is a diagnostic this change would otherwise lose
+  // outright. It was already not reaching a log — today/route.ts reduces the
+  // message to its KIND before writing it — so what is actually lost is
+  // nothing, and what is gained is a number that was never there: how often
+  // this happens, per pull, in production.
+  const skippedAccounts = notices.filter((n) => n.kind === 'account_currency').length;
+  const unpricedContracts = notices.filter((n) => n.kind === 'unpriced_product').length;
+  if (hostsDropped > 0 || crossHostCollisions > 0 || skippedAccounts > 0 || unpricedContracts > 0) {
     console.warn(
       `[tradovate][day] hostsAsked=${order.length} hostsDropped=${hostsDropped} ` +
-        `accounts=${claimed.size} crossHostIdCollisions=${crossHostCollisions}`
+        `accounts=${claimed.size} crossHostIdCollisions=${crossHostCollisions} ` +
+        `skippedAccounts=${skippedAccounts} unpricedContracts=${unpricedContracts}`
     );
   }
 
@@ -1775,13 +1835,24 @@ async function loadContractUnits(
     // A null contract body lands here too, and that is the honest answer for
     // it: a body with no `contractMaturityId` cannot reach a product, whether
     // the field is missing or the whole response is.
+    //
+    // REF-112 §5.11, item 6: A REFUSAL AND NO LONGER A THROW — and the same
+    // for the five below it. Every one of these was fatal to the whole day
+    // pull, on every account and every contract, for one contract whose chain
+    // did not resolve. §5.11 names the cases nothing has ever demonstrated
+    // this chain resolving for: a spread, an option, a combo leg. A trader
+    // legging a calendar spread lost their entire day, forever, with the
+    // journal falling back to Reflect-only data and saying nothing.
+    //
+    // The contract is refused, its cycles are dropped by {@link scanHost},
+    // and the trader is told which instrument did not come in. Everything
+    // the old throws protected is still protected: nothing unpriced reaches
+    // `units`, so nothing unpriced can be priced, and `describeCycle` still
+    // throws if a cycle ever gets that far without one.
     const maturityId = contract?.contractMaturityId;
     if (!usableId(maturityId)) {
-      throw new TradovateUnpriceableError(
-        `Contract ${contractId} states no usable contractMaturityId, so its product ` +
-          'cannot be reached and its trades would have no value per point.',
-        'no_value_per_point'
-      );
+      refused.set(contractId, { reason: 'no_value_per_point', name });
+      return;
     }
 
     // Same 404-only catch as the product read below, and for the same reason:
@@ -1794,12 +1865,16 @@ async function loadContractUnits(
         id: maturityId,
       });
     } catch (error) {
+      // A 404 IS A REFUSAL; EVERYTHING ELSE STILL THROWS. That split is the
+      // one line item 6 must not blur: a 404 says "this entity is not here",
+      // which is a fact about one contract, and a 401, 429 or 5xx says
+      // nothing about the contract at all — it is the connection or the rate
+      // limit, it affects every contract behind it, and swallowing it would
+      // under-count the day in exactly the direction rule 2 of
+      // {@link loadBrokerDay} forbids.
       if (error instanceof TradovateRequestError && error.status === 404) {
-        throw new TradovateUnpriceableError(
-          `Contract maturity ${maturityId} (contract ${contractId}) was not found on the ` +
-            "host that reported the fill, so the contract's product cannot be reached.",
-          'no_value_per_point'
-        );
+        refused.set(contractId, { reason: 'no_value_per_point', name });
+        return;
       }
       throw error;
     }
@@ -1808,12 +1883,8 @@ async function loadContractUnits(
     // contract. This is the guarantee the old chain did not have.
     const productId = maturity?.productId;
     if (!usableId(productId)) {
-      throw new TradovateUnpriceableError(
-        `Contract maturity ${maturityId} (contract ${contractId}) states no usable ` +
-          'productId, so its product cannot be looked up and its trades would have no ' +
-          'value per point.',
-        'no_value_per_point'
-      );
+      refused.set(contractId, { reason: 'no_value_per_point', name });
+      return;
     }
 
     // A 404 ALONE, and no cross-host retry. If the product genuinely is not on
@@ -1826,12 +1897,11 @@ async function loadContractUnits(
     try {
       product = await reader.get<TradovateProduct>('/product/item', { id: productId });
     } catch (error) {
+      // Same split as the maturity read above: a 404 refuses one contract, a
+      // 401/429/5xx still fails the pull.
       if (error instanceof TradovateRequestError && error.status === 404) {
-        throw new TradovateUnpriceableError(
-          `Product ${productId} (contract ${contractId}) was not found on the host that ` +
-            'reported the fill, so the trade cannot be priced.',
-          'no_value_per_point'
-        );
+        refused.set(contractId, { reason: 'no_value_per_point', name });
+        return;
       }
       throw error;
     }
@@ -1841,20 +1911,18 @@ async function loadContractUnits(
     // contract worth nothing.
     const valuePerPoint = product?.valuePerPoint;
     if (!usableId(valuePerPoint)) {
-      throw new TradovateUnpriceableError(
-        `Product ${productId} (contract ${contractId}) states no usable ` +
-          'valuePerPoint, so its trades would be counted in points against a dollar threshold.',
-        'no_value_per_point'
-      );
+      refused.set(contractId, { reason: 'no_value_per_point', name });
+      return;
     }
 
     const currencyName = currencyNames.get(product.currencyId);
     if (!currencyName) {
-      throw new TradovateUnpriceableError(
-        `Currency ${product.currencyId} on product ${product.id} is not in /currency/list, ` +
-          'so the unit of its P&L is unknown.',
-        'unknown_currency'
-      );
+      // A currency id `/currency/list` does not name is NOT the §5.10 case:
+      // we do not know that this product is foreign, only that we cannot say
+      // what unit it is in. So it is an unresolved PRODUCT — one trade's
+      // sentence — rather than an account skipped for its denomination.
+      refused.set(contractId, { reason: 'unknown_currency', name });
+      return;
     }
     // REF-112 §5.10. NOT A THROW ANY MORE, AND THAT IS THE WHOLE OF ITEM 1.
     //
