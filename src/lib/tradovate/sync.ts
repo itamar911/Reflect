@@ -52,7 +52,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { syncBrokerAccounts, type AccountSyncCounts } from './account-sync';
 import { tradovateGet } from './client';
-import { getUserTradingApi, readIsTradeSource } from './connections';
+import { getUserTradingApi, notingPenalty, readIsTradeSource } from './connections';
 import { loadBrokerDay, type TradovateReader } from './fills';
 import {
   importBrokerTrades,
@@ -239,8 +239,19 @@ export async function syncUserTrades(request: SyncRequest): Promise<SyncResult> 
   // /today and /trades. Both hosts are built because both are asked:
   // `environment` is the token's mint server and says nothing about where the
   // trader's accounts live (REF-90).
+  //
+  // WRAPPED IN `notingPenalty` (REF-112 §4.5 item 3). A penalty is a property
+  // of a REQUEST, and this closure is the only thing on this path that makes
+  // one — so recording the verdict here covers the import cron, the orders
+  // cron, send-alerts and POST /sync in one place instead of four catch blocks.
+  // It rethrows unchanged, so nothing downstream of it sees a difference.
   const readerFor = (apiUrl: string): TradovateReader => ({
-    get: (path, query) => tradovateGet(path, query, { accessToken: api.accessToken, apiUrl }),
+    get: (path, query) =>
+      notingPenalty(
+        userId,
+        () => tradovateGet(path, query, { accessToken: api.accessToken, apiUrl }),
+        { admin }
+      ),
   });
 
   const { day, trades, held, accounts: hosts } = await loadBrokerDay({

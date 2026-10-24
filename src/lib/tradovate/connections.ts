@@ -746,12 +746,61 @@ export interface UserTradingApi {
  * The second read is three columns on an indexed primary key, inside a request
  * that is about to make seven upstream calls. Caching it alongside the token
  * snapshot was the alternative and it is not worth the extra invalidation path.
+ *
+ *
+ * AND NOW A THIRD READ, FIRST, WHICH IS THE PENALTY GATE (REF-112 §4.5 item 3)
+ * ---------------------------------------------------------------------------
+ *
+ * **THIS FUNCTION IS THE ONE CHOKEPOINT EVERY PER-USER TRADOVATE READ PASSES
+ * THROUGH**, and that is why the gate is here and in no other place. /today,
+ * /trades, /live and ./sync.ts are the four callers, and ./sync.ts is itself
+ * what the import cron, the orders cron, send-alerts and POST /sync all go
+ * through — so one `if` covers every caller REF-112 names and the two it does
+ * not. A gate at each of them would be seven copies of a rule, which §3's
+ * mechanical checklist is explicit about: a partially applied cap is worse than
+ * no cap, because the missing site is invisible.
+ *
+ * BEFORE THE TOKEN AND NOT AFTER, which is not a micro-optimisation. Resolving
+ * a token can itself call Tradovate — `redeemRefreshTokenIfDue` and the renewal
+ * both do — so a gate below `getUserAccessToken` would still spend requests on
+ * a limiter that has already refused us. "Skip every call" has to mean every
+ * call.
+ *
+ * IT COSTS ONE NULLABLE COLUMN ON AN INDEXED PRIMARY KEY, which is the same
+ * trade the paragraph above accepts for the hosts, in front of the same seven
+ * upstream calls. On the live poll it is bounded by that route's own
+ * ten-second hold and shared in-flight promise rather than by its fifteen-
+ * second timer.
+ *
+ * THE KEEP-ALIVE IS DELIBERATELY NOT GATED. It does not come through here — it
+ * calls {@link redeemRefreshToken} directly — and that is the right outcome
+ * rather than an oversight. It makes ONE request a day per trader, and its job
+ * is to stop the connection dying while the trader waits the hour out. Letting
+ * a captcha strand a refresh token would turn an hour of degradation into a
+ * reconnect the trader has to perform by hand.
  */
 export async function getUserTradingApi(
   userId: string,
   options: { admin?: SupabaseClient } = {}
 ): Promise<UserTradingApi> {
   const admin = options.admin ?? createAdminClient();
+
+  // REF-112 §4.5 item 3. See the header: this is first because resolving a
+  // token can itself make an upstream call.
+  const penalty = await readPenaltyState(userId, { admin });
+  if (penalty.penalised) {
+    // A TradovatePenaltyError rather than a new type, so every caller's
+    // existing branch is the right one: `classifyDayPullFailure` answers
+    // `broker_unavailable`, which is the state all four read paths already
+    // render. The message names no user, no account and no instant —
+    // `describeDayPullFailureKind` keeps only the error's name, and this route
+    // family's rule is that nothing identifying reaches a log.
+    throw new TradovatePenaltyError(
+      'Skipped: Tradovate penalised this connection and the backoff has not expired.',
+      { captcha: true }
+    );
+  }
+
   const token = await getUserAccessToken(userId, { admin });
   const { configured, hosts } = await readConnectionTradingHosts(userId, { admin });
 
@@ -1655,6 +1704,165 @@ export async function claimSyncSlot(
     // Ceiling, and at least one. See {@link SyncSlot.retryAfterSeconds}.
     retryAfterSeconds: Math.max(1, Math.ceil(remainingMs / 1000)),
   };
+}
+
+/**
+ * How long a penalty verdict keeps us away from Tradovate for one trader.
+ *
+ * ONE HOUR, WHICH IS THE VENDOR'S OWN NUMBER AND NOT A GUESS. The FAQ says a
+ * `p-captcha` means "a third-party application CANNOT proceed; the user must
+ * try again in about an hour" (docs/tradovate-measurements.md §6). There is no
+ * retry, no header to read and no way for us to answer the challenge, so the
+ * only correct behaviour is to stop asking — and the only thing that made that
+ * impossible before migration 042 was having nowhere to write it down.
+ *
+ * REF-112 §4.5 item 3 is the finding this closes:
+ * `TradovatePenaltyError{captcha:true}` is classified TRANSIENT
+ * (./errors.ts, from REF-101) and transient BY DESIGN writes nothing, so
+ * nothing recorded that a trader was locked out — and the 15-second live poll
+ * kept asking roughly 240 times an hour while three sync mount points and four
+ * crons did the same. Every one of those requests was spent on a limiter that
+ * had already refused us, which is the exact behaviour that escalates a
+ * `p-time` into a `p-captcha` in the first place.
+ *
+ * THE SAME HOUR FOR BOTH KINDS OF PENALTY, deliberately. A non-captcha
+ * {@link TradovatePenaltyError} carries `retryAfterSeconds` and is milder — but
+ * it is only raised after ./client.ts has already spent its whole
+ * `MAX_PENALTY_RETRIES` budget waiting out `p-time` inside the request, so
+ * reaching here means we crossed a variable, undocumented limit and then
+ * crossed it again. The FAQ gives exactly one duration and this is it; a
+ * shorter window built from `retryAfterSeconds` would be inventing a second
+ * policy out of a field that has already been honoured once.
+ */
+export const PENALTY_BACKOFF_MS = 60 * 60_000;
+
+/**
+ * Whether Tradovate has told us to stay away from this trader, and until when.
+ *
+ * READ ONLY: one nullable column on an indexed primary key, no write, no token.
+ *
+ * NOT PENALISED ON ANY ERROR, loudly once. A 42703 is migration 042 not having
+ * run and the correct behaviour is today's — the gate is absent rather than the
+ * integration closed. Refusing every pull because a column is missing would
+ * turn a cap into an outage.
+ */
+export async function readPenaltyState(
+  userId: string,
+  options: { admin?: SupabaseClient; now?: number } = {}
+): Promise<{ penalised: boolean; untilMs: number | null }> {
+  const admin = options.admin ?? createAdminClient();
+  const now = options.now ?? Date.now();
+
+  const { data, error } = await admin
+    .from('tradovate_connections')
+    .select('penalised_until')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error) {
+    warnOnce(
+      'penalty-read',
+      `[tradovate] the penalty lockout could not be read (${error.code ?? 'no code'}); ` +
+        'treating the connection as clear. Migration 042 may not have run.'
+    );
+    return { penalised: false, untilMs: null };
+  }
+
+  const until = data?.penalised_until ? Date.parse(data.penalised_until as string) : Number.NaN;
+  if (!Number.isFinite(until)) return { penalised: false, untilMs: null };
+
+  // A value in the PAST is the normal resting state of this column for any
+  // trader who was ever penalised once. It is not cleared on expiry — nothing
+  // would be left to do the clearing but another cron — so "expired" is read
+  // rather than written.
+  return { penalised: until > now, untilMs: until };
+}
+
+/**
+ * Record that Tradovate refused us for this trader, and for how long.
+ *
+ * A PLAIN TARGETED UPDATE AND NOT {@link saveConnection}, which matters: that
+ * function writes EVERY column on every save, so routing this through it would
+ * need the whole `carryForward` dance and would risk nulling a token over a
+ * rate-limit verdict. One column, by user id.
+ *
+ * MONOTONIC — `penalised_until` only ever moves FORWARD. Two of a trader's
+ * lambdas can take a penalty seconds apart, and the second one must not shorten
+ * the first one's lockout by overwriting it with its own slightly earlier
+ * deadline. The `lte` filter makes the write a no-op in that case, which is
+ * also why zero rows updated is not an error here.
+ *
+ * NEVER THROWS. It is called from a catch block on the way out of a failed
+ * pull, and the pull has already failed — turning a bookkeeping failure into a
+ * second, different exception would replace a diagnosable broker error with a
+ * PostgREST one. Logged as a code, once per process.
+ */
+export async function recordPenalty(
+  userId: string,
+  options: { admin?: SupabaseClient; now?: number; backoffMs?: number } = {}
+): Promise<void> {
+  const admin = options.admin ?? createAdminClient();
+  const now = options.now ?? Date.now();
+  const until = new Date(now + (options.backoffMs ?? PENALTY_BACKOFF_MS)).toISOString();
+
+  // Forget the cached token as well. Not because it is wrong — a penalty says
+  // nothing about the credential, which is REF-101's whole lesson — but because
+  // the cache is what lets `getUserAccessToken` return without touching the
+  // database, and a trader whose lockout has just been written should not be
+  // served from a snapshot taken before it.
+  forgetCachedToken(userId);
+
+  const { error } = await admin
+    .from('tradovate_connections')
+    .update({ penalised_until: until })
+    .eq('user_id', userId)
+    // Only forward. See the note above.
+    .or(`penalised_until.is.null,penalised_until.lte."${until}"`);
+
+  if (error) {
+    warnOnce(
+      'penalty-write',
+      `[tradovate] a penalty verdict could not be recorded (${error.code ?? 'no code'}); ` +
+        'the backoff will not be honoured. Migration 042 may not have run.'
+    );
+  }
+}
+
+/**
+ * Run an upstream read and record a penalty verdict before rethrowing it.
+ *
+ * AT THE READER AND NOT AT THE SEVEN CATCH SITES, and that is the whole design
+ * decision in this function. A penalty is a property of a REQUEST, and the
+ * reader closures built in ./sync.ts, /today, /trades and /live are the only
+ * four things in the product that make one with a trader's token. Wrapping them
+ * is a complete and checkable set; wrapping the places that CATCH would mean
+ * seven of them — two crons, send-alerts, four routes — each of which would
+ * have to remember, and REF-112 §3's mechanical checklist is explicit that a
+ * partially applied cap is worse than none.
+ *
+ * It cannot be done in ./client.ts, which is where it would otherwise belong:
+ * that module would have to import this one to write, and ./oauth.ts already
+ * imports ./client.ts, so the edge would close a cycle.
+ *
+ * RETHROWS UNCHANGED. The error keeps its identity, so
+ * `classifyDayPullFailure` still answers `broker_unavailable` and every caller
+ * renders exactly what it rendered before — on the live poll that is the
+ * figure's absence, which is silence rather than an error (REF-108 Stage 4b
+ * deleted `NO_PRICE_NOTE` and replaced it with nothing).
+ */
+export async function notingPenalty<T>(
+  userId: string,
+  read: () => Promise<T>,
+  options: { admin?: SupabaseClient; now?: number } = {}
+): Promise<T> {
+  try {
+    return await read();
+  } catch (error) {
+    if (error instanceof TradovatePenaltyError) {
+      await recordPenalty(userId, options);
+    }
+    throw error;
+  }
 }
 
 /**

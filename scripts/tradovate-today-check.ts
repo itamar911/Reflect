@@ -4067,16 +4067,28 @@ async function liveRouteGroup() {
     })
   );
 
-  // Both of these log on purpose, so both run inside the capture — otherwise
-  // the suite's own output carries two warnings that look like failures.
+  // All three of these log on purpose, so all three run inside the capture —
+  // otherwise the suite's own output carries warnings that look like failures.
   let unrecorded: Record<string, unknown> = {};
   let failed: Record<string, unknown> = {};
+  let penalised: Record<string, unknown> = {};
   const logs = await liveLogsOf(async () => {
     unrecorded = await liveBody(liveDeps({ resolveAccounts: async () => new Map() }));
     failed = await liveBody(
       liveDeps({
         loadPositions: async () => {
           throw new TradovateNotConnectedError('user-1', 'expired');
+        },
+      })
+    );
+    // REF-112 §4.5 item 3. `getUserTradingApi` raises this for a trader inside
+    // their penalty backoff, BEFORE any upstream call is made — so on this
+    // route the lockout has to look like the state that already exists for "we
+    // have no figure" rather than like a new error nothing renders.
+    penalised = await liveBody(
+      liveDeps({
+        loadPositions: async () => {
+          throw new TradovatePenaltyError('penalised', { captcha: true });
         },
       })
     );
@@ -4120,10 +4132,25 @@ async function liveRouteGroup() {
     c('(12) and the pull is still verified rather than failed', unrecorded.source, 'broker_verified'),
     c('(13) a lapsed connection is a state, not an error', failed, { source: 'broker_expired' }),
 
+    // REF-112 §4.5 item 3. THE SAME THREE-KEY BODY AS EVERY OTHER REFUSAL, and
+    // that is the whole claim: a penalised trader's poll carries no `accounts`
+    // and therefore no figure, which Stage 4b made SILENCE rather than a
+    // message ("`NO_PRICE_NOTE` IS DELETED AND NOTHING REPLACED IT"). No new
+    // state, no error banner, and nothing for the client to learn.
+    c('(14) a penalty backoff is the figure’s absence, not an error',
+      penalised, { source: 'broker_unavailable' }),
+    // AND POLLING CONTINUES. `shouldKeepPolling` stops only on `reflect_only`,
+    // so the lockout must NOT be reported as that — the trader's own tab would
+    // go quiet for the session and still be quiet an hour later when the
+    // backoff expired. The server is what stops calling Tradovate; the browser
+    // keeps asking the server, which is one cheap read per poll.
+    c('(15) and the tab keeps polling, so it recovers when the hour is up',
+      shouldKeepPolling(penalised as unknown as BrokerLivePull), true),
+
     // Counts only. This is the highest-frequency log line in the product, so
     // a leak here repeats 240 times an hour per trader.
-    c('(14) the log carries a count', logs.some((l) => l.includes('unresolved=1')), true),
-    c('(15) and no account name, id or user id', [
+    c('(16) the log carries a count', logs.some((l) => l.includes('unresolved=1')), true),
+    c('(17) and no account name, id or user id', [
       logs.some((l) => l.includes('My Eval')),
       logs.some((l) => l.includes(String(ACCOUNT.id))),
       logs.some((l) => l.includes('user-1')),

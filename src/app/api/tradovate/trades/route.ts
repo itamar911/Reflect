@@ -68,7 +68,7 @@ import {
 } from '@/lib/rules/brokerDayContext';
 import { isUserAllowed } from '@/lib/tradovate/allowlist';
 import { tradovateGet } from '@/lib/tradovate/client';
-import { getUserTradingApi } from '@/lib/tradovate/connections';
+import { getUserTradingApi, notingPenalty } from '@/lib/tradovate/connections';
 import { loadBrokerDay, type BrokerTrade, type TradovateReader } from '@/lib/tradovate/fills';
 import { redactSecrets } from '@/lib/tradovate/redact';
 import {
@@ -262,8 +262,17 @@ export async function GET(request: Request) {
       // construction as /today. Both hosts are built because both are asked:
       // `environment` is the token's mint server and says nothing about where
       // the trader's accounts live (REF-90).
+      //
+      // `notingPenalty` records a penalty verdict on the way out (REF-112 §4.5
+      // item 3) and rethrows unchanged, so the catch below still maps it to
+      // `broker_unavailable`. It wraps the READER rather than the catch because
+      // a penalty is a property of a request, and this closure is the only
+      // thing here that makes one.
       const readerFor = (apiUrl: string): TradovateReader => ({
-        get: (path, query) => tradovateGet(path, query, { accessToken: api.accessToken, apiUrl }),
+        get: (path, query) =>
+          notingPenalty(userId, () =>
+            tradovateGet(path, query, { accessToken: api.accessToken, apiUrl })
+          ),
       });
 
       const { day, trades } = await loadBrokerDay({

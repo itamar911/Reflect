@@ -101,7 +101,7 @@ import {
 } from '@/lib/rules/brokerDayContext';
 import { isUserAllowed } from '@/lib/tradovate/allowlist';
 import { tradovateGet } from '@/lib/tradovate/client';
-import { getUserTradingApi, readIsTradeSource } from '@/lib/tradovate/connections';
+import { getUserTradingApi, notingPenalty, readIsTradeSource } from '@/lib/tradovate/connections';
 import { loadBrokerDay, type BrokerTrade, type TradovateReader } from '@/lib/tradovate/fills';
 import { importBrokerTrades, isImportEnabled } from '@/lib/tradovate/import';
 import { redactSecrets } from '@/lib/tradovate/redact';
@@ -241,9 +241,17 @@ export async function GET(request: Request) {
     // server and says nothing about where the trader's accounts live, which was
     // the first of REF-90's two bugs. See loadBrokerDay for what it is still
     // used for.
+    //
+    // `notingPenalty` records a penalty verdict on the way out (REF-112 §4.5
+    // item 3) and rethrows unchanged, so the catch below still maps it to
+    // `broker_unavailable`. It wraps the READER rather than the catch because a
+    // penalty is a property of a request, and this closure is the only thing
+    // here that makes one.
     const readerFor = (apiUrl: string): TradovateReader => ({
       get: (path, query) =>
-        tradovateGet(path, query, { accessToken: api.accessToken, apiUrl }),
+        notingPenalty(user.id, () =>
+          tradovateGet(path, query, { accessToken: api.accessToken, apiUrl })
+        ),
     });
 
     // `trades` is kept now, and ONLY to be written. It does not enter the

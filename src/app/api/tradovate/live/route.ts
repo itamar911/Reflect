@@ -144,7 +144,7 @@ import {
 } from '@/lib/rules/brokerDayContext';
 import { isUserAllowed } from '@/lib/tradovate/allowlist';
 import { tradovateGet, tradovatePost } from '@/lib/tradovate/client';
-import { getUserTradingApi } from '@/lib/tradovate/connections';
+import { getUserTradingApi, notingPenalty } from '@/lib/tradovate/connections';
 import { isImportEnabled } from '@/lib/tradovate/import';
 import { ORDERS_LOOKBACK_MS } from '@/lib/tradovate/orders-cron';
 import {
@@ -597,9 +597,24 @@ export async function GET() {
       // only place in the product that supplies one — see the note on
       // `LiveReader` in lib/tradovate/positions.ts for why the shared type did
       // not move.
+      //
+      // BOTH VERBS GO THROUGH `notingPenalty` (REF-112 §4.5 item 3), and this
+      // is the route that made the cap necessary: the penalty escalates to a
+      // `p-captcha` a third-party application cannot clear, and a route polled
+      // 240 times an hour is what escalates it. The verdict is recorded here
+      // and the error rethrown unchanged, so `buildPull`'s catch still answers
+      // `broker_unavailable` — which on this route is the figure's ABSENCE,
+      // silence rather than an error (Stage 4b deleted `NO_PRICE_NOTE` and
+      // replaced it with nothing).
       const readerFor = (apiUrl: string): LiveReader => ({
-        get: (path, query) => tradovateGet(path, query, { accessToken: api.accessToken, apiUrl }),
-        post: (path, body) => tradovatePost(path, body, { accessToken: api.accessToken, apiUrl }),
+        get: (path, query) =>
+          notingPenalty(userId, () =>
+            tradovateGet(path, query, { accessToken: api.accessToken, apiUrl })
+          ),
+        post: (path, body) =>
+          notingPenalty(userId, () =>
+            tradovatePost(path, body, { accessToken: api.accessToken, apiUrl })
+          ),
       });
 
       return loadOpenPositions({

@@ -124,6 +124,10 @@ import { respondToSyncRequest, type SyncRouteDeps } from '../src/app/api/tradova
 import { syncUserTrades } from '../src/lib/tradovate/sync';
 import {
   TradovateNotConnectedError,
+  // REF-112 §4.5 item 3. The one error in this integration that means "stop
+  // asking" rather than "try again", and until this stage nothing here raised
+  // or asserted on it.
+  TradovatePenaltyError,
   TradovateTransientError,
   TradovateUnpriceableError,
 } from '../src/lib/tradovate/errors';
@@ -148,6 +152,11 @@ import {
 import {
   claimSyncSlot,
   forgetRateWarnings,
+  getUserTradingApi,
+  notingPenalty,
+  PENALTY_BACKOFF_MS,
+  readPenaltyState,
+  recordPenalty,
   SYNC_COOLDOWN_MS,
 } from '../src/lib/tradovate/connections';
 import {
@@ -1576,6 +1585,234 @@ async function syncRouteGroup() {
     c('(10) a connection that never existed is reflect_only', missing, 'reflect_only'),
     c('(11) a transient failure is broker_unavailable', transient, 'broker_unavailable'),
     c('(12) an unpriceable product is broker_unavailable too', unpriceable, 'broker_unavailable'),
+  ]);
+}
+
+/**
+ * The captcha lockout: once Tradovate refuses us, we stop asking
+ * (REF-112 §4.5 item 3).
+ *
+ * THE FINDING THIS CLOSES, in the investigation's own words:
+ * `TradovatePenaltyError{captcha:true}` is classified TRANSIENT, and transient
+ * by design writes NOTHING to the database — "so nothing records that a user is
+ * in an hour-long captcha lockout, and the 15 s live poll keeps asking, ~240
+ * times an hour, while three sync mount points and four crons do the same."
+ * Every one of those requests was spent on a limiter that had already refused
+ * us, which is what escalates a `p-time` into a `p-captcha` in the first place.
+ *
+ * FOUR CLAIMS, AND THE THIRD IS THE ONE THAT IS EASY TO GET WRONG:
+ *
+ *   1. the state is read correctly, and an EXPIRED lockout is not a lockout —
+ *      the column is never cleared, so a past value is the resting state;
+ *   2. the verdict is recorded, forward-only, so two lambdas taking a penalty
+ *      seconds apart cannot shorten each other's hour;
+ *   3. the gate fires BEFORE THE TOKEN IS RESOLVED. Resolving a token can
+ *      itself call Tradovate (`redeemRefreshTokenIfDue`, the renewal), so a
+ *      gate below it would still spend requests. The assertion is that the
+ *      token COLUMNS ARE NEVER SELECTED — a stub that records its column lists
+ *      can prove the order, where a stub that just answers cannot;
+ *   4. and without migration 042 none of it fires, loudly once.
+ *
+ * The penalty is NOT reclassified. It stays a `TradovatePenaltyError`, so
+ * `classifyDayPullFailure` still answers `broker_unavailable` — pinned in
+ * scripts/tradovate-today-check.ts, which also asserts what the live route does
+ * with it: the figure is absent, which is silence rather than an error.
+ */
+async function penaltyBackoffGroup() {
+  /**
+   * A `tradovate_connections` that records every column list it was asked for.
+   *
+   * `columns` is what assertion (5) reads: the gate's own SELECT names
+   * `penalised_until` and nothing else, and if the token resolution had run
+   * first there would be a `CONNECTION_COLUMNS` list in here beside it.
+   */
+  function penaltyAdmin(options: { until?: number | null; failWith?: string }) {
+    const columns: string[] = [];
+    const updates: Record<string, unknown>[] = [];
+    const filters: string[] = [];
+
+    const admin = {
+      from: (table: string) => {
+        if (table !== 'tradovate_connections') throw new Error(`unexpected table ${table}`);
+        return {
+          select: (list: string) => {
+            columns.push(list);
+            const q = {
+              eq: () => q,
+              maybeSingle: () => {
+                if (options.failWith) {
+                  return Promise.resolve({
+                    data: null,
+                    error: { code: options.failWith, message: 'column does not exist' },
+                  });
+                }
+                return Promise.resolve({
+                  data: {
+                    penalised_until:
+                      options.until == null ? null : new Date(options.until).toISOString(),
+                  },
+                  error: null,
+                });
+              },
+              // Present so that a token read would RESOLVE rather than throw.
+              // A stub that threw here would make (5) pass because the call
+              // blew up, not because it never happened.
+              order: () => q,
+              returns: () => q,
+              then: (resolve: (v: { data: unknown; error: unknown }) => unknown) =>
+                Promise.resolve({ data: [], error: null }).then(resolve),
+            };
+            return q;
+          },
+          update: (values: Record<string, unknown>) => {
+            updates.push(values);
+            const q = {
+              eq: () => q,
+              or: (expression: string) => {
+                filters.push(expression);
+                return q;
+              },
+              then: (resolve: (v: { data: unknown; error: unknown }) => unknown) =>
+                Promise.resolve({
+                  data: null,
+                  error: options.failWith
+                    ? { code: options.failWith, message: 'column does not exist' }
+                    : null,
+                }).then(resolve),
+            };
+            return q;
+          },
+        };
+      },
+    } as unknown as SupabaseClient;
+
+    return { admin, columns, updates, filters };
+  }
+
+  const NOW = Date.parse('2026-10-15T14:00:00.000Z');
+  const HOUR = 60 * 60_000;
+
+  // ── 1. Reading the state ─────────────────────────────────────────────────
+
+  const never = await readPenaltyState(USER, { admin: penaltyAdmin({ until: null }).admin, now: NOW });
+  const expired = await readPenaltyState(USER, {
+    admin: penaltyAdmin({ until: NOW - 1 }).admin,
+    now: NOW,
+  });
+  const locked = await readPenaltyState(USER, {
+    admin: penaltyAdmin({ until: NOW + 30 * 60_000 }).admin,
+    now: NOW,
+  });
+
+  // ── 2. Recording it ──────────────────────────────────────────────────────
+
+  const recorder = penaltyAdmin({ until: null });
+  await recordPenalty(USER, { admin: recorder.admin, now: NOW });
+  const recorded = recorder.updates[0];
+
+  // ── 3. The gate, and where it sits ───────────────────────────────────────
+
+  // RELATIVE TO THE REAL CLOCK, unlike every other case here, because
+  // `getUserTradingApi` has no `now` seam and should not grow one for a test —
+  // it is the production entry point every read path goes through, and a clock
+  // parameter on it would be a seam nothing in production ever supplies. Half
+  // an hour of real future is a lockout under any clock this suite runs on.
+  const gated = penaltyAdmin({ until: Date.now() + 30 * 60_000 });
+  let gateThrew = 'no throw';
+  let gateCaptcha: boolean | null = null;
+  try {
+    await getUserTradingApi(USER, { admin: gated.admin });
+  } catch (error) {
+    gateThrew = error instanceof Error ? error.name : 'non-Error throw';
+    gateCaptcha = error instanceof TradovatePenaltyError ? error.captcha : null;
+  }
+
+  // A clear connection gets PAST the gate — so (5) is about the gate and not
+  // about the stub being unusable. It fails later, at the token, which is the
+  // proof that the token read is downstream of the gate.
+  const clear = penaltyAdmin({ until: null });
+  let clearThrew = 'no throw';
+  try {
+    await getUserTradingApi(USER, { admin: clear.admin });
+  } catch (error) {
+    clearThrew = error instanceof Error ? error.name : 'non-Error throw';
+  }
+
+  // ── 4. The recorder at the reader ────────────────────────────────────────
+
+  const onPenalty = penaltyAdmin({ until: null });
+  let rethrown = 'no throw';
+  try {
+    await notingPenalty(
+      USER,
+      () => Promise.reject(new TradovatePenaltyError('captcha', { captcha: true })),
+      { admin: onPenalty.admin, now: NOW }
+    );
+  } catch (error) {
+    rethrown = error instanceof Error ? error.name : 'non-Error throw';
+  }
+
+  // A failure that is NOT a penalty must write nothing. REF-101's whole lesson
+  // is that a transport fault is not a verdict, and buying an hour of silence
+  // on a timeout would be the same mistake in a new place.
+  const onTimeout = penaltyAdmin({ until: null });
+  try {
+    await notingPenalty(
+      USER,
+      () => Promise.reject(new TradovateTransientError('timeout', { reason: 'network' })),
+      { admin: onTimeout.admin, now: NOW }
+    );
+  } catch {
+    // expected
+  }
+
+  const onSuccess = penaltyAdmin({ until: null });
+  const passedThrough = await notingPenalty(USER, async () => 'the answer', {
+    admin: onSuccess.admin,
+    now: NOW,
+  });
+
+  // ── 5. Without migration 042 ─────────────────────────────────────────────
+
+  forgetRateWarnings();
+  const unmigrated = penaltyAdmin({ failWith: '42703' });
+  const { result: pre042, lines: readLines } = await captureLogs(() =>
+    readPenaltyState(USER, { admin: unmigrated.admin, now: NOW })
+  );
+  const { lines: writeLines } = await captureLogs(() =>
+    recordPenalty(USER, { admin: penaltyAdmin({ failWith: '42703' }).admin, now: NOW })
+  );
+  forgetRateWarnings();
+
+  group('a penalised connection is left alone for an hour', [
+    c('(1) a connection that was never penalised is clear',
+      [never.penalised, never.untilMs], [false, null]),
+    // The column is never cleared — nothing would be left to clear it but
+    // another cron — so an expired lockout is read, not written.
+    c('(2) an EXPIRED lockout is not a lockout, and still reports when it was',
+      [expired.penalised, expired.untilMs], [false, NOW - 1]),
+    c('(3) a live one is', [locked.penalised, locked.untilMs], [true, NOW + 30 * 60_000]),
+    c('(4) a verdict is recorded as the vendor’s own hour, forward-only',
+      [recorded?.penalised_until, recorder.filters[0]?.startsWith('penalised_until.is.null,')],
+      [new Date(NOW + HOUR).toISOString(), true]),
+    c('(5) and PENALTY_BACKOFF_MS is that hour', PENALTY_BACKOFF_MS, HOUR),
+    // THE ORDER. A gated user's token columns are never named, so the gate is
+    // upstream of a resolution that can itself call Tradovate.
+    c('(6) a penalised user is refused before the token is read',
+      [gateThrew, gateCaptcha, gated.columns], ['TradovatePenaltyError', true, ['penalised_until']]),
+    c('(7) so (6) is not vacuous: a clear user gets past the gate and reaches the token',
+      [clearThrew, clear.columns.length > 1], ['TradovateNotConnectedError', true]),
+    c('(8) a penalty at the reader is recorded and rethrown unchanged',
+      [rethrown, onPenalty.updates.length], ['TradovatePenaltyError', 1]),
+    // REF-101 again: a transport fault is not a verdict about anything.
+    c('(9) a timeout is not a penalty and buys no silence', onTimeout.updates.length, 0),
+    c('(10) and a successful read writes nothing and passes its value through',
+      [onSuccess.updates.length, passedThrough], [0, 'the answer']),
+    c('(11) without migration 042 nobody is penalised', pre042.penalised, false),
+    c('(12) and both halves say so once, naming no user',
+      [readLines.length, writeLines.length,
+       [...readLines, ...writeLines].some((l) => l.includes(USER))],
+      [1, 1, false]),
   ]);
 }
 
@@ -6075,8 +6312,9 @@ async function main() {
   await syncThrottleGroup();
   await syncPrivacyGroup();
 
-  // REF-112 §4.5 item 2 — the server-side backstop under the click bypass.
+  // REF-112 §4.5 items 2 and 3 — the two cheapest missing caps.
   await syncCooldownGroup();
+  await penaltyBackoffGroup();
 
   // Stage 3a — the debrief's storage and the alert emails.
   await debriefReaderGroup();
