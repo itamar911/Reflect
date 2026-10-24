@@ -320,37 +320,44 @@ export function permittedAccountIds(
  * whose promise is "an account's history survives it closing" would have lost
  * the account the first time it closed.
  *
- * `accountType` STAYS, and that is the half that is easy to drop by accident. A
- * type is what an account IS, not a state it is in: a `House` or `Omnibus`
- * account is never an end trader's portfolio, closed or open, so a permission
- * naming one would still change nothing. Keeping it preserves the property the
- * old gate had — a trader whose visible scope holds a firm's `House` accounts
- * pays nothing — and narrows the new cost to accounts this stage would actually
- * record.
+ * `accountType` HAS NOW GONE TOO, AND REF-112 §5.12 IS WHY (item 2)
+ * -----------------------------------------------------------------
  *
- * WHAT THIS COSTS, EXACTLY. One `/tradingPermission/list` per host per pull, in
- * one new case: a trader with no owned-and-tradeable gap but with somebody
- * else's CUSTOMER account in their visible scope. It is the cheapest read in
- * the chain and its failure is already swallowed ({@link readPermittedAccounts}
- * in ./fills.ts).
+ * The clause above kept `accountType === 'Customer'` on the grounds that a
+ * permission naming a `House` or `Omnibus` account "would still change
+ * nothing". That was true while the only two things this module produced were
+ * fills to count and rows to record. It stopped being true the moment a third
+ * appeared: the SENTENCE that tells a trader their account was skipped
+ * ({@link unsupportedTypeAccounts}).
  *
- * WHAT IT CANNOT COST: a different day. An account that becomes `permitted`
- * only now is one that FAILED a state flag — otherwise the old gate would have
- * fired on it — so {@link untradeable} drops it either way and `accepted` is
- * unchanged BY CONSTRUCTION, not by luck. What moves is which counter it lands
- * in: `noOwner` before, its real rejection reason now, which is strictly more
- * informative. The suite asserts the unchanged half.
+ * The case is the one §5.12 is actually about, and it is not an edge. REF-90
+ * Stage 2 recorded that a prop firm's evaluation account is documented as
+ * being OWNED BY THE API ADMIN with the trader holding a permission on it. So
+ * a funded trader whose firm provisions as `Omnibus` fails BOTH tests —
+ * `noOwner` and not `Customer` — and under the old gate the permission list
+ * was never read, the account could not be proved to be theirs, and it could
+ * not be named. The trader would get the empty journal with no sentence,
+ * which is exactly the failure item 2 exists to remove.
+ *
+ * WHAT THIS COSTS, EXACTLY. One `/tradingPermission/list` per host per pull,
+ * in one further case: a trader with no `noOwner` CUSTOMER account but with a
+ * non-`Customer` account in their visible scope that they do not own. It is
+ * the cheapest read in the chain and its failure is already swallowed
+ * ({@link readPermittedAccounts} in ./fills.ts).
+ *
+ * WHAT IT STILL CANNOT COST: a different day, and now also not a different
+ * accounts table. `untradeable` tests `accountType` FIRST and
+ * {@link claimedAccounts} filters on it before asking about the claim, so
+ * neither `accepted` nor `claimed` can gain a member from this — a permission
+ * on a non-`Customer` account changes which COUNTER it lands in and nothing
+ * else. Unchanged BY CONSTRUCTION, not by luck; the suite asserts it.
  */
 export function permissionsCouldHelp(
   accounts: readonly TradovateAccount[],
   tradovateUserId: number | null
 ): boolean {
   if (tradovateUserId === null) return false;
-  return accounts.some(
-    (account) =>
-      claimFor(account, tradovateUserId, null) === 'noOwner' &&
-      account.accountType === TRADEABLE_ACCOUNT_TYPE
-  );
+  return accounts.some((account) => claimFor(account, tradovateUserId, null) === 'noOwner');
 }
 
 /**
@@ -493,6 +500,46 @@ export function claimedAccounts(
   }
 
   return claimed;
+}
+
+/**
+ * This trader's accounts that were dropped for their TYPE alone (REF-112 §5.12).
+ *
+ * "REF-112'S CENTRAL RISK, IN ONE LINE OF CODE" is how the investigation
+ * describes the `accountType !== 'Customer'` test, and the reason is that it
+ * is an absolute exclusion exercised against exactly one firm's provisioning.
+ * A live prop or funded account provisioned as `Omnibus`, `Giveup` or `House`
+ * by a clearing arrangement imports nothing, gets no row in `accounts`, and —
+ * by the closing note in this module's header — is not an error either. It
+ * presents as an honest zero. At the scale an allowlist ships to that was
+ * defensible; at open rollout it is a trader staring at an empty journal with
+ * no way to find out why.
+ *
+ * SO THE EXCLUSION STAYS AND THE SILENCE GOES. Nothing here becomes importable
+ * and nothing here gets recorded; {@link claimedAccounts} is untouched, and an
+ * `Omnibus` account is still not a portfolio. What this adds is the list it
+ * takes to SAY so, which the pull turns into one sentence per account.
+ *
+ * THE CLAIM IS TESTED AND THAT IS A PRIVACY BOUNDARY, not an ordering
+ * preference. A prop firm's API admin has OTHER TRADERS' accounts in their
+ * visible scope (see this module's header), and an omnibus account is exactly
+ * the kind that shows up there. Naming those would put other people's account
+ * names on this trader's screen. Only an account this trader owns or holds a
+ * permission on can appear here — the same filter {@link claimedAccounts}
+ * applies, for the same reason.
+ *
+ * ZERO UPSTREAM COST: this reads the list `discoverHostAccounts` already has.
+ */
+export function unsupportedTypeAccounts(
+  accounts: readonly TradovateAccount[],
+  tradovateUserId: number | null,
+  permitted: ReadonlySet<number> | null = null
+): TradovateAccount[] {
+  return accounts.filter((account) => {
+    if (account.accountType === TRADEABLE_ACCOUNT_TYPE) return false;
+    const claim = claimFor(account, tradovateUserId, permitted);
+    return claim === 'owned' || claim === 'permitted';
+  });
 }
 
 /**

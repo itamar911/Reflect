@@ -37,10 +37,13 @@ import {
   type PortfolioFigures,
   type PortfolioTradeRow,
 } from '@/lib/portfolios/figures';
+import { readBrokerState } from '@/lib/tradovate/broker-state';
+import { brokerStateNotices } from '@/lib/tradovate/notices';
 import AccountsClient, {
   type PortfolioCardData,
   type UnassignedTrade,
 } from '@/components/accounts/AccountsClient';
+import BrokerNotices from '@/components/tradovate/BrokerNotices';
 
 export const metadata = { title: 'התיקים שלי — Reflect' };
 
@@ -152,9 +155,28 @@ export default async function AccountsPage() {
       dateLabel: hebrewDate(row.submitted_at),
     }));
 
+  // REF-112 §5.12 and §5.4. THE TWO THINGS THIS SCREEN CAN SAY THAT ITS EMPTY
+  // STATE CANNOT. `EmptyState` in AccountsClient promises "תיק מהברוקר נוצר
+  // לבד בסנכרון הבא", which is true for a new trader and false for the two
+  // this answers: one whose Tradovate scope holds no account the filter
+  // accepts, and one whose connection can no longer be refreshed because the
+  // deployment's environment changed. Both would wait for a sync that is
+  // never going to produce a card.
+  //
+  // COUNTED OVER BROKER ROWS ONLY. A trader who made a manual portfolio by
+  // hand has a card on this screen and still has nothing from Tradovate, and
+  // that is exactly the person the sentence is for.
+  const notices = brokerStateNotices(
+    await readBrokerState({
+      userId: user.id,
+      brokerAccounts: portfolios.filter((p) => p.broker === 'tradovate').length,
+    }),
+  );
+
   return (
     <div dir="rtl" className="px-4 py-5 flex flex-col gap-5 md:max-w-none">
       <PageHeader />
+      <BrokerNotices notices={notices} />
       <AccountsClient
         userId={user.id}
         // REF-108: whether the cards' reserved slot has anything to poll

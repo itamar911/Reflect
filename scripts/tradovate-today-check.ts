@@ -50,6 +50,7 @@ import {
   permissionsCouldHelp,
   permittedAccountIds,
   selectTradingAccounts,
+  unsupportedTypeAccounts,
 } from '../src/lib/tradovate/accounts';
 import {
   TradovateNotConnectedError,
@@ -1680,12 +1681,20 @@ async function main() {
     // account was never claimed and never recorded — the ticket's whole promise
     // lost on the one case it was written for.
     //
-    // THE TYPE TEST STAYS, and that is the half worth protecting: `House` is
-    // what an account IS, not a state it is in, so a permission naming one
-    // still changes nothing and a trader whose visible scope holds a firm's
-    // House accounts still pays nothing.
+    // AND THE TYPE TEST HAS NOW GONE THE SAME WAY (REF-112 §5.12, item 2).
+    // This case expected `false` on the fourth row — a `House` stranger never
+    // provoked the read, because "a permission naming one still changes
+    // nothing". A third consumer appeared and made that false: the SENTENCE
+    // that tells a trader their account was skipped. REF-90 Stage 2 recorded
+    // that a prop firm's evaluation account is owned by the API admin with the
+    // trader holding a permission, so a funded trader provisioned as `Omnibus`
+    // fails on ownership AND on type — and under the old gate we could never
+    // prove the account was theirs, so we could never name it. That trader got
+    // the empty journal with no explanation, which is the whole of item 2.
+    //
+    // WHAT THE WIDENING STILL CANNOT DO is the case below this one.
     c(
-      'a stranger CUSTOMER account provokes the permission read, closed or not — a House one never does',
+      'any stranger account provokes the permission read — a type is no longer a reason not to ask',
       [
         permissionsCouldHelp([FIRM_ACCOUNT], ACCOUNT.userId),
         permissionsCouldHelp([{ ...FIRM_ACCOUNT, closed: true }], ACCOUNT.userId),
@@ -1694,7 +1703,28 @@ async function main() {
         permissionsCouldHelp([ACCOUNT], ACCOUNT.userId),
         permissionsCouldHelp([FIRM_ACCOUNT], null),
       ],
-      [true, true, true, false, false, false]
+      [true, true, true, true, false, false]
+    ),
+    // THE PROPERTY THE WIDENING MUST NOT HAVE COST, in its strongest form: a
+    // permission on a non-`Customer` account changes which COUNTER it lands in
+    // and nothing else. Neither the day's accounts nor the accounts table can
+    // gain a member — `untradeable` tests the type first and `claimedAccounts`
+    // filters on it before asking about the claim.
+    c(
+      'a permitted House account is still not in the day and still not a portfolio',
+      (() => {
+        const house = { ...FIRM_ACCOUNT, accountType: 'House' as const };
+        const permitted = new Set([house.id]);
+        const f = partitionAccounts([ACCOUNT, house], ACCOUNT.userId, permitted);
+        return [
+          f.accepted.map((a) => a.id),
+          claimedAccounts([ACCOUNT, house], ACCOUNT.userId, permitted).map((x) => x.account.id),
+          [f.counts.noOwner, f.counts.notCustomer],
+          // And it IS now nameable, which is the point of the widening.
+          unsupportedTypeAccounts([ACCOUNT, house], ACCOUNT.userId, permitted).map((a) => a.id),
+        ];
+      })(),
+      [[ACCOUNT.id], [ACCOUNT.id], [0, 1], [FIRM_ACCOUNT.id]]
     ),
 
     // And the half the widening must not have cost: the DAY. An account that
@@ -2447,6 +2477,7 @@ async function main() {
   // ── REF-112 §5: live accounts this integration cannot serve ───────────────
 
   await foreignCurrencyGroup();
+  await unsupportedTypeGroup();
 
   console.log();
   if (failures.length) {
@@ -4588,6 +4619,111 @@ async function foreignCurrencyGroup() {
     // ── An ordinary day is untouched ─────────────────────────────────────
     c('(10) a dollar-only day carries no notices',
       (await pullFull(withTrips([dollarTrip]))).notices, []),
+  ]);
+}
+
+/**
+ * REF-112 §5.12 — "the central risk, in one line of code".
+ *
+ * `accountType !== 'Customer'` is an absolute exclusion exercised against one
+ * firm's provisioning. A live prop account provisioned as `Omnibus`, `Giveup`
+ * or `House` imports nothing, is never recorded, and — by the closing note in
+ * ./accounts.ts — is not an error either. The trader gets an empty journal
+ * and no way to find out why.
+ *
+ * THE EXCLUSION IS UNCHANGED AND THIS GROUP ASSERTS THAT FIRST. An `Omnibus`
+ * account is still not a portfolio, still contributes no fills, and still
+ * gets no row. What changed is that the trader is told.
+ */
+async function unsupportedTypeGroup() {
+  const OMNIBUS: TradovateAccount = {
+    id: 7101,
+    name: 'PROPFIRM-OMNI-1',
+    userId: ACCOUNT.userId,
+    accountType: 'Omnibus',
+  };
+  // Somebody ELSE's omnibus account, in a firm admin's visible scope. The one
+  // thing that must never be named.
+  const STRANGER: TradovateAccount = {
+    id: 7102,
+    name: 'OTHER-TRADERS-OMNI',
+    userId: 999,
+    accountType: 'Omnibus',
+  };
+
+  const trip = roundTrip({
+    side: 'long',
+    openAt: '2026-10-14T05:00:00Z',
+    closeAt: '2026-10-14T06:00:00Z',
+    entry: 5000,
+    exit: 4990,
+  });
+
+  // A trader with one ordinary account and one omnibus account.
+  const mixed = await pullFull(
+    withTrips([trip], { accounts: [ACCOUNT, OMNIBUS, STRANGER] })
+  );
+
+  // The §5.12 trader: the omnibus account is ALL they have.
+  const omnibusOnly = await pullFull(
+    scene({ accounts: [OMNIBUS], positions: [], pairs: [], fills: [] })
+  );
+
+  // And the same, with somebody else's account also in scope — the case where
+  // a careless implementation leaks a name.
+  const withStranger = await pullFull(
+    scene({ accounts: [OMNIBUS, STRANGER], positions: [], pairs: [], fills: [] })
+  );
+
+  // A trader whose scope is genuinely empty. Still an error state, and §5.12's
+  // argument is why: somebody who completed an OAuth consent screen to connect
+  // a broker almost certainly has an account.
+  const nothingAtAll = await pullFull(
+    scene({ accounts: [], positions: [], pairs: [], fills: [] })
+  );
+
+  group('REF-112 §5.12: an unsupported account type is skipped and named', [
+    // ── The exclusion is untouched ───────────────────────────────────────
+    c('(1) the omnibus account still contributes no trades',
+      mixed.trades.map((t) => t.accountId), [ACCOUNT.id]),
+    c('(2) and still gets no row in the accounts table',
+      mixed.accounts.flatMap((h) => h.claimed.map((x) => x.account.id)), [ACCOUNT.id]),
+
+    // ── And it is no longer silent ───────────────────────────────────────
+    c('(3) a notice names it',
+      mixed.notices,
+      [{ kind: 'account_type', host: 'live', accountId: OMNIBUS.id, name: OMNIBUS.name }]),
+    c('(4) a trader with ONLY an omnibus account gets the sentence',
+      omnibusOnly.notices.map((n) => n.kind).sort(),
+      ['account_type', 'no_accounts']),
+    // THE FAILURE §5.12 NAMES, asserted as the absence of silence. This pull
+    // returned `{closedCount: 0}` and nothing else before.
+    c('(5) and that is not an empty day with no explanation',
+      [omnibusOnly.trades.length, omnibusOnly.day.closedCount, omnibusOnly.notices.length > 0],
+      [0, 0, true]),
+
+    // ── The privacy boundary (./accounts.ts' header) ─────────────────────
+    //
+    // A prop firm's API admin has other traders' accounts in their visible
+    // scope. Naming one would put somebody else's account name on this
+    // trader's screen, which is worse than the silence this replaces.
+    c('(6) somebody else\'s account is never named',
+      withStranger.notices.some(
+        (n) => (n.kind === 'account_type' || n.kind === 'account_currency') &&
+          n.name === STRANGER.name
+      ),
+      false),
+    c('(7) only the trader\'s own is',
+      withStranger.notices
+        .filter((n) => n.kind === 'account_type')
+        .map((n) => (n.kind === 'account_type' ? n.accountId : 0)),
+      [OMNIBUS.id]),
+
+    // ── Zero eligible accounts is an error state (item 2, second half) ───
+    c('(8) an empty scope is a sentence, not an empty list',
+      nothingAtAll.notices.map((n) => n.kind), ['no_accounts']),
+    c('(9) and a trader with a working account never sees it',
+      mixed.notices.some((n) => n.kind === 'no_accounts'), false),
   ]);
 }
 

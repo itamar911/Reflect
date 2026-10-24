@@ -120,6 +120,7 @@ import {
   partitionAccounts,
   permissionsCouldHelp,
   permittedAccountIds,
+  unsupportedTypeAccounts,
   type ClaimedAccount,
 } from './accounts';
 import type { TradovateEnvironment } from './hosts';
@@ -823,7 +824,12 @@ async function readPermittedAccounts(
 export async function discoverHostAccounts(
   reader: TradovateReader,
   tradovateUserId: number | null
-): Promise<{ accepted: TradovateAccount[]; claimed: ClaimedAccount[] }> {
+): Promise<{
+  accepted: TradovateAccount[];
+  claimed: ClaimedAccount[];
+  /** This trader's accounts dropped for their TYPE alone. See REF-112 §5.12. */
+  unsupported: TradovateAccount[];
+}> {
   // THE ONE READ IN THIS MODULE WHOSE FAILURE BODY IS THE TRADER'S OWN DATA.
   // `/account/list` answers with a list of account NAMES, and a
   // TradovateRequestError puts `body.slice(0, 300)` into its message — so an
@@ -849,15 +855,20 @@ export async function discoverHostAccounts(
     ? await readPermittedAccounts(reader, tradovateUserId)
     : null;
 
-  // TWO ANSWERS OUT OF ONE LIST, AND NO SECOND REQUEST. `accepted` is what the
-  // day has always counted; `claimed` is the same trader's accounts WITHOUT the
-  // tradeability filter, which is what the accounts table records (REF-110
-  // Stage 1). Neither is derivable from the other — `accepted` has thrown the
-  // closed ones away and the raw list holds other traders' — so both leave
-  // here, from the one `/account/list` this pull was always going to make.
+  // THREE ANSWERS OUT OF ONE LIST, AND NO SECOND REQUEST. `accepted` is what
+  // the day has always counted; `claimed` is the same trader's accounts
+  // WITHOUT the tradeability filter, which is what the accounts table records
+  // (REF-110 Stage 1); `unsupported` is the ones neither of those will ever
+  // hold, because their TYPE put them out of scope (REF-112 §5.12) — and
+  // which, until now, nothing anywhere said a word about. None of the three is
+  // derivable from another: `accepted` has thrown the closed ones away, the
+  // raw list holds other traders', and `unsupported` is precisely what both
+  // of the first two filter out. All from the one `/account/list` this pull
+  // was always going to make.
   return {
     accepted: partitionAccounts(accounts, tradovateUserId, permitted).accepted,
     claimed: claimedAccounts(accounts, tradovateUserId, permitted),
+    unsupported: unsupportedTypeAccounts(accounts, tradovateUserId, permitted),
   };
 }
 
@@ -1441,6 +1452,27 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
       // absent, and the accounts sync reads that absence as "not asked" rather
       // than as "every account here is gone" (REF-110 §A.5).
       accounts.push({ host: env, claimed: discovered.claimed });
+
+      // REF-112 §5.12. ONE NOTICE PER ACCOUNT THE TYPE FILTER DROPPED, raised
+      // HERE and not in `scanHost`, because that function is never reached for
+      // these: they are not in `accepted`, so a trader whose ONLY accounts are
+      // `Omnibus` drops out at `fresh.length === 0` below and the six
+      // remaining reads never happen. That early exit is the saving (a′) was
+      // built for and it is also exactly how this failure stayed silent.
+      //
+      // NOT DEDUPLICATED ACROSS HOSTS HERE, for {@link HostAccounts}' reason:
+      // an account identity is `(host, id)` and nothing documents the two id
+      // spaces as shared. Two hosts reporting the same bare id produce two
+      // notices, which ./sync.ts collapses to one line if and only if they
+      // resolve to the same LABEL — the thing the trader actually reads.
+      for (const account of discovered.unsupported) {
+        notices.push({
+          kind: 'account_type',
+          host: env,
+          accountId: account.id,
+          name: account.name,
+        });
+      }
     } catch (error) {
       // Rule 1. The mint host answering with a failure is the failure this pull
       // has always had; the other host is new, additive, and must not be able
@@ -1472,6 +1504,32 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
     pooled.push(...scanned.trades);
     held.push(...scanned.held);
     notices.push(...scanned.notices);
+  }
+
+  // ── Nothing to have traded with, which is now an error (REF-112 §5.12) ───
+  //
+  // THIS REVERSES THE CLOSING NOTE OF ./accounts.ts, deliberately and with its
+  // argument in hand. That note says "a connection whose scope holds nothing
+  // tradeable has honestly reported zero trades today, and calling that a
+  // broker outage would put an orange warning in front of a user whose data is
+  // fine." Every word of that is right about an ALLOWLIST, where the handful
+  // of connected traders had accounts somebody had looked at. At open rollout
+  // the probabilities invert: a trader who went through an OAuth consent
+  // screen to connect a broker almost certainly has an account, so zero of
+  // them surviving the filter is far more likely to mean the filter rejected
+  // something real than that there was nothing there.
+  //
+  // IT IS STILL NOT AN OUTAGE, and this is not one. `source` stays
+  // `broker_verified` — the broker answered, and what it said is that we
+  // cannot use any of it. The day is an honest zero with a sentence attached,
+  // not an error page.
+  //
+  // THE GUARD IS `accounts.length > 0`: at least one host ANSWERED discovery.
+  // A pull where no host answered never reaches here (the mint host rethrows),
+  // and a pull with no readers at all has nothing to say about a scope it
+  // never saw.
+  if (accounts.length > 0 && claimed.size === 0) {
+    notices.push({ kind: 'no_accounts' });
   }
 
   // ── Pooled, and from here on there is one trader and one day ──────────────
