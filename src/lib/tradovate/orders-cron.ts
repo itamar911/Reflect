@@ -67,7 +67,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { isAllowlistConfigured, isUserAllowed } from './allowlist';
-import { listConnectionsForImport } from './connections';
+import {
+  listConnectionsForImport,
+  markCronProgress,
+  ORDERS_BATCH_LIMIT,
+} from './connections';
 import { isImportEnabled, type BrokerImportCounts } from './import';
 import { redactSecrets } from './redact';
 import { syncUserTrades } from './sync';
@@ -101,8 +105,29 @@ export const ORDERS_LOOKBACK_MS = 24 * 60 * 60_000;
 
 /** What one run did. Counts only — see the header. */
 export interface StopCaptureCounts {
-  /** Active connections found. */
+  /** Connections in THIS RUN'S BATCH. See {@link active} for the population. */
   found: number;
+  /**
+   * How many active connections exist in total (REF-112 §4.6 item 1).
+   *
+   * **THE NUMBER TO WATCH ON THIS JOB, ALONGSIDE `skippedOpen`.** `active`
+   * above `found` means the batch was full, and on THIS cron a user who was not
+   * reached loses that night's stop history permanently — `/order/list` has
+   * `depthDays = 0`, so there is no catching up. With rotation they are reached
+   * on a later night instead of never, which is the whole improvement; but a
+   * deployment where `active` is several times `found` is one where every
+   * trader is missing most of their stop histories, and this is where that is
+   * visible.
+   */
+  active: number;
+  /**
+   * Whether the batch was taken in least-recently-processed order.
+   *
+   * False means migration 042 has not run, so the batch is bounded but the same
+   * users lead it every night — which on this job is the original REF-112
+   * §4.6 item 1 defect, merely capped. Running 042 is what fixes it.
+   */
+  rotating: boolean;
   /** Users whose capture was attempted: past the allowlist and the declaration. */
   attempted: number;
   /**
@@ -151,6 +176,8 @@ export interface StopCaptureCounts {
 
 const EMPTY: StopCaptureCounts = Object.freeze({
   found: 0,
+  active: 0,
+  rotating: false,
   attempted: 0,
   updated: 0,
   unchanged: 0,
@@ -196,6 +223,8 @@ export async function runStopCapture(params: {
   admin: SupabaseClient;
   now?: number;
   lookbackMs?: number;
+  /** How many connections this run takes. Test seam; production uses the constant. */
+  batchLimit?: number;
   /** Test seam for the allowlist and the flag. Production reads process.env. */
   env?: NodeJS.ProcessEnv;
   /** Test seam for the pull. Production passes the real one by omission. */
@@ -205,6 +234,7 @@ export async function runStopCapture(params: {
     admin,
     now = Date.now(),
     lookbackMs = ORDERS_LOOKBACK_MS,
+    batchLimit = ORDERS_BATCH_LIMIT,
     env = process.env,
     sync = syncUserTrades,
   } = params;
@@ -220,8 +250,27 @@ export async function runStopCapture(params: {
     return run;
   }
 
-  const connections = await listConnectionsForImport({ admin });
+  // A BOUNDED BATCH, LEAST-RECENTLY-PROCESSED FIRST (REF-112 §4.6 item 1), and
+  // THIS IS THE JOB THAT NEEDED IT. The route's own header said so before the
+  // mechanism existed: "Tomorrow's run cannot pick up what this one missed —
+  // the orders are gone by then." The listing returned every active connection
+  // ordered by `user_id` with no limit, the loop walked it serially inside sixty
+  // seconds at four to eight seconds a trader, and so past roughly ten traders
+  // the run was cut off — at the same place every night, because the order never
+  // rotated. The tail's `broker_stop_loss`, `stop_history` and `moved_sl` stayed
+  // NULL for good.
+  //
+  // `ORDERS_BATCH_LIMIT` is ten and not the import's twenty, deliberately: see
+  // the constant.
+  const listing = await listConnectionsForImport({
+    admin,
+    cursor: 'last_orders_at',
+    limit: batchLimit,
+  });
+  const connections = listing.connections;
   run.found = connections.length;
+  run.active = listing.active;
+  run.rotating = listing.rotating;
 
   // The same fail-closed allowlist the user-facing routes enforce. Worth a log
   // line for ./import-cron.ts' reason: fail-closed means an unset variable
@@ -294,8 +343,18 @@ export async function runStopCapture(params: {
     }
   }
 
+  // Every connection in the batch, skipped and failed ones included, after the
+  // loop. See `markCronProgress`, and the import cron's own note.
+  await markCronProgress({
+    admin,
+    cursor: 'last_orders_at',
+    userIds: connections.map((connection) => connection.user_id),
+    now,
+  });
+
   const line =
-    `[tradovate][orders-cron] found=${run.found} attempted=${run.attempted} ` +
+    `[tradovate][orders-cron] found=${run.found} active=${run.active} ` +
+    `rotating=${run.rotating} attempted=${run.attempted} ` +
     `imported=${run.imported} updated=${run.updated} unchanged=${run.unchanged} ` +
     `skippedOpen=${run.skippedOpen} skippedHidden=${run.skippedHidden} ` +
     `failed=${run.failed} skippedUsers=${run.skippedUsers} ` +

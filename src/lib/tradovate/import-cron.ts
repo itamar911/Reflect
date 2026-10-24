@@ -120,7 +120,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { isAllowlistConfigured, isUserAllowed } from './allowlist';
-import { listConnectionsForImport } from './connections';
+import {
+  IMPORT_BATCH_LIMIT,
+  listConnectionsForImport,
+  markCronProgress,
+} from './connections';
 import { isImportEnabled, type BrokerImportCounts } from './import';
 import { redactSecrets } from './redact';
 import { syncUserTrades } from './sync';
@@ -151,8 +155,26 @@ export const IMPORT_LOOKBACK_MS = 48 * 60 * 60_000;
 
 /** What one run did. Counts only — see the header. */
 export interface ImportRunCounts {
-  /** Active connections found. */
+  /** Connections in THIS RUN'S BATCH. See {@link active} for the population. */
   found: number;
+  /**
+   * How many active connections exist in total (REF-112 §4.6 item 1).
+   *
+   * `active > found` IS THE NUMBER TO WATCH: it means the batch was full and
+   * somebody waited a night. It is not an error — that is what the rotation is
+   * for — but a run where `active` is several times `found` is a deployment
+   * that has outgrown {@link IMPORT_BATCH_LIMIT}, and this is where that
+   * becomes visible instead of showing up as a trader's missing day.
+   */
+  active: number;
+  /**
+   * Whether the batch was taken in least-recently-processed order.
+   *
+   * False means migration 042 has not run: the batch is bounded but the same
+   * users lead it every night. On the counts because it is the one thing about
+   * a deployment in that state that an operator has to know.
+   */
+  rotating: boolean;
   /** Users whose import was attempted: past the allowlist and the declaration. */
   attempted: number;
   /** Rows inserted, totalled across users. */
@@ -181,6 +203,8 @@ export interface ImportRunCounts {
 
 const EMPTY: ImportRunCounts = Object.freeze({
   found: 0,
+  active: 0,
+  rotating: false,
   attempted: 0,
   imported: 0,
   updated: 0,
@@ -219,10 +243,18 @@ export async function runBrokerImport(params: {
   admin: SupabaseClient;
   now?: number;
   lookbackMs?: number;
+  /** How many connections this run takes. Test seam; production uses the constant. */
+  batchLimit?: number;
   /** Test seam for the allowlist and the flag. Production reads process.env. */
   env?: NodeJS.ProcessEnv;
 }): Promise<ImportRunCounts> {
-  const { admin, now = Date.now(), lookbackMs = IMPORT_LOOKBACK_MS, env = process.env } = params;
+  const {
+    admin,
+    now = Date.now(),
+    lookbackMs = IMPORT_LOOKBACK_MS,
+    batchLimit = IMPORT_BATCH_LIMIT,
+    env = process.env,
+  } = params;
 
   const run: ImportRunCounts = { ...EMPTY };
 
@@ -234,8 +266,21 @@ export async function runBrokerImport(params: {
     return run;
   }
 
-  const connections = await listConnectionsForImport({ admin });
+  // A BOUNDED BATCH, LEAST-RECENTLY-PROCESSED FIRST (REF-112 §4.6 item 1).
+  // This listing used to return EVERY active connection with no limit, no range
+  // and no cursor, ordered by `user_id`, and the loop below walked it serially
+  // inside a sixty-second function — so past roughly twenty traders the run was
+  // cut off, and because the order never rotated it was cut off at the same
+  // place every night. The tail was starved permanently.
+  const listing = await listConnectionsForImport({
+    admin,
+    cursor: 'last_import_at',
+    limit: batchLimit,
+  });
+  const connections = listing.connections;
   run.found = connections.length;
+  run.active = listing.active;
+  run.rotating = listing.rotating;
 
   // The same fail-closed allowlist the user-facing routes enforce, and for the
   // same reason as the keep-alive's: this feature is not open to all users yet,
@@ -306,8 +351,21 @@ export async function runBrokerImport(params: {
     }
   }
 
+  // THE CURSOR MOVES FOR EVERY CONNECTION IN THE BATCH, skipped and failed ones
+  // included — see `markCronProgress` on why a skip that did not stamp would
+  // hold the head of the queue forever. After the loop, so a run killed by the
+  // function timeout stamps nothing and the next one reaches the same users:
+  // repeating an idempotent import is cheap, and skipping it is not.
+  await markCronProgress({
+    admin,
+    cursor: 'last_import_at',
+    userIds: connections.map((connection) => connection.user_id),
+    now,
+  });
+
   const line =
-    `[tradovate][import-cron] found=${run.found} attempted=${run.attempted} ` +
+    `[tradovate][import-cron] found=${run.found} active=${run.active} ` +
+    `rotating=${run.rotating} attempted=${run.attempted} ` +
     `imported=${run.imported} updated=${run.updated} unchanged=${run.unchanged} ` +
     `skippedOpen=${run.skippedOpen} skippedHidden=${run.skippedHidden} ` +
     `failed=${run.failed} skippedUsers=${run.skippedUsers} ` +

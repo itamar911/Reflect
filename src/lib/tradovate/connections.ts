@@ -1511,6 +1511,81 @@ export interface ImportCandidate {
 }
 
 /**
+ * Which job's place-in-the-queue column to rotate on (REF-112 §4.6 item 1).
+ *
+ * ONE PER JOB, AND THEY MUST NOT BE SHARED. The three jobs run at different
+ * hours over overlapping populations: the 20:00 import takes every active
+ * connection, the 21:30 orders run takes the same list but costs roughly double
+ * per user, and send-alerts imports only the users whose chosen hour this
+ * invocation is. A single shared column would let the 21:30 run read the 20:00
+ * run's stamps as "already served tonight" and skip the very users it exists to
+ * reach — which is the failure this whole mechanism is here to prevent, moved
+ * one level up.
+ *
+ * A union rather than a string, so the column name cannot be a typo: a
+ * misspelled column is a 42703, and a 42703 here is indistinguishable from
+ * migration 042 not having run.
+ */
+export type CronCursorColumn = 'last_import_at' | 'last_orders_at' | 'last_alert_import_at';
+
+/**
+ * How many connections one import run takes.
+ *
+ * TWENTY, which is the number the route's own header already arrived at:
+ * "`tradovate-import` at ~15-20 users", at "two to four seconds a trader"
+ * inside a `maxDuration = 60`. It is deliberately AT that ceiling rather than
+ * under it, because this job is idempotent and retried the next night — a run
+ * that overruns wastes work and loses nothing.
+ */
+export const IMPORT_BATCH_LIMIT = 20;
+
+/**
+ * How many connections one orders run takes.
+ *
+ * TEN, AND THE DIFFERENCE FROM {@link IMPORT_BATCH_LIMIT} IS THE WHOLE POINT.
+ * REF-112's brief suggested twenty for both; the orders route's own header is
+ * more specific and it wins: "AT ROUGHLY FOUR TO EIGHT SECONDS A TRADER THAT IS
+ * ON THE ORDER OF TEN — half the nightly job's ceiling, because the per-user
+ * cost is roughly double." The stop read adds `/order/list`,
+ * `/orderStrategy/list`, `/command/list` and a `deps` per candidate order on
+ * top of the day pull.
+ *
+ * AND BEING CUT OFF COSTS MORE HERE THAN ANYWHERE ELSE. The route says it
+ * outright: "Tomorrow's run cannot pick up what this one missed — the orders
+ * are gone by then." A batch of twenty would reliably overrun sixty seconds and
+ * lose the tail's stop histories permanently, which is the exact bug this
+ * commit exists to fix. Ten users reached completely beats twenty attempted.
+ *
+ * The cost of the smaller batch is that above ten connections a trader's orders
+ * are read every ceil(N/10) nights rather than every night. That is a real
+ * regression against a job that currently reaches the head of the list nightly
+ * — and an improvement for everybody in the tail, who currently never get read
+ * at all.
+ */
+export const ORDERS_BATCH_LIMIT = 10;
+
+/** One batch of connections, and enough context for a log line about it. */
+export interface ImportListing {
+  connections: ImportCandidate[];
+  /**
+   * Whether the batch was taken in least-recently-processed order.
+   *
+   * FALSE MEANS MIGRATION 042 HAS NOT RUN and the batch is today's stable
+   * prefix — bounded, but not fair. It is on the counts so that the one thing
+   * an operator needs to know about a deployment in that state is in the log
+   * line rather than inferable from an absence.
+   */
+  rotating: boolean;
+  /**
+   * How many active connections there are in total, batch or no batch.
+   *
+   * `active > connections.length` is the signature of a full batch, which is
+   * the number to watch: it means somebody waited a night.
+   */
+  active: number;
+}
+
+/**
  * Every active connection, for the daily import (REF-107 Stage 2).
  *
  * Reads the table here rather than in the cron route because this module is the
@@ -1531,24 +1606,142 @@ export interface ImportCandidate {
  * to reconnect, and importing on their behalf is not something a nightly job
  * can do about it.
  *
- * Ordered by `user_id` so a run cut short by the function's time budget covers
- * a stable prefix rather than an arbitrary slice — which makes a truncated run
- * diagnosable from the counts alone.
+ * ORDERED BY `user_id` WAS THE BUG, NOT THE FEATURE (REF-112 §4.6 item 1). The
+ * old comment here claimed a stable prefix made a truncated run "diagnosable
+ * from the counts alone", and that was true and beside the point: a stable
+ * prefix means THE SAME USERS ARE STARVED EVERY SINGLE NIGHT. On the orders
+ * cron that is permanent — `/order/list` has `depthDays = 0`, so tomorrow's run
+ * cannot pick up what tonight's missed, and the tail's `broker_stop_loss`,
+ * `stop_history` and `moved_sl` silently stay NULL forever. Pass a `cursor` and
+ * a `limit` to rotate instead; see {@link CronCursorColumn}.
+ *
+ * Without them this behaves exactly as it always did, which is what send-alerts
+ * wants: it is asking "who is ELIGIBLE for an import", not "who is next".
  */
 export async function listConnectionsForImport(params: {
   admin: SupabaseClient;
-}): Promise<ImportCandidate[]> {
-  const { data, error } = await params.admin
-    .from('tradovate_connections')
-    .select('user_id, is_trade_source')
-    .eq('status', 'active')
-    .order('user_id', { ascending: true })
-    .returns<ImportCandidate[]>();
+  /**
+   * Rotate by least-recently-processed, using this job's own column.
+   * Omitted means today's `user_id` order over every active connection.
+   */
+  cursor?: CronCursorColumn;
+  /** Cap the batch. Omitted means every active connection. */
+  limit?: number;
+}): Promise<ImportListing> {
+  const { admin, cursor, limit } = params;
+
+  const run = async (withCursor: boolean) => {
+    // `count: 'exact'` is the TOTAL matching rows and ignores the limit, which
+    // is the only way a log line can say "twenty of thirty-seven" and let an
+    // operator see that the batch was full. One statement either way.
+    let query = admin
+      .from('tradovate_connections')
+      .select(withCursor ? `user_id, is_trade_source, ${cursor}` : 'user_id, is_trade_source', {
+        count: 'exact',
+      })
+      .eq('status', 'active');
+
+    if (withCursor && cursor) {
+      // NULLS FIRST is what makes a brand-new connection the NEXT one served
+      // rather than the last — a trader who connects today would otherwise sit
+      // behind everybody who has already been processed once.
+      //
+      // `user_id` second, as a tiebreak, so a batch is deterministic when many
+      // rows share a timestamp (which is every row on the first run after
+      // migration 042, and every row stamped by the same run after that).
+      query = query
+        .order(cursor, { ascending: true, nullsFirst: true })
+        .order('user_id', { ascending: true });
+    } else {
+      query = query.order('user_id', { ascending: true });
+    }
+
+    if (limit !== undefined) query = query.limit(limit);
+
+    return query.returns<ImportCandidate[]>();
+  };
+
+  let wanted = cursor !== undefined;
+  let { data, error, count } = await run(wanted);
+
+  // THE PRE-042 FALLBACK, AND IT IS WHY THIS FUNCTION IS SAFE TO DEPLOY FIRST.
+  // Naming a column the database does not have is a 42703 on the WHOLE listing,
+  // which would mean a cron that reads nothing at all — strictly worse than the
+  // starvation it is meant to fix. So the cursor is dropped and the batch is
+  // taken in today's order: the LIMIT still applies, the rotation does not.
+  // Running migration 042 is what turns fairness on.
+  if (error && wanted) {
+    warnOnce(
+      'cron-cursor',
+      `[tradovate] the cron cursor could not be read (${error.code ?? 'no code'}); ` +
+        'falling back to user_id order, so the same users lead every batch. ' +
+        'Migration 042 may not have run.'
+    );
+    wanted = false;
+    ({ data, error, count } = await run(false));
+  }
 
   if (error) {
     throw new Error(`Failed to list Tradovate connections for import: ${error.message}`);
   }
-  return data ?? [];
+
+  const connections = data ?? [];
+  return {
+    connections,
+    rotating: wanted,
+    // `count` is null on a client that did not ask for it, and on the
+    // hand-built stubs in the suites that predate this change. The batch's own
+    // length is the honest floor.
+    active: typeof count === 'number' ? count : connections.length,
+  };
+}
+
+/**
+ * Stamp this run's place in the queue (REF-112 §4.6 item 1).
+ *
+ * EVERY CONNECTION IN THE BATCH, INCLUDING THE ONES THAT WERE SKIPPED, and that
+ * is the rule the whole rotation depends on. The listing filters on
+ * `status = 'active'` only, so a trader who declared the broker is not their
+ * source of trades (E7) is still returned and then skipped in the loop — and if
+ * a skip did not stamp, that trader would hold a slot at the head of every
+ * batch forever. With enough of them the batch would be entirely skipped users,
+ * every night, and the counts would show `found=20 attempted=0` with no
+ * explanation. The same goes for a user whose pull FAILED: a broken connection
+ * must not be able to block the queue.
+ *
+ * ONE STATEMENT FOR THE WHOLE BATCH rather than one per user. It runs after the
+ * loop, so a run killed by the function timeout stamps nothing and the next run
+ * reaches the same users — which is the right failure direction: repeating work
+ * is cheap and idempotent, skipping it on the orders cron is permanent.
+ *
+ * NEVER THROWS. The rows are already written and the counts are already
+ * correct; a bookkeeping failure must not turn a successful run into a failed
+ * one. A 42703 here is migration 042 again, and it is the same degradation as
+ * the listing's: no rotation, logged once.
+ */
+export async function markCronProgress(params: {
+  admin: SupabaseClient;
+  cursor: CronCursorColumn;
+  userIds: readonly string[];
+  now?: number;
+}): Promise<void> {
+  const { admin, cursor, userIds } = params;
+  if (userIds.length === 0) return;
+
+  const at = new Date(params.now ?? Date.now()).toISOString();
+
+  const { error } = await admin
+    .from('tradovate_connections')
+    .update({ [cursor]: at })
+    .in('user_id', [...userIds]);
+
+  if (error) {
+    warnOnce(
+      'cron-progress',
+      `[tradovate] the cron cursor could not be stamped (${error.code ?? 'no code'}); ` +
+        'the next run will reach the same users. Migration 042 may not have run.'
+    );
+  }
 }
 
 // ── REF-112 §4: the rate and cost caps ──────────────────────────────────────

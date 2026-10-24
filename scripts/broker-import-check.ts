@@ -153,7 +153,9 @@ import {
   claimSyncSlot,
   forgetRateWarnings,
   getUserTradingApi,
+  IMPORT_BATCH_LIMIT,
   notingPenalty,
+  ORDERS_BATCH_LIMIT,
   PENALTY_BACKOFF_MS,
   readPenaltyState,
   recordPenalty,
@@ -1406,10 +1408,17 @@ async function cronSkipGroup() {
         { user_id: USER, is_trade_source: true },
         { user_id: OTHER_USER, is_trade_source: false },
       ];
+      // `limit` and `update`/`in` arrived with REF-112 §4.6 item 1: the
+      // listing now takes a bounded batch and the loop stamps its place in the
+      // queue afterwards. Both are no-ops here — these two connections fit in
+      // any batch, and the group is about the SKIP rather than the cursor.
       const q = {
         select: () => q,
         eq: () => q,
         order: () => q,
+        limit: () => q,
+        update: () => q,
+        in: () => q,
         returns: () => q,
         then: (resolve: (v: { data: unknown; error: unknown }) => unknown) =>
           Promise.resolve({ data: rows, error: null }).then(resolve),
@@ -1585,6 +1594,242 @@ async function syncRouteGroup() {
     c('(10) a connection that never existed is reflect_only', missing, 'reflect_only'),
     c('(11) a transient failure is broker_unavailable', transient, 'broker_unavailable'),
     c('(12) an unpriceable product is broker_unavailable too', unpriceable, 'broker_unavailable'),
+  ]);
+}
+
+/**
+ * Every trader is reached across runs, and nobody is always last
+ * (REF-112 §4.6 item 1).
+ *
+ * THE DEFECT, WHICH WAS A CORRECTNESS BUG AND NOT A COST ONE.
+ * `listConnectionsForImport` had no `.limit()`, no `.range()` and no cursor: it
+ * returned EVERY active connection ordered by `user_id`, and both crons walked
+ * it serially inside a sixty-second function. Past roughly ten traders the
+ * orders run was cut off — at the same place every night, because the order
+ * never rotated — so the tail's `broker_stop_loss`, `stop_history` and
+ * `moved_sl` stayed NULL permanently. The orders route's own header already
+ * said why that is unrecoverable: "Tomorrow's run cannot pick up what this one
+ * missed — the orders are gone by then."
+ *
+ * SO THE ASSERTION IS ABOUT A SEQUENCE OF RUNS AND NOT ABOUT ONE. A single run
+ * cannot demonstrate fairness; three runs over five users with a batch of two
+ * can, and the property to check is COVERAGE — every user reached at least once
+ * — rather than any particular order.
+ *
+ * The stub keeps the cursor column in memory and sorts on it the way Postgres
+ * would, `NULLS FIRST` included, because that ordering is the entire mechanism.
+ * A stub that ignored `.order()` would make this group pass over a query that
+ * rotates nothing, which is the same trap `FakeQuery.not` guards against.
+ */
+async function cronRotationGroup() {
+  const USERS = [
+    'aaaaaaaa-0000-4000-8000-000000000001',
+    'bbbbbbbb-0000-4000-8000-000000000002',
+    'cccccccc-0000-4000-8000-000000000003',
+    'dddddddd-0000-4000-8000-000000000004',
+    'eeeeeeee-0000-4000-8000-000000000005',
+  ];
+
+  /**
+   * Five active connections with a `last_orders_at` the stub maintains.
+   *
+   * `cursorAvailable: false` is the pre-042 database: any select naming the
+   * column answers 42703, which is what the fallback path has to survive.
+   */
+  function rotatingAdmin(options: { cursorAvailable: boolean }) {
+    const stamps = new Map<string, string | null>(USERS.map((id) => [id, null]));
+    const selects: string[] = [];
+
+    const admin = {
+      from: (table: string) => {
+        if (table !== 'tradovate_connections') throw new Error(`unexpected table ${table}`);
+        return {
+          select: (columns: string) => {
+            selects.push(columns);
+            const named = columns.includes('last_orders_at');
+            let ordered: string[] = [];
+            let cap: number | null = null;
+
+            const q = {
+              eq: () => q,
+              order: (column: string) => {
+                if (column === 'last_orders_at') {
+                  // Postgres' `ASC NULLS FIRST`, which is the mechanism: a
+                  // never-processed connection goes to the HEAD of the queue.
+                  ordered = [...USERS].sort((a, b) => {
+                    const x = stamps.get(a) ?? '';
+                    const y = stamps.get(b) ?? '';
+                    return x === y ? a.localeCompare(b) : x.localeCompare(y);
+                  });
+                }
+                return q;
+              },
+              limit: (n: number) => {
+                cap = n;
+                return q;
+              },
+              returns: () => q,
+              then: (resolve: (v: { data: unknown; error: unknown }) => unknown) => {
+                if (named && !options.cursorAvailable) {
+                  return Promise.resolve({
+                    data: null,
+                    count: null,
+                    error: { code: '42703', message: 'column does not exist' },
+                  }).then(resolve);
+                }
+                const ids = ordered.length > 0 ? ordered : USERS;
+                const rows = (cap === null ? ids : ids.slice(0, cap)).map((id) => ({
+                  user_id: id,
+                  is_trade_source: true,
+                }));
+                // The TOTAL, which `count: 'exact'` reports regardless of the
+                // limit — what lets a log line say "two of five".
+                return Promise.resolve({ data: rows, count: USERS.length, error: null }).then(
+                  resolve
+                );
+              },
+            };
+            return q;
+          },
+          update: (values: Record<string, unknown>) => {
+            const q = {
+              in: (_column: string, ids: string[]) => {
+                if (options.cursorAvailable) {
+                  for (const id of ids) stamps.set(id, values.last_orders_at as string);
+                }
+                return q;
+              },
+              then: (resolve: (v: { data: unknown; error: unknown }) => unknown) =>
+                Promise.resolve({
+                  data: null,
+                  error: options.cursorAvailable
+                    ? null
+                    : { code: '42703', message: 'column does not exist' },
+                }).then(resolve),
+            };
+            return q;
+          },
+        };
+      },
+    } as unknown as SupabaseClient;
+
+    return { admin, stamps, selects };
+  }
+
+  const ON_ALLOWED: NodeJS.ProcessEnv = {
+    [IMPORT_FLAG]: '1',
+    TRADOVATE_OAUTH_ALLOWED_USER_IDS: USERS.join(','),
+  } as unknown as NodeJS.ProcessEnv;
+
+  // Three runs, batch of two, five users. The pull is a stub, so this is about
+  // WHO THE LOOP ASKED FOR.
+  const rotating = rotatingAdmin({ cursorAvailable: true });
+  const reached: string[][] = [];
+
+  for (let i = 0; i < 3; i += 1) {
+    const asked: string[] = [];
+    const stubSync = (async (request: { userId: string }) => {
+      asked.push(request.userId);
+      return {
+        counts: { ...EMPTY_COUNTS, ran: true },
+        accounts: EMPTY_ACCOUNT_COUNTS,
+        asOf: new Date().toISOString(),
+        isTradeSource: true,
+        importEnabled: true,
+      };
+    }) as unknown as typeof syncUserTrades;
+
+    await captureLogs(() =>
+      runStopCapture({
+        admin: rotating.admin,
+        // Each run a minute later, so the stamps are distinguishable.
+        now: Date.parse('2026-10-19T21:30:00.000Z') + i * 60_000,
+        batchLimit: 2,
+        env: ON_ALLOWED,
+        sync: stubSync,
+      })
+    );
+    reached.push(asked);
+  }
+
+  const everyoneReached = [...new Set(reached.flat())].sort();
+  const firstRun = reached[0] ?? [];
+  const secondRun = reached[1] ?? [];
+
+  // The counts and the log line of one run.
+  const counted = rotatingAdmin({ cursorAvailable: true });
+  const { result: oneRun, lines } = await captureLogs(() =>
+    runStopCapture({
+      admin: counted.admin,
+      now: Date.parse('2026-10-19T21:30:00.000Z'),
+      batchLimit: 2,
+      env: ON_ALLOWED,
+      sync: (async () => ({
+        counts: { ...EMPTY_COUNTS, ran: true },
+        accounts: EMPTY_ACCOUNT_COUNTS,
+        asOf: new Date().toISOString(),
+        isTradeSource: true,
+        importEnabled: true,
+      })) as unknown as typeof syncUserTrades,
+    })
+  );
+  const ordersLine = lines.find((l) => l.includes('[tradovate][orders-cron]')) ?? '';
+
+  // ── Pre-042: the batch still applies, the rotation does not ──────────────
+
+  forgetRateWarnings();
+  const unmigrated = rotatingAdmin({ cursorAvailable: false });
+  const preAsked: string[] = [];
+  const { result: pre042, lines: pre042Lines } = await captureLogs(() =>
+    runStopCapture({
+      admin: unmigrated.admin,
+      now: Date.parse('2026-10-19T21:30:00.000Z'),
+      batchLimit: 2,
+      env: ON_ALLOWED,
+      sync: (async (request: { userId: string }) => {
+        preAsked.push(request.userId);
+        return {
+          counts: { ...EMPTY_COUNTS, ran: true },
+          accounts: EMPTY_ACCOUNT_COUNTS,
+          asOf: new Date().toISOString(),
+          isTradeSource: true,
+          importEnabled: true,
+        };
+      }) as unknown as typeof syncUserTrades,
+    })
+  );
+  forgetRateWarnings();
+
+  group('every trader is reached across runs, and nobody is always last', [
+    c('(1) one run takes the batch and no more', firstRun.length, 2),
+    // THE PROPERTY. Three runs of two cover all five, so the fifth user is
+    // reached on the third night rather than never.
+    c('(2) three runs of two reach all five traders', everyoneReached, USERS),
+    // THE DEFECT, DIRECTLY: under the old `ORDER BY user_id` these two lists
+    // would be identical, every night, forever.
+    c('(3) and the second run is nobody from the first',
+      secondRun.some((id) => firstRun.includes(id)), false),
+    c('(4) the counts say the batch was full and the population is bigger',
+      [oneRun.found, oneRun.active, oneRun.rotating], [2, 5, true]),
+    c('(5) and the log line carries both, with no user id',
+      [ordersLine.includes('found=2'), ordersLine.includes('active=5'),
+       USERS.some((id) => ordersLine.includes(id))],
+      [true, true, false]),
+    // The stamp covers the whole batch, not just the users that were pulled —
+    // otherwise a skipped or failing trader holds the head of the queue.
+    c('(6) every connection in the batch was stamped',
+      [...counted.stamps.values()].filter((v) => v !== null).length, 2),
+    c('(7) the two batch limits differ, and the orders one is the smaller',
+      [IMPORT_BATCH_LIMIT, ORDERS_BATCH_LIMIT], [20, 10]),
+    // PRE-042: bounded but not fair, and it says so rather than failing.
+    c('(8) without migration 042 the run still happens, bounded',
+      [pre042.found, preAsked.length, pre042.rotating], [2, 2, false]),
+    c('(9) it falls back to user_id order, so the batch is the first two',
+      preAsked, [USERS[0], USERS[1]]),
+    c('(10) and it says so once, naming no user',
+      [pre042Lines.filter((l) => l.includes('falling back to user_id order')).length,
+       USERS.some((id) => pre042Lines.join(' ').includes(id))],
+      [1, false]),
   ]);
 }
 
@@ -6066,10 +6311,17 @@ async function ordersCronWindowGroup() {
         { user_id: USER, is_trade_source: true },
         { user_id: OTHER_USER, is_trade_source: false },
       ];
+      // `limit` and `update`/`in` arrived with REF-112 §4.6 item 1: the
+      // listing now takes a bounded batch and the loop stamps its place in the
+      // queue afterwards. Both are no-ops here — these two connections fit in
+      // any batch, and the group is about the SKIP rather than the cursor.
       const q = {
         select: () => q,
         eq: () => q,
         order: () => q,
+        limit: () => q,
+        update: () => q,
+        in: () => q,
         returns: () => q,
         then: (resolve: (v: { data: unknown; error: unknown }) => unknown) =>
           Promise.resolve({ data: rows, error: null }).then(resolve),
@@ -6312,9 +6564,10 @@ async function main() {
   await syncThrottleGroup();
   await syncPrivacyGroup();
 
-  // REF-112 §4.5 items 2 and 3 — the two cheapest missing caps.
+  // REF-112 §4 — the rate and cost caps.
   await syncCooldownGroup();
   await penaltyBackoffGroup();
+  await cronRotationGroup();
 
   // Stage 3a — the debrief's storage and the alert emails.
   await debriefReaderGroup();

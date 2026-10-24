@@ -444,7 +444,12 @@ export async function GET(request: Request) {
   let importable = new Set<string>();
   if (isImportEnabled()) {
     try {
-      const connections = await listConnectionsForImport({ admin: supabase });
+      // NO CURSOR AND NO LIMIT HERE, unlike the two crons (REF-112 §4.6 item
+      // 1). This listing answers "who is ELIGIBLE for an import", not "who is
+      // next" — it is intersected with the users whose chosen hour this
+      // invocation is, which is already a small subset — so a batch taken here
+      // would ration the wrong population.
+      const { connections } = await listConnectionsForImport({ admin: supabase });
       importable = new Set(
         connections
           .filter((c) => c.is_trade_source && isUserAllowed(c.user_id))
