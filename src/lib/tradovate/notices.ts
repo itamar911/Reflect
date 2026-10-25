@@ -195,6 +195,44 @@ export function noticeLine(notice: BrokerNotice): string {
 export const NO_LIVE_ENTITLEMENT_NOTE =
   'החשבון מחובר, אבל לא נמצאו חשבונות מסחר פעילים';
 
+/**
+ * What a trader is told when the connection is not open to them (REF-112-C
+ * item 2).
+ *
+ * THE SENTENCE THAT CLOSES §2's GAP. Both OAuth paths have always refused a
+ * user outside the list by redirecting to `/settings?tradovate=not_available`,
+ * and NOTHING READ THAT CODE — ./oauth-results.ts said "the UI for this is not
+ * built yet" from the day it was written. So the refusal was effectively
+ * SILENT: the trader clicked "connect", left the app, came back to Settings,
+ * and found an unexplained query string and no statement of any kind. §2 lists
+ * that as a defect in its own right, and a refusal with no explanation is the
+ * one thing ./notices.ts' copy rules call worse than instructing.
+ *
+ * ONE SHOT, LIKE {@link NO_LIVE_ENTITLEMENT_NOTE} and by the same
+ * construction: it is a query parameter on the redirect the route issued, so
+ * it is true for exactly one page view and gone the moment the trader
+ * navigates. Nothing stored, nothing to clear.
+ *
+ * IT IS NOT A MEMBER OF {@link BrokerNotice} for that reason — every member of
+ * that union is a standing condition, re-derived on every render. This is the
+ * answer to a question the trader asked by pressing a button.
+ *
+ * WHY IT IS NOT THE BADGE. `זמין בקרוב` stays exactly where it is and says
+ * what it has always said; it is a STATE, visible to a restricted trader on
+ * every view of this page, and it is why the button beside it is grey. This is
+ * the extra fact that only a trader who just tried needs: that the attempt was
+ * refused and the greyed-out control was not a rendering accident.
+ *
+ * "עדיין" AND "לְחשבון שלך" ARE BOTH LOAD-BEARING. "עדיין" says the state is
+ * temporary, which matches `זמין בקרוב` beside it and is true — this is a
+ * rollback lever, not a judgement. "לחשבון שלך" says it is about their account
+ * rather than the product being unbuilt, because the trader can see from the
+ * marketing that the feature exists. It names no list, no reason and no
+ * number, which is the same bound ./oauth-results.ts puts on the result codes:
+ * probing must reveal neither who is on a list nor whether one exists.
+ */
+export const NOT_AVAILABLE_NOTE = 'חיבור לברוקר עדיין לא פתוח לחשבון שלך';
+
 /** Every notice as a line, in severity order and without repeats. */
 export function noticeLines(notices: readonly BrokerNotice[]): string[] {
   return orderNotices(notices).map(noticeLine);

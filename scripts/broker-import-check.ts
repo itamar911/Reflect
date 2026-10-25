@@ -152,6 +152,7 @@ import {
   brokerStateNotices,
   noticeLine,
   noticeLines,
+  NOT_AVAILABLE_NOTE,
   NO_LIVE_ENTITLEMENT_NOTE,
   orderNotices,
   readNotices,
@@ -3094,6 +3095,31 @@ async function noticeCopyGroup() {
       NO_LIVE_ENTITLEMENT_NOTE, 'החשבון מחובר, אבל לא נמצאו חשבונות מסחר פעילים'),
     c('(35) and carries no id, number or host',
       /\d|tradovateapi|https?:/i.test(NO_LIVE_ENTITLEMENT_NOTE), false),
+
+    // ── REF-112-C item 2: the refusal both OAuth paths issue, in words ─────
+    //
+    // §2's gap. `?tradovate=not_available` was read by NOTHING, so a trader
+    // the connection is closed to clicked "connect", left the app, came back
+    // to Settings and found an unexplained query string. Verbatim from the
+    // brief, so the assertion is the string and not a shape.
+    c('(36) the refusal has a sentence',
+      NOT_AVAILABLE_NOTE, 'חיבור לברוקר עדיין לא פתוח לחשבון שלך'),
+    // Same bound as the result codes themselves (lib/tradovate/oauth-results.ts):
+    // it must reveal neither who is on a list nor whether one exists, so no
+    // id, no count, no host — and no emoji (CLAUDE.md).
+    c('(37) and names no id, number, host or list',
+      [
+        /\d|tradovateapi|https?:|live:|demo:/i.test(NOT_AVAILABLE_NOTE),
+        /\p{Extended_Pictographic}/u.test(NOT_AVAILABLE_NOTE),
+      ],
+      [false, false]),
+    // THE BADGE IS NOT THIS SENTENCE AND MUST NOT BECOME IT. `זמין בקרוב` is
+    // the standing state a restricted trader sees on every view; this is the
+    // one-shot fact that their press was refused. Two different jobs, and a
+    // change that collapsed them would tell a trader who never pressed
+    // anything that something was refused. There is no case for it here
+    // because the two are distinct string literals and tsc rejects the
+    // comparison outright — the stronger guarantee of the two.
   ]);
 }
 

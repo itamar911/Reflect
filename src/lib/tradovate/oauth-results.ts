@@ -11,7 +11,16 @@
  * all nothing derived from a token or an authorization code.
  */
 
-/** Result page. The UI for this is not built yet; the codes are stable. */
+/**
+ * Result page.
+ *
+ * TWO OF THE EIGHT CODES NOW HAVE READERS — `connected_no_live` (REF-112 item
+ * 5) and `not_available` (REF-112-C item 2), both in app/(app)/settings/page.tsx.
+ * The other six still have none, which §2 of the investigation lists as a
+ * defect of its own: a code nobody translates is a code the trader cannot act
+ * on. The mechanism is built now, so wiring the rest is small and
+ * self-contained.
+ */
 export const TRADOVATE_RESULT_PATH = '/settings';
 
 /** Query parameter carrying the outcome. */
@@ -51,9 +60,19 @@ export const TradovateResult = {
   /**
    * The connection is not open to this user yet.
    *
-   * Deliberately says nothing about why. The allowlist gate produces this for
-   * "you are not on the list" and for "no list is configured" alike, so probing
-   * the route reveals neither who is on it nor whether one exists.
+   * Deliberately says nothing about why, so probing the route reveals neither
+   * who is on a list nor whether one exists.
+   *
+   * ONE PRODUCER AND NOT TWO ANY MORE. It used to cover "you are not on the
+   * list" and "no list is configured" alike, because the allowlist failed
+   * closed and both meant the same refusal. After REF-112-C item 1 an
+   * unconfigured list is the OPEN state, so the only way to produce this code
+   * is a deliberately restricted deployment that excludes this user — which is
+   * a rollback in force, not a configuration accident.
+   *
+   * READ BY app/(app)/settings/page.tsx, which turns it into
+   * NOT_AVAILABLE_NOTE (lib/tradovate/notices.ts). Before REF-112-C item 2 it
+   * was read by nothing and the refusal was effectively silent.
    */
   NotAvailable: 'not_available',
 } as const;

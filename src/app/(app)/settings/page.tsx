@@ -31,9 +31,16 @@ export default async function SettingsPage({ searchParams }: {
   // that URL — which is the "show once on connect" this item asks for, with
   // nothing stored and nothing to clear.
   const resultParam = (await searchParams)[TRADOVATE_RESULT_PARAM];
-  const noLiveAccounts =
-    (Array.isArray(resultParam) ? resultParam[0] : resultParam) ===
-    TradovateResult.ConnectedNoLive;
+  const result = Array.isArray(resultParam) ? resultParam[0] : resultParam;
+  const noLiveAccounts = result === TradovateResult.ConnectedNoLive;
+
+  // REF-112-C item 2 — THE SECOND READER, and the one §2 of the investigation
+  // asked for by name. `not_available` is what BOTH OAuth paths redirect to
+  // when the connection is restricted and this user is not on the list, and
+  // until now nothing read it: the trader clicked "connect", left the app, came
+  // back here and found an unexplained query string. One reader covers both
+  // paths because both redirect to this page with this code — see resultUrl().
+  const notAvailable = result === TradovateResult.NotAvailable;
 
   const [profileRes, alertRes] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', user.id).single(),
@@ -132,6 +139,9 @@ export default async function SettingsPage({ searchParams }: {
             // REF-112 item 5. Only ever true on the redirect the callback
             // just issued; see the note where it is computed.
             noLiveAccounts={noLiveAccounts}
+            // REF-112-C item 2. Same one-shot construction, from the refusal
+            // either OAuth path issues.
+            notAvailable={notAvailable}
           />
         </Card>
       </div>

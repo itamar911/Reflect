@@ -49,7 +49,7 @@ import Button from '@/components/ui/Button';
 // Browser-safe and pure, like lib/tradovate/sync-response.ts: a sentence and
 // nothing else. It does not reach connections.ts, so the rule in the header
 // above — a client component never names that module — still holds.
-import { NO_LIVE_ENTITLEMENT_NOTE } from '@/lib/tradovate/notices';
+import { NOT_AVAILABLE_NOTE, NO_LIVE_ENTITLEMENT_NOTE } from '@/lib/tradovate/notices';
 
 /**
  * The one thing the disconnect action cannot do, stated in full.
@@ -206,6 +206,28 @@ export interface TradovateConnectionCardProps {
    * lib/tradovate/notices.ts on why both halves are news.
    */
   noLiveAccounts?: boolean;
+  /**
+   * Whether an OAuth attempt was just refused because the connection is not
+   * open to this account (REF-112-C item 2).
+   *
+   * ONE SHOT AND NOT A STATE, exactly like {@link noLiveAccounts}: it comes off
+   * `?tradovate=not_available` on the redirect /api/tradovate/connect or
+   * /api/tradovate/callback just issued, so it is true on one page view and
+   * gone the moment the trader navigates.
+   *
+   * IT DOES NOT CHANGE THE BADGE. `זמין בקרוב` is the STATE and already says
+   * what it needs to on every view; this is the one extra fact a trader who
+   * just pressed the button needs — that the press was refused, and the grey
+   * control was not a rendering accident. See NOT_AVAILABLE_NOTE in
+   * lib/tradovate/notices.ts for the wording.
+   *
+   * NOT GATED ON `canConnect`, deliberately. The two disagree only in one
+   * state: the restriction changed between this page rendering and the route
+   * answering. The route is the authority on what actually happened — it is
+   * what refused — so its answer is the one shown, even standing next to a
+   * button this render believes is live.
+   */
+  notAvailable?: boolean;
 }
 
 export default function TradovateConnectionCard({
@@ -214,6 +236,7 @@ export default function TradovateConnectionCard({
   isActive,
   readFailed,
   noLiveAccounts = false,
+  notAvailable = false,
 }: TradovateConnectionCardProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -270,6 +293,26 @@ export default function TradovateConnectionCard({
         </div>
 
         <SyncNote />
+
+        {/* REF-112-C item 2 — the refusal, said out loud.
+            ABOVE the controls and outside both `canConnect` branches: it
+            describes what just happened when the trader pressed a button, so
+            it belongs where they will look when they land back here, and it is
+            the same sentence whichever of the two OAuth paths refused them.
+
+            role="status" and not role="alert". A restriction is not the page
+            being wrong about something — it is an answer, and `aria-live`
+            without the interruption is how the rest of this card announces
+            one. */}
+        {notAvailable && (
+          <p
+            role="status"
+            className="mt-3 text-xs font-semibold leading-relaxed"
+            style={{ color: 'var(--color-tg-warning)' }}
+          >
+            {NOT_AVAILABLE_NOTE}
+          </p>
+        )}
 
         {!canConnect && (
           <button
