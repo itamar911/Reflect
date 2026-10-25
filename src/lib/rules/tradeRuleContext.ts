@@ -199,6 +199,28 @@ export interface TradeRuleContext {
    */
   source: RuleContextSource;
 
+  /**
+   * Whether the broker's view of today was INCOMPLETE (REF-112-C item 3).
+   *
+   * Passed through from {@link BrokerDayPull.partial} unchanged, like `source`
+   * beside it, and reported on this one object for the same reason: the gate in
+   * AppShell and the form must not be able to disagree about whose day they are
+   * looking at or about how much of it they can see.
+   *
+   * WHEN IT IS TRUE, EVERY FIGURE ON THIS OBJECT IS REFLECT'S. The broker
+   * override below is skipped entirely — see the branch — so this flag is not
+   * an annotation on the broker's numbers, it is the statement that the
+   * broker's numbers were not used. `source` still says `broker_verified`,
+   * because the broker DID answer and the trader IS connected, and the form
+   * reads the two together: one line saying the broker data is partial
+   * (PARTIAL_DAY_NOTE) in place of the line claiming the closes came from
+   * Tradovate.
+   *
+   * False in all four source states when nothing was missing, which is every
+   * ordinary day.
+   */
+  partial: boolean;
+
   /** Today's closes, shaped for the sentence the panel writes. Display only. */
   todayClosed: TodayClosedSummary;
 }
@@ -539,6 +561,7 @@ export async function loadTradeRuleContext(
     // and the one REF-113's error policy picks.
     lastTradeStopWidened: stopWasWidened(lastTrade?.stop_history),
     source: broker.source,
+    partial: broker.partial === true,
     todayClosed: summariseTodayCloses(closedToday),
   };
 
@@ -549,7 +572,42 @@ export async function loadTradeRuleContext(
   // nothing to clear — the honest fallback is the data we already have. After
   // Stage 2 that data INCLUDES the broker's own imported rows, which is why the
   // filter above matters most on exactly this path.
-  if (broker.source !== 'broker_verified') return context;
+  //
+  //
+  // AND SO DOES A PARTIAL DAY (REF-112-C item 3)
+  // -------------------------------------------
+  //
+  // `partial` is the broker saying "I answered, and what I gave you is short".
+  // Stage B is what created that state: items 1 and 6 stopped a non-USD account
+  // and an unresolvable product from failing the whole pull — which was right,
+  // because failing the day over one product is a believable zero of its own —
+  // and the cost was that the day is now STATED with those trades missing.
+  // `max_daily_loss` was then measured against `day.lost`, a total short by
+  // exactly the trades that were skipped.
+  //
+  // THAT IS THE ONE DIRECTION THIS INTEGRATION MUST NEVER FAIL IN. An
+  // under-counted day makes every rule MORE PERMISSIVE: a trader who really
+  // lost $800 across two accounts, one of them euro-denominated, is told they
+  // have lost $300 and the block that should have stopped them lifts. The whole
+  // of lib/tradovate/notices.ts exists because of that argument, and stage B's
+  // own report flagged this route as the place the argument had not been
+  // applied yet.
+  //
+  // So a partial day takes THE PRE-STAGE-B PATH, which is this one: the figures
+  // are Reflect's own rows, exactly as they are when the pull throws. Falling
+  // back on `todayLossAmount` alone was the narrower option and it is the wrong
+  // one — `todayClosed` feeds the panel, and §4.5's rule is that the sentence
+  // the trader reads and the number the rule acts on come from one source. A
+  // panel showing the broker's short loss above a block fired on Reflect's
+  // bigger one is the divergence this module was written to end.
+  //
+  // `source` STAYS `broker_verified`, because it is true: the broker answered
+  // and the trader is connected. The form distinguishes the two with `partial`
+  // and prints PARTIAL_DAY_NOTE instead of the "closes came from Tradovate"
+  // line, which would otherwise be a claim about figures that did not come from
+  // there. Inventing a fifth RuleContextSource was the alternative and it would
+  // have meant a migration: the four values are a CHECK constraint (032).
+  if (broker.source !== 'broker_verified' || context.partial) return context;
 
   const day = broker.day;
 

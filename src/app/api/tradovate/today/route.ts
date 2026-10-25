@@ -105,6 +105,7 @@ import { flushUserCalls } from '@/lib/tradovate/call-meter';
 import { getUserTradingApi, notingPenalty, readIsTradeSource } from '@/lib/tradovate/connections';
 import { loadBrokerDay, type BrokerTrade, type TradovateReader } from '@/lib/tradovate/fills';
 import { importBrokerTrades, isImportEnabled } from '@/lib/tradovate/import';
+import { makesDayPartial } from '@/lib/tradovate/notices';
 import { redactSecrets } from '@/lib/tradovate/redact';
 import { DAY_START_PARAM, parseDayStart } from '@/lib/tradovate/trading-day';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -123,9 +124,14 @@ const NO_STORE = { 'Cache-Control': 'no-store, private' };
  * The client reads absence as false (readBrokerDayResponse), which makes the
  * two indistinguishable where it matters and distinguishable in a diff.
  */
-function answer(pull: BrokerDayPull, isTradeSource: boolean) {
+function answer(pull: BrokerDayPull, isTradeSource: boolean, partial = false) {
   const body: BrokerDayPull = isTradeSource ? { ...pull, isTradeSource: true } : pull;
-  return NextResponse.json(body, { headers: NO_STORE });
+  // REF-112-C item 3. Added the same way and for the same reason: absent unless
+  // true, so an ordinary day is byte-identical to the pre-stage-B response. It
+  // defaults to false so that the five call sites which have no pull in hand —
+  // the refusal and the four failure states — cannot accidentally claim a
+  // completeness they know nothing about.
+  return NextResponse.json(partial ? { ...body, partial: true } : body, { headers: NO_STORE });
 }
 
 /**
@@ -261,7 +267,14 @@ export async function GET(request: Request) {
     // no `windowStartMs` is passed either, so this pull prices exactly what it
     // priced before REF-107. What changed is that the list it always built is
     // persisted instead of discarded (REF-107 Stage 2, E9).
-    const { day, trades } = await loadBrokerDay({
+    //
+    // `notices` IS NO LONGER DROPPED ON THE FLOOR (REF-112-C item 3). Stage B's
+    // own report named this as the one thing it traded one risk for another on:
+    // this route destructured `{ day, trades }` and discarded the list, so a
+    // skipped account or an unresolvable product left the day SHORT with
+    // nothing on this wire saying so. Only the boolean crosses — see
+    // BrokerDayPull.partial for why not the list.
+    const { day, trades, notices } = await loadBrokerDay({
       readers: {
         live: readerFor(api.hosts.live.url),
         demo: readerFor(api.hosts.demo.url),
@@ -276,7 +289,7 @@ export async function GET(request: Request) {
     // write runs under their RLS and no user id is taken from the request.
     await syncQuietly({ client: supabase, userId: user.id, trades, isTradeSource });
 
-    return answer({ source: 'broker_verified', day }, isTradeSource);
+    return answer({ source: 'broker_verified', day }, isTradeSource, makesDayPartial(notices));
   } catch (error) {
     const source = classifyDayPullFailure(error);
 

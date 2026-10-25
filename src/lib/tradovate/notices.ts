@@ -233,6 +233,90 @@ export const NO_LIVE_ENTITLEMENT_NOTE =
  */
 export const NOT_AVAILABLE_NOTE = 'חיבור לברוקר עדיין לא פתוח לחשבון שלך';
 
+// ── Which notices mean the DAY is short (REF-112-C item 3) ──────────────────
+
+/**
+ * The notice kinds that mean this day's figures are missing something.
+ *
+ * THE ONE THING STAGE B TRADED AWAY, and its own report said so: items 1 and 6
+ * turned a non-USD account and an unresolvable product from "the pull throws
+ * and the day fails" into "that account / that trade is skipped and named".
+ * Before, `/api/tradovate/today` answered `broker_unavailable` and the rule
+ * engine degraded to Reflect's own rows — the fail-safe direction. After, the
+ * day is STATED with the skipped trades missing, and `max_daily_loss` is
+ * measured against a number short by exactly them. The sync panel says so; the
+ * trade form did not.
+ *
+ * So these four are the kinds that make a day PARTIAL, each because something
+ * that happened is not in the figures:
+ *
+ *   - `account_currency` and `account_type` — a whole account was skipped.
+ *   - `unpriced_product` — one trade was skipped.
+ *   - `host_degraded` — a host was dropped, so an unknown amount is missing.
+ *
+ * TWO KINDS ARE DELIBERATELY NOT HERE:
+ *
+ *   - `connection_environment` is not produced by a pull at all. It is derived
+ *     from the stored row by {@link brokerStateNotices}, and in that state
+ *     there is no day to be short of.
+ *   - `no_accounts` means discovery found nothing this trader could have
+ *     traded. That is an error state with its own sentence (stage B item 2),
+ *     and it is NOT a partial day — it is a day with no broker scope at all.
+ *     Worth knowing that this is the one judgement call in the mapping: a
+ *     trader whose accounts were ALL rejected also gets an under-counted zero,
+ *     and `no_accounts` cannot tell "the filter rejected everything" from "the
+ *     scope was genuinely empty" (stage B §5.2 records that limitation). Under
+ *     the second reading Reflect's own rows are the whole truth and no fallback
+ *     is needed; under the first, a fallback would be right. It is called out
+ *     in the build report rather than decided here.
+ *
+ * As `kind` strings rather than a type, so the SERVER-side
+ * {@link import('./fills').PullNotice} and the wire-side {@link BrokerNotice}
+ * can both be measured by one rule — the two unions share these four members
+ * and the routes hold the first kind, not the second.
+ */
+export const PARTIAL_DAY_KINDS: readonly string[] = [
+  'account_currency',
+  'account_type',
+  'host_degraded',
+  'unpriced_product',
+];
+
+/**
+ * Whether these notices mean the day's figures are incomplete.
+ *
+ * Takes anything with a `kind`, for the reason {@link PARTIAL_DAY_KINDS}
+ * gives. False on an empty list, which is every ordinary day — so the flag it
+ * decides is absent from almost every response and costs nothing to carry.
+ */
+export function makesDayPartial(notices: readonly { kind: string }[]): boolean {
+  return notices.some((notice) => PARTIAL_DAY_KINDS.includes(notice.kind));
+}
+
+/**
+ * What the trade form says when the day it is judging rules against is short
+ * (REF-112-C item 3).
+ *
+ * ONE LINE, AND IT REPLACES THE PROVENANCE SENTENCE RATHER THAN JOINING IT.
+ * `broker_verified` normally renders "הסגירות של היום נקראו מ-Tradovate", and
+ * on a partial day that claim is no longer true of the numbers above it: the
+ * figures have fallen back to Reflect's own rows (see
+ * lib/rules/tradeRuleContext.ts), because measuring a loss limit against a
+ * broker total that is short by a skipped account is the one direction this
+ * integration must never fail in. Printing both would be a panel telling the
+ * trader its figures came from somewhere they did not.
+ *
+ * "חלקיים" AND NOT "שגויים". Nothing here is wrong — it is incomplete, and the
+ * difference is what the trader does next. "הנתונים חלקיים" describes the
+ * figures; it does not instruct, which is §8 of TodayContextPanel's rule and a
+ * NinjaTrader vendor compliance requirement. The sync panel is where the
+ * SPECIFIC notices live — which account, which symbol — and this is the one
+ * sentence the form owes a trader who is about to have a rule checked against
+ * these numbers.
+ */
+export const PARTIAL_DAY_NOTE =
+  'חלק מהעסקאות מהברוקר לא נטענו היום — הנתונים חלקיים';
+
 /** Every notice as a line, in severity order and without repeats. */
 export function noticeLines(notices: readonly BrokerNotice[]): string[] {
   return orderNotices(notices).map(noticeLine);

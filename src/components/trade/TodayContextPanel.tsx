@@ -14,6 +14,8 @@ import {
   type TodayTradeLine,
 } from '@/lib/rules/todayLines';
 import { describeStages } from '@/lib/journal/stages';
+// Browser-safe and pure, like sync-response.ts: one sentence and nothing else.
+import { PARTIAL_DAY_NOTE } from '@/lib/tradovate/notices';
 import type { RuleContextSource } from '@/lib/types';
 import LivePositions from '@/components/tradovate/LivePositions';
 
@@ -310,6 +312,16 @@ export interface TodayContextPanelProps {
   /** What the day's figures are based on (REF-82 §6). */
   source: RuleContextSource;
   /**
+   * Whether the broker's view of today was incomplete (REF-112-C item 3).
+   *
+   * Only ever true alongside `source: 'broker_verified'`. When it is, the
+   * figures above have ALREADY fallen back to Reflect's own rows
+   * (lib/rules/tradeRuleContext.ts) — so this does not annotate the broker's
+   * numbers, it reports that they were not used, and the provenance line is
+   * replaced rather than joined.
+   */
+  partial?: boolean;
+  /**
    * Today's closes, one per line, or null when there is no list to show.
    *
    * NULL IS THE ORDINARY CASE AND NOT A FAILURE: the form only asks for this
@@ -339,6 +351,7 @@ export default function TodayContextPanel({
   maxDailyTrades,
   maxDailyLoss,
   source,
+  partial = false,
   lines = null,
   live = null,
 }: TodayContextPanelProps) {
@@ -497,7 +510,7 @@ export default function TodayContextPanel({
                 </>
               )}
 
-              <SourceDeclaration source={source} />
+              <SourceDeclaration source={source} partial={partial} />
             </>
           )}
         </div>
@@ -521,8 +534,40 @@ export default function TodayContextPanel({
  * came from the broker" would be read as covering the count too, which would
  * be a sentence this panel cannot stand behind.
  */
-function SourceDeclaration({ source }: { source: RuleContextSource }) {
+function SourceDeclaration({
+  source,
+  partial,
+}: {
+  source: RuleContextSource;
+  partial: boolean;
+}) {
   if (source === 'broker_verified') {
+    // REF-112-C item 3 — ONE LINE, AND IT REPLACES THE ONE BELOW RATHER THAN
+    // JOINING IT. On a partial day the figures above have already fallen back
+    // to Reflect's own rows, so "הסגירות של היום נקראו מ-Tradovate" would be a
+    // claim about numbers that did not come from there. Printing both would
+    // have the panel contradict itself about its own provenance in the one
+    // sentence whose whole job is to state it.
+    //
+    // The ordinary text colour and not the warning one, and no icon: the frame
+    // and the AlertTriangle are reserved for the two states where the broker
+    // FAILED (see `failed` above). This is not a failure — the rules are being
+    // checked against the trader's own complete records, which is the
+    // fail-safe direction and the behaviour this product had before stage B.
+    // What the sentence buys is that the trader knows why their broker's
+    // figures are not the ones on screen.
+    //
+    // The specific notices — which account, which symbol — are the sync
+    // panel's, where sync.ts has resolved an account id into the label the
+    // trader chose. This route carries a boolean and nothing else.
+    if (partial) {
+      return (
+        <p className="text-sm leading-relaxed" style={{ color: 'var(--color-tg-text)' }}>
+          {PARTIAL_DAY_NOTE}
+        </p>
+      );
+    }
+
     return (
       <p className="text-xs leading-relaxed" style={{ color: 'var(--color-tg-text-2)' }}>
         הסגירות של היום נקראו מ-Tradovate. מספר העסקאות לפי מה שתיעדת כאן.

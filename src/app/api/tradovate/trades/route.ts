@@ -71,6 +71,7 @@ import { tradovateGet } from '@/lib/tradovate/client';
 import { flushUserCalls } from '@/lib/tradovate/call-meter';
 import { getUserTradingApi, notingPenalty } from '@/lib/tradovate/connections';
 import { loadBrokerDay, type BrokerTrade, type TradovateReader } from '@/lib/tradovate/fills';
+import { makesDayPartial } from '@/lib/tradovate/notices';
 import { redactSecrets } from '@/lib/tradovate/redact';
 import {
   MAX_SINCE_AGE_MS,
@@ -108,6 +109,24 @@ export type BrokerTradesPull =
       windowStart: string;
       /** When this was read from Tradovate, ISO 8601. The day pull's `asOf`. */
       asOf: string;
+      /**
+       * Whether this answer is INCOMPLETE (REF-112-C item 3).
+       *
+       * The same flag, the same meaning and the same literal-`true` rule as
+       * {@link import('@/lib/rules/brokerDayContext').BrokerDayPull.partial} —
+       * raised when the pull skipped an account or a trade, or dropped a host.
+       *
+       * IT MATTERS MORE HERE THAN ON /today, not less, even though the rule
+       * engine reads the other route. `trades` is a LIST, and a list is the one
+       * shape in which an under-count is invisible: four rows where there
+       * should be five look exactly like four rows. The scalars at least have a
+       * `closedCount` a second read can be compared against, which is what
+       * `showsLineList` does with it.
+       *
+       * Absent unless true, so an ordinary day is byte-identical to the
+       * response that shipped before this field.
+       */
+      partial?: boolean;
     }
   | { source: 'broker_expired' }
   | { source: 'broker_unavailable' }
@@ -140,10 +159,17 @@ export interface TradesRouteDeps {
   /** The signed-in user's id, or null. From the session cookie, never the request body. */
   currentUserId: () => Promise<string | null>;
   isAllowed: (userId: string) => boolean;
+  /**
+   * The pull.
+   *
+   * `partial` joined the return in REF-112-C item 3 and is OPTIONAL so that
+   * every existing fixture keeps compiling and keeps meaning what it meant —
+   * absence is "nothing was missing", which is what those fixtures assert.
+   */
   loadTrades: (
     userId: string,
     window: { dayStartMs: number; windowStartMs: number }
-  ) => Promise<{ trades: BrokerTrade[]; asOf: string }>;
+  ) => Promise<{ trades: BrokerTrade[]; asOf: string; partial?: boolean }>;
   /**
    * The clock, for the window bounds. Injected for the same reason
    * `BrokerDayRequest.now` is: a suite whose fixtures are dated 2026 cannot
@@ -193,7 +219,7 @@ export async function respondToTradesRequest(
   try {
     // Spelled out rather than passed whole: the parse also carries `ok` and
     // `clamped`, which are this function's business and not the pull's.
-    const { trades, asOf } = await deps.loadTrades(userId, {
+    const { trades, asOf, partial } = await deps.loadTrades(userId, {
       dayStartMs: requested.dayStartMs,
       windowStartMs: requested.windowStartMs,
     });
@@ -202,12 +228,19 @@ export async function respondToTradesRequest(
     // reaches back past both on purpose (STREAK_WINDOW in fills.ts). So the list
     // is cut to what was asked for here, after the reduction that needed the
     // wider view has already happened.
-    return answer({
+    const pull: BrokerTradesPull = {
       source: 'broker_verified',
       trades: trades.filter((trade) => trade.closedAtMs >= requested.windowStartMs),
       windowStart: new Date(requested.windowStartMs).toISOString(),
       asOf,
-    });
+    };
+    // Absent unless true (REF-112-C item 3), so an ordinary day's body is the
+    // one that shipped before the field. NOTE THAT THE FILTER ABOVE DOES NOT
+    // SET IT: cutting the streak window back to what was asked for is this
+    // route answering the question it was asked, not an under-count. `partial`
+    // only ever means the BROKER's view was short of the trader's real day.
+    if (partial) pull.partial = true;
+    return answer(pull);
   } catch (error) {
     const source = classifyDayPullFailure(error);
 
@@ -281,7 +314,11 @@ export async function GET(request: Request) {
       });
 
       try {
-        const { day, trades } = await loadBrokerDay({
+        // `notices` is read for `partial` alone (REF-112-C item 3) — see the
+        // field on BrokerTradesPull. The sentences themselves reach the trader
+        // through the sync panel, which has an account label this route does
+        // not and must not resolve.
+        const { day, trades, notices } = await loadBrokerDay({
           readers: {
             live: readerFor(api.hosts.live.url),
             demo: readerFor(api.hosts.demo.url),
@@ -297,7 +334,7 @@ export async function GET(request: Request) {
         // `day` is dropped here, and the suite asserts the two routes agree:
         // these rows reduce to those scalars, because the scalars ARE this
         // list's reduction (fills.ts). Nothing recomputes a figure here.
-        return { trades, asOf: day.asOf };
+        return { trades, asOf: day.asOf, partial: makesDayPartial(notices) };
       } finally {
         // The call counter, for a route that does not go through
         // `syncUserTrades` (REF-112 §4.5 item 1). In a `finally` because a pull

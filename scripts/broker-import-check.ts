@@ -151,8 +151,10 @@ import {
 import {
   brokerStateNotices,
   noticeLine,
+  makesDayPartial,
   noticeLines,
   NOT_AVAILABLE_NOTE,
+  PARTIAL_DAY_NOTE,
   NO_LIVE_ENTITLEMENT_NOTE,
   orderNotices,
   readNotices,
@@ -2840,6 +2842,18 @@ async function syncCopyGroup() {
  */
 async function noticeCopyGroup() {
   /** A run that imported nothing and refused nothing, plus the notices. */
+  /**
+   * `makesDayPartial` over the WIRE type (REF-112-C item 3).
+   *
+   * A rest parameter typed `BrokerNotice[]` rather than calling the function
+   * with array literals directly: the function takes the structural
+   * `{ kind: string }` so one rule can measure both the server-side PullNotice
+   * and this one, and TypeScript's excess-property check then rejects a fresh
+   * literal carrying `account` or `root`. Going through the real union is the
+   * better assertion anyway — it is what the routes hand it.
+   */
+  const partialOf = (...notices: BrokerNotice[]) => makesDayPartial(notices);
+
   const verified = (notices: BrokerNotice[]) =>
     describeSyncOutcome({
       source: 'broker_verified',
@@ -3113,6 +3127,46 @@ async function noticeCopyGroup() {
         /\p{Extended_Pictographic}/u.test(NOT_AVAILABLE_NOTE),
       ],
       [false, false]),
+    // ── REF-112-C item 3: which notices mean the DAY is short ─────────────
+    //
+    // The mapping stage B's own report asked for. Four of the six kinds mean
+    // something that happened is not in the figures; two do not.
+    c('(39) a skipped account, a skipped trade and a dropped host are partial',
+      [
+        partialOf({ kind: 'account_currency', account: 'A' }),
+        partialOf({ kind: 'account_type', account: 'A' }),
+        partialOf({ kind: 'unpriced_product', root: 'MNQ' }),
+        partialOf({ kind: 'host_degraded' }),
+      ],
+      [true, true, true, true]),
+    // `connection_environment` cannot co-occur with a pull at all — it is
+    // derived from the stored row — and `no_accounts` is a day with no broker
+    // scope rather than a day short of something. The second is the one
+    // judgement call in the mapping; see PARTIAL_DAY_KINDS and the build report.
+    c('(40) a derived connection notice and an empty scope are not',
+      [
+        partialOf({ kind: 'connection_environment' }),
+        partialOf({ kind: 'no_accounts' }),
+      ],
+      [false, false]),
+    // AN ORDINARY DAY IS THE COMMON CASE and must be free: no notices, no
+    // flag, and a response byte-identical to the pre-stage-B one.
+    c('(41) an ordinary day is not partial', partialOf(), false),
+    // One partial kind among several is enough — the day is short either way.
+    c('(42) one partial kind among non-partial ones still counts',
+      partialOf({ kind: 'no_accounts' }, { kind: 'host_degraded' }), true),
+    // The sentence, verbatim from the brief.
+    c('(43) the trade form has one line for it',
+      PARTIAL_DAY_NOTE, 'חלק מהעסקאות מהברוקר לא נטענו היום — הנתונים חלקיים'),
+    // Same bound as every other sentence this module owns: no id, no count, no
+    // host, no emoji. A partial day's CAUSE is the sync panel's to name.
+    c('(44) and it names no id, number, host or emoji',
+      [
+        /\d|tradovateapi|https?:|live:|demo:/i.test(PARTIAL_DAY_NOTE),
+        /\p{Extended_Pictographic}/u.test(PARTIAL_DAY_NOTE),
+      ],
+      [false, false]),
+
     // THE BADGE IS NOT THIS SENTENCE AND MUST NOT BECOME IT. `זמין בקרוב` is
     // the standing state a restricted trader sees on every view; this is the
     // one-shot fact that their press was refused. Two different jobs, and a

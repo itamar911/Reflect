@@ -120,6 +120,43 @@ export type BrokerDayPull = (
    * optional columns in lib/types.ts.
    */
   isTradeSource?: boolean;
+  /**
+   * Whether this day's figures are INCOMPLETE (REF-112-C item 3).
+   *
+   * A THIRD INDEPENDENT AXIS, for the same reason `isTradeSource` is a second
+   * one: `source` says whether the broker answered, that says what policy the
+   * trader is under, and this says whether what the broker answered covers
+   * their whole day. True when the pull raised a notice of a kind that means
+   * something is missing from the figures — a skipped account, a skipped trade,
+   * or a dropped host (`makesDayPartial` in lib/tradovate/notices.ts).
+   *
+   * WHAT IT IS FOR, IN ONE SENTENCE: stage B stopped a non-USD account and an
+   * unresolvable product from failing the whole pull, which was right, and the
+   * cost was that the day is now stated with those trades missing while
+   * `max_daily_loss` is measured against the short total. An under-counted day
+   * makes every rule MORE PERMISSIVE — the one direction this integration must
+   * never fail in — so the gap has to be visible to the thing that acts on it,
+   * not only to the sync panel.
+   *
+   * ONLY MEANINGFUL ON `broker_verified`, and that is why it is on the
+   * intersection rather than inside that member: the three failure states have
+   * no figures at all, so "the figures are short" has nothing to say about
+   * them, and a caller that reads it there gets `undefined` — which is false.
+   *
+   * OPTIONAL, AND ABSENCE MEANS FALSE — the same rule, and the same reason, as
+   * `isTradeSource`. An ordinary day raises no notices, so the field is absent
+   * from almost every response; a client that has not been updated reads it as
+   * false and behaves exactly as it did before, which is also the pre-stage-B
+   * behaviour for every day that had nothing missing.
+   *
+   * NOT THE NOTICES THEMSELVES. A boolean is all the rule engine can act on,
+   * and the specific sentences — which account, which symbol — already reach
+   * the trader through the sync panel, where lib/tradovate/sync.ts has already
+   * resolved an account id into a label the trader chose. Putting the list on
+   * this route would put a broker account label on the rule engine's wire for
+   * nothing to read.
+   */
+  partial?: boolean;
 };
 
 /** The three stateless outcomes, as singletons: there is nothing to vary. */
@@ -303,16 +340,26 @@ async function requestBrokerDay(): Promise<BrokerDayPull> {
  */
 export function readBrokerDayResponse(body: unknown): BrokerDayPull {
   if (typeof body !== 'object' || body === null) return BROKER_UNAVAILABLE;
-  const { source, day, isTradeSource } = body as {
+  const { source, day, isTradeSource, partial } = body as {
     source?: unknown;
     day?: unknown;
     isTradeSource?: unknown;
+    partial?: unknown;
   };
 
   // Only the literal `true` turns the de-duplication policy on. A missing
   // field, the string "true", or anything else is false — see the field's own
   // note on why absence and the safe answer are the same value here.
   const tradeSource = isTradeSource === true;
+
+  // The same literal-`true` rule (REF-112-C item 3), and here the two reasons
+  // for it point the same way for once. The string "true" is not a claim, like
+  // everywhere else in this parser — AND the conservative answer is the
+  // SURPRISING one: false means "trust the broker's figures", so a half-built
+  // body that defaulted this to true would silently stop every connected
+  // trader's broker day from reaching their rules. Absence has to mean "nothing
+  // was missing", because that is what every response before this field said.
+  const isPartial = partial === true;
 
   // The three stateless outcomes keep their FROZEN SINGLETONS when the policy
   // is off, which is every call before migration 034 and the flag: nothing
@@ -322,6 +369,10 @@ export function readBrokerDayResponse(body: unknown): BrokerDayPull {
   const stateless = (pull: BrokerDayPull): BrokerDayPull =>
     tradeSource ? { ...pull, isTradeSource: true } : pull;
 
+  // `partial` IS DROPPED ON THE THREE STATELESS OUTCOMES, deliberately. It
+  // describes figures, and those three carry none — so keeping it would mean
+  // the frozen singletons could no longer be returned as-is on the commonest
+  // path, in exchange for a field nothing can read. See the field's own note.
   if (source === 'reflect_only') return stateless(REFLECT_ONLY);
   if (source === 'broker_expired') return stateless(BROKER_EXPIRED);
   if (source === 'broker_unavailable') return stateless(BROKER_UNAVAILABLE);
@@ -329,9 +380,14 @@ export function readBrokerDayResponse(body: unknown): BrokerDayPull {
 
   const parsed = readBrokerDayContext(day);
   if (!parsed) return BROKER_UNAVAILABLE;
-  return tradeSource
-    ? { source: 'broker_verified', day: parsed, isTradeSource: true }
-    : { source: 'broker_verified', day: parsed };
+
+  // Built up rather than spread over a literal, so each flag is absent unless
+  // it is true — which is what keeps an ordinary day's pull byte-identical to
+  // the one that shipped before either field existed.
+  const pull: BrokerDayPull = { source: 'broker_verified', day: parsed };
+  if (tradeSource) pull.isTradeSource = true;
+  if (isPartial) pull.partial = true;
+  return pull;
 }
 
 function readBrokerDayContext(value: unknown): BrokerDayContext | null {

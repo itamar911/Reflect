@@ -396,6 +396,16 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
   // way for the two to disagree — see the header of lib/rules/tradeRuleContext.ts.
   const [todayClosed, setTodayClosed] = useState<TodayClosedSummary>(EMPTY_TODAY_CLOSED);
   const [contextSource, setContextSource] = useState<RuleContextSource>('reflect_only');
+  /**
+   * Whether the broker's view of today was incomplete (REF-112-C item 3).
+   *
+   * A SECOND FLAG BESIDE `contextSource` AND NOT A FIFTH VALUE IN IT: the four
+   * `RuleContextSource` values are a CHECK constraint in migration 032, so a
+   * fifth would be a migration for something that is a different question
+   * anyway. `source` says whether the broker answered; this says whether the
+   * answer covered the whole day.
+   */
+  const [contextPartial, setContextPartial] = useState(false);
   /** False until the first load returns, so the panel never states zeros as fact. */
   const [contextLoaded, setContextLoaded] = useState(false);
   /**
@@ -572,6 +582,11 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     // on, and when it is anything else both describe Reflect's.
     setTodayClosed(history.todayClosed);
     setContextSource(history.source);
+    // REF-112-C item 3. Off the SAME object as the figures, for the reason
+    // above: on a partial day `loadTradeRuleContext` has already fallen back to
+    // Reflect's own rows, so this flag and `todayClosed` have to move together
+    // or the panel would call the broker's data partial while displaying it.
+    setContextPartial(history.partial);
     setContextLoaded(true);
 
     // `?? []` rather than the `if (data)` guard the two above use: an empty
@@ -593,7 +608,18 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     //
     // `closedCount === 0` is most form opens, including every one before the
     // first trade of the day, and there is nothing to itemise then anyway.
-    if (history.source === 'broker_verified' && history.todayClosed.count > 0) {
+    // AND NOT ON A PARTIAL DAY (REF-112-C item 3). The list comes from
+    // /api/tradovate/trades — the BROKER's rows — while on a partial day
+    // `todayClosed` has fallen back to Reflect's. `showsLineList` would usually
+    // decline to draw them anyway, because the two counts will not match; but
+    // "usually" is not good enough here, since its one condition is an equal
+    // count and two different sets can be the same size. Then it would render
+    // the broker's rows under a net the rules computed from Reflect's, which is
+    // exactly the self-contradicting panel that check exists to prevent.
+    //
+    // It also saves the second eight-to-ten-request pull on a day we already
+    // know we will not draw a list for.
+    if (history.source === 'broker_verified' && !history.partial && history.todayClosed.count > 0) {
       setTodayLines(await loadTodayTradeLines());
     } else {
       // A reload after the day moved — the trader closed the last open plan —
@@ -1224,6 +1250,10 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
               maxDailyTrades={presetRules?.max_daily_trades ?? null}
               maxDailyLoss={presetRules?.max_daily_loss ?? null}
               source={contextSource}
+              // REF-112-C item 3. Replaces the "closes came from Tradovate"
+              // line with one saying the broker's data is partial, because on
+              // such a day the figures beside it are Reflect's own.
+              partial={contextPartial}
               lines={todayLines}
               // REF-108: what the trader is holding right now. The panel
               // renders nothing from this when they are flat.

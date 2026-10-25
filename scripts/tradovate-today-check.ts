@@ -141,6 +141,8 @@ import {
 // writes for a thrown TradovateUnpriceableError. The pricing chain's refusals
 // no longer throw (REF-112 §5.11), so no group builds that line any more.
 import { loadTradeRuleContext, type TradeRuleContext } from '../src/lib/rules/tradeRuleContext';
+// REF-112-C item 3: which of stage B's notices mean the day is short.
+import { makesDayPartial } from '../src/lib/tradovate/notices';
 import {
   checkActiveViolation,
   checkCustomRules,
@@ -2561,6 +2563,55 @@ async function main() {
     }),
     c('an unknown source', readBrokerDayResponse({ source: 'broker_maybe' }), { source: 'broker_unavailable' }),
     c('no body', readBrokerDayResponse(null), { source: 'broker_unavailable' }),
+
+    // ── REF-112-C item 3: the `partial` axis ────────────────────────────────
+    //
+    // ABSENCE IS THE LOAD-BEARING CASE HERE, and it is the first one: every
+    // response this product has ever sent omits the field, and all of them
+    // meant "nothing was missing". So absence must leave the pull byte-identical
+    // to the pre-stage-B one — which the first case in this group already
+    // asserts and this one restates on purpose, because the conservative answer
+    // and the surprising one are the same value. Defaulting it to true would
+    // silently stop every connected trader's broker day from reaching the rules.
+    c('REF-112-C: partial is absent unless it is true',
+      readBrokerDayResponse({ source: 'broker_verified', day: wireDay }),
+      { source: 'broker_verified', day: wireDay }),
+    c('REF-112-C: a partial day carries the flag',
+      readBrokerDayResponse({ source: 'broker_verified', day: wireDay, partial: true }),
+      { source: 'broker_verified', day: wireDay, partial: true }),
+    // Only the literal `true`, like every other boolean this parser reads: the
+    // body is JSON from a route and the string "true" is not a claim.
+    c('REF-112-C: the string "true" is not a claim',
+      readBrokerDayResponse({ source: 'broker_verified', day: wireDay, partial: 'true' }),
+      { source: 'broker_verified', day: wireDay }),
+    c('REF-112-C: and neither is 1',
+      readBrokerDayResponse({ source: 'broker_verified', day: wireDay, partial: 1 }),
+      { source: 'broker_verified', day: wireDay }),
+    // An explicit false is the same as absence, which is what lets the route
+    // send either without changing what a client concludes.
+    c('REF-112-C: an explicit false is absence',
+      readBrokerDayResponse({ source: 'broker_verified', day: wireDay, partial: false }),
+      { source: 'broker_verified', day: wireDay }),
+    // DROPPED ON THE THREE STATELESS OUTCOMES. They carry no figures, so
+    // "the figures are short" has nothing to say about them — and keeping it
+    // would mean the frozen singletons could no longer be returned as-is.
+    c('REF-112-C: a stateless outcome does not carry it',
+      [
+        readBrokerDayResponse({ source: 'broker_unavailable', partial: true }),
+        readBrokerDayResponse({ source: 'reflect_only', partial: true }),
+        readBrokerDayResponse({ source: 'broker_expired', partial: true }),
+      ],
+      [
+        { source: 'broker_unavailable' },
+        { source: 'reflect_only' },
+        { source: 'broker_expired' },
+      ]),
+    // Both optional axes at once, to pin that neither clobbers the other.
+    c('REF-112-C: partial and the trade-source declaration coexist',
+      readBrokerDayResponse({
+        source: 'broker_verified', day: wireDay, partial: true, isTradeSource: true,
+      }),
+      { source: 'broker_verified', day: wireDay, isTradeSource: true, partial: true }),
   ]);
 
   // ── The two enforcement paths ─────────────────────────────────────────────
@@ -2765,6 +2816,33 @@ async function bothPathsAgree() {
     },
   };
 
+  /**
+   * A day the broker answered SHORT (REF-112-C item 3).
+   *
+   * $300 AND NOT $0, because this is the realistic shape: stage B skips one
+   * euro-denominated account and prices the rest, so the broker's total is a
+   * plausible-looking number that simply is not the trader's whole day. A zero
+   * at least looks like nothing happened; $300 against a real $800 looks like a
+   * fact. Which is why the fallback cannot be conditioned on the figure — there
+   * is no figure that announces itself as short.
+   */
+  const partialShort: BrokerDayPull = {
+    source: 'broker_verified',
+    partial: true,
+    day: {
+      closedCount: 1,
+      losingCount: 1,
+      net: -300,
+      lost: 300,
+      lossStreak: 1,
+      minutesSinceLastClose: 20,
+      asOf: new Date(NOW).toISOString(),
+    },
+  };
+
+  /** The same flag on the quiet day — where the block would otherwise lift. */
+  const partialQuiet: BrokerDayPull = { ...quietBroker, partial: true };
+
   const cases: { label: string; broker: BrokerDayPull; reflect: typeof reflectBlocked; wantSource: string; wantLoss: number; wantBlocked: boolean }[] = [
     { label: 'broker_verified, broker over the limit', broker: brokerVerified, reflect: { taken: 1, closedToday: [], recent: [] }, wantSource: 'broker_verified', wantLoss: 900, wantBlocked: true },
     { label: 'broker_expired falls back to Reflect, still blocked', broker: { source: 'broker_expired' }, reflect: reflectBlocked, wantSource: 'broker_expired', wantLoss: 800, wantBlocked: true },
@@ -2774,6 +2852,20 @@ async function bothPathsAgree() {
     // broker that paired nothing REPLACES Reflect's figure, so the block lifts.
     // Both paths lift it together, which is the property under test.
     { label: 'broker_verified and quiet replaces Reflect (option A)', broker: quietBroker, reflect: reflectBlocked, wantSource: 'broker_verified', wantLoss: 0, wantBlocked: false },
+    // REF-112-C item 3 — THE EXACT INVERSE OF THE ROW ABOVE, and the whole
+    // point of the item. Same quiet broker, same Reflect record, one flag
+    // different: the day is PARTIAL, so option A does not apply and the figures
+    // stay Reflect's. The block that lifts on the row above does not lift here.
+    //
+    // The row above is option A's accepted cost — a broker that genuinely
+    // paired nothing is believed. This one is the case where the broker told us
+    // it could not see everything, and believing it then is not option A, it is
+    // just an under-count.
+    { label: 'REF-112-C: a PARTIAL quiet day falls back to Reflect, and the block holds', broker: partialQuiet, reflect: reflectBlocked, wantSource: 'broker_verified', wantLoss: 800, wantBlocked: true },
+    // The realistic shape: the broker answered with a plausible $300 while the
+    // trader really lost $800. Falling back is what keeps the $500 limit
+    // enforceable.
+    { label: 'REF-112-C: a PARTIAL short day falls back to Reflect, not the short number', broker: partialShort, reflect: reflectBlocked, wantSource: 'broker_verified', wantLoss: 800, wantBlocked: true },
   ];
 
   const results: Case[] = [];
@@ -2804,6 +2896,47 @@ async function bothPathsAgree() {
 
   const quietCtx = await loadTradeRuleContext('u', quietBroker, fakeSupabase(reflectBlocked));
   results.push(c('no broker closes means no money line, not a zero', quietCtx.todayClosed.money, null));
+
+  // ── REF-112-C item 3: the PANEL falls back with the rule, not after it ────
+  //
+  // §4.5's rule is that the sentence the trader reads and the number the rule
+  // acts on come off one object. Falling back on `todayLossAmount` alone would
+  // have satisfied the brief's letter and broken that: the panel would show the
+  // broker's $300 above a block fired on $800. These four are what pin the
+  // whole override being skipped rather than one field of it.
+  const partialCtx = await loadTradeRuleContext('u', partialShort, fakeSupabase(reflectBlocked));
+  results.push(c('REF-112-C: the flag reaches the context', partialCtx.partial, true));
+  results.push(
+    c(
+      'REF-112-C: the panel figure is Reflect\'s too, not the broker\'s short one',
+      [partialCtx.todayClosed.count, partialCtx.todayClosed.money?.lost],
+      [1, 800]
+    )
+  );
+  results.push(
+    c(
+      'REF-112-C: THE PANEL AND THE RULE READ ONE NUMBER (§4.5)',
+      partialCtx.todayClosed.money?.lost,
+      partialCtx.todayLossAmount
+    )
+  );
+  // The streak falls back with it. A skipped losing trade breaks a streak, and
+  // `cooldown_after_losses` is measured on exactly that — so leaving the
+  // broker's streak behind would be the same permissive failure one rule over.
+  results.push(
+    c(
+      'REF-112-C: the streak and its clock are Reflect\'s as well',
+      [partialCtx.lossStreak, partialCtx.minutesSinceLastClose !== null],
+      [1, true]
+    )
+  );
+  // And `source` is unchanged: the broker DID answer, the trader IS connected,
+  // and the four values are a CHECK constraint (032) with no room for a fifth.
+  // `partial` is the second axis that tells the panel which line to print.
+  results.push(c('REF-112-C: and source still says the broker answered', partialCtx.source, 'broker_verified'));
+  // An ordinary verified day must be untouched by any of this.
+  results.push(c('REF-112-C: an ordinary verified day is not partial', verifiedCtx.partial, false));
+  results.push(c('REF-112-C: and neither is a fallback state', quietCtx.partial, false));
 
   group('both enforcement paths, one context', results);
 
@@ -3560,6 +3693,14 @@ async function bothPathsAgree() {
   const badSince = await callRoute({ ...today, since: 'last tuesday' });
   const ok = await callRoute(today);
   const okLoad = loaded;
+  // REF-112-C item 3. The dep seam carries `partial` now, so the flag is driven
+  // the same way every other outcome in this group is.
+  const partialRows = await callRoute(today, {
+    loadTrades: async () => ({ trades: [ROW_TODAY, ROW_YESTERDAY], asOf: ROUTE_ASOF, partial: true }),
+  });
+  const completeRows = await callRoute(today, {
+    loadTrades: async () => ({ trades: [ROW_TODAY, ROW_YESTERDAY], asOf: ROUTE_ASOF, partial: false }),
+  });
   const sinceOk = await callRoute({ ...today, since: '2026-10-12T00:00:00.000Z' });
   const sinceClamped = await callRoute({ ...today, since: '2026-09-01T00:00:00.000Z' });
 
@@ -3634,6 +3775,33 @@ async function bothPathsAgree() {
       describeDayPullFailure(leakyError).includes('2606306'),
       describeDayPullFailureKind(leakyError).includes('2606306'),
     ], [true, false]),
+
+    // ── REF-112-C item 3: `partial` on the rows route ────────────────────
+    //
+    // Case (7) is also the ABSENCE assertion, by whole-object equality: a pull
+    // that reports nothing missing must produce the body that shipped before
+    // this field existed, or (7) fails.
+    c('(17) a pull that came back short says so on the wire', [partialRows.status, partialRows.body], [
+      200,
+      {
+        source: 'broker_verified',
+        trades: [ROW_TODAY],
+        windowStart: DAY_START_ISO,
+        asOf: ROUTE_ASOF,
+        partial: true,
+      },
+    ]),
+    // AN EXPLICIT `false` MUST NOT REACH THE WIRE. Absence is what every client
+    // reads as "nothing missing", so sending the field on an ordinary day would
+    // be bytes for nothing — the same rule `isTradeSource` follows.
+    c('(18) and a pull that was complete sends no flag at all',
+      'partial' in completeRows.body, false),
+    // THE WINDOW CUT IS NOT AN UNDER-COUNT. The pull reaches back past the
+    // window on purpose (STREAK_WINDOW) and case (8) asserts the route trims
+    // it; that is the route answering the question it was asked, not the broker
+    // failing to see the day. `partial` stays the broker's claim alone.
+    c('(19) trimming the streak window to the asked-for one is not partial',
+      'partial' in ok.body, false),
   ]);
 
   // ── /today is unchanged ───────────────────────────────────────────────────
@@ -3643,7 +3811,11 @@ async function bothPathsAgree() {
   // form has had no position leave our server. This group asserts the half that
   // can regress silently — a later change returning `trades` from /today has to
   // delete these lines on purpose.
-  const todayBody = JSON.stringify({ source: 'broker_verified', day: mixed.day });
+  // REF-112-C item 3 added `partial` to this response, so it is here: the point
+  // of this group is that the FULL shape of the body carries no trade, and a
+  // field added to the route but not to this fixture is a field the privacy
+  // sweep below never looks at.
+  const todayBody = JSON.stringify({ source: 'broker_verified', day: mixed.day, partial: true });
   const tradeFields = [
     'brokerTradeKey',
     'host',
@@ -3667,7 +3839,7 @@ async function bothPathsAgree() {
   ];
 
   group('/api/tradovate/today still carries no trade', [
-    c('(1) the response body is the source and the seven scalars', Object.keys(JSON.parse(todayBody)).sort(), ['day', 'source']),
+    c('(1) the response body is the source, the scalars and the partial flag', Object.keys(JSON.parse(todayBody)).sort(), ['day', 'partial', 'source']),
     c('(2) not one trade field appears anywhere in it', tradeFields.filter((field) => todayBody.includes(field)), []),
     c('(3) nor a symbol, a price, an account id, a fill id or an ORDER id as a VALUE', [
       todayBody.includes('ESZ6'),
@@ -4727,6 +4899,17 @@ async function foreignCurrencyGroup() {
     // ── An ordinary day is untouched ─────────────────────────────────────
     c('(10) a dollar-only day carries no notices',
       (await pullFull(withTrips([dollarTrip]))).notices, []),
+
+    // REF-112-C item 3 — AND THE DAY SAYS IT IS SHORT. This is the half stage
+    // B left to a follow-up: the notice reached the sync panel, and the rule
+    // engine's route dropped it, so `max_daily_loss` was measured against a
+    // total missing the euro account's trades entirely.
+    c('(11) a skipped account makes the day PARTIAL',
+      makesDayPartial(day.notices), true),
+    c('(12) and so does a trader who has only that account',
+      makesDayPartial(alone.notices), true),
+    c('(13) while a dollar-only day is not partial',
+      makesDayPartial((await pullFull(withTrips([dollarTrip]))).notices), false),
   ]);
 }
 
@@ -4832,6 +5015,17 @@ async function unsupportedTypeGroup() {
       nothingAtAll.notices.map((n) => n.kind), ['no_accounts']),
     c('(9) and a trader with a working account never sees it',
       mixed.notices.some((n) => n.kind === 'no_accounts'), false),
+
+    // REF-112-C item 3. An unsupported TYPE is a skipped account, so the day
+    // is partial and the rule engine falls back to Reflect's figures.
+    c('(10) an unsupported account type makes the day PARTIAL',
+      makesDayPartial(withStranger.notices), true),
+    // `no_accounts` DOES NOT, and this is the one judgement call in the
+    // mapping — the build report raises it rather than settling it here. It is
+    // not a day that is short of something: it is a day with no broker scope
+    // at all, and it already has its own sentence. See PARTIAL_DAY_KINDS.
+    c('(11) but an empty scope is not a PARTIAL day',
+      makesDayPartial(nothingAtAll.notices), false),
   ]);
 }
 
@@ -4935,6 +5129,15 @@ async function unpricedProductGroup() {
     // (7) A clean day says nothing, which is what keeps this free.
     c('(7) a day where everything resolved carries no notice',
       (await pullFull(withTrips([goodTrip]))).notices, []),
+
+    // REF-112-C item 3. A skipped TRADE is the sharpest case for the fallback:
+    // stage B's own report works the arithmetic — ES at $50 turns an 8-point
+    // move into $400, so one unpriced trade can be the difference between a
+    // day that trips max_daily_loss and one that does not.
+    c('(8) an unresolvable product makes the day PARTIAL',
+      makesDayPartial(mixed.notices), true),
+    c('(9) while a day that priced everything is not partial',
+      makesDayPartial((await pullFull(withTrips([goodTrip]))).notices), false),
   ]);
 }
 
