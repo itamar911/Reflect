@@ -32,7 +32,9 @@ import { tradeMoneyPnl, hasMoneyPnl, tradeDirection } from '@/lib/pnl';
 import { PLAIN_HEBREW_PROSE_CLAUSE } from '@/lib/ai/prompts';
 import { hasStoredDebrief, readStoredDebrief, type StoredDebrief } from '@/lib/journal/debrief';
 import { linkState } from '@/lib/journal/link';
-import { readStopHistory, stopDirectionOf } from '@/lib/journal/stopHistory';
+import { readStopHistory, stopDirectionOf, stopMoveSentence } from '@/lib/journal/stopHistory';
+import { readTradeFacts } from '@/lib/ai/tradeFacts';
+import { formatMoney } from '@/lib/money';
 import { isImportEnabled } from '@/lib/tradovate/import';
 
 /**
@@ -481,20 +483,29 @@ function buildDebriefPrompt(
     ? trade.post_trade_notes.trim()
     : null;
 
-  // ── What the BROKER says about the stop (REF-113 Stage 5) ────────────────
+  // ── What the BROKER says about the stop (REF-113 Stage 5, REF-120) ───────
   //
   // `- Moved Stop Loss: כן/לא` is the self-report, and on a broker row it is
   // now derived from the order history rather than typed by the trader — which
   // makes it the one line in this prompt whose single bit throws away most of
-  // what we know. The block below adds the three fields that change what a
-  // coach would say, and ONLY those three.
+  // what we know.
   //
-  // NO RAW PRICES, AND THAT IS A DELIBERATE LINE RATHER THAN CAUTION. The stop
-  // prices are already in the prompt where they belong — `Stop Loss` is the one
-  // the trader PLANNED — and adding the broker's two would invite the model to
-  // compute a risk figure and present it as fact, which is the same class of
-  // mistake as letting it restate the score. The direction and the count are
-  // the behaviour; the prices are evidence for a human.
+  // THE VERDICT IS NOW THE SHARED SENTENCE AND NOT A SECOND IMPLEMENTATION OF
+  // IT (REF-120). What stood here was five hand-written ENGLISH sentences built
+  // from the same document `stopMoveSentence` reads — so the sentence the trader
+  // saw on the trade card and the sentence the model read were two independent
+  // renderings of one verdict, free to disagree, and one of them had no test.
+  // `stopMoveSentence` also has branches these five never grew: a position that
+  // opened UNPROTECTED (`stopAtEntry === false`) and a stop CANCELLED with
+  // nothing in its place both read here as an ordinary move before this change.
+  // Now there is one verdict, and the trader can be shown the exact sentence the
+  // coaching was written from.
+  //
+  // THE INSTRUCTIONS STAY, BENEATH IT. They are the part of this block that is
+  // not a fact — what a coach should and should not do with the verdict — and
+  // the shared sentence deliberately carries no instruction (it is a statement
+  // of fact by vendor-compliance rule, see lib/journal/stages.ts). So: the
+  // sentence as the fact, the guidance under it, per branch.
   //
   // THE EARLY-TIGHTENING INSTRUCTION IS THE POINT OF THE WHOLE BLOCK. A
   // tightening costs no discipline points (lib/scoring/tradeScore.ts) and is
@@ -502,32 +513,60 @@ function buildDebriefPrompt(
   // breakeven twenty minutes before the price reached the target is good risk
   // management that cost the trader the trade, and that is exactly the kind of
   // thing a deterministic score cannot say and a coach can.
+  //
+  // `broker_stop_loss` AND `broker_take_profit` ARE STILL NOT IN THIS PROMPT,
+  // which is the decision this block has always recorded and REF-120 does not
+  // reopen: the stop prices that belong in front of a model are the ones the
+  // trader COMMITTED TO — `Stop Loss` below is the planned one — and handing it
+  // the broker's two columns invites it to compute a risk figure and present it
+  // as fact. The ONE judgement call in the swap: `stopMoveSentence` appends a
+  // from→to range on a single-stop move, so a broker price can now reach the
+  // prompt INSIDE the shared sentence. That is accepted deliberately. It is
+  // bounded (one branch, both ends readable, correct side of the entry, one stop
+  // only — the function withholds it otherwise), it is the exact string the
+  // trader is looking at, and stripping it would mean building a second sentence
+  // again, which is the whole thing this change removes.
   const stops = readStopHistory(trade.stop_history);
   const stopBlock = (() => {
-    if (stops === null) return '';
-    if (stops.verdict === 'unknown') {
-      return '\n- Broker stop orders: COULD NOT BE READ. Do not say anything about whether the stop was moved — the self-report line above is the only thing known, and it is not evidence either way.';
-    }
-    if (stops.verdict === 'none') {
-      return '\n- Broker stop orders: NO PROTECTIVE STOP WAS EVER PLACED on this trade (read from the broker). This is a fact about the execution and worth addressing directly.';
-    }
-    if (stops.trailing) {
-      return '\n- Broker stop orders: a TRAILING stop. Its steps were the server\'s, not decisions the trader took mid-trade, so do not describe them as the trader moving their stop.';
-    }
-    if (stops.verdict === 'kept') {
-      return '\n- Broker stop orders: the stop was placed and NEVER MOVED (read from the broker, not self-reported).';
-    }
-    const which =
-      stops.direction === 'tightened'
-        ? 'TOWARD the entry/profit (tightened — risk reduced). This is risk management and NOT a discipline failure; do not criticise it as one.'
-        : stops.direction === 'widened'
-          ? 'AWAY from the entry (widened — the risk the trader committed to GREW mid-trade). This is the discipline failure the score measures.'
-          : stops.direction === 'mixed'
-            ? 'BOTH ways — at least one move widened the risk and at least one tightened it. The widening is the part that matters.'
-            : 'in a direction we could not determine.';
+    const sentence = stopMoveSentence(stops);
+    if (stops === null || sentence === null) return '';
+
+    // The branches, in `stopMoveSentence`'s own precedence, so the guidance
+    // under a sentence always belongs to it.
+    const guidance = (() => {
+      if (stops.verdict === 'unknown') {
+        return 'The orders COULD NOT BE READ. Do not say anything about whether the stop was moved — the self-report line above is the only thing known, and it is not evidence either way.';
+      }
+      if (stops.verdict === 'none') {
+        return 'No protective stop was ever placed. This is a fact about the execution and worth addressing directly.';
+      }
+      if (stops.stopAtEntry === false) {
+        return 'The position was OPEN AND UNPROTECTED until the stop arrived. That is the headline about this trade\'s risk, ahead of anything that happened to the stop afterwards.';
+      }
+      if (stops.cancelledUnreplaced) {
+        return 'The rest of the position was carried with NO stop at all. That is the final state of the risk and worth addressing directly.';
+      }
+      if (stops.trailing) {
+        return 'Its steps were the server\'s, not decisions the trader took mid-trade, so do not describe them as the trader moving their stop.';
+      }
+      if (stops.verdict === 'kept') {
+        return 'Read from the broker\'s orders, not self-reported.';
+      }
+      if (stops.direction === 'tightened') {
+        return 'Tightening is risk management and NOT a discipline failure; do not criticise it as one. If it plausibly ENDED the trade early — a stop pulled to breakeven on a trade that then reached its target — say so as an observation, not as a rule violation.';
+      }
+      if (stops.direction === 'widened') {
+        return 'The risk the trader committed to GREW mid-trade. This is the discipline failure the score measures.';
+      }
+      if (stops.direction === 'mixed') {
+        return 'At least one move widened the risk and at least one tightened it. The widening is the part that matters.';
+      }
+      return 'The direction of the move could not be determined, so do not attribute one.';
+    })();
+
     return (
-      `\n- Broker stop orders: the stop was MOVED ${stops.movedCount} time(s), ${which}` +
-      '\n  If a tightening plausibly ENDED the trade early — a stop pulled to breakeven on a trade that then reached its target — say so as an observation, not as a rule violation.'
+      `\n- Broker stop orders — the trader is shown this exact sentence: ${sentence.text}` +
+      `\n  ${guidance}`
     );
   })();
 
@@ -553,11 +592,43 @@ Address them directly in your analysis — validate or challenge their read of t
     ? 'You are a professional trading-process coach. The trader just closed a trade that they took WITHOUT a written plan, and has told us so. Your ONLY job is to write feedback text about how it was executed.'
     : 'You are a professional trading-process coach. The trader just closed a trade and a deterministic score (0-100) has already been computed in code from verified, persisted data. Your ONLY job is to write feedback text about this trade — you do NOT determine, adjust, or restate the score.';
 
+  // ── The four facts the debrief was never told (REF-120) ──────────────────
+  //
+  // This route wrote "סיכום העסקה" about a trade whose INSTRUMENT and DOLLAR
+  // RESULT it had never been given. `symbol` was not interpolated in either
+  // form; the money was computed by `computeOutcome` above and returned to the
+  // browser only — `buildDebriefPrompt` never received it; and `quantity`,
+  // `submitted_at` and `closed_at` were absent too, so the model could not say
+  // how long a trade was held or how big it was.
+  //
+  // THROUGH THE SHARED READER rather than off the row, so the two surfaces
+  // cannot disagree about what a column means: the instrument comes from
+  // whichever of `symbol` / `plan_symbol` owns it on this row, the size takes
+  // `units ?? quantity`, and the money goes through lib/pnl.ts — i.e.
+  // `actual_pnl` on a broker row, which the import writes and `pnl_amount`
+  // deliberately is not.
+  //
+  // ENGLISH LABELS AND ONE LINE EACH, matching the block they join rather than
+  // importing `tradeFactsLine`'s Hebrew row wholesale. This prompt enumerates
+  // fields the model is asked to reason about individually; the chat coach's
+  // prompt lists twenty trades and wants one line per trade. Same facts, same
+  // reader, two renderings — which is the split the module was built for.
+  const facts = readTradeFacts(trade);
+
+  const executionLines = facts === null ? '' : [
+    // The ROOT and never the contract name — see lib/ai/tradeFacts.ts.
+    facts.instrument !== null ? `- Instrument: ${facts.instrument}` : null,
+    facts.quantity !== null ? `- Quantity: ${facts.quantity}` : null,
+    facts.openedAt !== null ? `- Opened at: ${facts.openedAt}` : null,
+    facts.closedAt !== null ? `- Closed at: ${facts.closedAt}` : null,
+    facts.money !== null ? `- Money result: ${formatMoney(facts.money)}` : null,
+  ].filter((line): line is string => line !== null).join('\n');
+
   return `${opening}
 
 Trade data:
 - Strategy: ${trade.strategy ?? '—'}
-- Direction: ${trade.direction ?? '—'}
+- Direction: ${trade.direction ?? '—'}${executionLines ? '\n' + executionLines : ''}
 - Entry: ${trade.entry_price}
 - Stop Loss: ${trade.stop_loss ?? '—'}
 - Take Profit: ${trade.take_profit ?? '—'}
