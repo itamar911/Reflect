@@ -391,9 +391,11 @@ export async function respondToLiveRequest(deps: LiveRouteDeps): Promise<NextRes
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: NO_STORE });
   }
 
-  // Fails closed, like every other gate in this integration: an unset or empty
-  // allowlist allows nobody. `reflect_only` rather than a 403 — a user with no
-  // broker view is in a state the UI renders, not an error.
+  // The same check as every other route in this integration, through the same
+  // function: open to every signed-in user unless TRADOVATE_OAUTH_ALLOWED_USER_IDS
+  // names ids, in which case only those (allowlist.ts). `reflect_only` rather
+  // than a 403 — a user with no broker view is in a state the UI renders, not
+  // an error.
   if (!deps.isAllowed(userId)) return answer(stateless('reflect_only'));
 
   // `accounts` is migration 037's, and without it there is no portfolio to

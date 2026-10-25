@@ -95,6 +95,7 @@ import { isHiddenTrade, visibleTrades, withHidden } from '../src/lib/trades/visi
 import { loadTradeRuleContext } from '../src/lib/rules/tradeRuleContext';
 import type { BrokerDayPull } from '../src/lib/rules/brokerDayContext';
 import { readBrokerDayResponse } from '../src/lib/rules/brokerDayContext';
+import { isAllowlistRestricting, isUserAllowed } from '../src/lib/tradovate/allowlist';
 import { GET as cronImport } from '../src/app/api/cron/tradovate-import/route';
 import { GET as cronOrders } from '../src/app/api/cron/tradovate-orders/route';
 import { ORDERS_LOOKBACK_MS, runStopCapture } from '../src/lib/tradovate/orders-cron';
@@ -1496,6 +1497,109 @@ async function cronSkipGroup() {
     // this group proves nothing upstream was touched.
     c('(4) and nothing failed, because nothing was tried', [run.failedUsers, run.failed], [0, 0]),
     c('(5) no rows moved', [run.imported, run.updated, run.unchanged], [0, 0, 0]),
+  ]);
+}
+
+/**
+ * The rollback lever, in both positions (REF-112-C item 1, investigation §6).
+ *
+ * THIS GROUP EXISTS BECAUSE THE DEFAULT INVERTED. `isUserAllowed` used to fail
+ * closed — unset, empty, or no parseable ids all meant *nobody* — and the
+ * connection is now open to every signed-in user unless the variable names ids.
+ * All 10 server enforcement points, 6 UI gates and 4 check scripts read this
+ * one function, so a regression here silently either opens a rolled-back
+ * deployment or shuts a launched one, in twenty places at once, with nothing
+ * else in the suite positioned to notice.
+ *
+ * `cronSkipGroup` above proves the RESTRICTED half end to end. The second part
+ * of this group proves the OPEN half the same way, and that is the half the
+ * launch turns on: with the variable unset the nightly loop must actually reach
+ * the pull for a trader who declared the broker their source. A stub that
+ * throws on a token read is what makes "it got there" observable —
+ * `failedUsers` can only be non-zero if the guard let the connection through.
+ */
+async function allowlistInversionGroup() {
+  const env = (value?: string): NodeJS.ProcessEnv =>
+    (value === undefined
+      ? {}
+      : { TRADOVATE_OAUTH_ALLOWED_USER_IDS: value }) as unknown as NodeJS.ProcessEnv;
+
+  // The same two connections and the same stub `cronSkipGroup` uses: USER
+  // declares the broker its trade source, OTHER_USER declines.
+  const admin = {
+    from: (table: string) => {
+      if (table === 'tradovate_call_counts') return emptyCounts();
+      if (table !== 'tradovate_connections') throw new Error(`unexpected table ${table}`);
+      const rows = [
+        { user_id: USER, is_trade_source: true },
+        { user_id: OTHER_USER, is_trade_source: false },
+      ];
+      const q = {
+        select: () => q,
+        eq: () => q,
+        order: () => q,
+        limit: () => q,
+        update: () => q,
+        in: () => q,
+        returns: () => q,
+        then: (resolve: (v: { data: unknown; error: unknown }) => unknown) =>
+          Promise.resolve({ data: rows, error: null }).then(resolve),
+      };
+      return q;
+    },
+  } as unknown as SupabaseClient;
+
+  // NO ALLOWLIST AT ALL — the launched state. USER must now get past the guard
+  // and fail on the token read; OTHER_USER is still held back by E7's
+  // declaration and not by this variable, which is what keeps the two reasons
+  // for not pulling apart.
+  const { result: open } = await captureLogs(() =>
+    runBrokerImport({
+      admin,
+      env: { [IMPORT_FLAG]: '1' } as unknown as NodeJS.ProcessEnv,
+    })
+  );
+
+  group('REF-112-C: an empty allowlist opens the connection, a non-empty one restricts it', [
+    // ── The rule itself ────────────────────────────────────────────────────
+    c('(1) an UNSET variable allows anybody', isUserAllowed(USER, env()), true),
+    c('(2) an EMPTY variable allows anybody', isUserAllowed(USER, env('')), true),
+    // The parser drops blanks, so this is "set, but to no usable ids". It was
+    // the sharpest case under fail-closed — a stray comma locked everyone out —
+    // and it is now indistinguishable from unset, deliberately.
+    c('(3) a variable holding only separators allows anybody',
+      isUserAllowed(USER, env(' , ,\n ')), true),
+    c('(4) a NON-EMPTY variable allows the ids it names',
+      isUserAllowed(USER, env(USER)), true),
+    c('(5) and refuses everybody else', isUserAllowed(OTHER_USER, env(USER)), false),
+    c('(6) ids are matched case-insensitively, in both directions',
+      [isUserAllowed(USER.toUpperCase(), env(USER)), isUserAllowed(USER, env(USER.toUpperCase()))],
+      [true, true]),
+    // THE ONE THING THAT DID NOT INVERT. An empty id is not an unrestricted
+    // deployment, it is a caller that has lost track of whose request this is.
+    c('(7) an empty user id is refused even with the connection wide open',
+      [isUserAllowed('', env()), isUserAllowed('   ', env())], [false, false]),
+    c('(8) isAllowlistRestricting reports which position the lever is in',
+      [
+        isAllowlistRestricting(env()),
+        isAllowlistRestricting(env('')),
+        isAllowlistRestricting(env(' , ')),
+        isAllowlistRestricting(env(USER)),
+      ],
+      [false, false, false, true]),
+
+    // ── The open half, end to end through the nightly loop ─────────────────
+    c('(9) both connections were still found', open.found, 2),
+    // 1 and not 2: OTHER_USER is held back by the declaration. If the inversion
+    // had leaked into that check this would read 2.
+    c('(10) the declaring trader is attempted with no allowlist configured',
+      open.attempted, 1),
+    c('(11) the non-declaring one is the only skip', open.skippedUsers, 1),
+    // The proof the guard let it through: nothing can fail that was never
+    // tried. `cronSkipGroup` asserts the mirror image, failedUsers 0, because
+    // nothing got this far.
+    c('(12) and it reached the pull, which is why it failed on the token read',
+      open.failedUsers, 1),
   ]);
 }
 
@@ -7133,6 +7237,7 @@ async function main() {
   await wireGroup();
   await cronGroup();
   await cronSkipGroup();
+  await allowlistInversionGroup();
 
   // Stage 2.5 — the sync button's half.
   await syncRouteGroup();

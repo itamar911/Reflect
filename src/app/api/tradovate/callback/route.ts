@@ -25,7 +25,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
 import { createClient } from '@/lib/supabase/server';
-import { isAllowlistConfigured, isUserAllowed } from '@/lib/tradovate/allowlist';
+import { isUserAllowed } from '@/lib/tradovate/allowlist';
 import { describeConfigError } from '@/lib/tradovate/config';
 import { saveConnection } from '@/lib/tradovate/connections';
 import {
@@ -72,18 +72,17 @@ export async function GET(request: NextRequest) {
 
   if (!user) return NextResponse.redirect(new URL('/login', request.url));
 
-  // The allowlist gate, checked independently of /connect. A callback can be
-  // replayed or hand-crafted, so the route that actually writes tokens does not
-  // get to assume the route that starts the flow was ever involved. Placed
-  // before the error branch and before state so that a blocked user cannot
-  // learn anything about the flow's internals.
+  // The same check as /connect, made independently. A callback can be replayed
+  // or hand-crafted, so the route that actually writes tokens does not get to
+  // assume the route that starts the flow was ever involved. Placed before the
+  // error branch and before state so that a restricted user cannot learn
+  // anything about the flow's internals.
+  //
+  // The "unset or empty" warning that used to sit inside this branch is gone
+  // for the reason given at the same place in ../connect/route.ts: after the
+  // inversion an unset variable makes this line unreachable, so the only way to
+  // reach it is a list that deliberately excludes this user.
   if (!isUserAllowed(user.id)) {
-    if (!isAllowlistConfigured()) {
-      console.warn(
-        '[tradovate] callback refused: TRADOVATE_OAUTH_ALLOWED_USER_IDS is unset or empty, ' +
-          'so no user can connect. This is the fail-closed default.'
-      );
-    }
     return finish(TradovateResult.NotAvailable);
   }
 

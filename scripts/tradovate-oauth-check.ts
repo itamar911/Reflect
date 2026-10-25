@@ -47,7 +47,7 @@ import {
   detectEnvironment,
 } from '../src/lib/tradovate/hosts';
 import {
-  isAllowlistConfigured,
+  isAllowlistRestricting,
   parseAllowlist,
   TRADOVATE_ALLOWLIST_ENV_VAR,
 } from '../src/lib/tradovate/allowlist';
@@ -200,20 +200,32 @@ function checkApiUrl(): 'demo' | 'live' | null {
   return environment;
 }
 
+/**
+ * Report which state the rollback lever is in (REF-112 §6).
+ *
+ * BOTH OUTCOMES ARE A PASS, and that is the change. Under the fail-closed
+ * default an unset variable meant the connection was shut to everyone, so this
+ * warned about it; now an unset variable is the LAUNCHED state and a non-empty
+ * one is a deliberate restriction. Neither is a fault, so neither is a warning
+ * — what this check owes the operator is an unambiguous statement of which one
+ * is in force, because that is the single fact a launch or a rollback turns on.
+ */
 function checkAllowlist(): void {
   const entries = parseAllowlist();
-  if (!isAllowlistConfigured()) {
-    // Not a FAIL: an unset allowlist is a valid, safe state — it means the
-    // feature is closed. It is only a problem if you were expecting to test.
-    warn(
+  if (!isAllowlistRestricting()) {
+    pass(
       TRADOVATE_ALLOWLIST_ENV_VAR,
-      'unset or empty — the connection is closed to every user (fail-closed default)'
+      'unset or empty — the connection is OPEN to every signed-in user'
     );
     return;
   }
   // Count only. A Supabase user id is not a secret, but it identifies a person,
   // and this output is meant to be safe to paste anywhere.
-  pass(TRADOVATE_ALLOWLIST_ENV_VAR, `${entries.length} user id${entries.length === 1 ? '' : 's'} allowed`);
+  pass(
+    TRADOVATE_ALLOWLIST_ENV_VAR,
+    `RESTRICTED to ${entries.length} user id${entries.length === 1 ? '' : 's'} — ` +
+      'clear the variable to open the connection to everyone'
+  );
 }
 
 function reportEndpoints(environment: 'demo' | 'live' | null): void {

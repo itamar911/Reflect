@@ -170,17 +170,21 @@ export async function respondToTradesRequest(
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: NO_STORE });
   }
 
-  // Fails closed, like connect, callback and today: an unset or empty
-  // TRADOVATE_OAUTH_ALLOWED_USER_IDS allows nobody (allowlist.ts). `reflect_only`
-  // and not a 403 — the user has no broker view, which is a state the journal
-  // renders ("only trades you recorded in Reflect") and not an error.
+  // The same check as connect, callback and today, through the same function:
+  // open to every signed-in user unless TRADOVATE_OAUTH_ALLOWED_USER_IDS names
+  // ids, in which case only those (allowlist.ts). `reflect_only` and not a 403 —
+  // the user has no broker view, which is a state the journal renders ("only
+  // trades you recorded in Reflect") and not an error.
   //
   // §E16 of the investigation is worth reading next to this: in a JOURNAL, where
   // the trader expects their trades to appear by themselves, silence is the worst
-  // available failure. The route cannot fix that — the allowlist is small enough
-  // that explaining the refusal would identify a person — so it answers
-  // `reflect_only` and the UI that ships in a later stage owes the trader a
-  // visible sentence.
+  // available failure. The reason this route still does not explain itself has
+  // CHANGED RATHER THAN GONE. It used to be that the allowlist was small enough
+  // that explaining the refusal would identify a person; now the connection is
+  // open by default, so reaching this line means a deliberate rollback is in
+  // force. The sentence a restricted trader is owed is on the two OAuth paths,
+  // where they go to connect (REF-112-C item 2) — not on a data route whose body
+  // they never see.
   if (!deps.isAllowed(userId)) return answer(stateless('reflect_only'));
 
   const requested = parseTradesWindow(new URL(request.url).searchParams, deps.now());

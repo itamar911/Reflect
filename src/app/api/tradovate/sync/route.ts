@@ -298,10 +298,11 @@ export async function respondToSyncRequest(
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: NO_STORE });
   }
 
-  // Fails closed, like every other route in this integration: an unset or empty
-  // TRADOVATE_OAUTH_ALLOWED_USER_IDS allows nobody (allowlist.ts). `reflect_only`
-  // and not a 403 — the user has no broker view, which is a state the pages
-  // render (E16) and not an error.
+  // The same check as every other route in this integration, through the same
+  // function: open to every signed-in user unless TRADOVATE_OAUTH_ALLOWED_USER_IDS
+  // names ids, in which case only those (allowlist.ts). `reflect_only` and not
+  // a 403 — the user has no broker view, which is a state the pages render
+  // (E16) and not an error.
   if (!deps.isAllowed(userId)) return answer(stateless('reflect_only'));
 
   // The same window parser as /trades, and `dayStart` is mandatory for the same

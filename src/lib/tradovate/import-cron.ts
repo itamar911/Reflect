@@ -119,7 +119,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import { isAllowlistConfigured, isUserAllowed } from './allowlist';
+import { isUserAllowed } from './allowlist';
 import {
   IMPORT_BATCH_LIMIT,
   listConnectionsForImport,
@@ -283,19 +283,11 @@ export async function runBrokerImport(params: {
   run.active = listing.active;
   run.rotating = listing.rotating;
 
-  // The same fail-closed allowlist the user-facing routes enforce, and for the
-  // same reason as the keep-alive's: this feature is not open to all users yet,
-  // and a background job must not quietly write rows for a trader the routes
-  // would refuse to serve. Fail-closed means an unset variable imports for
-  // exactly nobody, so it is worth a log line — otherwise a run that did
-  // nothing looks identical to a run with nothing to do.
-  if (connections.length > 0 && !isAllowlistConfigured(env)) {
-    console.warn(
-      '[tradovate][import-cron] TRADOVATE_OAUTH_ALLOWED_USER_IDS is unset or empty, so every ' +
-        `connection is skipped (${connections.length} were found). Nothing was imported.`
-    );
-  }
-
+  // The "unset or empty, so every connection is skipped" warning is DELETED,
+  // not rewritten — see the same place in ./keepalive.ts. It described the
+  // fail-closed default, and after the inversion an unset variable is the state
+  // in which every connection IS imported. `run.skippedUsers` already carries
+  // the number a restricted deployment leaves out.
   // THE DAY BOUNDARY THIS JOB CANNOT KNOW (§C10.5). A cron has no browser to
   // ask, and `profiles.timezone` does not exist. UTC midnight is used, and it
   // is harmless HERE in a way it would not be in the rule engine: the scalars

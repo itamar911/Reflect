@@ -192,15 +192,16 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: NO_STORE });
   }
 
-  // The same gate as connect and callback, and it fails closed: an unset or
-  // empty TRADOVATE_OAUTH_ALLOWED_USER_IDS allows nobody (allowlist.ts). A user
-  // outside it has no broker view at all, which is `reflect_only` and not a
-  // failure — the panel says "only trades you recorded in Reflect" and invites
-  // nothing. Answered before any read, so a deployment with the integration off
-  // does no work here.
-  // `false` for the policy, and it is the honest value: a user outside the
-  // allowlist has no broker view, so nothing of theirs was ever imported and
-  // there is nothing to de-duplicate against.
+  // The same check as connect and callback, through the same function: open to
+  // every signed-in user unless TRADOVATE_OAUTH_ALLOWED_USER_IDS names ids, in
+  // which case only those (allowlist.ts). A restricted user has no broker view
+  // at all, which is `reflect_only` and not a failure — the panel says "only
+  // trades you recorded in Reflect" and invites nothing. Answered before any
+  // read, so a deployment that has rolled the connection back does no work here.
+  //
+  // `false` for the policy, and it is the honest value: a restricted user has no
+  // broker view, so nothing of theirs was ever imported and there is nothing to
+  // de-duplicate against.
   if (!isUserAllowed(user.id)) return answer(REFLECT_ONLY, false);
 
   const dayStart = parseDayStart(
@@ -282,8 +283,11 @@ export async function GET(request: Request) {
     // Through redactSecrets() like every diagnostic in this integration: the
     // describe helper reads an error's type and its own message, and on these
     // endpoints a message can have been built from a response body. The user id
-    // is not logged — there is nothing to correlate it with here, and the
-    // allowlist is small enough that it would identify a person.
+    // is not logged — there is nothing to correlate it with here, and it names a
+    // person. That reason USED TO BE "the allowlist is small enough that it
+    // would identify a person", which an open rollout retires; the rule it
+    // justified does not change, because a user id is an identifier at any
+    // scale.
     console.warn(
       redactSecrets(
         `[tradovate] today pull did not produce figures (${source}): ` +

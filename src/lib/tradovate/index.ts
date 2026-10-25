@@ -140,8 +140,13 @@ export type { DayStartParse, TradesWindowParse } from './trading-day';
 export { runKeepAlive, KEEPALIVE_WINDOW_MS } from './keepalive';
 export type { KeepAliveCounts } from './keepalive';
 
+// The rollback lever (REF-112 §6). `isUserAllowed` is the ONE function that
+// decides whether a user may use the Tradovate connection, and it now answers
+// true for everybody when TRADOVATE_OAUTH_ALLOWED_USER_IDS is empty or unset.
+// These re-exports have no importers — every call site imports from
+// './allowlist' directly — and are kept so the barrel describes the module.
 export {
-  isAllowlistConfigured,
+  isAllowlistRestricting,
   isUserAllowed,
   parseAllowlist,
   TRADOVATE_ALLOWLIST_ENV_VAR,

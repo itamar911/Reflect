@@ -576,8 +576,12 @@ export async function GET(request: Request) {
   //   - an ACTIVE connection, which `listConnectionsForImport` filters on;
   //   - `is_trade_source`, E7's declaration — a trader who said the broker is
   //     not where their trades come from should not have one pulled;
-  //   - and the fail-closed allowlist, so a background job never writes rows
-  //     for a trader the user-facing routes would refuse to serve.
+  //   - and `isUserAllowed`, the one function the whole integration asks, so a
+  //     background job never writes rows for a trader the user-facing routes
+  //     would refuse to serve. Open to everyone unless the variable names ids
+  //     (lib/tradovate/allowlist.ts). THIS SITE IS THE EASY ONE TO MISS — §1a of
+  //     the investigation says so — and it decides only whether a user gets a
+  //     broker import BEFORE their end-of-day email. They still get the email.
   //
   // A listing failure is not fatal: no user is eligible, every email still
   // goes out, and the run reports zero imports rather than zero emails.

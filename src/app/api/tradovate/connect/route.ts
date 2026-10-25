@@ -18,7 +18,7 @@
 import { NextResponse } from 'next/server';
 
 import { createClient } from '@/lib/supabase/server';
-import { isAllowlistConfigured, isUserAllowed } from '@/lib/tradovate/allowlist';
+import { isUserAllowed } from '@/lib/tradovate/allowlist';
 import { describeConfigError } from '@/lib/tradovate/config';
 import { buildAuthorizeUrl } from '@/lib/tradovate/oauth';
 import { loadOAuthConfig } from '@/lib/tradovate/oauth-config';
@@ -47,18 +47,21 @@ export async function GET(request: Request) {
     return NextResponse.redirect(new URL('/login', request.url));
   }
 
-  // The allowlist gate. Checked before configuration so that a server which is
-  // not yet configured and a user who is not yet allowed produce the same
-  // outcome for everyone outside the list. See lib/tradovate/allowlist.ts —
-  // this fails closed, and it is the real gate; the hidden settings button is
-  // only cosmetic.
+  // The rollback lever, checked before configuration so that a server which is
+  // not yet configured and a user who is not on a restricted list produce the
+  // same outcome. See lib/tradovate/allowlist.ts — the connection is OPEN to
+  // every signed-in user unless TRADOVATE_OAUTH_ALLOWED_USER_IDS names ids, and
+  // this is the real check; the hidden settings button is only cosmetic.
+  //
+  // The branch that used to sit inside this one is GONE RATHER THAN MOVED. It
+  // logged "the variable is unset or empty, so no user can connect", which was
+  // the fail-closed default announcing itself — and after the inversion an
+  // unset variable is the state in which this line is unreachable, because
+  // `isUserAllowed` answers true for everybody. Reaching here now means a list
+  // exists and this user is not on it, which is a deliberate restriction and
+  // not a configuration accident, so there is nothing for the server to warn
+  // about. The trader gets the sentence instead (REF-112-C item 2).
   if (!isUserAllowed(user.id)) {
-    if (!isAllowlistConfigured()) {
-      console.warn(
-        '[tradovate] connect refused: TRADOVATE_OAUTH_ALLOWED_USER_IDS is unset or empty, ' +
-          'so no user can connect. This is the fail-closed default.'
-      );
-    }
     return NextResponse.redirect(resultUrl(request, TradovateResult.NotAvailable));
   }
 

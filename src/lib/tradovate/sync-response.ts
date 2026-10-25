@@ -225,8 +225,14 @@ export function readSyncResponse(body: unknown): BrokerSyncOutcome {
  * beside the CSV button on each of the three pages. §E16 of the Stage 1
  * investigation is why it is said at all: in a JOURNAL, where the trader
  * expects their trades to appear by themselves, silence is the worst available
- * failure, and the allowlist is small enough that explaining the refusal would
- * identify a person. So the page states what it is showing and stops.
+ * failure. So the page states what it is showing and stops.
+ *
+ * It used to stop there because the allowlist was small enough that explaining
+ * the refusal would identify a person. That reason is retired — the connection
+ * is open to every signed-in user (lib/tradovate/allowlist.ts) — and the
+ * sentence is unchanged, because `reflect_only` is now overwhelmingly reached by
+ * a trader who simply has no broker connected, and "only trades you recorded
+ * here" is exactly the right thing to tell them.
  */
 export const REFLECT_ONLY_NOTE = 'מוצגות רק עסקאות שתיעדת ב-Reflect.';
 

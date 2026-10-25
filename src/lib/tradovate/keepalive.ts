@@ -38,7 +38,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import { isAllowlistConfigured, isUserAllowed } from './allowlist';
+import { isUserAllowed } from './allowlist';
 import {
   listConnectionsDueForRefresh,
   redeemRefreshToken,
@@ -139,21 +139,23 @@ export async function runKeepAlive(params: {
 
   const due = await listConnectionsDueForRefresh({ admin, withinMs });
 
-  // The same fail-closed allowlist the connect and callback routes enforce, and
-  // for the same reason: this feature is not open to all users yet, and a
-  // background job must not quietly keep alive a connection the user-facing
-  // routes would refuse to create. Fail-closed means an unset variable keeps
-  // every connection alive for exactly nobody, so it is worth a log line —
-  // otherwise a run that did nothing looks identical to a run with nothing to
-  // do. When the integration opens to everyone, ./allowlist.ts says to delete
-  // the module and its guards; this is one of them.
-  if (due.length > 0 && !isAllowlistConfigured(env)) {
-    console.warn(
-      '[tradovate][keepalive] TRADOVATE_OAUTH_ALLOWED_USER_IDS is unset or empty, so every ' +
-        `connection is skipped (${due.length} were due). Nothing was refreshed.`
-    );
-  }
-
+  // The warning that used to stand here is DELETED AND NOT REWRITTEN. It fired
+  // when the variable was unset and said "every connection is skipped, nothing
+  // was refreshed" — true under fail-closed and the exact opposite of the truth
+  // now, because an unset variable is the open state in which every connection
+  // IS refreshed. Renaming the export it called turned it into a compile error
+  // rather than a log line that lies (./allowlist.ts).
+  //
+  // Nothing replaces it, because the state it was warning about no longer
+  // exists: there is no configuration of this variable that silently refreshes
+  // nobody. A restricted deployment skips exactly the ids its list excludes,
+  // and `counts.skipped` already carries that number.
+  //
+  // THIS GUARD IS THE ONE §3 OF THE INVESTIGATION SINGLES OUT. It must keep
+  // reading the same function as the two OAuth routes: a keep-alive that
+  // stopped honouring a restriction would refresh connections the routes refuse
+  // to create, and one that kept a restriction the routes had dropped would let
+  // every new connection die at token expiry with no signal anywhere.
   for (const connection of due) {
     // A user id would be the one identifier worth having here and is exactly
     // what must not be logged, so the skip is counted and not narrated.

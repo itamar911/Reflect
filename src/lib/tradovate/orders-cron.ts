@@ -66,7 +66,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import { isAllowlistConfigured, isUserAllowed } from './allowlist';
+import { isUserAllowed } from './allowlist';
 import {
   listConnectionsForImport,
   markCronProgress,
@@ -273,17 +273,10 @@ export async function runStopCapture(params: {
   run.active = listing.active;
   run.rotating = listing.rotating;
 
-  // The same fail-closed allowlist the user-facing routes enforce. Worth a log
-  // line for ./import-cron.ts' reason: fail-closed means an unset variable
-  // reads for exactly nobody, and a run that did nothing would otherwise look
-  // identical to a run with nothing to do.
-  if (connections.length > 0 && !isAllowlistConfigured(env)) {
-    console.warn(
-      '[tradovate][orders-cron] TRADOVATE_OAUTH_ALLOWED_USER_IDS is unset or empty, so every ' +
-        `connection is skipped (${connections.length} were found). No orders were read.`
-    );
-  }
-
+  // The "unset or empty, so every connection is skipped" warning is DELETED,
+  // not rewritten — see the same place in ./keepalive.ts. It described the
+  // fail-closed default, and an unset variable now means every connection is
+  // read. `run.skippedUsers` already carries a restricted deployment's number.
   // THE DAY BOUNDARY THIS JOB CANNOT KNOW (§C10.5), and here it matters even
   // less than it does nightly: `syncUserTrades` discards the scalars cut at
   // `dayStartMs`, every column the import writes takes its value from the

@@ -1245,8 +1245,11 @@ async function observeCronCounts(): Promise<{ actual: string; expected: string; 
 
   const writes = noWrites();
   const previousAllowlist = process.env.TRADOVATE_OAUTH_ALLOWED_USER_IDS;
-  // Everyone but `notAllowed`. The variable is fail-closed, so this also proves
-  // the loop reads it at all: an empty value would skip all five.
+  // Everyone but `notAllowed`, and the list has to be NON-EMPTY for this
+  // fixture to mean anything now (REF-112-C item 1). The variable used to fail
+  // closed, so an empty value skipped all five and the mere presence of a skip
+  // proved the loop read it; after the inversion an empty value ALLOWS all
+  // five, so a deliberate restriction is the whole of what is exercised here.
   process.env.TRADOVATE_OAUTH_ALLOWED_USER_IDS = [
     ids.rejected,
     ids.transient,

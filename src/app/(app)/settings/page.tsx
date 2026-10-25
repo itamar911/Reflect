@@ -43,14 +43,19 @@ export default async function SettingsPage({ searchParams }: {
   const profile = profileRes.data;
   const alertSettings = alertRes.data as AlertSettingsData | null;
 
-  // Tradovate is closed to everyone but an allowlist until the production OAuth
-  // test has passed. This only decides whether the button is live — the real
-  // gate is in /api/tradovate/connect and /api/tradovate/callback, which check
-  // the same list independently. A hidden button is still a URL.
+  // Tradovate is OPEN to every signed-in user unless TRADOVATE_OAUTH_ALLOWED_USER_IDS
+  // names ids, in which case only those (lib/tradovate/allowlist.ts). This only
+  // decides whether the button is live — the real check is in
+  // /api/tradovate/connect and /api/tradovate/callback, which read the same
+  // function independently. A hidden button is still a URL.
   const canConnectTradovate = isUserAllowed(user.id);
 
-  // Only read for an allowlisted user — nobody else can have a connection, and
-  // this call uses the service-role client.
+  // Read for everyone now that everyone can connect, which is what §3 of the
+  // investigation asked for ("restore readConnectionSummary() unconditionally").
+  // The condition is KEPT rather than deleted, and it is no longer about who is
+  // on a list: it is the one state in which this service-role read buys nothing,
+  // because a rolled-back deployment is not going to show a connect button or a
+  // disconnect button to a restricted trader whatever the row says.
   //
   // A failure here must not take down a page whose other five sections do not
   // depend on it, but it must not be mistaken for an answer either. This used to
