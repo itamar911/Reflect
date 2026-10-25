@@ -69,6 +69,42 @@
  * The settings UI also hides the button for a restricted user, but that is
  * cosmetic — a hidden button is a link anyone can still navigate to, and both
  * OAuth routes check this independently.
+ *
+ *
+ * THE OTHER LEVER: TRADOVATE_IMPORT_ENABLED IS NOT A CONNECTION GATE
+ * -----------------------------------------------------------------
+ *
+ * There are two environment variables in this integration and they are NOT
+ * interchangeable. This one decides WHO MAY CONNECT. `TRADOVATE_IMPORT_ENABLED`
+ * (./import.ts, read through `isImportEnabled()`) decides WHETHER ANYTHING IS
+ * READ OR WRITTEN. Set it to anything other than `'1'` and:
+ *
+ *   - the import and orders crons log and return without reading;
+ *   - the import-before-email step of /api/cron/send-alerts is skipped;
+ *   - the sync buttons on the journal and trades pages are not rendered, so
+ *     /api/tradovate/sync is never triggered by a trader;
+ *   - /api/tradovate/live answers `reflect_only` (`portfoliosEnabled()`);
+ *   - /api/tradovate/today imports nothing and reports `isTradeSource: false`.
+ *
+ * IT DOES NOT STOP NEW USERS CONNECTING. Sites 1 and 2 — /connect and
+ * /callback — read only THIS module and never look at the import flag, so with
+ * the import flag off and this variable clear, traders go on completing OAuth
+ * consent screens and writing token rows all day. It is a read/import kill
+ * switch, not a connection gate.
+ *
+ * AND IT DOES NOT SILENCE EVERY PULL, which is the half worth knowing before
+ * reaching for it in an incident. `/api/tradovate/today` and
+ * `/api/tradovate/trades` STILL PULL with the flag off: neither route gates its
+ * pull on it, and `loadBrokerDayPull()` is called unconditionally by the trade
+ * form and by the rule gate in AppShell. On /today the flag turns off the
+ * IMPORT (the write) and the trade-source declaration — not the eight-to-ten
+ * upstream requests the pull makes. So a connected trader opening the trade
+ * form costs the same upstream calls with the flag off as with it on.
+ *
+ * To actually stop the volume, restrict THIS variable: a user it excludes is
+ * answered `reflect_only` before any read, on all six interactive routes and
+ * all four crons. That is the only switch in the repository that reaches every
+ * one of them.
  */
 
 /** The variable holding the allowlist. Comma-separated Supabase user ids. */
