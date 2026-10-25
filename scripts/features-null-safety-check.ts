@@ -569,7 +569,15 @@ group('REF-115 / REF-106: five points is $250, not $5', [
   // quote them back as dollars. The summary is a string, so these assert on
   // what Claude actually receives.
   c('(8) the coach is told the money total', coachSummary.includes('Total P&L: $250.00'), true),
-  c('(9) and never the points total', coachSummary.includes('5.00'), false),
+  // ANCHORED TO THE LABEL, and it has to be (REF-120 §4.2). A bare
+  // `includes('5.00')` over the whole summary was meant to catch a points total
+  // of 5 formatted as `5.00` — and the fixture's exit price is 4995, so
+  // `'4995.00'.includes('5.00')` is TRUE. The moment any price reaches this
+  // string with two decimals the check fails, and it fails as a FALSE POSITIVE:
+  // it reports "the coach is being told the points total" about an exit price.
+  // (`'5000.00'` is clean and a bare `'4995'` is clean; it is specifically the
+  // `…995.00` exit that collides.)
+  c('(9) and never the points total', coachSummary.includes('Total P&L: $5.00'), false),
   c('(10) the winning-trades line is money', coachSummary.includes('P&L from winning trades: +$250.00'), true),
   c('(11) the strategy breakdown is money',
     coachSummary.includes('"pl":250'), true),
