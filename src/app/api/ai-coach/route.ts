@@ -61,7 +61,9 @@ ${PLAIN_HEBREW_PROSE_CLAUSE}`,
 /**
  * What the coach is told, as a string (REF-115 site 2).
  *
- * Exported so `scripts/money-format-check.ts` can drive the real function:
+ * Exported so `scripts/features-null-safety-check.ts` can drive the real
+ * function — this comment named `scripts/money-format-check.ts` until REF-120
+ * and that script has never imported it:
  * six of the figures below are labelled `($)` and the system prompt above
  * instructs Claude to quote them back to the trader as dollars, so "is this
  * actually money" is the one property worth asserting rather than reading.
