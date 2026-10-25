@@ -43,6 +43,9 @@ import { computeWeeklyStats, type TradeRow } from '../src/lib/weekly/stats';
 import { exportRow, type ExportTrade } from '../src/lib/journal/csv';
 import { tradeDirection, tradePointsPnl, tradeMoneyPnl, isWinningTrade, pnlRow } from '../src/lib/pnl';
 import { averageOf, rrValue, scaleValue, intentText, intentNumber } from '../src/lib/intent';
+import { readTradeFacts, tradeFactsLine, tradeFactsSummaryLine } from '../src/lib/ai/tradeFacts';
+import { readStopHistory, stopMoveSentence } from '../src/lib/journal/stopHistory';
+import { describeStages } from '../src/lib/journal/stages';
 
 // ── Harness ──────────────────────────────────────────────────────────────────
 
@@ -595,6 +598,229 @@ group('REF-115 / REF-106: five points is $250, not $5', [
   // It is still a win — isWinningTrade falls back to points — which is
   // exactly why the amount must not read $0.00 beside it.
   c('(16) the row is still counted as a win', coachNoMoney.includes('Win rate: 100%'), true),
+]);
+
+// ── Site 5: the trade serialiser the model reads (REF-120) ───────────────────
+//
+// `lib/ai/tradeFacts.ts` is the first module in this repository to put broker
+// columns into a prompt DELIBERATELY, which is why the negative half of this
+// group matters more than the positive half. Until it existed, no check
+// anywhere asserted that a prompt string is free of ids, account names or host
+// tokens — the repo has exactly this discipline for UI notices
+// (broker-import-check.ts:2995) and for log lines (:1131), and never had it for
+// prompts. Both AI routes read `select('*')`, so one `JSON.stringify(trade)`
+// would leak the lot.
+//
+// THE FIXTURE DID NOT EXIST BEFORE THIS EITHER. There was no broker-linked row
+// anywhere in the repo with the stop evidence populated: `linkStateRow('linked')`
+// in broker-import-check.ts is the nearest and leaves `stop_history`,
+// `broker_stop_loss` and `broker_stages` absent, `lib/demo/fixtures.ts` has none
+// of the three, and `demoApi.ts` stubs both AI routes with canned answers so
+// `/demo/*` never builds a prompt at all. So the whole of the stop verdict —
+// five sentences — had never been exercised at the prompt level.
+//
+// SYNTHETIC PRICES, AND DELIBERATELY GREPPABLE SECRETS. Every id below is
+// invented and chosen so that a leak is unmistakable in a diff: the account id,
+// the trade key with its host token and fill id, the host label, and the prop
+// firm's own name for the account. Same construction as the log-leak suite.
+
+const ACCOUNT_ID_LEAK = 1_805_221;
+const TRADE_KEY_LEAK = 'demo:88412';
+const HOST_LEAK = 'demo';
+const ACCOUNT_NAME_LEAK = 'EVAL-A';
+
+/**
+ * Every string a facts line must never contain, including the two halves of
+ * the trade key separately — the host token and the broker-side fill id are
+ * each a leak on their own, which is why `broker_trade_key` is denied rather
+ * than trimmed.
+ */
+const DENIED_STRINGS = [
+  String(ACCOUNT_ID_LEAK),
+  TRADE_KEY_LEAK,
+  HOST_LEAK,
+  ACCOUNT_NAME_LEAK,
+  '88412',
+  'a7f3c1d2',
+  'f1e2d3c4',
+  'trade-ref-120',
+];
+
+/**
+ * A linked Tradovate row with the broker's stop and stage evidence on it.
+ *
+ * The `linkStateRow('linked')` shape — `source`, the trade key, the contract
+ * name, a quantity, `link_confirmed_at`, `link_method: 'auto'` and the intent
+ * the broker row could never have carried — plus the three columns that shape
+ * leaves out, and the four denied fields above.
+ *
+ * `accounts` IS PLANTED RATHER THAN REALISTIC, and on purpose. `select('*')` on
+ * `trade_plans` never returns it; it is here so that "the module does not reach
+ * into the account's name" is an assertion about a string rather than a claim
+ * about an import graph, which is all `accounts-check.ts` can test.
+ */
+const LINKED_WITH_STOPS: Record<string, unknown> = {
+  id: 'trade-ref-120',
+  user_id: 'a7f3c1d2-0000-4000-8000-000000000001',
+  status: 'closed',
+  // ── denied, every one of them ──
+  source: 'tradovate',
+  broker_trade_key: TRADE_KEY_LEAK,
+  broker_host: HOST_LEAK,
+  broker_account_id: ACCOUNT_ID_LEAK,
+  account_id: 'f1e2d3c4-0000-4000-8000-000000000002',
+  accounts: { display_name: ACCOUNT_NAME_LEAK, nickname: 'הקטן שלי' },
+  // ── the facts ──
+  symbol: 'MNQZ6',
+  quantity: 2,
+  direction: 'short',
+  entry_price: 29834.75,
+  exit_price: 29767.25,
+  stop_loss: 29870,
+  take_profit: 29700,
+  rr_ratio: 2,
+  strategy: 'Range Reversal',
+  emotional_state: 4,
+  actual_pnl: 270,
+  pnl_amount: null,
+  pnl_currency: '$',
+  plan_score: 88,
+  submitted_at: '2026-10-15T09:12:00.000Z',
+  closed_at: '2026-10-15T09:41:00.000Z',
+  unplanned: false,
+  link_confirmed_at: '2026-10-16T10:00:00.000Z',
+  link_method: 'auto',
+  // ── the three columns linkStateRow leaves absent ──
+  broker_stop_loss: 29870.25,
+  stop_history: {
+    verdict: 'moved',
+    reason: null,
+    initialStop: 29870.25,
+    initialStopSide: 'risk',
+    finalStop: 29850.5,
+    movedCount: 2,
+    direction: 'tightened',
+    trailing: false,
+    stopCount: 1,
+    stopAtEntry: true,
+    lateStop: null,
+    cancelledUnreplaced: false,
+  },
+  // Two entries, one exit — the shape that earns a sentence at all.
+  broker_stages: {
+    entries: [{ qty: 1, price: 29834.75 }, { qty: 1, price: 29835.25 }],
+    exits: [{ qty: 2, price: 29767.25 }],
+  },
+};
+
+/** The same row with a verdict we could not read. See assertion (9). */
+const LINKED_UNKNOWN_STOP: Record<string, unknown> = {
+  ...LINKED_WITH_STOPS,
+  id: 'trade-ref-120-unknown',
+  stop_history: { verdict: 'unknown', reason: 'interday' },
+};
+
+/**
+ * A hand-entered row with EVERY broker column absent — not null, absent, which
+ * is what `select('*')` returns against a database where 038/040/041 have not
+ * run. The file's own reason to exist, applied to the new module.
+ */
+const MANUAL_NO_BROKER: Record<string, unknown> = {
+  id: 'manual-ref-120',
+  status: 'closed',
+  symbol: 'NQ',
+  direction: 'long',
+  entry_price: 100,
+  exit_price: 110,
+  stop_loss: 95,
+  take_profit: 115,
+  rr_ratio: 3,
+  strategy: 'Breakout',
+  emotional_state: 4,
+  pnl_amount: 1000,
+  actual_pnl: 1000,
+  plan_score: 80,
+  submitted_at: '2026-10-05T10:00:00.000Z',
+  closed_at: '2026-10-05T11:00:00.000Z',
+};
+
+const linkedLine = tradeFactsLine(readTradeFacts(LINKED_WITH_STOPS)!);
+const unknownLine = tradeFactsLine(readTradeFacts(LINKED_UNKNOWN_STOP)!);
+const manualLine = tradeFactsLine(readTradeFacts(MANUAL_NO_BROKER)!);
+
+// The sentence the TRADER is shown for this exact document, read through the
+// shared function rather than written out here — so the assertion pins the
+// shared sentence instead of a paraphrase of it that could drift away from it.
+const traderStopSentence = stopMoveSentence(readStopHistory(LINKED_WITH_STOPS.stop_history))!.text;
+
+group('REF-120: the facts a model is given, and the four it never is', [
+  // ── The facts the coach was missing entirely ───────────────────────────
+  //
+  // (1) THE ROOT, NOT THE CONTRACT NAME. `MNQZ6` and `NQH7` are the same
+  // instrument two quarters apart, and the expiry buys a coach nothing.
+  c('(1) the symbol root is there and the contract name is not',
+    [linkedLine.includes('NQ'), linkedLine.includes('MNQZ6')], [true, false]),
+  c('(2) the direction is in Hebrew',
+    [linkedLine.includes('שורט'), linkedLine.includes('short')], [true, false]),
+  // Bare, with no toFixed — see REF-120 §4.2 and assertion (9) of the group
+  // above, which a two-decimal price would have failed as a false positive.
+  c('(3) the entry price is a bare number', linkedLine.includes('כניסה 29834.75'), true),
+  c('(4) and so is the exit price', linkedLine.includes('יציאה 29767.25'), true),
+  // (5) THE SHARED SENTENCE AND NOT A SECOND OPINION ABOUT IT. The debrief
+  // route built its own English verdict from this same document until REF-120.
+  c('(5) the stop verdict is the sentence the trader reads',
+    [traderStopSentence, linkedLine.includes(traderStopSentence)],
+    ['הסטופ הודק לכיוון הרווח (מ-29870.25 ל-29850.50)', true]),
+  c('(6) and the stages sentence is the shared one too',
+    [describeStages(2, 1), linkedLine.includes(describeStages(2, 1))],
+    ['נכנסת בשני שלבים · יצאת בשלב אחד', true]),
+
+  // ── The half that matters: the deny list, asserted ────────────────────
+  //
+  // (7) Each of the four is in the fixture and must be in none of the three
+  // lines. A `JSON.stringify(trade)` in either AI route fails this instantly,
+  // which is the whole reason the list is named in the module header.
+  c('(7) no account id, trade key, host token or account name reaches a line',
+    [linkedLine, unknownLine, manualLine, tradeFactsSummaryLine(readTradeFacts(LINKED_WITH_STOPS)!)]
+      .flatMap((line) => DENIED_STRINGS.filter((secret) => line.includes(secret))),
+    []),
+  // AND THE FIXTURE STILL CARRIES THEM, so (7) cannot pass because somebody
+  // tidied the row rather than because the module is careful. A negative
+  // assertion over a fixture nobody re-checks is an assertion about nothing.
+  c('(7b) and the fixture really does carry every one of them',
+    DENIED_STRINGS.filter((secret) => !JSON.stringify(LINKED_WITH_STOPS).includes(secret)), []),
+
+  // ── Null safety, which is what this file is for ────────────────────────
+  //
+  // (8) The template this module replaces printed `R:R — מצב-רגשי:—` on every
+  // broker row. Null means SAY NOTHING: no empty label, no literal "null", no
+  // stack of dashes, and no sentence about evidence that was never read.
+  c('(8) a manual row with no broker columns says nothing about them',
+    [
+      manualLine.includes('null'),
+      manualLine.includes('—'),
+      manualLine.includes(': ·'),
+      manualLine.endsWith(':'),
+      manualLine.includes('הסטופ'),
+      manualLine.includes('שלבים'),
+      manualLine.includes('מקור'),
+      // And it still carries everything the trader DID type.
+      manualLine.includes('[רווח] NQ לונג'),
+      manualLine.includes('R:R 3'),
+    ],
+    [false, false, false, false, false, false, false, true, true]),
+
+  // (9) `'kept'` AND `'unknown'` ARE THE PAIR THAT MATTERS (stopHistory.ts:34).
+  // Without its own sentence, a failed read reads exactly like a stop that was
+  // left alone — a claim about the trader's discipline made out of our own
+  // missing data. Not silence either: the trader is told we could not look.
+  c('(9) an unknown verdict says so, and does not say the stop was kept',
+    [
+      unknownLine.includes('לא הצלחנו לקרוא את פקודות הסטופ'),
+      unknownLine.includes('הסטופ לא הוזז'),
+      unknownLine.includes('הודק'),
+    ],
+    [true, false, false]),
 ]);
 
 // ── Summary ──────────────────────────────────────────────────────────────────
