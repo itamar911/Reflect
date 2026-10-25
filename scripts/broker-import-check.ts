@@ -3139,22 +3139,28 @@ async function noticeCopyGroup() {
         partialOf({ kind: 'host_degraded' }),
       ],
       [true, true, true, true]),
-    // `connection_environment` cannot co-occur with a pull at all — it is
-    // derived from the stored row — and `no_accounts` is a day with no broker
-    // scope rather than a day short of something. The second is the one
-    // judgement call in the mapping; see PARTIAL_DAY_KINDS and the build report.
-    c('(40) a derived connection notice and an empty scope are not',
-      [
-        partialOf({ kind: 'connection_environment' }),
-        partialOf({ kind: 'no_accounts' }),
-      ],
-      [false, false]),
+    // AN EMPTY SCOPE IS PARTIAL TOO, and this case REVERSED — it used to assert
+    // false, on the grounds that `no_accounts` is a day with no broker scope
+    // rather than a day short of something. The route still answers
+    // `broker_verified` with an all-zero day, so without the flag
+    // `max_daily_loss` is measured against $0 — the most permissive figure
+    // there is — and `no_accounts` cannot tell "the filter rejected
+    // everything" from "the scope was genuinely empty" (stage B §5.2). See
+    // PARTIAL_DAY_KINDS for the full argument.
+    c('(40) an empty scope is partial as well', partialOf({ kind: 'no_accounts' }), true),
+    // `connection_environment` IS STILL NOT, and it is the only one left out:
+    // it is derived from the stored row and never co-occurs with a pull, so
+    // there is no broker figure for the flag to displace.
+    c('(40b) but a derived connection notice is not',
+      partialOf({ kind: 'connection_environment' }), false),
     // AN ORDINARY DAY IS THE COMMON CASE and must be free: no notices, no
     // flag, and a response byte-identical to the pre-stage-B one.
     c('(41) an ordinary day is not partial', partialOf(), false),
     // One partial kind among several is enough — the day is short either way.
+    // `connection_environment` is the non-partial one here now that
+    // `no_accounts` has moved.
     c('(42) one partial kind among non-partial ones still counts',
-      partialOf({ kind: 'no_accounts' }, { kind: 'host_degraded' }), true),
+      partialOf({ kind: 'connection_environment' }, { kind: 'host_degraded' }), true),
     // The sentence, verbatim from the brief.
     c('(43) the trade form has one line for it',
       PARTIAL_DAY_NOTE, 'חלק מהעסקאות מהברוקר לא נטענו היום — הנתונים חלקיים'),

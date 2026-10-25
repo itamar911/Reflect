@@ -247,38 +247,53 @@ export const NOT_AVAILABLE_NOTE = 'חיבור לברוקר עדיין לא פת�
  * measured against a number short by exactly them. The sync panel says so; the
  * trade form did not.
  *
- * So these four are the kinds that make a day PARTIAL, each because something
+ * So these five are the kinds that make a day PARTIAL, each because something
  * that happened is not in the figures:
  *
  *   - `account_currency` and `account_type` — a whole account was skipped.
  *   - `unpriced_product` — one trade was skipped.
  *   - `host_degraded` — a host was dropped, so an unknown amount is missing.
+ *   - `no_accounts` — discovery found nothing eligible, so the day is a zero
+ *     that nothing was measured into. See below.
  *
- * TWO KINDS ARE DELIBERATELY NOT HERE:
+ * `no_accounts` IS HERE, AND IT WAS NOT AT FIRST. The first cut of this list
+ * left it out on the grounds that it is not a day SHORT of something but a day
+ * with no broker scope at all, which already has its own sentence (stage B
+ * item 2). That reasoning is wrong in the direction that matters, and the
+ * argument against it is the same one the rest of this list rests on:
  *
- *   - `connection_environment` is not produced by a pull at all. It is derived
- *     from the stored row by {@link brokerStateNotices}, and in that state
- *     there is no day to be short of.
- *   - `no_accounts` means discovery found nothing this trader could have
- *     traded. That is an error state with its own sentence (stage B item 2),
- *     and it is NOT a partial day — it is a day with no broker scope at all.
- *     Worth knowing that this is the one judgement call in the mapping: a
- *     trader whose accounts were ALL rejected also gets an under-counted zero,
- *     and `no_accounts` cannot tell "the filter rejected everything" from "the
- *     scope was genuinely empty" (stage B §5.2 records that limitation). Under
- *     the second reading Reflect's own rows are the whole truth and no fallback
- *     is needed; under the first, a fallback would be right. It is called out
- *     in the build report rather than decided here.
+ *   - The route still answers `source: 'broker_verified'` with an all-zero
+ *     day, so without the flag `max_daily_loss` is measured against **$0** —
+ *     the most permissive figure there is — for a trader whose own rows may say
+ *     they are down $800. That is the identical failure a skipped account
+ *     causes, at its maximum rather than at the margin.
+ *   - `no_accounts` CANNOT TELL "the filter rejected everything" from "the
+ *     scope was genuinely empty" (stage B §5.2 records that limitation
+ *     explicitly). The first reading is an under-count of the whole day. A rule
+ *     that has to pick one has to pick the fail-safe one, and the fail-safe one
+ *     is to fall back to Reflect's rows.
+ *   - It is also what stage B's own reversal already implies: zero eligible
+ *     accounts was made an ERROR STATE because at open rollout a trader who
+ *     completed an OAuth consent screen almost certainly has an account. A
+ *     state we have decided is probably a filter bug must not be the state in
+ *     which we trust the broker's zero over the trader's own record.
+ *
+ * ONE KIND IS STILL NOT HERE. `connection_environment` is not produced by a
+ * pull at all — it is derived from the stored row by
+ * {@link brokerStateNotices}, and a connection that cannot refresh has no day
+ * to be short of. On that path the route never reaches `broker_verified`, so
+ * there is no broker figure for the flag to displace.
  *
  * As `kind` strings rather than a type, so the SERVER-side
  * {@link import('./fills').PullNotice} and the wire-side {@link BrokerNotice}
- * can both be measured by one rule — the two unions share these four members
+ * can both be measured by one rule — the two unions share these five members
  * and the routes hold the first kind, not the second.
  */
 export const PARTIAL_DAY_KINDS: readonly string[] = [
   'account_currency',
   'account_type',
   'host_degraded',
+  'no_accounts',
   'unpriced_product',
 ];
 

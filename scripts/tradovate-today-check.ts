@@ -2938,6 +2938,57 @@ async function bothPathsAgree() {
   results.push(c('REF-112-C: an ordinary verified day is not partial', verifiedCtx.partial, false));
   results.push(c('REF-112-C: and neither is a fallback state', quietCtx.partial, false));
 
+  // ── An EMPTY SCOPE falls back too, with the flag COMPUTED not asserted ────
+  //
+  // The `no_accounts` reversal, end to end and in the direction that matters.
+  // Stage B item 2 made zero eligible accounts an error state; what it did not
+  // do is stop the route answering `broker_verified` with an all-zero day — so
+  // `max_daily_loss` was measured against $0, the most permissive figure
+  // available, for a trader whose own rows say they are down $800.
+  //
+  // `partial` here comes from `makesDayPartial` over a real `no_accounts`
+  // notice list rather than being hand-set to `true`, which is what makes this
+  // a test of the WIRING and not of the boolean: the row above pins what the
+  // rule engine does with the flag, and this pins that an empty scope actually
+  // raises it. If `no_accounts` were dropped from PARTIAL_DAY_KINDS, the
+  // hand-set rows would keep passing and this one would not.
+  const emptyScopePull: BrokerDayPull = {
+    source: 'broker_verified',
+    partial: makesDayPartial([{ kind: 'no_accounts' }]),
+    day: {
+      closedCount: 0,
+      losingCount: 0,
+      net: 0,
+      lost: 0,
+      lossStreak: 0,
+      minutesSinceLastClose: null,
+      asOf: new Date(NOW).toISOString(),
+    },
+  };
+  const emptyScopeCtx = await loadTradeRuleContext('u', emptyScopePull, fakeSupabase(reflectBlocked));
+  const emptyScopeVerdict = verdicts(emptyScopeCtx);
+
+  results.push(c('REF-112-C: an empty scope raises the flag', emptyScopeCtx.partial, true));
+  // THE WHOLE POINT: $800 and not $0.
+  results.push(c('REF-112-C: so the loss is Reflect\'s $800, not the broker\'s $0', emptyScopeCtx.todayLossAmount, 800));
+  results.push(c('REF-112-C: and the block HOLDS on an empty scope', emptyScopeVerdict.gateBlocks, true));
+  results.push(c('REF-112-C: both paths agree on it', emptyScopeVerdict.gateBlocks, emptyScopeVerdict.formBlocks));
+  results.push(
+    c(
+      'REF-112-C: and on the same rule',
+      emptyScopeVerdict.formKeys.includes('max_daily_loss'),
+      emptyScopeVerdict.gateKeys.includes('max_daily_loss')
+    )
+  );
+  // The panel follows the rule, §4.5, as on every other partial day.
+  results.push(
+    c(
+      'REF-112-C: the panel reads the same number on an empty scope',
+      emptyScopeCtx.todayClosed.money?.lost,
+      emptyScopeCtx.todayLossAmount
+    )
+  );
+
   group('both enforcement paths, one context', results);
 
   // ══ REF-107 STAGE 1 — the rows, and the route that serves them ════════════
@@ -5020,12 +5071,15 @@ async function unsupportedTypeGroup() {
     // is partial and the rule engine falls back to Reflect's figures.
     c('(10) an unsupported account type makes the day PARTIAL',
       makesDayPartial(withStranger.notices), true),
-    // `no_accounts` DOES NOT, and this is the one judgement call in the
-    // mapping — the build report raises it rather than settling it here. It is
-    // not a day that is short of something: it is a day with no broker scope
-    // at all, and it already has its own sentence. See PARTIAL_DAY_KINDS.
-    c('(11) but an empty scope is not a PARTIAL day',
-      makesDayPartial(nothingAtAll.notices), false),
+    // AND SO DOES AN EMPTY SCOPE. This case REVERSED: it asserted false until
+    // the decision went the other way. A pull that found nothing eligible
+    // still answers `broker_verified` with an all-zero day, so leaving it
+    // un-flagged measures `max_daily_loss` against $0 for a trader whose own
+    // rows may say they are down — and this is also the state stage B item 2
+    // decided is PROBABLY a filter bug rather than an empty account. See
+    // PARTIAL_DAY_KINDS.
+    c('(11) and an empty scope is a PARTIAL day too',
+      makesDayPartial(nothingAtAll.notices), true),
   ]);
 }
 
