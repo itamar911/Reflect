@@ -9,6 +9,32 @@ import type { CustomRule } from '@/lib/types';
 import { PLAIN_HEBREW_PROSE_CLAUSE } from '@/lib/ai/prompts';
 import { isWinningTrade, pnlRow } from '@/lib/pnl';
 import { averageOf, scaleValue, rrValue, intentText, type RawValue } from '@/lib/intent';
+import { readTradeFacts, tradeFactsLine, tradeFactsSummaryLine } from '@/lib/ai/tradeFacts';
+import { averagePlanScore, behaviourDisciplineScore } from '@/lib/scoring/disciplineAggregate';
+
+/**
+ * How many trades reach the coach with every fact, and how many as one line.
+ *
+ * TWENTY IS THE SMALLEST NUMBER THAT ANSWERS THE QUESTIONS THIS SURFACE IS
+ * ACTUALLY ASKED — "analyse my last trade", "how was today", "how was this
+ * week" — and it covers roughly a week for an active futures trader. It replaces
+ * FIVE, which could not answer the first of those three, because the five facts
+ * it carried per trade did not include the symbol.
+ *
+ * `TODAY_LINE_CAP = 10` in lib/rules/todayLines.ts is the existing precedent for
+ * capping a per-trade list with a stated reason, and the rationale transfers: a
+ * trader who took thirty trades does not need thirty full rows, they need the
+ * last few whole and the SHAPE of the rest. Hence the tail — the hundred rows
+ * were already being loaded and thrown away.
+ *
+ * MEASURED COST, at ~2.2 chars/token for this mixed Hebrew/Latin text and ±30%:
+ * the trade history goes from ~65 tokens to ~3,850, and the whole system prompt
+ * from ~2,600 to ~6,400. The static trading-knowledge block above is ~2,300 of
+ * that and is re-sent uncached on every message of every conversation, so if one
+ * number has to move it is the TAIL (100 → 50) rather than the head — and prompt
+ * caching on the knowledge block would save more than any trade cap will.
+ */
+const FULL_FACT_TRADES = 20;
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -17,7 +43,8 @@ function buildSystemPrompt(ctx: {
   winRate: number;
   avgRR: string;
   avgEmotional: string;
-  disciplineScore: number;
+  disciplineScore: string;
+  processScore: string;
   bestHours: string;
   worstHours: string;
   topStrategies: string;
@@ -124,7 +151,8 @@ function buildSystemPrompt(ctx: {
 - אחוז הצלחה: ${ctx.winRate}%
 - R:R ממוצע: ${ctx.avgRR}
 - מצב רגשי ממוצע: ${ctx.avgEmotional}/5
-- ציון משמעת: ${ctx.disciplineScore}/100
+- ציון משמעת: ${ctx.disciplineScore} — זהו בדיוק הציון שמוצג לסוחר בעמוד הסטטיסטיקות
+- ציון תהליך ממוצע: ${ctx.processScore} — ממוצע ציוני העסקאות המחושבים בתחקיר
 
 **שעות מסחר:**
 - שעות טובות: ${ctx.bestHours || 'אין מספיק נתונים'}
@@ -181,17 +209,31 @@ function buildUserContext(data: {
   const avgRR = avgRRNum !== null ? avgRRNum.toFixed(2) : 'לא תועד';
   const avgEmotional = avgEmotionalNum !== null ? avgEmotionalNum.toFixed(1) : 'לא תועד';
 
-  // Discipline score. Each component is scored over its own eligible rows, so
-  // a trade with no self-report neither earns nor forfeits the points — it is
-  // simply not evidence either way.
-  const emoRows = trades.map(emoOf).filter((v): v is number => v !== null);
-  const rrRows = trades.map(rrOf).filter((v): v is number => v !== null);
-  const scoreOf = (num: number, den: number, weight: number) => (den > 0 ? (num / den) * weight : 0);
-  const disciplineScore = trades.length === 0 ? 0 : Math.min(100, Math.round(
-    scoreOf(closed.filter(t => t.plan_score != null).length, closed.length, 30) +
-    scoreOf(emoRows.filter(v => v >= 3).length, emoRows.length, 30) +
-    scoreOf(rrRows.filter(v => v >= 2).length, rrRows.length, 40)
-  ));
+  // ── The two discipline figures, both shared (REF-120 §2.4) ───────────────
+  //
+  // WHAT STOOD HERE WAS A NUMBER THAT EXISTED NOWHERE ELSE IN THE PRODUCT: 30
+  // points for `plan_score` being present, 30 for an emotional state ≥ 3, 40 for
+  // an R:R ≥ 2, capped at 100 — and it was handed to the coach as "ציון משמעת",
+  // which is also the name of the figure on the statistics page. Different
+  // inputs, same label, so a trader who asked the coach about their discipline
+  // score and then opened /stats saw two different numbers and neither of them
+  // was wrong about anything in particular.
+  //
+  // `behaviourDisciplineScore` IS the stats page's formula, now a shared
+  // function rather than a copy of one. `averagePlanScore` is the mean of the
+  // scores `computeTradeScore` actually produced — the same figure the weekly
+  // mail quotes — and it is the one with a per-trade breakdown behind it, which
+  // is why both are given rather than one: the coach can now name the score the
+  // trader sees AND reason about the trades that made it, since every full facts
+  // line below carries its own `ציון`.
+  //
+  // Null is "not recorded" and never 0, for lib/intent.ts' reason: a trader who
+  // has run no debrief has no process score, and a zero reads as a measured
+  // failure.
+  const behaviour = behaviourDisciplineScore(closed);
+  const process = averagePlanScore(closed);
+  const disciplineScore = behaviour !== null ? `${behaviour}/100` : 'לא תועד';
+  const processScore = process !== null ? `${process}/100` : 'לא תועד';
 
   // Strategy breakdown. A row with no strategy gets no bucket; it used to be
   // filed under 'אחר' and quoted back as one the trader chose.
@@ -240,26 +282,51 @@ function buildUserContext(data: {
     else break;
   }
 
-  // Recent trades summary
-  const recent = trades.slice(0, 5).map(t => {
-    const r = rrOf(t);
-    // Words, not ✓/✗/⏳: symbols in the prompt invite the model to answer in
-    // them, and stripFormatting (lib/ai/textFormatting.ts) then has to catch
-    // them on the way back out. Cheaper not to teach the habit — and the words
-    // carry more meaning than the glyphs did.
-    const win = isWinningTrade(pnlRow(t));
-    const status = win === null ? '[פתוחה]' : win ? '[רווח]' : '[הפסד]';
-    const emo = emoOf(t);
-    // An intent field the row does not carry is named as absent rather than
-    // printed as "null" or "0" for the assistant to quote as the trader's own.
-    const line = `${status} ${intentText(t.strategy as string | null) ?? 'ללא אסטרטגיה'}`
-      + ` R:R ${r !== null ? r.toFixed(1) : '—'} מצב-רגשי:${emo ?? '—'}`;
-    // Truncated per trade to protect the token budget of the system prompt.
+  // ── Recent trades (REF-120) ──────────────────────────────────────────────
+  //
+  // WHAT THIS REPLACES IS THE WHOLE REASON FOR THE TICKET. Five trades carrying
+  // four facts each — a win/loss word, the strategy, the planned R:R and the
+  // self-reported emotional state — so a trader who asked "analyse my last
+  // trade" was told, correctly, that the coach had no symbol, no entry, no exit,
+  // no stop and no R:R. Every one of those columns was already in memory: the
+  // query below is `select('*')` and the loss was entirely here.
+  //
+  // THE SERIALISER IS A MODULE AND NOT A TEMPLATE, and lib/ai/tradeFacts.ts says
+  // why at length: it is the one thing that can carry an explicit deny list for
+  // the ids, the trade key, the host token and the prop firm's account name that
+  // this row also holds, and being pure it is testable without exporting
+  // anything from here.
+  //
+  // THE NOTES STAY IN THIS FILE, and deliberately. They are the trader's own
+  // free prose — the one piece of this line that is not a fact — and keeping
+  // them out of the shared serialiser keeps that surface where it already was
+  // rather than handing it to every future caller. Truncated as before, to
+  // protect the system prompt's token budget.
+  const recentFull = trades.slice(0, FULL_FACT_TRADES).flatMap(t => {
+    const facts = readTradeFacts(t);
+    if (facts === null) return [];
+    const line = tradeFactsLine(facts);
+    if (line === '') return [];
     const notes = typeof t.post_trade_notes === 'string' ? t.post_trade_notes.trim() : '';
-    return notes
+    return [notes
       ? `${line} | הערת הסוחר: ${notes.length > 200 ? notes.slice(0, 200) + '…' : notes}`
-      : line;
-  }).join('\n');
+      : line];
+  });
+
+  // The tail: the shape of the record rather than the detail of any one trade.
+  const recentTail = trades.slice(FULL_FACT_TRADES).flatMap(t => {
+    const facts = readTradeFacts(t);
+    if (facts === null) return [];
+    const line = tradeFactsSummaryLine(facts);
+    return line === '' ? [] : [line];
+  });
+
+  const recent = [
+    ...recentFull,
+    ...(recentTail.length > 0
+      ? ['', `**עסקאות מוקדמות יותר (${recentTail.length}, בשורת סיכום):**`, ...recentTail]
+      : []),
+  ].join('\n');
 
   // Rules
   const rules = presetRules ? [
@@ -279,7 +346,7 @@ function buildUserContext(data: {
 
   return {
     totalTrades: trades.length,
-    winRate, avgRR, avgEmotional, disciplineScore,
+    winRate, avgRR, avgEmotional, disciplineScore, processScore,
     bestHours: best, worstHours: worst,
     topStrategies, emotionalPatterns,
     recentTrades: recent,

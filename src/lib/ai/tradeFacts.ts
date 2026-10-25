@@ -297,7 +297,10 @@ export function tradeFactsLine(f: TradeFacts): string {
     f.planScore !== null ? `ציון: ${f.planScore}/100` : null,
     f.stopSentence,
     f.stagesSentence,
-    f.source,
+    // Prefixed, unlike the two sentences above it: `LINK_STATE_COPY` is the
+    // journal's own wording for a row's origin ("Tradovate · מקושרת לתוכנית")
+    // and without a label it reads as a stray noun in the middle of a list.
+    f.source !== null ? `מקור: ${f.source}` : null,
   ];
 
   return pieces.filter((x) => x !== null && x !== '').join(' · ');

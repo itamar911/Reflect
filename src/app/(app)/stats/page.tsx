@@ -16,6 +16,7 @@ import { resolveAccountParam, tradesInAccount, type RawSearchParams } from '@/li
 import { readPortfolioLabel } from '@/lib/portfolios/read';
 import { tradePointsPnl, tradeMoneyPnl, hasMoneyPnl, isWinningTrade } from '@/lib/pnl';
 import { averageOf, rrValue, intentText } from '@/lib/intent';
+import { behaviourDisciplineScore } from '@/lib/scoring/disciplineAggregate';
 import { TrendingUp, BarChart2, Target, CandlestickChart } from 'lucide-react';
 import '@/components/stats/stats.css';
 
@@ -188,14 +189,10 @@ export default async function StatsPage({ searchParams }: {
   const revengePct = withRevenge.length
     ? Math.round((withRevenge.filter(t => t.revenge_trade === true).length / withRevenge.length) * 100) : null;
 
-  const disciplineComponents = [
-    withFollowed.length ? withFollowed.filter(t => t.followed_plan === true).length / withFollowed.length : null,
-    withMovedSl.length  ? withMovedSl.filter(t => t.moved_sl === false).length / withMovedSl.length : null,
-    withFomo.length     ? withFomo.filter(t => t.fomo_entry === false).length / withFomo.length : null,
-    withRevenge.length  ? withRevenge.filter(t => t.revenge_trade === false).length / withRevenge.length : null,
-  ].filter((v): v is number => v !== null);
-  const disciplineScore = disciplineComponents.length
-    ? Math.round((disciplineComponents.reduce((s, v) => s + v, 0) / disciplineComponents.length) * 100) : null;
+  // The formula is unchanged and now lives in lib/scoring/disciplineAggregate.ts.
+  // The AI chat coach quoted a DIFFERENT number under the same name (REF-120
+  // §2.4) and a trader could see both in one session; one function, two readers.
+  const disciplineScore = behaviourDisciplineScore(closed);
 
   // ── Confidence / emotional-state breakdowns ─────────────────────────────────
   function buildScaleBuckets(field: 'confidence_level' | 'emotional_state'): ScaleBucket[] {
