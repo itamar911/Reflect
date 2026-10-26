@@ -98,13 +98,20 @@ const STRATEGIES: TradeStrategy[] = [
 
 const TIMEFRAMES: Timeframe[] = ['1m', '5m', '15m', '30m', '1H', '4H', 'Daily', 'Weekly'];
 
-const PRE_TRADE_CHECKLIST = [
-  'בדקתי R:R',
-  'הגדרתי Stop Loss',
-  'גודל הפוזיציה תואם לסיכון שהגדרתי',
-  'אין לי עסקאות פתוחות סותרות',
-];
-
+// REF-123: a `PRE_TRADE_CHECKLIST` of four self-report checkboxes sat here —
+// 'בדקתי R:R', 'הגדרתי Stop Loss', 'גודל הפוזיציה תואם לסיכון שהגדרתי',
+// 'אין לי עסקאות פתוחות סותרות'. They are gone, and nothing replaces them,
+// because they wrote to NO COLUMN and never had: the only state was a local
+// Set, no `trade_plans` column could hold it, and `TradeScoreInput` has no
+// checklist field — so a submission with all four ticked and one with none
+// were byte-identical in the database and scored the same.
+//
+// Not to be confused with `strategy_conditions_checked` below, which is a
+// different feature, really persisted and really scored. Three of the four are
+// enforced mechanically anyway (the `min_rr_ratio` rule, `stop_loss` being
+// required, the broker's own size comparison) and the fourth — conflicting open
+// positions — is answered by TodayContextPanel + LivePositions, which sits
+// directly above where these used to render.
 const REASON_TAGS = [
   'בריקאאוט מתנגדות',
   'תנועת מומנטום',
@@ -431,7 +438,6 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
   const [pnlFieldsError, setPnlFieldsError] = useState(false);
   const [slInput, setSlInput] = useState('');
   const [tpInput, setTpInput] = useState('');
-  const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set());
   const [strategyConditionsChecked, setStrategyConditionsChecked] = useState<Record<string, boolean>>({});
   const [fetchedStrategyTradeCount, setFetchedStrategyTradeCount] = useState(0);
   const [chartSymbol, setChartSymbol] = useState('');
@@ -449,18 +455,6 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
 
   const savedPnlMode = useSyncExternalStore(emptySubscribe, getSavedPnlMode, getServerNull);
   const pnlMode = pnlModeOverride ?? savedPnlMode ?? 'points';
-
-  function toggleChecklistItem(item: string) {
-    setCheckedItems((prev) => {
-      const next = new Set(prev);
-      if (next.has(item)) {
-        next.delete(item);
-      } else {
-        next.add(item);
-      }
-      return next;
-    });
-  }
 
   function toggleConditionChecked(condition: string) {
     setStrategyConditionsChecked((prev) => ({ ...prev, [condition]: !prev[condition] }));
@@ -1088,7 +1082,6 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
         setTpInput('');
         setValidationResult(null);
         setPnlFieldsError(false);
-        setCheckedItems(new Set());
         setStrategyConditionsChecked({});
         // The override is dropped so "תיק חדש…" is not still selected with a
         // name the next submit would reuse. The next form open reads the
@@ -1662,35 +1655,6 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                       className="w-full px-3 py-2.5 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none focus:border-tg-primary transition-colors resize-none"
                       style={{ background: 'var(--color-tg-surface-2)' }}
                     />
-                  </div>
-                  <div className="flex flex-col gap-1.5 mt-1">
-                    {PRE_TRADE_CHECKLIST.map((item) => {
-                      const checked = checkedItems.has(item);
-                      return (
-                        <button
-                          key={item}
-                          type="button"
-                          onClick={() => toggleChecklistItem(item)}
-                          className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-xs border transition-all text-right"
-                          style={{
-                            background: checked ? 'var(--color-tg-success-muted)' : 'var(--color-tg-surface-2)',
-                            borderColor: checked ? 'var(--color-tg-success)' : 'var(--color-tg-border)',
-                            color: checked ? 'var(--color-tg-success)' : 'var(--color-tg-text-2)',
-                          }}
-                        >
-                          <span
-                            className="w-4 h-4 rounded shrink-0 flex items-center justify-center"
-                            style={{
-                              background: checked ? 'var(--color-tg-success)' : 'transparent',
-                              border: checked ? 'none' : '1px solid var(--color-tg-border)',
-                            }}
-                          >
-                            {checked && <Check size={11} color="white" />}
-                          </span>
-                          {item}
-                        </button>
-                      );
-                    })}
                   </div>
                 </FormSection>
               </div>
