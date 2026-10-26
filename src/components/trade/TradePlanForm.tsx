@@ -102,11 +102,14 @@ const STRATEGIES: TradeStrategy[] = [
  *
  * All seventeen in a flex-wrap is four to five rows — roughly 180px on a phone
  * — for a field answered with a single tap, and it was the largest vertical
- * cost in Step 1. This list is the broad-category end of that set, with
- * 'Custom' kept visible because it is the catch-all a trader reaches for when
- * none of the others is their answer; the named-methodology chips (ICT, SMC,
- * Elliott Wave, …) are the ones a trader who uses them will look for
- * deliberately.
+ * cost in Step 1. This list is the broad-category end of that set: the four
+ * families almost every other name on the list is a flavour of.
+ *
+ * FOUR AND NOT SEVEN, which is one rendered row rather than two (the chips
+ * wrap three to a row in Hebrew at 390px). 'Custom', 'Price Action' and
+ * 'Scalping' moved behind "עוד" with the named methodologies — a trader
+ * reaching for any of them is reaching for something specific and will open
+ * the list, while the trader whose answer is one of these four taps once.
  *
  * Deliberately a constant and not the trader's own most-used: their personal
  * strategies already render as their own group below, which is the
@@ -114,7 +117,7 @@ const STRATEGIES: TradeStrategy[] = [
  * chips move around under them between form opens.
  */
 const COMMON_STRATEGIES: TradeStrategy[] = [
-  'Breakout', 'Trend Follow', 'Reversal', 'Range', 'Price Action', 'Scalping', 'Custom',
+  'Breakout', 'Trend Follow', 'Reversal', 'Range',
 ];
 
 const TIMEFRAMES: Timeframe[] = ['1m', '5m', '15m', '30m', '1H', '4H', 'Daily', 'Weekly'];
@@ -300,7 +303,6 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
   // laid out inside the flex column these sit in without fighting its
   // default rendering — and the accessible result is the same.
   const symbolId = useId();
-  const symbolHelpId = useId();
   const directionLabelId = useId();
   const strategyLabelId = useId();
   const personalStrategyLabelId = useId();
@@ -842,6 +844,15 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
       initial[condition] = false;
     }
     setStrategyConditionsChecked(initial);
+
+    // REF-123: Timeframe now lives behind "הגדרות מתקדמות", and a personal
+    // strategy can make it a condition — `complianceChecks` reports
+    // "טיים-פריים" against `allowed_timeframes`. A trader told they fail a
+    // criterion whose field is not on screen has been given a problem without
+    // its control, so picking such a strategy opens the disclosure. Set here
+    // rather than derived into `open`, so the trader can still close it: this
+    // reveals the field once, it does not pin it open.
+    if ((selectedStrategy?.allowed_timeframes.length ?? 0) > 0) setAdvancedOpen(true);
   }
 
   // Live count of today's trades logged under this strategy (for the
@@ -1383,81 +1394,28 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
 
             {/* Step 1 — Asset, direction & strategy */}
             <FormSection step={1} label="נכס ואסטרטגיה" active={activeStep === 1} done={activeStep > 1}>
-              {/* ── "תיק" — which account this trade belongs to (REF-110 §B) ──
-                  First in the section, above the symbol, because it is the
-                  only field here whose answer the trader usually already
-                  knows before they open the sheet — and because the sentence
-                  under it is what tells a broker-connected trader they can
-                  leave it alone.
-
-                  Rendered as its own markup rather than through <Select>, for
-                  one reason: the helper line is tied to the control with
-                  aria-describedby. Imri's requirement is that every element
-                  explains itself, and an explanation a screen reader does not
-                  reach only explains it to some traders. */}
-              {portfoliosEnabled && (
-                <div className="flex flex-col gap-1">
-                  <label htmlFor={portfolioFieldId} className="text-xs font-medium text-tg-muted">תיק</label>
-                  <select
-                    id={portfolioFieldId}
-                    aria-describedby={portfolioHintId}
-                    value={portfolioId}
-                    onChange={(e) => setPortfolioChoice(e.target.value)}
-                    className="w-full h-10 px-3 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none focus:border-tg-primary transition-colors appearance-none cursor-pointer"
-                    style={{ background: 'var(--color-tg-surface-2)' }}
-                  >
-                    <option value={UNASSIGNED_VALUE}>ללא תיק</option>
-                    {portfolios.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {/* The status rides in the option text because a
-                            <select> cannot carry a chip. A closed portfolio is
-                            still choosable — a trader reconciling last month's
-                            trades needs it. */}
-                        {p.status === 'active' ? portfolioLabel(p) : `${portfolioLabel(p)} · ${statusLabel(p.status)}`}
-                      </option>
-                    ))}
-                    <option value={NEW_PORTFOLIO_VALUE}>תיק חדש…</option>
-                  </select>
-                  <p id={portfolioHintId} className="text-[11px] text-tg-muted">{PORTFOLIO_COPY.formField}</p>
-                  {portfolioId === NEW_PORTFOLIO_VALUE && (
-                    <div className="flex flex-col gap-1 mt-1">
-                      <label htmlFor={newPortfolioFieldId} className="text-xs font-medium text-tg-muted">שם התיק החדש</label>
-                      <input
-                        id={newPortfolioFieldId}
-                        type="text"
-                        value={newPortfolioName}
-                        onChange={(e) => setNewPortfolioName(e.target.value)}
-                        placeholder="למשל: אינטראקטיב, אישי"
-                        className="w-full h-10 px-3 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none focus:border-tg-primary transition-colors"
-                        style={{ background: 'var(--color-tg-surface-2)' }}
-                      />
-                      <p className="text-[11px] text-tg-muted">{PORTFOLIO_COPY.createManual}</p>
-                    </div>
-                  )}
-                </div>
-              )}
               <div ref={(el) => { fieldRefs.current.symbol = el; }} style={fieldHighlightStyle('symbol')} className="flex flex-col gap-1">
                 <label htmlFor={symbolId} className="text-xs font-medium text-tg-muted">סימול</label>
+                {/* NQ1 IS IN THE PLACEHOLDER ON PURPOSE (REF-123).
+                    A help line under this field used to say
+                    "בחוזים עתידיים אפשר לכתוב NQ, NQ1 או MNQ — רפלקט יזהה",
+                    added by REF-107 because nothing in the form suggested
+                    futures notation and the trader who typed "NQ1" had no hint
+                    the matcher was reading it as another instrument. It is
+                    gone for the fold, but the thing it taught is not: the
+                    placeholder now carries the third form itself, which costs
+                    no vertical space at all. lib/symbols.ts still reads all
+                    three. */}
                 <input
                   id={symbolId}
                   ref={symbolRef}
                   type="text"
-                  placeholder="NQ, MNQ, ES, AAPL, EURUSD"
+                  placeholder="NQ, NQ1, MNQ, ES, AAPL"
                   value={form.symbol}
                   onChange={(e) => { setForm({ ...form, symbol: e.target.value.toUpperCase() }); setValidationResult(null); }}
-                  aria-describedby={symbolHelpId}
                   className="w-full h-10 px-3 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none focus:border-tg-primary transition-colors"
                   style={{ background: 'var(--color-tg-surface-2)' }}
                 />
-                {/* The placeholder used to offer a stock, a forex pair and
-                    another stock, so nothing in the form suggested futures
-                    notation at all — and the trader who wrote "NQ1" had no
-                    hint the matcher was reading it as another instrument
-                    (REF-107). lib/symbols.ts now reads all three forms, and
-                    this line is what tells the trader so. */}
-                <p id={symbolHelpId} className="text-[11px] text-tg-muted">
-                  בחוזים עתידיים אפשר לכתוב NQ, NQ1 או MNQ — רפלקט יזהה
-                </p>
               </div>
               <div ref={(el) => { fieldRefs.current.direction = el; }} style={fieldHighlightStyle('direction')} className="flex flex-col gap-1">
                 <span id={directionLabelId} className="text-xs font-medium text-tg-muted">כיוון עסקה</span>
@@ -1545,13 +1503,6 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
               ) : (
                 <p className="text-xs text-tg-muted">לא הוספת אסטרטגיות עדיין — ניתן להוסיף בעמוד האסטרטגיות</p>
               )}
-              <Select
-                label="Timeframe"
-                value={form.timeframe}
-                onChange={(e) => { setForm({ ...form, timeframe: e.target.value as Timeframe }); setValidationResult(null); }}
-                options={TIMEFRAMES.map((tf) => ({ value: tf, label: tf }))}
-                placeholder="בחר Timeframe"
-              />
             </FormSection>
 
             {/* Step 2 — Prices & position sizing */}
@@ -1651,6 +1602,75 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                 onToggle={() => setAdvancedOpen((v) => !v)}
                 regionId={advancedRegionId}
               >
+                {/* ── "תיק" — which account this trade belongs to (REF-110 §B)
+                    Rendered as its own markup rather than through <Select>,
+                    for one reason: the helper line is tied to the control with
+                    aria-describedby. Imri's requirement is that every element
+                    explains itself, and an explanation a screen reader does not
+                    reach only explains it to some traders.
+
+                    MOVED HERE FROM THE TOP OF STEP 1 (REF-123). It led the
+                    form because it is the field a trader usually knows the
+                    answer to before they open the sheet — but that is the
+                    argument for it being cheap, not for it being first, and
+                    at 85px it was first in the way. It already defaults to
+                    the portfolio of the trader's last plan, so the common
+                    answer is the one it is already showing. */}
+                {portfoliosEnabled && (
+                  <div className="flex flex-col gap-1">
+                    <label htmlFor={portfolioFieldId} className="text-xs font-medium text-tg-muted">תיק</label>
+                    <select
+                      id={portfolioFieldId}
+                      aria-describedby={portfolioHintId}
+                      value={portfolioId}
+                      onChange={(e) => setPortfolioChoice(e.target.value)}
+                      className="w-full h-10 px-3 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none focus:border-tg-primary transition-colors appearance-none cursor-pointer"
+                      style={{ background: 'var(--color-tg-surface-2)' }}
+                    >
+                      <option value={UNASSIGNED_VALUE}>ללא תיק</option>
+                      {portfolios.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {/* The status rides in the option text because a
+                              <select> cannot carry a chip. A closed portfolio
+                              is still choosable — a trader reconciling last
+                              month's trades needs it. */}
+                          {p.status === 'active' ? portfolioLabel(p) : `${portfolioLabel(p)} · ${statusLabel(p.status)}`}
+                        </option>
+                      ))}
+                      <option value={NEW_PORTFOLIO_VALUE}>תיק חדש…</option>
+                    </select>
+                    <p id={portfolioHintId} className="text-[11px] text-tg-muted">{PORTFOLIO_COPY.formField}</p>
+                    {portfolioId === NEW_PORTFOLIO_VALUE && (
+                      <div className="flex flex-col gap-1 mt-1">
+                        <label htmlFor={newPortfolioFieldId} className="text-xs font-medium text-tg-muted">שם התיק החדש</label>
+                        <input
+                          id={newPortfolioFieldId}
+                          type="text"
+                          value={newPortfolioName}
+                          onChange={(e) => setNewPortfolioName(e.target.value)}
+                          placeholder="למשל: אינטראקטיב, אישי"
+                          className="w-full h-10 px-3 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none focus:border-tg-primary transition-colors"
+                          style={{ background: 'var(--color-tg-surface-2)' }}
+                        />
+                        <p className="text-[11px] text-tg-muted">{PORTFOLIO_COPY.createManual}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {/* Timeframe, also moved out of Step 1 (REF-123). It has never
+                    been required and it has no default — an untouched plan
+                    writes null, exactly as before. The one case where hiding it
+                    would strand a trader is handled above: a personal strategy
+                    that restricts timeframes opens this disclosure by itself,
+                    so the compliance panel can never report "טיים-פריים ✗"
+                    against a field that is not on screen. */}
+                <Select
+                  label="Timeframe"
+                  value={form.timeframe}
+                  onChange={(e) => { setForm({ ...form, timeframe: e.target.value as Timeframe }); setValidationResult(null); }}
+                  options={TIMEFRAMES.map((tf) => ({ value: tf, label: tf }))}
+                  placeholder="בחר Timeframe"
+                />
                 <div className="flex flex-col gap-1">
                   <label htmlFor="trade-point-value" className="text-xs font-medium text-tg-muted">שווי נקודה ($)</label>
                   <input
