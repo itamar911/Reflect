@@ -1157,6 +1157,190 @@ async function observeCronNoFalseDeath(): Promise<{
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// PART 2c — the self-healing expired gate (REF-112 follow-up item 1)
+//
+// The gate in loadOrRenew() used to refuse every non-active row outright, and
+// `listConnectionsDueForRefresh` selects status='active' only — so between the
+// two, ANY stray 'expired' was permanent and the trader had to reconnect by
+// hand. The 26.10 incident is the case in point: whichever of the four writers
+// fired, one redemption would have revived the row.
+//
+// What these cases pin is the pair of obligations that makes that safe. The
+// gate must HEAL a row whose refresh token is still usable, and it must spend
+// AT MOST ONE redemption on a row that is expired for a good reason — a gate
+// that retried on every request would hammer the token endpoint on behalf of a
+// trader whose grant is genuinely gone, which is how a p-time becomes a
+// p-captcha.
+//
+// Driven through the real getUserAccessToken(), because "a row marked expired
+// is redeemed on the ordinary request path" is itself the thing under test.
+// ════════════════════════════════════════════════════════════════════════════
+
+/** Drive the gate once and report what the caller got. */
+async function driveGate(
+  store: Map<string, Row>,
+  userId: string,
+  writes: Writes,
+  stubbed: typeof fetch
+): Promise<string> {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = stubbed;
+  try {
+    const snapshot = await getUserAccessToken(userId, { admin: storeAdmin(store, writes) });
+    if (snapshot.accessToken === REDEEMED_TOKEN) return 'token=redeemed';
+    if (snapshot.accessToken === STORED_TOKEN) return 'token=stored';
+    return 'token=unrecognised';
+  } catch (thrown: unknown) {
+    if (thrown instanceof TradovateNotConnectedError) return `threw=NotConnected(${thrown.status})`;
+    if (TransientError && thrown instanceof TransientError) return 'threw=Transient';
+    return `threw=${thrown instanceof Error ? thrown.name : typeof thrown}`;
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
+
+/**
+ * What the row says afterwards.
+ *
+ * THE STATUS IS THE ASSERTION, not the returned token. A heal is only a heal if
+ * the row stopped saying 'expired' — and nothing writes that status directly:
+ * saveConnection() sets status='active' on every save, so the flip is a
+ * side-effect of the redemption committing. A case that checked only the token
+ * would pass against a gate that healed the caller and left the row broken for
+ * the next one.
+ */
+function rowAfter(store: Map<string, Row>, userId: string): string {
+  const row = store.get(userId);
+  if (!row) return 'row=gone';
+  let refresh = 'none';
+  if (row.refresh_token_encrypted) {
+    const plaintext = decryptToken(String(row.refresh_token_encrypted), 'refresh', userId);
+    refresh =
+      plaintext === ORIGINAL_REFRESH ? 'original' : plaintext === ROTATED_REFRESH ? 'rotated' : 'unknown';
+  }
+  return `status=${String(row.status)} refresh=${refresh}`;
+}
+
+/** An expired row holding a live refresh token: the whole point of item 1. */
+async function observeHealSucceeds(): Promise<{ actual: string; expected: string; note: string }> {
+  const userId = 'cccc3333-0000-4000-8000-000000000001';
+  const row = keepAliveRow({ userId });
+  // The access token is deliberately FRESH (60 min out). Nothing about this row
+  // needs recovering except the status, so a heal here can only have been
+  // triggered by the gate and not by an expiry.
+  row.status = 'expired';
+  const store = singleRowStore(row);
+  const writes = noWrites();
+
+  clearAllCachedTokens();
+  const outcome = await driveGate(
+    store,
+    userId,
+    writes,
+    tokenEndpointFetch({ status: 200, body: grantBody() })
+  );
+
+  return {
+    actual: `${outcome} ${rowAfter(store, userId)}`,
+    expected: 'token=redeemed status=active refresh=rotated',
+    note: `cas:applied×${writes.casApplied}`,
+  };
+}
+
+/** The same row, but Tradovate refuses the grant: it was expired for a reason. */
+async function observeHealRefused(): Promise<{ actual: string; expected: string; note: string }> {
+  const userId = 'cccc3333-0000-4000-8000-000000000002';
+  const row = keepAliveRow({ userId });
+  row.status = 'expired';
+  const store = singleRowStore(row);
+  const writes = noWrites();
+
+  clearAllCachedTokens();
+  const outcome = await driveGate(
+    store,
+    userId,
+    writes,
+    tokenEndpointFetch({ status: 400, body: INVALID_GRANT_BODY })
+  );
+
+  return {
+    actual: `${outcome} ${rowAfter(store, userId)}`,
+    expected: 'threw=NotConnected(expired) status=expired refresh=original',
+    note: `statuses=[${writes.statusUpdates.join(',') || 'none'}]`,
+  };
+}
+
+/**
+ * ONE ATTEMPT, NOT A LOOP. The guard the TODO said this change needed.
+ *
+ * Two consecutive requests over the same refused row. The second must send
+ * NOTHING — `noCallsExpected` makes a second grant a loud harness failure
+ * rather than a silent extra call — and must still refuse the caller.
+ * clearAllCachedTokens() is called once, before the first request, precisely
+ * because it also clears the attempt ledger: clearing it between the two would
+ * be measuring nothing.
+ */
+async function observeHealAttemptedOnce(): Promise<{
+  actual: string;
+  expected: string;
+  note: string;
+}> {
+  const userId = 'cccc3333-0000-4000-8000-000000000003';
+  const row = keepAliveRow({ userId });
+  row.status = 'expired';
+  const store = singleRowStore(row);
+  const writes = noWrites();
+
+  let sent = 0;
+  const countingFetch: typeof fetch = (async (url: unknown) => {
+    const href = String(url);
+    if (!href.includes('/auth/oauthtoken')) throw new Error(`unexpected call to ${href}`);
+    sent += 1;
+    return { ok: false, status: 400, text: async () => INVALID_GRANT_BODY };
+  }) as unknown as typeof fetch;
+
+  clearAllCachedTokens();
+  const first = await driveGate(store, userId, writes, countingFetch);
+  const second = await driveGate(store, userId, writes, noCallsExpected);
+
+  return {
+    actual: `first=${first} second=${second} sent=${sent}`,
+    expected:
+      'first=threw=NotConnected(expired) second=threw=NotConnected(expired) sent=1',
+    note: `statuses=[${writes.statusUpdates.join(',') || 'none'}]`,
+  };
+}
+
+/**
+ * The three states in which the gate must not send anything at all.
+ *
+ * A lapsed refresh token and a missing one are the honest ends of the road —
+ * there is nothing to redeem, and a guess is refused here exactly as it is in
+ * `redeemRefreshTokenIfDue`. 'revoked' is different in kind: the trader gave
+ * that grant up themselves, so it is refused however usable the stored
+ * credential looks, which is why the fixture gives it a perfectly live one.
+ */
+async function observeGateSendsNothing(params: {
+  userId: string;
+  row: (userId: string) => Row;
+  expectStatus: string;
+  expectRefresh: string;
+  thrown: string;
+}): Promise<{ actual: string; expected: string; note: string }> {
+  const store = singleRowStore(params.row(params.userId));
+  const writes = noWrites();
+
+  clearAllCachedTokens();
+  const outcome = await driveGate(store, params.userId, writes, noCallsExpected);
+
+  return {
+    actual: `${outcome} ${rowAfter(store, params.userId)}`,
+    expected: `threw=${params.thrown} status=${params.expectStatus} refresh=${params.expectRefresh}`,
+    note: `statuses=[${writes.statusUpdates.join(',') || 'none'}]`,
+  };
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // PART 3 — REF-100: the cron
 // ════════════════════════════════════════════════════════════════════════════
 
@@ -1406,6 +1590,90 @@ async function main(): Promise<number> {
       `  ${(ok ? 'PASS ' : 'FAIL ') + raceCase.name.padEnd(31)} ${expected.padEnd(66)} ${actual}`
     );
     notes.push(`    ${raceCase.name} — ${raceCase.why}${note ? ` [${note}]` : ''}`);
+  }
+
+  // ── Part 2c ───────────────────────────────────────────────────────────────
+  console.log('\n\nREF-112 follow-up item 1 — the self-healing expired gate\n');
+  console.log('  A row marked expired that still holds a usable refresh token must be revived');
+  console.log('  on next use, and a row that is expired for a good reason must cost exactly');
+  console.log('  ONE grant and never a loop. The status in the last column is the assertion.\n');
+  console.log(`  ${'case'.padEnd(36)} ${'expected'.padEnd(66)} actual`);
+  console.log(`  ${'-'.repeat(36)} ${'-'.repeat(66)} ${'-'.repeat(66)}`);
+
+  const healCases: Array<{
+    name: string;
+    why: string;
+    run: () => Promise<{ actual: string; expected: string; note: string }>;
+  }> = [
+    {
+      name: 'expired + live refresh — healed',
+      why: 'the fix: one redemption revives the row, and saveConnection writes status=active as a side-effect of the save rather than through a second write',
+      run: observeHealSucceeds,
+    },
+    {
+      name: 'expired + refused grant — stays expired',
+      why: 'the row really was dead: a definitive invalid_grant leaves the status alone and the caller is still told to reconnect',
+      run: observeHealRefused,
+    },
+    {
+      name: 'refused twice — one grant only',
+      why: 'the loop guard the TODO asked for: the second request over the same credential sends nothing at all',
+      run: observeHealAttemptedOnce,
+    },
+    {
+      name: 'expired + lapsed refresh — nothing sent',
+      why: 'past its own deadline there is nothing to redeem, so no request is made and no guess is invented',
+      run: () =>
+        observeGateSendsNothing({
+          userId: 'cccc3333-0000-4000-8000-000000000004',
+          row: (userId) => ({
+            ...keepAliveRow({ userId, refreshExpiresInMs: -60_000 }),
+            status: 'expired',
+          }),
+          expectStatus: 'expired',
+          expectRefresh: 'original',
+          thrown: 'NotConnected(expired)',
+        }),
+    },
+    {
+      name: 'expired + no refresh token — nothing sent',
+      why: 'W2 recorded this honestly and there is nothing here to recover with',
+      run: () =>
+        observeGateSendsNothing({
+          userId: 'cccc3333-0000-4000-8000-000000000005',
+          row: (userId) => ({
+            ...keepAliveRow({ userId }),
+            status: 'expired',
+            refresh_token_encrypted: null,
+          }),
+          expectStatus: 'expired',
+          expectRefresh: 'none',
+          thrown: 'NotConnected(expired)',
+        }),
+    },
+    {
+      name: 'revoked + live refresh — never healed',
+      why: 'the one status the heal must not touch: the trader relinquished that grant, and a usable-looking credential is no licence to spend it',
+      run: () =>
+        observeGateSendsNothing({
+          userId: 'cccc3333-0000-4000-8000-000000000006',
+          row: (userId) => ({ ...keepAliveRow({ userId }), status: 'revoked' }),
+          expectStatus: 'revoked',
+          expectRefresh: 'original',
+          thrown: 'NotConnected(revoked)',
+        }),
+    },
+  ];
+
+  for (const healCase of healCases) {
+    const { actual, expected, note } = await healCase.run();
+    const ok = actual === expected;
+    total += 1;
+    if (!ok) failures += 1;
+    console.log(
+      `  ${(ok ? 'PASS ' : 'FAIL ') + healCase.name.padEnd(31)} ${expected.padEnd(66)} ${actual}`
+    );
+    notes.push(`    ${healCase.name} — ${healCase.why}${note ? ` [${note}]` : ''}`);
   }
 
   // ── Part 3 ────────────────────────────────────────────────────────────────

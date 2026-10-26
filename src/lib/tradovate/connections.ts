@@ -59,9 +59,15 @@
  *   at 15 calls an hour BY IP ADDRESS, and on Vercel every lambda shares a small
  *   pool of egress addresses — so one tenant's traffic can make our renewal
  *   fail. Treating that as a dead connection wrote status='expired', after which
- *   the status gate above rejects the row immediately on every later call and a
- *   working connection is permanently dead until the user reconnects. The same
- *   went for a timeout, a reset, a 500, or a body we could not parse.
+ *   the status gate above rejects the row immediately on every later call. The
+ *   same went for a timeout, a reset, a 500, or a body we could not parse.
+ *
+ *   A stray 'expired' is no longer PERMANENT — {@link healExpiredConnection}
+ *   spends one redemption on a row that still holds a refresh token inside its
+ *   own lifetime, and a success writes status='active' back. That is a safety
+ *   net and not a licence: the classifier above is still what keeps a live
+ *   connection from being marked dead in the first place, and a row whose
+ *   refresh token has also lapsed is past saving by anything here.
  *
  *   So the catch classifies before it writes, and {@link classifyRenewalFailure}
  *   holds the rule: only proof of refusal is treated as refusal, the default is
@@ -269,10 +275,19 @@ export function forgetCachedToken(userId: string): void {
   inFlight.delete(userId);
 }
 
-/** Reset the whole cache. Test seam. */
+/**
+ * Reset the whole cache. Test seam.
+ *
+ * Clears {@link healAttempts} too, so a suite that drives the self-healing gate
+ * twice is not silently measuring the loop guard the second time. Deliberately
+ * NOT cleared by {@link forgetCachedToken}: `recordPenalty` calls that on every
+ * penalty verdict, and resetting the one-attempt ledger from there would turn
+ * the guard into no guard at all for a trader who is being rate limited.
+ */
 export function clearAllCachedTokens(): void {
   cache.clear();
   inFlight.clear();
+  healAttempts.clear();
 }
 
 /**
@@ -1207,11 +1222,33 @@ export async function redeemRefreshToken(params: {
   config: TradovateOAuthConfig;
   admin: SupabaseClient;
   signal?: AbortSignal;
+  /**
+   * Redeem a row whose status is already 'expired' (REF-112 follow-up item 1).
+   *
+   * OFF BY DEFAULT, AND ONLY {@link healExpiredConnection} TURNS IT ON. The
+   * status gate below is what stops the daily keep-alive spending a grant on
+   * every dead row in the table on every run, and that is still the right
+   * default for a loop over every connection.
+   *
+   * What it unlocks is the single case that gate was never meant to cover: a
+   * row marked 'expired' that still holds a refresh token inside its own
+   * lifetime is RECOVERABLE, and {@link saveConnection} writes
+   * `status = 'active'` on every save — so one successful redemption here both
+   * revives the tokens and clears the status, with no separate write and no
+   * second code path. 'revoked' is excluded unconditionally: the trader
+   * relinquished that grant themselves.
+   *
+   * The caller owns the loop guard. See {@link healExpiredConnection}.
+   */
+  allowExpired?: boolean;
 }): Promise<RefreshRedemption> {
-  const { connection, config, admin, signal } = params;
+  const { connection, config, admin, signal, allowExpired = false } = params;
   const userId = connection.user_id;
 
-  if (connection.status !== 'active') {
+  // 'revoked' is refused whatever the caller passes — see `allowExpired`.
+  const statusBlocks =
+    connection.status === 'revoked' || (connection.status !== 'active' && !allowExpired);
+  if (statusBlocks) {
     return {
       outcome: 'skipped',
       reason: 'not_active',
@@ -2127,6 +2164,152 @@ async function redeemRefreshTokenIfDue(
   return redeemRefreshToken({ connection: row, config: config.config, admin });
 }
 
+/**
+ * Cap on remembered heal attempts, for {@link MAX_CACHED_USERS}' reason: a
+ * process serving many traders must not grow this map without bound. Eviction
+ * is oldest-inserted-first, and an evicted entry costs at most one more
+ * redemption attempt.
+ */
+const MAX_HEAL_ATTEMPTS = 500;
+
+/**
+ * Which stored credential this process has already spent a heal attempt on,
+ * per user (REF-112 follow-up item 1).
+ *
+ * THE VALUE IS THE REFRESH-TOKEN CIPHERTEXT AND NOT A TIMESTAMP OR A COUNT,
+ * which is what makes this guard self-invalidating rather than a thing to
+ * expire. An attempt is spent against one specific credential: if the row
+ * still holds that exact ciphertext, retrying would present the same grant to
+ * the same endpoint and get the same answer, so it is refused without a
+ * request. Anything that gives the row a NEW refresh token — the trader
+ * reconnecting, a redemption landing from another process — changes the
+ * ciphertext (a fresh IV per encryption guarantees it, which is the same
+ * property `expectRefreshTokenCiphertext` relies on) and a new attempt is
+ * allowed on its own merits.
+ *
+ * PER PROCESS, AND THAT IS THE HONEST BOUND. On Vercel this is per lambda
+ * instance, so a row that is expired for a good reason costs one token-endpoint
+ * call per cold start for as long as its refresh token has not itself lapsed —
+ * at most ~26 hours, bounded by the `refreshExpiry > 0` guard below. A bound
+ * that survived restarts would need a column on the row, which is a migration;
+ * the TODO this replaces asked for "one attempt per row per run, recorded", and
+ * this is that, with the run being the process.
+ */
+const healAttempts = new Map<string, string>();
+
+/**
+ * Spend at most one redemption on a connection marked 'expired', and revive it
+ * if the grant still works (REF-112 follow-up item 1).
+ *
+ * THE TODO THIS REPLACES SAID IT PLAINLY: a row that is 'expired' but still
+ * holds a refresh token whose `refresh_expires_at` is in the future is
+ * recoverable in exactly one redemption, and refusing it in {@link loadOrRenew}
+ * is what made any stray 'expired' PERMANENT — because
+ * {@link listConnectionsDueForRefresh} selects `status = 'active'` only, so the
+ * keep-alive never looks at such a row again either. Between the two, a single
+ * bad write cost the trader a manual reconnect forever.
+ *
+ * It heals whatever wrote the status, including causes this function cannot
+ * see: REF-101 before its fix, the rotation race before
+ * {@link markExpiredIfRefreshUnchanged}, a 5xx misread at the wrong minute, and
+ * any future write that gets it wrong. The investigation's own verdict on the
+ * 26.10 incident is that this would have healed it automatically whichever of
+ * the four writers had fired.
+ *
+ * ONE ATTEMPT, NEVER A LOOP, and three things enforce that together:
+ *
+ *   1. {@link healAttempts} refuses a second attempt against the same stored
+ *      credential, so a row that is expired FOR A GOOD REASON is asked once and
+ *      then left alone.
+ *   2. The refresh token must still be inside its own lifetime. Past that there
+ *      is nothing to redeem and no request is made, ever.
+ *   3. Only a SUCCESS changes the row's status, and it changes it to 'active' —
+ *      so a successful heal removes the condition that brings a caller here.
+ *      A failure writes nothing new (or re-writes the same 'expired'), which is
+ *      a fixed point rather than a cycle.
+ *
+ * Returns null for "still expired, and the caller should say so". Never throws:
+ * the caller's next line is a {@link TradovateNotConnectedError} that is more
+ * useful than anything that could go wrong in here.
+ */
+async function healExpiredConnection(
+  row: ConnectionRow,
+  admin: SupabaseClient
+): Promise<UserTokenSnapshot | null> {
+  const userId = row.user_id;
+
+  // Nothing to redeem. These are the states W2 records honestly: no refresh
+  // token, no recorded lifetime, or a lifetime that has itself run out. A guess
+  // is refused here for the same reason it is refused in
+  // `redeemRefreshTokenIfDue` and `listConnectionsDueForRefresh`.
+  if (!row.refresh_token_encrypted) return null;
+  const refreshExpiry = row.refresh_expires_at ? Date.parse(row.refresh_expires_at) : Number.NaN;
+  if (!Number.isFinite(refreshExpiry) || refreshExpiry - Date.now() <= 0) return null;
+
+  // Before the ledger is spent: a deployment that cannot read its own OAuth
+  // settings has learned nothing about this connection, and burning the one
+  // attempt on it would mean the row is never healed even after the
+  // configuration is fixed. Not logged per call — the connect route reports a
+  // broken configuration to someone who can act on it.
+  const config = loadOAuthConfig();
+  if (!config.ok) return null;
+
+  // Recorded BEFORE the await, so two callers arriving together cannot both
+  // spend a grant. (`getUserAccessToken`'s single-flight map already prevents
+  // that per user; this does not depend on it.)
+  if (healAttempts.get(userId) === row.refresh_token_encrypted) return null;
+  if (healAttempts.size >= MAX_HEAL_ATTEMPTS && !healAttempts.has(userId)) {
+    const oldest = healAttempts.keys().next();
+    if (!oldest.done) healAttempts.delete(oldest.value);
+  }
+  healAttempts.set(userId, row.refresh_token_encrypted);
+
+  let result: RefreshRedemption;
+  try {
+    result = await redeemRefreshToken({
+      connection: row,
+      config: config.config,
+      admin,
+      allowExpired: true,
+    });
+  } catch (error) {
+    // redeemRefreshToken classifies everything it can and returns rather than
+    // throws, so reaching here is something unexpected — a failed write, most
+    // likely. The name only: no row contents, no token, no user id.
+    const name = error instanceof Error ? error.name : 'non-Error throw';
+    console.warn(
+      redactSecrets(
+        `[tradovate] the heal attempt on an expired connection did not complete (${name}); ` +
+          'the row is left exactly as it was'
+      )
+    );
+    return null;
+  }
+
+  if (result.outcome === 'refreshed' || result.outcome === 'superseded') {
+    // Worth a line, at info, because it is otherwise invisible: the caller sees
+    // an ordinary success and the row quietly stopped being broken. Counts
+    // nothing and names nobody.
+    console.info(
+      '[tradovate] an expired connection was revived by redeeming its refresh token; ' +
+        'no reconnect was needed'
+    );
+    return result.snapshot;
+  }
+
+  // 'expired' means Tradovate refused the grant and the row was expired for a
+  // good reason after all. 'transient' and 'skipped' mean nothing was learned
+  // and nothing was written. All three leave the status alone and all three are
+  // the end of it for this credential — see the loop guard above.
+  console.warn(
+    redactSecrets(
+      `[tradovate] an expired connection could not be revived (${result.outcome}); it stays ` +
+        'expired and this credential will not be attempted again'
+    )
+  );
+  return null;
+}
+
 async function loadOrRenew(
   userId: string,
   admin: SupabaseClient
@@ -2143,20 +2326,22 @@ async function loadOrRenew(
     cache.delete(userId);
     throw new TradovateNotConnectedError(userId, 'missing');
   }
-  // TODO(REF-100 follow-up): make this gate self-healing. A row that is
-  // 'expired' but still holds a refresh token whose refresh_expires_at is in
-  // the future is recoverable — one redemption would revive it — and refusing
-  // it here is what makes any stray 'expired' permanent, since
-  // listConnectionsDueForRefresh() also selects status='active' only. That
-  // would recover rows stranded by causes this branch cannot see: REF-101
-  // before its fix, the rotation race before
-  // markExpiredIfRefreshUnchanged(), and any future write that gets it wrong.
-  // Deliberately NOT done here — it needs a guard against redeeming in a loop
-  // on a row that is expired for a good reason, which is more than this change
-  // should carry.
-  if (data.status !== 'active') {
+  // THE GATE IS NOW SELF-HEALING (REF-112 follow-up item 1), which is the TODO
+  // that stood here. 'revoked' is still the end of the road — the trader gave
+  // that grant up themselves — but 'expired' is a status, not a fact about the
+  // credential, and a row that still holds a usable refresh token is recovered
+  // rather than refused. See {@link healExpiredConnection} for the one-attempt
+  // guard that keeps this from redeeming in a loop on a row that is expired for
+  // a good reason.
+  if (data.status === 'revoked') {
     cache.delete(userId);
-    throw new TradovateNotConnectedError(userId, data.status === 'revoked' ? 'revoked' : 'expired');
+    throw new TradovateNotConnectedError(userId, 'revoked');
+  }
+  if (data.status !== 'active') {
+    const healed = await healExpiredConnection(data, admin);
+    if (healed) return remember(userId, healed);
+    cache.delete(userId);
+    throw new TradovateNotConnectedError(userId, 'expired');
   }
 
   const storedExpiry = Date.parse(data.expires_at);
