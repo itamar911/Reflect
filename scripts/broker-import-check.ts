@@ -2339,10 +2339,26 @@ async function penaltyBackoffGroup() {
       [recorded?.penalised_until, recorder.filters[0]?.startsWith('penalised_until.is.null,')],
       [new Date(NOW + HOUR).toISOString(), true]),
     c('(5) and PENALTY_BACKOFF_MS is that hour', PENALTY_BACKOFF_MS, HOUR),
-    // THE ORDER. A gated user's token columns are never named, so the gate is
-    // upstream of a resolution that can itself call Tradovate.
-    c('(6) a penalised user is refused before the token is read',
-      [gateThrew, gateCaptcha, gated.columns], ['TradovatePenaltyError', true, ['penalised_until']]),
+    // THE ORDER, AND IT NOW HAS EXACTLY ONE EXCEPTION (REF-112 follow-up
+    // item 3). The gate still comes first and still refuses, so no TRADING
+    // call is resolved for a penalised trader. What changed is that it no
+    // longer strands the refresh token while it holds: the 26.10 investigation
+    // found that all four read paths come through getUserTradingApi, so an
+    // hour of lockout removed the 12-hour refresh backstop from every one of
+    // them at once — and a call to the token endpoint is not what the limiter
+    // penalised.
+    //
+    // So this asserts the SHAPE of that exception rather than dropping the
+    // assertion. `penalised_until` is still read first, and there is exactly
+    // ONE further read: `redeemWhilePenalised` looking at the row to see
+    // whether a redemption is due. A third list here would mean the token
+    // resolution had run after all, which is what this case has always been
+    // about. This stub's row carries no `status`, so that check returns without
+    // redeeming and nothing is sent — the redemption itself is pinned in
+    // scripts/tradovate-refresh-check.ts, where the token endpoint is counted.
+    c('(6) a penalised user is refused, and the only read past the gate is the redemption check',
+      [gateThrew, gateCaptcha, gated.columns[0], gated.columns.length],
+      ['TradovatePenaltyError', true, 'penalised_until', 2]),
     c('(7) so (6) is not vacuous: a clear user gets past the gate and reaches the token',
       [clearThrew, clear.columns.length > 1], ['TradovateNotConnectedError', true]),
     c('(8) a penalty at the reader is recorded and rethrown unchanged',

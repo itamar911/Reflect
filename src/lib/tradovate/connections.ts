@@ -278,16 +278,18 @@ export function forgetCachedToken(userId: string): void {
 /**
  * Reset the whole cache. Test seam.
  *
- * Clears {@link healAttempts} too, so a suite that drives the self-healing gate
- * twice is not silently measuring the loop guard the second time. Deliberately
- * NOT cleared by {@link forgetCachedToken}: `recordPenalty` calls that on every
- * penalty verdict, and resetting the one-attempt ledger from there would turn
- * the guard into no guard at all for a trader who is being rate limited.
+ * Clears {@link healAttempts} and {@link penalisedRedeemChecks} too, so a suite
+ * that drives either mechanism twice is not silently measuring its throttle the
+ * second time. Both are deliberately left alone by {@link forgetCachedToken}:
+ * `recordPenalty` calls that on every penalty verdict, and resetting either
+ * ledger from there would turn both guards into no guard at all for exactly the
+ * trader they exist to protect.
  */
 export function clearAllCachedTokens(): void {
   cache.clear();
   inFlight.clear();
   healAttempts.clear();
+  penalisedRedeemChecks.clear();
 }
 
 /**
@@ -793,6 +795,22 @@ export interface UserTradingApi {
  * is to stop the connection dying while the trader waits the hour out. Letting
  * a captcha strand a refresh token would turn an hour of degradation into a
  * reconnect the trader has to perform by hand.
+ *
+ * AND THE SAME EXEMPTION NOW APPLIES ON THIS SIDE (REF-112 follow-up item 3).
+ * The hazard the paragraph above describes was reintroduced here by the gate
+ * itself, and the investigation into the 26.10 incident is what found it: all
+ * four product read paths come through this function, so while
+ * `penalised_until > now` NOTHING in the product resolves a token for that
+ * trader — and {@link redeemRefreshTokenIfDue}, the 12-hour request-path
+ * backstop, does not run either. For up to an hour at a time the refresh
+ * backstop was simply absent, on every read path at once.
+ *
+ * So the gate stays exactly where it is, and the redemption is let through it.
+ * The distinction that makes that sound is the one the keep-alive's exemption
+ * already rests on: A TOKEN-ENDPOINT CALL IS NOT A TRADING CALL. POST
+ * /auth/oauthtoken is not what the rate limiter penalised, it opens no session,
+ * and it is the one request that keeps the connection's clock rolling. "Skip
+ * every call" was always about the seven upstream reads below.
  */
 export async function getUserTradingApi(
   userId: string,
@@ -804,6 +822,12 @@ export async function getUserTradingApi(
   // token can itself make an upstream call.
   const penalty = await readPenaltyState(userId, { admin });
   if (penalty.penalised) {
+    // Before the throw and not instead of it: the trading calls are still
+    // skipped, and the connection still does not die while the trader waits the
+    // hour out. See the header, and `redeemWhilePenalised` for the throttle
+    // that keeps this off the 15-second live poll's hot path.
+    await redeemWhilePenalised(userId, admin);
+
     // A TradovatePenaltyError rather than a new type, so every caller's
     // existing branch is the right one: `classifyDayPullFailure` answers
     // `broker_unavailable`, which is the state all four read paths already
@@ -2189,6 +2213,93 @@ async function redeemRefreshTokenIfDue(
   if (!config.ok) return declined('Tradovate OAuth is not configured');
 
   return redeemRefreshToken({ connection: row, config: config.config, admin });
+}
+
+/**
+ * How often one process will look at a penalised trader's row to see whether a
+ * redemption is due (REF-112 follow-up item 3).
+ *
+ * FIFTEEN MINUTES, AND IT IS A READ BUDGET RATHER THAN A REFRESH POLICY. The
+ * decision itself needs the row, so "redeem if due" cannot be answered without
+ * one read — and the caller it has to survive is GET /api/tradovate/live, whose
+ * poll arrives every fifteen seconds. Unthrottled, an hour of lockout would be
+ * roughly 240 reads of a single row to discover 240 times that nothing was due.
+ *
+ * Fifteen minutes bounds that to four an hour per trader, and it costs the
+ * mechanism nothing: {@link REFRESH_REDEEM_MARGIN_MS} is twelve hours wide and
+ * {@link PENALTY_BACKOFF_MS} is one, so a lockout cannot start and end inside a
+ * window this gap could miss. One attempt per lockout is already enough; four
+ * chances at it is slack, not cadence.
+ */
+const PENALISED_REDEEM_INTERVAL_MS = 15 * 60_000;
+
+/** When this process last looked, per user. See {@link PENALISED_REDEEM_INTERVAL_MS}. */
+const penalisedRedeemChecks = new Map<string, number>();
+
+/**
+ * Keep a penalised trader's refresh token rolling, then let the caller throw
+ * (REF-112 follow-up item 3).
+ *
+ * WHY THIS EXISTS AT ALL is in {@link getUserTradingApi}'s header: the penalty
+ * gate sits above token resolution on purpose, and the cost of that position —
+ * unstated when it was written, and found by the investigation into the 26.10
+ * incident — is that the 12-hour refresh backstop stops running for every read
+ * path at once while the lockout holds. A missed cron run plus an hour of
+ * captcha was enough to put a trader inside the margin with nothing left to
+ * redeem them.
+ *
+ * NEVER THROWS AND NEVER CHANGES WHAT THE CALLER THROWS. The caller's next line
+ * is a {@link TradovatePenaltyError}, and that error is what every one of the
+ * four read paths already renders as `broker_unavailable`. A bookkeeping failure
+ * here must not replace it with something else, so every outcome — a failed
+ * read, a missing row, a refused grant — resolves to "return and let the
+ * penalty be the answer".
+ *
+ * ONLY AN ACTIVE ROW. A row that is 'expired' is {@link
+ * healExpiredConnection}'s business, and that runs on the token path which this
+ * lockout is deliberately blocking; attempting it here would spend the one heal
+ * attempt at the moment the caller cannot use the result anyway.
+ */
+async function redeemWhilePenalised(userId: string, admin: SupabaseClient): Promise<void> {
+  const now = Date.now();
+  const last = penalisedRedeemChecks.get(userId);
+  if (last !== undefined && now - last < PENALISED_REDEEM_INTERVAL_MS) return;
+
+  if (penalisedRedeemChecks.size >= MAX_CACHED_USERS && !penalisedRedeemChecks.has(userId)) {
+    const oldest = penalisedRedeemChecks.keys().next();
+    if (!oldest.done) penalisedRedeemChecks.delete(oldest.value);
+  }
+  // Stamped before the await, so a burst of polls cannot all get through.
+  penalisedRedeemChecks.set(userId, now);
+
+  try {
+    const { data, error } = await admin
+      .from('tradovate_connections')
+      .select(CONNECTION_COLUMNS)
+      .eq('user_id', userId)
+      .maybeSingle<ConnectionRow>();
+
+    // Nothing to act on, and nothing worth a line: the penalty the caller is
+    // about to throw is the more useful statement in all three cases.
+    if (error || !data || data.status !== 'active') return;
+
+    // Not forced. `force` means "the access token has lapsed and the refresh
+    // grant is the only recovery", which is a claim about serving THIS request
+    // — and this request is not going to be served. The 12-hour margin is the
+    // whole of what is being preserved here.
+    await redeemRefreshTokenIfDue(data, admin);
+  } catch (error) {
+    // redeemRefreshTokenIfDue classifies and returns rather than throwing, so
+    // this is something unexpected. The name only, once per occurrence: no row
+    // contents, no token, no user id.
+    const name = error instanceof Error ? error.name : 'non-Error throw';
+    console.warn(
+      redactSecrets(
+        `[tradovate] the refresh redemption attempted during a penalty lockout did not ` +
+          `complete (${name}); the lockout is still reported as it was`
+      )
+    );
+  }
 }
 
 /**

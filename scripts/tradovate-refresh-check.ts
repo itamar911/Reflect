@@ -63,12 +63,13 @@ import { GET as keepAliveRoute } from '../src/app/api/cron/tradovate-keepalive/r
 import {
   clearAllCachedTokens,
   getUserAccessToken,
+  getUserTradingApi,
   redeemRefreshToken,
   saveConnection,
   type StoredConnection,
 } from '../src/lib/tradovate/connections';
 import * as tradovateErrors from '../src/lib/tradovate/errors';
-import { TradovateNotConnectedError } from '../src/lib/tradovate/errors';
+import { TradovateNotConnectedError, TradovatePenaltyError } from '../src/lib/tradovate/errors';
 import { runKeepAlive } from '../src/lib/tradovate/keepalive';
 import type { TradovateOAuthConfig } from '../src/lib/tradovate/oauth-config';
 import { decryptToken, encryptToken } from '../src/lib/tradovate/token-crypto';
@@ -1667,6 +1668,90 @@ async function observeNullLifetimeRefused(): Promise<{
   return { actual, expected: 'checked=1 expired=1 nullLifetime=1 status=expired', note };
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// PART 3c — the penalty gate lets the redemption through (item 3)
+//
+// The gate in getUserTradingApi() sits ABOVE token resolution on purpose, so
+// that a limiter which has already refused us costs no further upstream calls.
+// The cost of that position went unstated until the 26.10 investigation found
+// it: all four product read paths come through that one function, so while
+// `penalised_until > now` nothing in the product resolves a token — and the
+// 12-hour refresh backstop therefore does not run either. An hour of captcha
+// removed the safety net on every read path at once.
+//
+// A token-endpoint call is not a trading call. It is not what the limiter
+// penalised, it opens no session, and it is the one request that keeps the
+// connection's clock rolling — which is the argument the keep-alive's own
+// exemption has always made. So the redemption runs and the penalty is still
+// thrown.
+// ════════════════════════════════════════════════════════════════════════════
+
+/** A lockout with half an hour left on it. */
+const PENALISED_FOR_30_MIN = 30 * 60_000;
+
+/**
+ * Drive the real getUserTradingApi() against a penalised row.
+ *
+ * `sent` is the assertion that matters in both directions: a case that only
+ * checked the thrown error would pass against a gate that redeemed nothing, and
+ * one that only checked the stored token would pass against a gate that had
+ * stopped throwing.
+ */
+async function observePenalisedGate(params: {
+  userId: string;
+  refreshExpiresInMs: number;
+  /** The token endpoint's answer. 200 redeems, 503 is a failure that writes nothing. */
+  grantStatus: number;
+  /** Poll twice without clearing the throttle, to pin the read budget. */
+  twice?: boolean;
+}): Promise<{ actual: string; note: string }> {
+  const { userId, refreshExpiresInMs, grantStatus } = params;
+  const row = keepAliveRow({ userId, refreshExpiresInMs });
+  row.penalised_until = new Date(Date.now() + PENALISED_FOR_30_MIN).toISOString();
+  const store = singleRowStore(row);
+  const writes = noWrites();
+
+  let sent = 0;
+  const countingFetch: typeof fetch = (async (url: unknown) => {
+    const href = String(url);
+    if (!href.includes('/auth/oauthtoken')) throw new Error(`unexpected call to ${href}`);
+    sent += 1;
+    return {
+      ok: grantStatus >= 200 && grantStatus < 300,
+      status: grantStatus,
+      text: async () => (grantStatus === 200 ? grantBody() : 'Service Unavailable'),
+    };
+  }) as unknown as typeof fetch;
+
+  const drive = async (stubbed: typeof fetch): Promise<string> => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = stubbed;
+    try {
+      await getUserTradingApi(userId, { admin: storeAdmin(store, writes) });
+      return 'no-throw';
+    } catch (thrown: unknown) {
+      if (thrown instanceof TradovatePenaltyError) return 'threw=Penalty';
+      if (thrown instanceof TradovateNotConnectedError) return 'threw=NotConnected';
+      return `threw=${thrown instanceof Error ? thrown.name : typeof thrown}`;
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  };
+
+  clearAllCachedTokens();
+  const first = await drive(countingFetch);
+  // The second poll must not even read the row, so anything it sends is a loud
+  // harness failure rather than a silently larger number.
+  const second = params.twice ? await drive(noCallsExpected) : null;
+
+  const after = rowAfter(store, userId);
+  const observed = second === null ? first : `first=${first} second=${second}`;
+  return {
+    actual: `${observed} ${after} sent=${sent}`,
+    note: `cas:applied×${writes.casApplied}`,
+  };
+}
+
 async function main(): Promise<number> {
   let failures = 0;
   let total = 0;
@@ -1893,6 +1978,67 @@ async function main(): Promise<number> {
     '    counts over five connections — a refusal and a 5xx come BEFORE the healthy ' +
       `connection, so a loop that stopped on failure would report refreshed=0${counts.note ? ` [${counts.note}]` : ''}`
   );
+
+  // ── Part 3c ───────────────────────────────────────────────────────────────
+  console.log('\n\nREF-112 follow-up item 3 — the penalty gate lets the redemption through\n');
+  console.log('  A lockout must still skip every TRADING call, and must no longer strand the');
+  console.log('  refresh token while it holds. `sent` counts calls to the token endpoint.\n');
+  console.log(`  ${'case'.padEnd(36)} ${'expected'.padEnd(72)} actual`);
+  console.log(`  ${'-'.repeat(36)} ${'-'.repeat(72)} ${'-'.repeat(72)}`);
+
+  const penalisedCases: Array<{
+    name: string;
+    why: string;
+    expected: string;
+    run: () => Promise<{ actual: string; note: string }>;
+  }> = [
+    {
+      name: 'redemption due — redeemed, still thrown',
+      why: 'the fix: the refresh token rotates and the row stays active, AND the caller still gets the penalty it would have got before — the trading calls are skipped either way',
+      expected: 'threw=Penalty status=active refresh=rotated sent=1',
+      run: () =>
+        observePenalisedGate({
+          userId: 'eeee5555-0000-4000-8000-000000000001',
+          refreshExpiresInMs: REFRESH_EXPIRES_IN_6_H,
+          grantStatus: 200,
+        }),
+    },
+    {
+      name: 'redemption not due — nothing sent',
+      why: 'the exemption is for a redemption that is DUE, not a licence to redeem on every penalised request: outside the 12h margin the gate sends nothing at all',
+      expected: 'threw=Penalty status=active refresh=original sent=0',
+      run: () =>
+        observePenalisedGate({
+          userId: 'eeee5555-0000-4000-8000-000000000002',
+          refreshExpiresInMs: REFRESH_EXPIRES_IN_20_H,
+          grantStatus: 200,
+        }),
+    },
+    {
+      name: 'two polls — one read window',
+      why: 'the live poll arrives every 15 seconds and an hour of lockout must not become 240 reads of one row. The 5xx leaves the refresh token still due, so the second poll sending nothing can only be the throttle',
+      expected: 'first=threw=Penalty second=threw=Penalty status=active refresh=original sent=1',
+      run: () =>
+        observePenalisedGate({
+          userId: 'eeee5555-0000-4000-8000-000000000003',
+          refreshExpiresInMs: REFRESH_EXPIRES_IN_6_H,
+          grantStatus: 503,
+          twice: true,
+        }),
+    },
+  ];
+
+  for (const penalisedCase of penalisedCases) {
+    const { actual, note } = await penalisedCase.run();
+    const ok = actual === penalisedCase.expected;
+    total += 1;
+    if (!ok) failures += 1;
+    console.log(
+      `  ${(ok ? 'PASS ' : 'FAIL ') + penalisedCase.name.padEnd(31)} ` +
+        `${penalisedCase.expected.padEnd(72)} ${actual}`
+    );
+    notes.push(`    ${penalisedCase.name} — ${penalisedCase.why}${note ? ` [${note}]` : ''}`);
+  }
 
   // ── Part 3b ───────────────────────────────────────────────────────────────
   console.log('\n\nREF-112 follow-up item 2 — the row with no recorded refresh lifetime\n');
