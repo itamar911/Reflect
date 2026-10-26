@@ -96,6 +96,27 @@ const STRATEGIES: TradeStrategy[] = [
   'Gap & Go', 'Elliott Wave', 'Fibonacci', 'Moving Average', 'RSI Divergence', 'Order Flow',
 ];
 
+/**
+ * The generic strategies shown without asking (REF-123). The rest of
+ * `STRATEGIES` is one tap away behind "עוד".
+ *
+ * All seventeen in a flex-wrap is four to five rows — roughly 180px on a phone
+ * — for a field answered with a single tap, and it was the largest vertical
+ * cost in Step 1. This list is the broad-category end of that set, with
+ * 'Custom' kept visible because it is the catch-all a trader reaches for when
+ * none of the others is their answer; the named-methodology chips (ICT, SMC,
+ * Elliott Wave, …) are the ones a trader who uses them will look for
+ * deliberately.
+ *
+ * Deliberately a constant and not the trader's own most-used: their personal
+ * strategies already render as their own group below, which is the
+ * trader-specific half of this field, and a frequency query would make the
+ * chips move around under them between form opens.
+ */
+const COMMON_STRATEGIES: TradeStrategy[] = [
+  'Breakout', 'Trend Follow', 'Reversal', 'Range', 'Price Action', 'Scalping', 'Custom',
+];
+
 const TIMEFRAMES: Timeframe[] = ['1m', '5m', '15m', '30m', '1H', '4H', 'Daily', 'Weekly'];
 
 // REF-123: a `PRE_TRADE_CHECKLIST` of four self-report checkboxes sat here —
@@ -296,6 +317,9 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
   const [noteOpen, setNoteOpen] = useState(false);
   const noteRegionId = useId();
   const reasonTagsLabelId = useId();
+
+  // "עוד" — whether the full generic strategy list is on screen (REF-123).
+  const [strategiesExpanded, setStrategiesExpanded] = useState(false);
 
   // The chart is opt-in (REF-70): until the trader asks for it, TradingViewChart
   // isn't rendered at all, so neither its dynamic() chunk nor
@@ -777,6 +801,25 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
   const rr = hasEntry && slPrice !== null && tpPrice !== null
     ? calcRR(entryNum, slPrice, tpPrice)
     : null;
+
+  /**
+   * The generic chips on screen (REF-123): the common ones, plus whichever
+   * chip is currently chosen.
+   *
+   * That second clause is what keeps the field honest. A trader who picked
+   * 'Fibonacci', then changed the symbol, must still see their own answer
+   * selected — if the chip it lives on were hidden, the form would be holding
+   * a strategy it is not showing, and `missingFieldKeys` would say nothing is
+   * missing while the section looked unanswered. Expanding is one-way within a
+   * sheet opening, so this only ever matters before the first expand.
+   */
+  const shownStrategies = useMemo(
+    () => (strategiesExpanded
+      ? STRATEGIES
+      : STRATEGIES.filter((s) => COMMON_STRATEGIES.includes(s) || form.strategy === s)),
+    [strategiesExpanded, form.strategy],
+  );
+  const hiddenStrategyCount = STRATEGIES.length - shownStrategies.length;
 
   const selectedStrategy = useMemo(
     () => personalStrategyRows.find((s) => s.name === form.strategy) ?? null,
@@ -1411,7 +1454,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
               <div ref={(el) => { fieldRefs.current.strategy = el; }} style={fieldHighlightStyle('strategy')} className="flex flex-col gap-1">
                 <span id={strategyLabelId} className="text-xs font-medium text-tg-muted">אסטרטגיה</span>
                 <div role="group" aria-labelledby={strategyLabelId} className="flex flex-wrap gap-2">
-                  {STRATEGIES.map((s) => (
+                  {shownStrategies.map((s) => (
                     <StrategyChip
                       key={s}
                       label={s}
@@ -1419,6 +1462,22 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                       onClick={() => { setForm({ ...form, strategy: s }); setValidationResult(null); }}
                     />
                   ))}
+                  {/* Inside the same group as the chips: it adds more of them
+                      rather than opening anything, so it reads as the last
+                      option in the list. One-way on purpose — there is no
+                      "פחות". A trader who expanded the list did it to find
+                      their strategy, and collapsing it under them while they
+                      are still looking would be the form arguing with them. */}
+                  {!strategiesExpanded && hiddenStrategyCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setStrategiesExpanded(true)}
+                      className={`px-3 py-1.5 rounded-full text-sm border border-dashed transition-all duration-150 text-tg-muted hover:text-tg-text ${CHART_TOGGLE_FOCUS_RING}`}
+                      style={{ background: 'transparent', borderColor: 'var(--color-tg-border)' }}
+                    >
+                      עוד {hiddenStrategyCount}
+                    </button>
+                  )}
                 </div>
               </div>
               <div className="flex items-center gap-2 mt-1">
