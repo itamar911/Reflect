@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useId, useMemo, useRef, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, AlertTriangle, X, LineChart, EyeOff } from 'lucide-react';
+import { Check, AlertTriangle, X, LineChart, EyeOff, ChevronDown } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { validateTradePlan, DEFAULT_PRESET_RULES } from '@/lib/validators/RulesetValidator';
 import { useModalDialog } from '@/lib/a11y/useModalDialog';
@@ -282,6 +282,13 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
   const personalStrategyLabelId = useId();
   const reasonId = useId();
   const sizingNoteId = useId();
+
+  // "הגדרות מתקדמות" — the one field in Step 2 that is not a price (REF-123).
+  // Not reset by handleClose or by the post-submit reset: a trader who had to
+  // open it once is the trader who will need it again, and the value behind it
+  // does go back to its default of 1 with the rest of the form.
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const advancedRegionId = useId();
 
   // The chart is opt-in (REF-70): until the trader asks for it, TradingViewChart
   // isn't rendered at all, so neither its dynamic() chunk nor
@@ -1466,29 +1473,6 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                   />
                 </div>
               </div>
-              {/* REF-99: a ₪/$ toggle sat above this pair. The product is
-                  dollar-only, so there is nothing to choose and the row is
-                  gone — the note below the field names the currency.
-                  REF-123: and the "יחידות/חוזים" field that stood beside the
-                  point value is gone too — it was one of the eight required
-                  fields and it is not one any more. */}
-              <div className="flex flex-col gap-1">
-                <label htmlFor="trade-point-value" className="text-xs font-medium text-tg-muted">שווי נקודה ($)</label>
-                <input
-                  id="trade-point-value"
-                  type="number"
-                  step="any"
-                  placeholder="1"
-                  value={form.point_value}
-                  aria-describedby={sizingNoteId}
-                  onChange={(e) => setForm({ ...form, point_value: e.target.value })}
-                  className="w-full h-10 px-2 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors text-center"
-                  style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)' }}
-                />
-              </div>
-              <p id={sizingNoteId} className="text-[10px] text-tg-muted">
-                שווי נקודה ($) — אופציונלי, ברירת מחדל 1. משמש כדי שהמערכת תחשב עבורך רווח/הפסד ({TRADING_CURRENCY}) בסגירת עסקה ידנית
-              </p>
               {rr !== null && rr > 0 && (
                 <div className="flex items-center justify-between px-4 py-2.5 rounded-xl animate-fade-in"
                   style={{
@@ -1501,6 +1485,45 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                   </span>
                 </div>
               )}
+
+              {/* ── "שווי נקודה" behind a disclosure (REF-123) ───────────────
+                  Moved, NOT deleted, and this is the one removal in the trim
+                  that would have cost real money. The column is already
+                  optional and already defaults to 1, so demoting it to a
+                  disclosure changes no data path at all — while deleting it
+                  would send every manual close through `(pointValue ?? 1)` and
+                  silently store raw index points as dollars: 5 points on MNQ
+                  as $5 instead of $10. That cascades into stats, the
+                  dashboard, the weekly email and — because those thresholds
+                  are in currency — the max_daily_loss rules, which is the same
+                  unit bug lib/rules/tradeRuleContext.ts is a written record of.
+                  There is no per-symbol lookup to fall back on yet
+                  (lib/symbols.ts holds no dollar values), so the field stays
+                  reachable until a follow-up ticket adds one. */}
+              <Disclosure
+                label="הגדרות מתקדמות"
+                open={advancedOpen}
+                onToggle={() => setAdvancedOpen((v) => !v)}
+                regionId={advancedRegionId}
+              >
+                <div className="flex flex-col gap-1">
+                  <label htmlFor="trade-point-value" className="text-xs font-medium text-tg-muted">שווי נקודה ($)</label>
+                  <input
+                    id="trade-point-value"
+                    type="number"
+                    step="any"
+                    placeholder="1"
+                    value={form.point_value}
+                    aria-describedby={sizingNoteId}
+                    onChange={(e) => setForm({ ...form, point_value: e.target.value })}
+                    className="w-full h-10 px-2 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors text-center"
+                    style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)' }}
+                  />
+                  <p id={sizingNoteId} className="text-[10px] text-tg-muted">
+                    אופציונלי, ברירת מחדל 1. משמש כדי שהמערכת תחשב עבורך רווח/הפסד ({TRADING_CURRENCY}) בסגירה ידנית של עסקה
+                  </p>
+                </div>
+              </Disclosure>
             </FormSection>
 
             {/* Entry conditions checklist — only when the selected personal strategy defines them */}
@@ -1863,6 +1886,43 @@ function ClosePlanDialog({ titleId, title, exitPriceRef, onCancel, children }: {
       </div>
     </div>,
     document.body
+  );
+}
+
+/**
+ * A labelled show/hide for a field the form no longer asks for by default
+ * (REF-123) — "הגדרות מתקדמות" in Step 2, "הוסף הערה" in Step 4.
+ *
+ * The region div is always rendered and only its CONTENT is conditional, the
+ * same shape the chart toggle above uses: `aria-controls` has to point at an
+ * element that exists, or it announces nothing. The button carries
+ * `aria-expanded` so the state is conveyed without relying on the chevron.
+ */
+function Disclosure({ label, open, onToggle, regionId, children }: {
+  label: string;
+  open: boolean;
+  onToggle: () => void;
+  regionId: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        aria-controls={regionId}
+        className={`self-start flex items-center gap-1 text-[11px] font-medium text-tg-muted hover:text-tg-text transition-colors rounded ${CHART_TOGGLE_FOCUS_RING}`}
+      >
+        <ChevronDown
+          size={12}
+          aria-hidden
+          style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 150ms ease' }}
+        />
+        {label}
+      </button>
+      <div id={regionId}>{open && children}</div>
+    </div>
   );
 }
 
