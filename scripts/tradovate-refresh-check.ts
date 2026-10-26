@@ -171,7 +171,7 @@ type Row = Record<string, unknown>;
  *
  *   loadOrRenew / reconcile   .select(cols).eq(…).maybeSingle()
  *   listConnectionsDueForRefresh
- *                             .select(cols).eq().not().not().lte().order()
+ *                             .select(cols).eq().not().or().order()
  *                               .returns()   — awaited
  *   markStatus                .update(values).eq(…)   — awaited
  *   saveConnection (CAS)      .update(values).eq(…).eq(…).select(cols)
@@ -203,6 +203,7 @@ function storeAdmin(store: Map<string, Row>, writes: Writes, race?: RaceWindow) 
   function selectBuilder() {
     const filters: Array<(row: Row) => boolean> = [];
     let orderBy: string | null = null;
+    let nullsFirst = false;
 
     const builder = {
       eq(column: string, value: unknown) {
@@ -224,8 +225,39 @@ function storeAdmin(store: Map<string, Row>, writes: Writes, race?: RaceWindow) 
         filters.push((row) => typeof row[column] === 'string' && (row[column] as string) <= value);
         return builder;
       },
-      order(column: string) {
+      /**
+       * PostgREST's disjunction, parsed rather than special-cased.
+       *
+       * `listConnectionsDueForRefresh` builds
+       * `refresh_expires_at.is.null,refresh_expires_at.lte."<iso>"` (REF-112
+       * follow-up item 2), and a stub that matched that whole string literally
+       * would keep passing if the filter were later rewritten to mean something
+       * else. So the two term forms are parsed, and an unrecognised one throws
+       * instead of being quietly ignored — a silently dropped filter would
+       * select rows the real query excludes and make every count wrong.
+       *
+       * The value is unquoted because the real call quotes an ISO timestamp:
+       * see the matching note in `recordPenalty`.
+       */
+      or(expression: string) {
+        const predicates = expression.split(',').map((term) => {
+          const [column, operator, ...rest] = term.trim().split('.');
+          const value = rest.join('.').replace(/^"/, '').replace(/"$/, '');
+          if (operator === 'is' && value === 'null') {
+            return (row: Row) => (row[column] ?? null) === null;
+          }
+          if (operator === 'lte') {
+            return (row: Row) =>
+              typeof row[column] === 'string' && (row[column] as string) <= value;
+          }
+          throw new Error(`the stub does not implement the .or() term "${term}"`);
+        });
+        filters.push((row) => predicates.some((predicate) => predicate(row)));
+        return builder;
+      },
+      order(column: string, options?: { ascending?: boolean; nullsFirst?: boolean }) {
         orderBy = column;
+        nullsFirst = options?.nullsFirst ?? false;
         return builder;
       },
       returns() {
@@ -253,7 +285,21 @@ function storeAdmin(store: Map<string, Row>, writes: Writes, race?: RaceWindow) 
       ) {
         const found = rows().filter((row) => filters.every((f) => f(row)));
         if (orderBy) {
-          found.sort((a, b) => String(a[orderBy!] ?? '').localeCompare(String(b[orderBy!] ?? '')));
+          // NULLs are ordered explicitly rather than coerced to '', which is
+          // what the old sort did: an empty string sorts before every ISO
+          // timestamp, so it happened to look like NULLS FIRST without ever
+          // honouring the option. It has to be real now — item 2 selects rows
+          // with no recorded lifetime and puts them at the HEAD of the queue.
+          found.sort((a, b) => {
+            const left = a[orderBy!] ?? null;
+            const right = b[orderBy!] ?? null;
+            if (left === null || right === null) {
+              if (left === right) return 0;
+              const nullRank = nullsFirst ? -1 : 1;
+              return left === null ? nullRank : -nullRank;
+            }
+            return String(left).localeCompare(String(right));
+          });
         }
         // Copies, for the same reason as maybeSingle() above.
         const snapshot = found.map((row) => ({ ...row }));
@@ -1499,6 +1545,128 @@ async function observeCronCounts(): Promise<{ actual: string; expected: string; 
   };
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// PART 3b — the null-lifetime row (REF-112 follow-up item 2)
+//
+// `listConnectionsDueForRefresh` used to filter `refresh_expires_at IS NULL`
+// out, and `redeemRefreshTokenIfDue` declines it on the request path, so such a
+// row was invisible to the cron AND un-redeemable on demand. It survived only
+// on 80-minute access-token renewals — which work only while the trader is
+// using the app — and died the first night they were away. It never healed
+// either: a renewal carries the null forward, and redemption is the only thing
+// that would fill the column.
+//
+// So the attempt is the fix, and these two cases pin both of its outcomes. A
+// success must record the lifetime the SERVER stated, which is what makes the
+// heal permanent rather than a guess. A refusal must mark the row expired for
+// real, which is a fact rather than a trader discovering it on their own.
+// ════════════════════════════════════════════════════════════════════════════
+
+/** The success: the column is filled from the grant, and the row is served first. */
+async function observeNullLifetimeRedeemed(): Promise<{
+  actual: string;
+  expected: string;
+  note: string;
+}> {
+  const ids = {
+    nullLifetime: 'dddd4444-0000-4000-8000-000000000001',
+    known: 'dddd4444-0000-4000-8000-000000000002',
+  };
+  const refreshTokens: Record<string, string> = {
+    [ids.nullLifetime]: 'refresh-for-null-lifetime',
+    [ids.known]: 'refresh-for-known-lifetime',
+  };
+
+  const store = new Map<string, Row>();
+  // INSERTED KNOWN-FIRST ON PURPOSE. Insertion order is what the stub returns
+  // when nothing reorders it, so `first=null-lifetime` below can only hold if
+  // NULLS FIRST is really being honoured — a row whose deadline is unknown is
+  // the most urgent thing in the queue.
+  store.set(ids.known, keepAliveRow({ userId: ids.known, refreshToken: refreshTokens[ids.known] }));
+  const nullRow = keepAliveRow({
+    userId: ids.nullLifetime,
+    refreshToken: refreshTokens[ids.nullLifetime],
+  });
+  nullRow.refresh_expires_at = null;
+  store.set(ids.nullLifetime, nullRow);
+
+  const writes = noWrites();
+  const order: string[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: unknown, init: unknown) => {
+    const href = String(url);
+    if (!href.includes('/auth/oauthtoken')) throw new Error(`unexpected call to ${href}`);
+    const body = String((init as { body?: unknown } | undefined)?.body ?? '');
+    const sent = new URLSearchParams(body).get('refresh_token');
+    order.push(sent === refreshTokens[ids.nullLifetime] ? 'null-lifetime' : 'known');
+    return { ok: true, status: 200, text: async () => grantBody() };
+  }) as unknown as typeof fetch;
+
+  clearAllCachedTokens();
+  let actual = '';
+  let note = '';
+  try {
+    const counts = await runKeepAlive({ admin: storeAdmin(store, writes), config: FAKE_CONFIG });
+    const after = store.get(ids.nullLifetime);
+    const recorded = after?.refresh_expires_at
+      ? Date.parse(String(after.refresh_expires_at))
+      : Number.NaN;
+    // The measured 26-hour lifetime the grant stated, not a value this script
+    // chose: anything above 25 hours out can only have come from
+    // `refresh_token_expires_in`.
+    const filled = Number.isFinite(recorded) && recorded - Date.now() > 25 * 60 * 60_000;
+    actual =
+      `checked=${counts.checked} refreshed=${counts.refreshed} ` +
+      `nullLifetime=${counts.nullLifetime} lifetimeRecorded=${filled} ` +
+      `first=${order[0] ?? 'none'}`;
+    note = `cas:applied×${writes.casApplied}`;
+  } catch (thrown: unknown) {
+    actual = `threw ${thrown instanceof Error ? thrown.message : String(thrown)}`;
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+
+  return {
+    actual,
+    expected:
+      'checked=2 refreshed=2 nullLifetime=1 lifetimeRecorded=true first=null-lifetime',
+    note,
+  };
+}
+
+/** The refusal: the row genuinely was dead, and now the status says so. */
+async function observeNullLifetimeRefused(): Promise<{
+  actual: string;
+  expected: string;
+  note: string;
+}> {
+  const userId = 'dddd4444-0000-4000-8000-000000000003';
+  const row = keepAliveRow({ userId });
+  row.refresh_expires_at = null;
+  const store = singleRowStore(row);
+  const writes = noWrites();
+
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = tokenEndpointFetch({ status: 400, body: INVALID_GRANT_BODY });
+
+  clearAllCachedTokens();
+  let actual = '';
+  let note = '';
+  try {
+    const counts = await runKeepAlive({ admin: storeAdmin(store, writes), config: FAKE_CONFIG });
+    actual =
+      `checked=${counts.checked} expired=${counts.expired} ` +
+      `nullLifetime=${counts.nullLifetime} status=${String(store.get(userId)?.status)}`;
+    note = `statuses=[${writes.statusUpdates.join(',') || 'none'}]`;
+  } catch (thrown: unknown) {
+    actual = `threw ${thrown instanceof Error ? thrown.message : String(thrown)}`;
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+
+  return { actual, expected: 'checked=1 expired=1 nullLifetime=1 status=expired', note };
+}
+
 async function main(): Promise<number> {
   let failures = 0;
   let total = 0;
@@ -1725,6 +1893,42 @@ async function main(): Promise<number> {
     '    counts over five connections — a refusal and a 5xx come BEFORE the healthy ' +
       `connection, so a loop that stopped on failure would report refreshed=0${counts.note ? ` [${counts.note}]` : ''}`
   );
+
+  // ── Part 3b ───────────────────────────────────────────────────────────────
+  console.log('\n\nREF-112 follow-up item 2 — the row with no recorded refresh lifetime\n');
+  console.log('  A NULL refresh_expires_at used to be filtered out of the cron entirely and');
+  console.log('  declined on the request path, so the row was guaranteed to die the first');
+  console.log('  night the trader was away. It is now attempted like any other.\n');
+  console.log(`  ${'case'.padEnd(36)} ${'expected'.padEnd(62)} actual`);
+  console.log(`  ${'-'.repeat(36)} ${'-'.repeat(62)} ${'-'.repeat(62)}`);
+
+  const nullLifetimeCases: Array<{
+    name: string;
+    why: string;
+    run: () => Promise<{ actual: string; expected: string; note: string }>;
+  }> = [
+    {
+      name: 'selected, redeemed, lifetime filled',
+      why: 'the grant states refresh_token_expires_in, so a success records the REAL lifetime and heals the row permanently — no guess was ever made. It is served first, because an unknown deadline is the most urgent thing in the queue',
+      run: observeNullLifetimeRedeemed,
+    },
+    {
+      name: 'selected, refused, marked expired',
+      why: 'the other honest outcome: the row really was dead, and the status now records that instead of leaving the trader to find out',
+      run: observeNullLifetimeRefused,
+    },
+  ];
+
+  for (const nullCase of nullLifetimeCases) {
+    const { actual, expected, note } = await nullCase.run();
+    const ok = actual === expected;
+    total += 1;
+    if (!ok) failures += 1;
+    console.log(
+      `  ${(ok ? 'PASS ' : 'FAIL ') + nullCase.name.padEnd(31)} ${expected.padEnd(62)} ${actual}`
+    );
+    notes.push(`    ${nullCase.name} — ${nullCase.why}${note ? ` [${note}]` : ''}`);
+  }
 
   // ── Why ───────────────────────────────────────────────────────────────────
   console.log('\n  Why each case is classified the way it is:\n');

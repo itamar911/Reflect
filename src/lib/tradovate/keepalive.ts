@@ -103,6 +103,27 @@ export interface KeepAliveCounts {
    * be acted on.
    */
   strandedByEnvironment: number;
+  /**
+   * How many of the selected connections had no recorded refresh lifetime
+   * (REF-112 follow-up item 2).
+   *
+   * NOT A SKIP, AND NOT DISJOINT FROM THE COUNTERS ABOVE. These rows used to be
+   * filtered out of
+   * {@link import('./connections').listConnectionsDueForRefresh} entirely and
+   * are now handed to {@link import('./connections').redeemRefreshToken} like
+   * any other, so each one is counted twice on purpose: once here, and once in
+   * whichever outcome it reached. It overlaps every outcome counter and sums to
+   * nothing with them.
+   *
+   * IT IS A COUNTER THAT SHOULD GO TO ZERO AND STAY THERE, which is what makes
+   * it worth printing. A null lifetime is a pre-migration-030 row, and a
+   * successful redemption records the real `refresh_token_expires_in` and fills
+   * the column — permanently. So a healthy deployment shows this falling to 0
+   * over a run or two and never rising again; a number that persists across
+   * runs means the attempts are being refused, and the row is dying for a
+   * reason the status column is about to record.
+   */
+  nullLifetime: number;
 }
 
 /**
@@ -135,6 +156,7 @@ export async function runKeepAlive(params: {
     expired: 0,
     skipped: 0,
     strandedByEnvironment: 0,
+    nullLifetime: 0,
   };
 
   const due = await listConnectionsDueForRefresh({ admin, withinMs });
@@ -165,6 +187,12 @@ export async function runKeepAlive(params: {
     }
 
     counts.checked += 1;
+
+    // REF-112 follow-up item 2. Counted before the attempt, because the point
+    // is how many rows arrived here in that state rather than how many of them
+    // worked — the outcome counters already answer the second question. See
+    // {@link KeepAliveCounts.nullLifetime}.
+    if (connection.refresh_expires_at === null) counts.nullLifetime += 1;
 
     let result: RefreshRedemption;
     try {
@@ -214,7 +242,7 @@ export async function runKeepAlive(params: {
     `[tradovate][keepalive] due=${due.length} checked=${counts.checked} ` +
       `refreshed=${counts.refreshed} superseded=${counts.superseded} ` +
       `transient=${counts.transient} expired=${counts.expired} skipped=${counts.skipped} ` +
-      `strandedByEnvironment=${counts.strandedByEnvironment}`
+      `strandedByEnvironment=${counts.strandedByEnvironment} nullLifetime=${counts.nullLifetime}`
   );
 
   // REF-112 §5.4. A SECOND LINE, AT WARN, BECAUSE THE FIRST ONE IS NOT READ

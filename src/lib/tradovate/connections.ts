@@ -1508,12 +1508,34 @@ export async function redeemRefreshToken(params: {
  * the caller gets rows it cannot decrypt and hands them straight back to
  * {@link redeemRefreshToken}.
  *
- * `refresh_expires_at IS NULL` rows are deliberately NOT selected. A null means
- * we never recorded a lifetime — every row written before migration 030 added
- * the column — and redeeming on a guess about an unknown expiry is the kind of
- * invention this integration refuses everywhere else. Those connections behave
- * exactly as they did before this change; they recover by reconnecting once,
- * after which the column is populated.
+ * `refresh_expires_at IS NULL` ROWS ARE NOW SELECTED (REF-112 follow-up item 2),
+ * which reverses the paragraph that stood here. The exclusion was argued from
+ * the right principle — "redeeming on a guess about an unknown expiry is the
+ * kind of invention this integration refuses everywhere else" — and drew the
+ * wrong conclusion from it, because refusing to GUESS and refusing to ATTEMPT
+ * are different things and only the first one was ever the rule.
+ *
+ * What the exclusion bought was a guaranteed death. A null lifetime — every row
+ * written before migration 030 added the column — was invisible to this cron
+ * AND declined on the request path by {@link redeemRefreshTokenIfDue}, so such
+ * a row survived only on 80-minute access-token renewals, which work only while
+ * the trader is actively using the app. The first night they were away it
+ * lapsed and they were told to reconnect. It could not heal itself either: a
+ * renewal carries the null forward, and redemption — the only thing that would
+ * populate the column — never ran. That is the investigation's cleanest fit for
+ * the 26.10 incident.
+ *
+ * An attempt costs one call to the token endpoint and has two outcomes, both
+ * better than the above. It WORKS, and the response's
+ * `refresh_token_expires_in` states the real lifetime, which fills the column
+ * and heals the row permanently — no guess was made, the server supplied the
+ * number. Or it is REFUSED, and the row genuinely was dead; the status write
+ * then records a fact instead of leaving the trader to discover it.
+ *
+ * NULLS SORT FIRST for that reason. The ordering is "most urgent first" so a
+ * run cut short does the work that matters most, and a row whose deadline is
+ * unknown is the most urgent thing in the list — it is the one that cannot be
+ * reasoned about at all.
  */
 export async function listConnectionsDueForRefresh(params: {
   admin: SupabaseClient;
@@ -1527,11 +1549,16 @@ export async function listConnectionsDueForRefresh(params: {
     .select(CONNECTION_COLUMNS)
     .eq('status', 'active')
     .not('refresh_token_encrypted', 'is', null)
-    .not('refresh_expires_at', 'is', null)
-    .lte('refresh_expires_at', cutoff)
+    // AN `or` AND NOT A BARE `lte`, because NULL satisfies no comparison:
+    // dropping the `IS NOT NULL` filter on its own would have left these rows
+    // excluded by this line instead, which is the same bug one step further
+    // down. Quoted like `recordPenalty`'s filter — the value is an ISO
+    // timestamp and PostgREST reads `or` as a comma-separated list.
+    .or(`refresh_expires_at.is.null,refresh_expires_at.lte."${cutoff}"`)
     // Soonest to expire first, so a run that is cut off short has done the most
-    // urgent work rather than an arbitrary slice of it.
-    .order('refresh_expires_at', { ascending: true })
+    // urgent work rather than an arbitrary slice of it. See the header for why
+    // an unknown deadline sorts ahead of every known one.
+    .order('refresh_expires_at', { ascending: true, nullsFirst: true })
     .returns<ConnectionRow[]>();
 
   if (error) {
