@@ -290,6 +290,13 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const advancedRegionId = useId();
 
+  // "הוסף הערה" — the free-text entry reason, optional since REF-123. Same
+  // no-reset reasoning as the disclosure above; the text itself is cleared
+  // with the rest of the form.
+  const [noteOpen, setNoteOpen] = useState(false);
+  const noteRegionId = useId();
+  const reasonTagsLabelId = useId();
+
   // The chart is opt-in (REF-70): until the trader asks for it, TradingViewChart
   // isn't rendered at all, so neither its dynamic() chunk nor
   // s3.tradingview.com/tv.js is fetched and no symbol leaves the page.
@@ -440,6 +447,17 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
   const [pnlModeOverride, setPnlModeOverride] = useState<'points' | 'percent' | null>(null);
   const [slInput, setSlInput] = useState('');
   const [tpInput, setTpInput] = useState('');
+  /**
+   * The entry-reason chips the trader has picked (REF-123).
+   *
+   * THE REQUIRED FIELD IN STEP 4 IS THIS SET, not the textarea. The chips used
+   * to append their own text into the textarea and the textarea was what the
+   * form demanded, so the cheapest path through the section was still typing a
+   * sentence. Now the set is the answer and `form.trade_reason` holds only the
+   * optional note; the two are composed into the one `trade_reason` column on
+   * submit — see `composedTradeReason`.
+   */
+  const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [strategyConditionsChecked, setStrategyConditionsChecked] = useState<Record<string, boolean>>({});
   const [fetchedStrategyTradeCount, setFetchedStrategyTradeCount] = useState(0);
   const [chartSymbol, setChartSymbol] = useState('');
@@ -488,6 +506,25 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
 
   const slPrice = inputToPrice(slInput, 'sl');
   const tpPrice = inputToPrice(tpInput, 'tp');
+
+  /**
+   * What goes into the `trade_reason` column (REF-123): the chosen chips, then
+   * the optional note, comma-joined.
+   *
+   * Comma-joined and in that order deliberately — it is the same shape the
+   * column has always held, because the chips used to write themselves into
+   * the textarea with `', '`. Every reader of this column is a pass-through
+   * (the journal, the CSV export, two AI prompts); nothing splits it back
+   * apart, so changing the separator would change what traders read with no
+   * upside.
+   *
+   * With one chip required this is never empty, which is what satisfies
+   * `trade_reason NOT NULL` in the live schema without a migration.
+   */
+  const composedTradeReason = useMemo(
+    () => [...selectedTags, form.trade_reason.trim()].filter((p) => p !== '').join(', '),
+    [selectedTags, form.trade_reason],
+  );
 
   function fmtPrice(n: number): string {
     return parseFloat(n.toFixed(6)).toString();
@@ -840,9 +877,11 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     if (!hasEntry) missing.push('entry_price');
     if (slPrice === null) missing.push('stop_loss');
     if (tpPrice === null) missing.push('take_profit');
-    if (form.trade_reason.trim() === '') missing.push('trade_reason');
+    // One CHIP, not any text: the note is optional and a trader who typed only
+    // a sentence has still not told us which of the eleven reasons this is.
+    if (selectedTags.size === 0) missing.push('trade_reason');
     return missing;
-  }, [form.symbol, form.direction, form.strategy, hasEntry, slPrice, tpPrice, form.trade_reason]);
+  }, [form.symbol, form.direction, form.strategy, hasEntry, slPrice, tpPrice, selectedTags]);
 
   const isFormFilled = missingFieldKeys.length === 0;
 
@@ -913,7 +952,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     await new Promise((r) => setTimeout(r, 800)); // simulate validation delay
 
     const rules = presetRules ?? ({ ...DEFAULT_PRESET_RULES, id: '', user_id: userId, created_at: '', updated_at: '' } as PresetRules);
-    const planForValidation: TradePlanInput = { ...form, stop_loss: fmtPrice(slPrice), take_profit: fmtPrice(tpPrice) };
+    const planForValidation: TradePlanInput = { ...form, trade_reason: composedTradeReason, stop_loss: fmtPrice(slPrice), take_profit: fmtPrice(tpPrice) };
     const result = applyRealTimeBlockingPolicy(validateTradePlan(
       planForValidation, rules, todayCount, lossCount, todayLossAmount,
       personalStrategyRows.map((s) => s.name),
@@ -943,7 +982,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
 
     // Re-validate silently — preset rules
     const rules = presetRules ?? ({ ...DEFAULT_PRESET_RULES, id: '', user_id: userId, created_at: '', updated_at: '' } as PresetRules);
-    const planForValidation: TradePlanInput = { ...form, stop_loss: fmtPrice(slPrice), take_profit: fmtPrice(tpPrice) };
+    const planForValidation: TradePlanInput = { ...form, trade_reason: composedTradeReason, stop_loss: fmtPrice(slPrice), take_profit: fmtPrice(tpPrice) };
     const result = applyRealTimeBlockingPolicy(validateTradePlan(
       planForValidation, rules, todayCount, lossCount, todayLossAmount,
       personalStrategyRows.map((s) => s.name),
@@ -1026,7 +1065,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
       stop_loss: sl,
       take_profit: tp,
       rr_ratio: calcRR(entry, sl, tp),
-      trade_reason: form.trade_reason.trim(),
+      trade_reason: composedTradeReason,
       emotional_state: form.emotional_state,
       confidence_level: form.confidence_level,
       timeframe: form.timeframe || null,
@@ -1080,6 +1119,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
         setForm(EMPTY_FORM);
         setSlInput('');
         setTpInput('');
+        setSelectedTags(new Set());
         setValidationResult(null);
         setStrategyConditionsChecked({});
         // The override is dropped so "תיק חדש…" is not still selected with a
@@ -1109,10 +1149,13 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     handleSubmit();
   }
 
-  function addTag(tag: string) {
-    const current = form.trade_reason;
-    const sep = current.trim() ? ', ' : '';
-    setForm({ ...form, trade_reason: current + sep + tag });
+  function toggleTag(tag: string) {
+    setSelectedTags((prev) => {
+      const next = new Set(prev);
+      if (next.has(tag)) next.delete(tag);
+      else next.add(tag);
+      return next;
+    });
     setValidationResult(null);
     if (formState !== 'empty') setFormState('editing');
   }
@@ -1620,31 +1663,68 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
 
               {/* Step 4 (mobile: first; desktop: right) */}
               <div className="order-1 md:order-2 md:flex-1 md:overflow-y-auto md:max-h-[450px]">
-                <FormSection step={4} label="סיבת הכניסה ותוכנית" active={activeStep === 4} done={false}>
-                  <div className="flex flex-wrap gap-1.5">
-                    {REASON_TAGS.map((tag) => (
-                      <button
-                        key={tag}
-                        onClick={() => addTag(tag)}
-                        className="px-2.5 py-1 rounded-full text-xs border transition-all duration-150"
-                        style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)', color: 'var(--color-tg-muted)' }}
-                      >
-                        {tag}
-                      </button>
-                    ))}
+                <FormSection step={4} label="סיבת הכניסה" active={activeStep === 4} done={false}>
+                  {/* ── The chips ARE the field now (REF-123) ───────────────
+                      They used to append themselves into the textarea, and the
+                      textarea was the required field — so the cheapest path
+                      through this section was still typing a sentence. Now one
+                      chip is required and the free text is optional: the cost
+                      drops from a sentence to a tap, and `trade_reason` is
+                      still written non-empty, which is what keeps the live
+                      NOT NULL constraint satisfied with no migration. */}
+                  <div
+                    ref={(el) => { fieldRefs.current.trade_reason = el; }}
+                    style={fieldHighlightStyle('trade_reason')}
+                    className="flex flex-col gap-1.5"
+                  >
+                    <span id={reasonTagsLabelId} className="text-xs font-medium text-tg-muted">
+                      למה אתה נכנס? בחר לפחות תגית אחת
+                    </span>
+                    <div role="group" aria-labelledby={reasonTagsLabelId} className="flex flex-wrap gap-1.5">
+                      {REASON_TAGS.map((tag) => {
+                        const selected = selectedTags.has(tag);
+                        return (
+                          <button
+                            key={tag}
+                            type="button"
+                            // Selection is a choice the trader can take back
+                            // now, so it has to be announced and not left to
+                            // colour — the same reason StrategyChip below
+                            // carries aria-pressed.
+                            aria-pressed={selected}
+                            onClick={() => toggleTag(tag)}
+                            className="px-2.5 py-1 rounded-full text-xs border transition-all duration-150"
+                            style={{
+                              background: selected ? 'var(--color-tg-primary-muted)' : 'var(--color-tg-surface-2)',
+                              borderColor: selected ? 'var(--color-tg-primary)' : 'var(--color-tg-border)',
+                              color: selected ? 'var(--color-tg-primary)' : 'var(--color-tg-muted)',
+                            }}
+                          >
+                            {tag}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                  <div ref={(el) => { fieldRefs.current.trade_reason = el; }} style={fieldHighlightStyle('trade_reason')} className="flex flex-col gap-1">
-                    <label htmlFor={reasonId} className="text-xs font-medium text-tg-muted">סיבת הכניסה</label>
-                    <textarea
-                      id={reasonId}
-                      rows={2}
-                      placeholder="תאר מה אתה רואה בגרף..."
-                      value={form.trade_reason}
-                      onChange={(e) => { setForm({ ...form, trade_reason: e.target.value }); setValidationResult(null); }}
-                      className="w-full px-3 py-2.5 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none focus:border-tg-primary transition-colors resize-none"
-                      style={{ background: 'var(--color-tg-surface-2)' }}
-                    />
-                  </div>
+                  <Disclosure
+                    label="הוסף הערה"
+                    open={noteOpen}
+                    onToggle={() => setNoteOpen((v) => !v)}
+                    regionId={noteRegionId}
+                  >
+                    <div className="flex flex-col gap-1">
+                      <label htmlFor={reasonId} className="text-xs font-medium text-tg-muted">הערה (אופציונלי)</label>
+                      <textarea
+                        id={reasonId}
+                        rows={2}
+                        placeholder="תאר מה אתה רואה בגרף..."
+                        value={form.trade_reason}
+                        onChange={(e) => { setForm({ ...form, trade_reason: e.target.value }); setValidationResult(null); }}
+                        className="w-full px-3 py-2.5 rounded-xl text-sm text-tg-text border border-tg-border focus:outline-none focus:border-tg-primary transition-colors resize-none"
+                        style={{ background: 'var(--color-tg-surface-2)' }}
+                      />
+                    </div>
+                  </Disclosure>
                 </FormSection>
               </div>
 
