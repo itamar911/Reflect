@@ -49,7 +49,11 @@ import Button from '@/components/ui/Button';
 // Browser-safe and pure, like lib/tradovate/sync-response.ts: a sentence and
 // nothing else. It does not reach connections.ts, so the rule in the header
 // above — a client component never names that module — still holds.
-import { NOT_AVAILABLE_NOTE, NO_LIVE_ENTITLEMENT_NOTE } from '@/lib/tradovate/notices';
+import {
+  CONNECTION_EXPIRING_NOTE,
+  NOT_AVAILABLE_NOTE,
+  NO_LIVE_ENTITLEMENT_NOTE,
+} from '@/lib/tradovate/notices';
 
 /**
  * The one thing the disconnect action cannot do, stated in full.
@@ -228,6 +232,27 @@ export interface TradovateConnectionCardProps {
    * button this render believes is live.
    */
   notAvailable?: boolean;
+  /**
+   * Whether the connection's refresh deadline is near and nothing has renewed
+   * it (REF-112 follow-up item 4).
+   *
+   * A STATE AND NOT A ONE-SHOT, unlike the two flags above: it is re-derived
+   * from the stored row on every view of this page, and it stays true until
+   * something renews the connection or it dies. The server decides it — see
+   * `refreshDeadlineNear` in lib/tradovate/notices.ts — and what arrives here
+   * is a boolean, never the deadline, so this component cannot print an instant
+   * that the copy has no business promising.
+   *
+   * A BOOLEAN AND NOT A `ConnectionStatus`, for the reason this file's header
+   * gives: connection state reaches this client component as plain booleans so
+   * that it never names lib/tradovate/connections.ts, which holds the
+   * service-role client.
+   *
+   * IT DOES NOT CHANGE THE BADGE. The connection is working — "מחובר" is
+   * correct, and that is the entire point of warning before it stops rather
+   * than after.
+   */
+  expiringSoon?: boolean;
 }
 
 export default function TradovateConnectionCard({
@@ -237,6 +262,7 @@ export default function TradovateConnectionCard({
   readFailed,
   noLiveAccounts = false,
   notAvailable = false,
+  expiringSoon = false,
 }: TradovateConnectionCardProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -381,6 +407,24 @@ export default function TradovateConnectionCard({
               {connectedNow && noLiveAccounts && (
                 <p className="text-xs font-semibold" style={{ color: 'var(--color-tg-warning)' }}>
                   {NO_LIVE_ENTITLEMENT_NOTE}
+                </p>
+              )}
+
+              {/* REF-112 follow-up item 4. BEFORE THE SENTENCE BELOW, AND THE
+                  TWO CAN NEVER BOTH RENDER: this one requires a connection
+                  that still works and that one requires a row that has
+                  stopped. It sits here because the order on the screen should
+                  be the order in time — the warning, then the failure.
+
+                  The CONSTANT and not noticeLine(): /settings takes its
+                  connection state as booleans (see the header), so reaching
+                  for the notices renderer here would pull a wire type and an
+                  ordering rule into a card with one fact to state. The
+                  sentence itself is shared, because the same words rendered
+                  from two files is a string that drifts. */}
+              {connectedNow && expiringSoon && (
+                <p className="text-xs font-semibold" style={{ color: 'var(--color-tg-warning)' }}>
+                  {CONNECTION_EXPIRING_NOTE}
                 </p>
               )}
 

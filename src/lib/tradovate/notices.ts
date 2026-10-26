@@ -69,6 +69,29 @@ export type BrokerNotice =
    */
   | { kind: 'connection_environment' }
   /**
+   * The connection's refresh deadline is close and nothing has renewed it
+   * (REF-112 follow-up item 4).
+   *
+   * BEFORE THE FAILURE AND NOT AFTER IT, which is the whole of why it exists.
+   * The trader's only signal until now was a connection that had ALREADY
+   * stopped working — `connection_environment` above, or /settings' "ההרשאה
+   * השמורה פגה" — and by then the reconnect is mandatory rather than
+   * avoidable. `refresh_expires_at` is known, so the window in which the
+   * trader can still act is knowable too.
+   *
+   * NOT A COUNTDOWN, AND THAT IS WHAT MAKES IT A SIGNAL. See
+   * {@link refreshDeadlineNear}: a healthy connection never renders this,
+   * because every successful redemption pushes the deadline a full 26 hours
+   * out and the row is never inside the window to begin with. A trader who
+   * sees it is a trader for whom the automatic renewal is demonstrably not
+   * working.
+   *
+   * Derived from the stored row by {@link brokerStateNotices}, like
+   * `connection_environment` and for the same reason: no pull is involved and
+   * none would help.
+   */
+  | { kind: 'connection_expiring' }
+  /**
    * Discovery found nothing this trader could have traded (§5.12).
    *
    * AN ERROR STATE AND NOT AN EMPTY LIST, which is the reversal REF-112 asked
@@ -115,6 +138,7 @@ export type BrokerNotice =
 /** The kinds, in severity order. See {@link BrokerNotice}. */
 const KIND_ORDER: readonly BrokerNotice['kind'][] = [
   'connection_environment',
+  'connection_expiring',
   'no_accounts',
   'account_currency',
   'account_type',
@@ -148,6 +172,8 @@ export function noticeLine(notice: BrokerNotice): string {
   switch (notice.kind) {
     case 'connection_environment':
       return 'החיבור לברוקר פג — חבר מחדש';
+    case 'connection_expiring':
+      return CONNECTION_EXPIRING_NOTE;
     case 'no_accounts':
       return 'לא נמצאו חשבונות מסחר נתמכים בחיבור לברוקר — צור קשר ונבדוק';
     case 'account_currency':
@@ -170,6 +196,35 @@ export function noticeLine(notice: BrokerNotice): string {
         : `עסקה ב-${notice.root} לא יובאה — מוצר לא מזוהה`;
   }
 }
+
+/**
+ * What a trader is told while the connection still works but is running out
+ * (REF-112 follow-up item 4).
+ *
+ * A NAMED CONSTANT AND NOT AN INLINE RETURN, which none of its five siblings in
+ * {@link noticeLine} needed, because this is the one sentence with TWO
+ * renderers. /settings takes its connection state as plain booleans and writes
+ * its own copy (TradovateConnectionCard's header explains why: that card must
+ * never name ./connections.ts), while /accounts and the dashboard go through
+ * {@link brokerStateNotices} and this function. Two copies of a Hebrew string
+ * in two files is a string that drifts; one constant imported by both cannot.
+ *
+ * FUTURE TENSE, AND IT NAMES NO DATE. "עומד לפוג" is the whole claim this state
+ * can honestly make: the deadline is known, but whether it is reached depends
+ * on something that may yet work — a cron run, or this trader's next page view.
+ * A printed timestamp would read as a promise about the moment the connection
+ * dies, and ./sync-response.ts' rule against stating figures we cannot stand
+ * behind applies to instants as much as to numbers.
+ *
+ * TWO WAYS OUT, CHEAPEST FIRST. Opening Reflect is enough on its own — the
+ * request path redeems a refresh token that is inside its margin — so it is
+ * offered before the manual reconnect. "חבר מחדש" instructs, which §8 of
+ * TradeContextPanel's rule normally forbids; it is allowed here for the reason
+ * the two existing exceptions give, that a refusal with no way out of it is
+ * worse than instructing.
+ */
+export const CONNECTION_EXPIRING_NOTE =
+  'החיבור לברוקר עומד לפוג — פתח את Reflect או חבר מחדש';
 
 /**
  * What a trader is told when the connection worked and there is nothing live
@@ -278,11 +333,15 @@ export const NOT_AVAILABLE_NOTE = 'חיבור לברוקר עדיין לא פת�
  *     state we have decided is probably a filter bug must not be the state in
  *     which we trust the broker's zero over the trader's own record.
  *
- * ONE KIND IS STILL NOT HERE. `connection_environment` is not produced by a
- * pull at all — it is derived from the stored row by
- * {@link brokerStateNotices}, and a connection that cannot refresh has no day
- * to be short of. On that path the route never reaches `broker_verified`, so
- * there is no broker figure for the flag to displace.
+ * TWO KINDS ARE STILL NOT HERE, and it is the same reason for both.
+ * `connection_environment` and `connection_expiring` are not produced by a pull
+ * at all — they are derived from the stored row by
+ * {@link brokerStateNotices} — and neither describes a day that is short of
+ * anything. A connection that cannot refresh never reaches `broker_verified`,
+ * so there is no broker figure for the flag to displace; a connection that is
+ * merely CLOSE to its refresh deadline is still working perfectly, and its
+ * day is complete. Marking that day partial would fall back to Reflect's own
+ * rows for a trader whose broker figures are entirely sound.
  *
  * As `kind` strings rather than a type, so the SERVER-side
  * {@link import('./fills').PullNotice} and the wire-side {@link BrokerNotice}
@@ -402,7 +461,12 @@ export function readNotices(value: unknown): BrokerNotice[] {
     const record = entry as Record<string, unknown>;
     const kind = record.kind;
 
-    if (kind === 'connection_environment' || kind === 'no_accounts' || kind === 'host_degraded') {
+    if (
+      kind === 'connection_environment' ||
+      kind === 'connection_expiring' ||
+      kind === 'no_accounts' ||
+      kind === 'host_degraded'
+    ) {
       notices.push({ kind });
       continue;
     }
@@ -431,6 +495,63 @@ export function readNotices(value: unknown): BrokerNotice[] {
   return orderNotices(notices);
 }
 
+// ── The pre-expiry window (REF-112 follow-up item 4) ───────────────────────
+
+/**
+ * How close to the refresh deadline is close enough to tell the trader.
+ *
+ * SIX HOURS, and the number is doing less work than it looks. Against a
+ * measured 26-hour refresh lifetime, a 25-hour keep-alive window and a 12-hour
+ * request-path margin, EVERY mechanism that could renew this connection has
+ * already had its chance long before the row reaches six hours out. So the
+ * threshold is not a lead time the trader is meant to act within — it is the
+ * point past which "nothing renewed it" has stopped being a coincidence.
+ *
+ * Wide enough that a trader who opens the app once a day will see it, narrow
+ * enough that a single late cron run does not produce it.
+ */
+export const REFRESH_DEADLINE_NOTICE_MS = 6 * 60 * 60_000;
+
+/**
+ * Whether this connection's refresh deadline is near AND nothing has renewed it
+ * (REF-112 follow-up item 4).
+ *
+ * ONE PREDICATE AND NOT TWO, which is the part worth reading. The condition
+ * wanted here is "the deadline is close and the last redemption did not work",
+ * and the second half is not a separate fact to look up — IT IS IMPLIED BY THE
+ * FIRST. Every successful redemption rotates the refresh token and stores a
+ * fresh ~26-hour deadline, so a row whose deadline is only six hours away has
+ * not had a successful redemption for roughly twenty hours, through a daily
+ * cron run and a 12-hour request-path margin that were both due in that time.
+ * The deadline IS the record of the last success, which is why no attempt
+ * counter is kept anywhere: one would need a column, and the column would say
+ * what this value already says.
+ *
+ * (A row that has never had a lifetime recorded at all — `null` — is NOT near
+ * its deadline, because nobody knows where its deadline is. That row's problem
+ * is item 2's, and the keep-alive now attempts it rather than skipping it.)
+ *
+ * PAST THE DEADLINE IS NOT "NEAR" IT EITHER. "עומד לפוג" says the connection is
+ * about to expire, and a row whose refresh token has already lapsed is past
+ * anything a notice can help with — the next use of it writes 'expired', and
+ * that state has its own copy on /settings and in the sync panel.
+ *
+ * Pure, so the server can decide it and the regression suite can drive every
+ * boundary without a clock seam in production code.
+ */
+export function refreshDeadlineNear(
+  refreshExpiresAt: string | null,
+  now: number = Date.now()
+): boolean {
+  if (!refreshExpiresAt) return false;
+  const deadline = Date.parse(refreshExpiresAt);
+  // An unparsable value says nothing. Silence is the answer to "I could not
+  // tell", here as everywhere else in this module.
+  if (!Number.isFinite(deadline)) return false;
+  const remaining = deadline - now;
+  return remaining > 0 && remaining <= REFRESH_DEADLINE_NOTICE_MS;
+}
+
 // ── What the stored connection alone can say ────────────────────────────────
 
 /**
@@ -456,6 +577,18 @@ export interface BrokerState {
    * until then, which is why this is a separate flag and not a status.
    */
   environmentMismatch: boolean;
+  /**
+   * Whether the refresh deadline is near and nothing has renewed it
+   * (REF-112 follow-up item 4).
+   *
+   * A BOOLEAN AND NOT THE TIMESTAMP, deliberately. The decision is
+   * {@link refreshDeadlineNear}'s and it is made once, server-side, by the
+   * module that did the read — so no screen has to hold a deadline it might
+   * render, and the copy cannot drift into printing an instant this state has
+   * no business promising. It is the same reduction `environmentMismatch` makes
+   * of a pair of environment names.
+   */
+  refreshDeadlineNear: boolean;
   /**
    * How many broker-sourced rows the trader has in `accounts`, or null.
    *
@@ -489,6 +622,17 @@ export function brokerStateNotices(state: BrokerState): BrokerNotice[] {
   if (state.connection === 'unreadable' || state.connection === 'none') return [];
 
   if (state.environmentMismatch) return [{ kind: 'connection_environment' }];
+
+  // REF-112 follow-up item 4, and it returns ALONE on the same argument the
+  // mismatch above makes. A connection that is about to stop working is the
+  // thing to act on, and one click of "חבר מחדש" fixes it; pairing it with
+  // "צור קשר ונבדוק" would send the trader looking for a support answer to a
+  // problem they can already solve. 'active' only — the two dead statuses have
+  // their own copy, and a row that has already expired is past a warning about
+  // expiring.
+  if (state.connection === 'active' && state.refreshDeadlineNear) {
+    return [{ kind: 'connection_expiring' }];
+  }
 
   // 'expired' and 'revoked' already have their own copy on /settings and in
   // the sync panel, and both are states the trader caused or was told about.

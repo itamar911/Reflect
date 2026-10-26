@@ -7,6 +7,9 @@ import DeleteAccountSection from '@/components/settings/DeleteAccountSection';
 import TradovateConnectionCard from '@/components/settings/TradovateConnectionCard';
 import { isUserAllowed } from '@/lib/tradovate/allowlist';
 import { readConnectionSummary, type ConnectionStatus } from '@/lib/tradovate/connections';
+// REF-112 follow-up item 4 — the pre-expiry window, decided here so the card
+// receives a boolean rather than a deadline.
+import { refreshDeadlineNear } from '@/lib/tradovate/notices';
 import { TRADOVATE_RESULT_PARAM, TradovateResult } from '@/lib/tradovate/oauth-results';
 
 export const metadata = { title: 'הגדרות — Reflect' };
@@ -72,6 +75,18 @@ export default async function SettingsPage({ searchParams }: {
   // to the card: a read that failed says so, to the user and in the logs.
   let tradovateStatus: ConnectionStatus | null = null;
   let tradovateReadFailed = false;
+  /**
+   * REF-112 follow-up item 4: the refresh deadline is close and nothing has
+   * renewed it.
+   *
+   * FALSE WHENEVER WE DO NOT KNOW, which is the direction every state on this
+   * page fails in: a read that errored, a row with no recorded lifetime, and a
+   * connection that is simply healthy all land here as `false` and the card
+   * stays quiet. "I could not ask" must never render as "your connection is
+   * about to die" — the same rule readBrokerState applies on the other two
+   * screens.
+   */
+  let tradovateExpiringSoon = false;
 
   if (canConnectTradovate) {
     const read = await readConnectionSummary(user.id);
@@ -85,6 +100,7 @@ export default async function SettingsPage({ searchParams }: {
       );
     } else if (read.outcome === 'row') {
       tradovateStatus = read.summary.status;
+      tradovateExpiringSoon = refreshDeadlineNear(read.summary.refreshExpiresAt);
     }
   }
 
@@ -142,6 +158,10 @@ export default async function SettingsPage({ searchParams }: {
             // REF-112-C item 2. Same one-shot construction, from the refusal
             // either OAuth path issues.
             notAvailable={notAvailable}
+            // REF-112 follow-up item 4. A STATE and not a one-shot, unlike the
+            // two above: re-derived from the stored row on every view, and
+            // false whenever anything is unknown.
+            expiringSoon={tradovateExpiringSoon}
           />
         </Card>
       </div>

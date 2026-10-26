@@ -158,6 +158,10 @@ import {
   NO_LIVE_ENTITLEMENT_NOTE,
   orderNotices,
   readNotices,
+  // REF-112 follow-up item 4 — the pre-expiry window and its one predicate.
+  refreshDeadlineNear,
+  REFRESH_DEADLINE_NOTICE_MS,
+  CONNECTION_EXPIRING_NOTE,
   type BrokerNotice,
 } from '../src/lib/tradovate/notices';
 // REF-112 §5.17 item 5 — the first reader hasLive/hasFunded have ever had.
@@ -2870,6 +2874,17 @@ async function noticeCopyGroup() {
    */
   const partialOf = (...notices: BrokerNotice[]) => makesDayPartial(notices);
 
+  /**
+   * A fixed clock for the pre-expiry window (REF-112 follow-up item 4).
+   *
+   * `refreshDeadlineNear` takes `now` precisely so these boundaries can be
+   * driven exactly rather than approached with Date.now() and a tolerance — the
+   * assertion is about a threshold, and a threshold tested loosely is not
+   * tested.
+   */
+  const NOTICE_NOW = Date.parse('2026-10-15T14:00:00.000Z');
+  const iso = (ms: number) => new Date(ms).toISOString();
+
   const verified = (notices: BrokerNotice[]) =>
     describeSyncOutcome({
       source: 'broker_verified',
@@ -3012,6 +3027,7 @@ async function noticeCopyGroup() {
       [
         ...noticeLines([
           { kind: 'connection_environment' },
+          { kind: 'connection_expiring' },
           { kind: 'no_accounts' },
           { kind: 'host_degraded' },
           { kind: 'account_currency', account: null },
@@ -3023,7 +3039,8 @@ async function noticeCopyGroup() {
     // No emojis (CLAUDE.md), across every sentence this module owns.
     c('(21) no emojis',
       noticeLines([
-        { kind: 'connection_environment' }, { kind: 'no_accounts' },
+        { kind: 'connection_environment' }, { kind: 'connection_expiring' },
+        { kind: 'no_accounts' },
         { kind: 'host_degraded' }, { kind: 'account_currency', account: 'A' },
         { kind: 'account_type', account: 'A' }, { kind: 'unpriced_product', root: 'MNQ' },
       ]).some((line) => /\p{Extended_Pictographic}/u.test(line)),
@@ -3032,7 +3049,7 @@ async function noticeCopyGroup() {
     // ── What a screen with no pull in hand can still say (§5.4, §5.12) ───
     c('(22) an environment mismatch is the reconnect sentence',
       brokerStateNotices({
-        connection: 'active', environmentMismatch: true, brokerAccounts: 3,
+        connection: 'active', environmentMismatch: true, refreshDeadlineNear: false, brokerAccounts: 3,
       }).map(noticeLine),
       ['החיבור לברוקר פג — חבר מחדש']),
     // THE MISMATCH WINS AND RETURNS ALONE. A connection that cannot refresh
@@ -3040,17 +3057,17 @@ async function noticeCopyGroup() {
     // the trader looking for support over something one click fixes.
     c('(23) and it suppresses the zero-accounts line',
       brokerStateNotices({
-        connection: 'active', environmentMismatch: true, brokerAccounts: 0,
+        connection: 'active', environmentMismatch: true, refreshDeadlineNear: false, brokerAccounts: 0,
       }).length,
       1),
     c('(24) a connected trader with no accounts is an error state',
       brokerStateNotices({
-        connection: 'active', environmentMismatch: false, brokerAccounts: 0,
+        connection: 'active', environmentMismatch: false, refreshDeadlineNear: false, brokerAccounts: 0,
       }).map((n) => n.kind),
       ['no_accounts']),
     c('(25) a connected trader WITH accounts is told nothing',
       brokerStateNotices({
-        connection: 'active', environmentMismatch: false, brokerAccounts: 2,
+        connection: 'active', environmentMismatch: false, refreshDeadlineNear: false, brokerAccounts: 2,
       }),
       []),
     // "I could not ask" IS NOT "you are not connected" — ConnectionRead exists
@@ -3058,12 +3075,12 @@ async function noticeCopyGroup() {
     // broker link is dead.
     c('(26) an unreadable connection says nothing',
       brokerStateNotices({
-        connection: 'unreadable', environmentMismatch: true, brokerAccounts: 0,
+        connection: 'unreadable', environmentMismatch: true, refreshDeadlineNear: false, brokerAccounts: 0,
       }),
       []),
     c('(27) and neither does having no connection at all',
       brokerStateNotices({
-        connection: 'none', environmentMismatch: false, brokerAccounts: 0,
+        connection: 'none', environmentMismatch: false, refreshDeadlineNear: false, brokerAccounts: 0,
       }),
       []),
     // THE DASHBOARD PASSES null, which is not zero: it does not read the
@@ -3071,14 +3088,103 @@ async function noticeCopyGroup() {
     // subject is portfolios.
     c('(28) a caller that did not count accounts gets no zero-accounts line',
       brokerStateNotices({
-        connection: 'active', environmentMismatch: false, brokerAccounts: null,
+        connection: 'active', environmentMismatch: false, refreshDeadlineNear: false, brokerAccounts: null,
       }),
       []),
     c('(29) but still gets the connection one',
       brokerStateNotices({
-        connection: 'active', environmentMismatch: true, brokerAccounts: null,
+        connection: 'active', environmentMismatch: true, refreshDeadlineNear: false, brokerAccounts: null,
       }).map((n) => n.kind),
       ['connection_environment']),
+
+    // ── The pre-expiry notice (REF-112 follow-up item 4) ─────────────────
+    //
+    // The trader's only signal used to be a connection that had ALREADY
+    // failed. `refresh_expires_at` is known, so the window in which they can
+    // still act is knowable — and the point of these cases is that a HEALTHY
+    // connection never reaches it. Every successful redemption stores a fresh
+    // ~26h deadline, so a row inside six hours has gone roughly twenty without
+    // one, through a daily cron run and a 12h request-path margin that were
+    // both due in that time. The deadline IS the record of the last success,
+    // which is why no attempt counter exists to consult.
+    c('(29a) six hours out with nothing having renewed it speaks',
+      brokerStateNotices({
+        connection: 'active', environmentMismatch: false, refreshDeadlineNear: true, brokerAccounts: 3,
+      }).map(noticeLine),
+      ['החיבור לברוקר עומד לפוג — פתח את Reflect או חבר מחדש']),
+    // A HEALTHY ROW SHOWS NOTHING, which is what makes the line above a signal
+    // rather than a countdown. `refreshDeadlineNear` is the whole difference
+    // between this case and the one before it.
+    c('(29b) a healthy connection says nothing at all',
+      brokerStateNotices({
+        connection: 'active', environmentMismatch: false, refreshDeadlineNear: false, brokerAccounts: 3,
+      }),
+      []),
+    // IT RETURNS ALONE, on the mismatch's own argument: one click of
+    // "חבר מחדש" fixes it, and pairing it with "צור קשר ונבדוק" would send the
+    // trader looking for support over something they can already solve.
+    c('(29c) and it suppresses the zero-accounts line',
+      brokerStateNotices({
+        connection: 'active', environmentMismatch: false, refreshDeadlineNear: true, brokerAccounts: 0,
+      }).map((n) => n.kind),
+      ['connection_expiring']),
+    // THE MISMATCH STILL WINS. Both are true of a stranded row — it cannot
+    // refresh AND its deadline is approaching — and the mismatch is the more
+    // specific statement of why.
+    c('(29d) an environment mismatch outranks it',
+      brokerStateNotices({
+        connection: 'active', environmentMismatch: true, refreshDeadlineNear: true, brokerAccounts: 3,
+      }).map((n) => n.kind),
+      ['connection_environment']),
+    // A row that has ALREADY expired is past a warning about expiring, and
+    // 'expired' has its own copy on /settings and in the sync panel.
+    c('(29e) a dead connection is not warned about dying',
+      [
+        brokerStateNotices({
+          connection: 'expired', environmentMismatch: false, refreshDeadlineNear: true, brokerAccounts: 3,
+        }),
+        brokerStateNotices({
+          connection: 'revoked', environmentMismatch: false, refreshDeadlineNear: true, brokerAccounts: 3,
+        }),
+      ],
+      [[], []]),
+    // ── The window itself ────────────────────────────────────────────────
+    //
+    // Driven at the boundaries with an explicit clock, which is why
+    // refreshDeadlineNear() takes one. The two ends say different things: PAST
+    // the deadline is not "about to expire" — that row's next use writes
+    // 'expired' — and WELL BEFORE it is a connection that is simply working.
+    c('(29f) the window is the six hours before the deadline, open at both ends',
+      [
+        refreshDeadlineNear(iso(NOTICE_NOW + 5 * 60 * 60_000), NOTICE_NOW),
+        refreshDeadlineNear(iso(NOTICE_NOW + REFRESH_DEADLINE_NOTICE_MS), NOTICE_NOW),
+        refreshDeadlineNear(iso(NOTICE_NOW + REFRESH_DEADLINE_NOTICE_MS + 60_000), NOTICE_NOW),
+        refreshDeadlineNear(iso(NOTICE_NOW + 26 * 60 * 60_000), NOTICE_NOW),
+        refreshDeadlineNear(iso(NOTICE_NOW), NOTICE_NOW),
+        refreshDeadlineNear(iso(NOTICE_NOW - 60_000), NOTICE_NOW),
+      ],
+      [true, true, false, false, false, false]),
+    // A LIFETIME NOBODY RECORDED IS NOT A DEADLINE NEARBY. That row's problem
+    // belongs to item 2 — the keep-alive now attempts it instead of skipping
+    // it — and claiming a deadline we do not know would be the guess this
+    // integration refuses everywhere else. An unparsable value is the same
+    // answer: silence is what "I could not tell" renders as.
+    c('(29g) an unknown or unreadable lifetime says nothing',
+      [
+        refreshDeadlineNear(null, NOTICE_NOW),
+        refreshDeadlineNear('not a timestamp', NOTICE_NOW),
+      ],
+      [false, false]),
+    c('(29h) and the window is six hours',
+      REFRESH_DEADLINE_NOTICE_MS, 6 * 60 * 60_000),
+    // ONE SENTENCE, TWO RENDERERS. /settings writes its own copy from plain
+    // booleans (TradovateConnectionCard's header says why it must never name
+    // lib/tradovate/connections.ts), while /accounts and the dashboard go
+    // through noticeLine(). The card imports this constant rather than
+    // repeating the words, and this is the assertion that keeps the two from
+    // drifting apart.
+    c('(29i) the card and the notices renderer say the same thing',
+      noticeLine({ kind: 'connection_expiring' }), CONNECTION_EXPIRING_NOTE),
 
     // ── REF-112 §5.17 item 5: the entitlement flags finally have a reader ──
     //

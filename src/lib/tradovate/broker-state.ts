@@ -34,7 +34,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { readConnectionSummary } from './connections';
 import { loadOAuthConfig } from './oauth-config';
-import type { BrokerState } from './notices';
+import { refreshDeadlineNear, type BrokerState } from './notices';
 
 /**
  * Read enough of a trader's connection to decide what to tell them.
@@ -68,14 +68,29 @@ export async function readBrokerState(params: {
     // readConnectionSummary already reports its own failures as values,
     // including the service-role client failing to build. This catches what is
     // left — nothing known, so nothing claimed.
-    return { connection: 'unreadable', environmentMismatch: false, brokerAccounts };
+    return {
+      connection: 'unreadable',
+      environmentMismatch: false,
+      refreshDeadlineNear: false,
+      brokerAccounts,
+    };
   }
 
   if (read.outcome === 'error') {
-    return { connection: 'unreadable', environmentMismatch: false, brokerAccounts };
+    return {
+      connection: 'unreadable',
+      environmentMismatch: false,
+      refreshDeadlineNear: false,
+      brokerAccounts,
+    };
   }
   if (read.outcome === 'none') {
-    return { connection: 'none', environmentMismatch: false, brokerAccounts };
+    return {
+      connection: 'none',
+      environmentMismatch: false,
+      refreshDeadlineNear: false,
+      brokerAccounts,
+    };
   }
 
   // §5.4. THE COMPARISON `redeemRefreshToken` ALREADY MAKES, read from the
@@ -93,5 +108,16 @@ export async function readBrokerState(params: {
   const environmentMismatch =
     config.ok && config.config.environment !== read.summary.environment;
 
-  return { connection: read.summary.status, environmentMismatch, brokerAccounts };
+  return {
+    connection: read.summary.status,
+    environmentMismatch,
+    // REF-112 follow-up item 4. The decision is made HERE, by the module that
+    // did the read, and travels onward as a boolean — see
+    // {@link import('./notices').BrokerState.refreshDeadlineNear}. The clock is
+    // the real one: `refreshDeadlineNear` takes `now` for the regression suite's
+    // benefit, and a seam on this function would be one nothing in production
+    // ever supplies.
+    refreshDeadlineNear: refreshDeadlineNear(read.summary.refreshExpiresAt),
+    brokerAccounts,
+  };
 }

@@ -254,6 +254,25 @@ export interface ConnectionSummary {
   tradovateUserId: number | null;
   expiresAt: string;
   environment: TradovateEnvironment;
+  /**
+   * When the REFRESH token's own lifetime ends, or null if none was recorded
+   * (REF-112 follow-up item 4).
+   *
+   * NOT `expiresAt`, AND THE DIFFERENCE IS WHY THIS FIELD EXISTS. `expiresAt`
+   * is the access token's ~80 minutes, which lapses and is renewed many times a
+   * day and means nothing to a trader. THIS is the deadline a trader would
+   * actually have to act on: past it, no redemption can recover the connection
+   * and reconnecting by hand is the only way back.
+   *
+   * A DEADLINE AND NOT A SECRET — it is an instant, it decrypts nothing and it
+   * identifies nobody, which is what lets it sit on a type documented as safe
+   * to return from a route. Migration 030 withholds `api_hosts` from the client
+   * column grant and this column is not granted either; the value reaches a
+   * screen only through this service-role read, and {@link
+   * import('./notices').refreshDeadlineNear} reduces it to a boolean before
+   * anything hands it to a browser.
+   */
+  refreshExpiresAt: string | null;
 }
 
 function remember(userId: string, snapshot: UserTokenSnapshot): UserTokenSnapshot {
@@ -470,7 +489,8 @@ export async function saveConnection(params: {
 }
 
 /** The non-secret columns a summary needs. Never a token column. */
-const SUMMARY_COLUMNS = 'status, tradovate_user_id, expires_at, environment';
+const SUMMARY_COLUMNS =
+  'status, tradovate_user_id, expires_at, environment, refresh_expires_at';
 
 /**
  * The outcome of trying to read a connection.
@@ -492,6 +512,7 @@ function toSummary(row: Record<string, unknown>): ConnectionSummary {
     tradovateUserId: (row.tradovate_user_id as number | null) ?? null,
     expiresAt: row.expires_at as string,
     environment: row.environment as TradovateEnvironment,
+    refreshExpiresAt: (row.refresh_expires_at as string | null) ?? null,
   };
 }
 
