@@ -137,7 +137,6 @@ const EMPTY_FORM: TradePlanInput = {
   confidence_level: 3,
   timeframe: '',
   direction: null,
-  units: '',
   point_value: '1',
 };
 
@@ -156,7 +155,6 @@ type RequiredFieldKey =
   | 'entry_price'
   | 'stop_loss'
   | 'take_profit'
-  | 'units'
   | 'trade_reason';
 
 const REQUIRED_FIELD_LABELS: Record<RequiredFieldKey, string> = {
@@ -166,7 +164,6 @@ const REQUIRED_FIELD_LABELS: Record<RequiredFieldKey, string> = {
   entry_price: 'מחיר כניסה',
   stop_loss: 'סטופ לוס',
   take_profit: 'טייק פרופיט',
-  units: 'יחידות/חוזים',
   trade_reason: 'סיבת הכניסה',
 };
 
@@ -285,7 +282,6 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
   const personalStrategyLabelId = useId();
   const reasonId = useId();
   const sizingNoteId = useId();
-  const sizingErrorId = useId();
 
   // The chart is opt-in (REF-70): until the trader asks for it, TradingViewChart
   // isn't rendered at all, so neither its dynamic() chunk nor
@@ -435,7 +431,6 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
   const [personalStrategyRows, setPersonalStrategyRows] = useState<PersonalStrategy[]>([]);
   // Session override wins over the saved preference, which wins over the default
   const [pnlModeOverride, setPnlModeOverride] = useState<'points' | 'percent' | null>(null);
-  const [pnlFieldsError, setPnlFieldsError] = useState(false);
   const [slInput, setSlInput] = useState('');
   const [tpInput, setTpInput] = useState('');
   const [strategyConditionsChecked, setStrategyConditionsChecked] = useState<Record<string, boolean>>({});
@@ -467,9 +462,6 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
 
   const entryNum = parseFloat(form.entry_price);
   const hasEntry = form.entry_price !== '' && !isNaN(entryNum);
-
-  const unitsNum = parseFloat(form.units);
-  const hasUnits = form.units.trim() !== '' && !isNaN(unitsNum) && unitsNum > 0;
 
   const pointValueParsed = parseFloat(form.point_value);
   const pointValueNum = form.point_value.trim() !== '' && !isNaN(pointValueParsed) && pointValueParsed > 0
@@ -841,10 +833,9 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     if (!hasEntry) missing.push('entry_price');
     if (slPrice === null) missing.push('stop_loss');
     if (tpPrice === null) missing.push('take_profit');
-    if (!hasUnits) missing.push('units');
     if (form.trade_reason.trim() === '') missing.push('trade_reason');
     return missing;
-  }, [form.symbol, form.direction, form.strategy, hasEntry, slPrice, tpPrice, hasUnits, form.trade_reason]);
+  }, [form.symbol, form.direction, form.strategy, hasEntry, slPrice, tpPrice, form.trade_reason]);
 
   const isFormFilled = missingFieldKeys.length === 0;
 
@@ -900,7 +891,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
   }, [validationResult, formState]);
 
   const step1Done = form.symbol.trim() !== '' && form.direction !== null && form.strategy !== '';
-  const step2Done = hasEntry && slPrice !== null && tpPrice !== null && hasUnits;
+  const step2Done = hasEntry && slPrice !== null && tpPrice !== null;
 
   const activeStep = useMemo(() => {
     if (!step1Done) return 1;
@@ -909,8 +900,6 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
   }, [step1Done, step2Done]);
 
   async function handleValidate() {
-    if (!hasUnits) { setPnlFieldsError(true); return; }
-    setPnlFieldsError(false);
     if (!isFormFilled || slPrice === null || tpPrice === null) return;
     setFormState('validating');
 
@@ -943,8 +932,6 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
   }
 
   async function handleSubmit() {
-    if (!hasUnits) { setPnlFieldsError(true); return; }
-    setPnlFieldsError(false);
     if (!isFormFilled || slPrice === null || tpPrice === null) return;
 
     // Re-validate silently — preset rules
@@ -1037,7 +1024,13 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
       confidence_level: form.confidence_level,
       timeframe: form.timeframe || null,
       status: 'open',
-      units: unitsNum,
+      // REF-123: `units` is deliberately NOT written. The field is gone from
+      // the form, so a form-created row now has `units IS NULL` — and
+      // `proper_size` in lib/journal/link.ts resolves the planned quantity
+      // through `finite(plan.units) ?? finite(plan.quantity)`, which means its
+      // proposal is skipped rather than shown on a link. That is the accepted
+      // cost of the trim (Imri, 26.10); the column itself is untouched, and the
+      // journal's edit modal can still set a quantity on a row that needs one.
       point_value: pointValueNum,
       // Written explicitly rather than left to the column default, so a plan
       // created before migration 033 runs is already '$' (REF-99 req. 3).
@@ -1081,7 +1074,6 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
         setSlInput('');
         setTpInput('');
         setValidationResult(null);
-        setPnlFieldsError(false);
         setStrategyConditionsChecked({});
         // The override is dropped so "תיק חדש…" is not still selected with a
         // name the next submit would reuse. The next form open reads the
@@ -1411,7 +1403,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
             </FormSection>
 
             {/* Step 2 — Prices & position sizing */}
-            <FormSection step={2} label="מחירים וגודל פוזיציה" active={activeStep === 2} done={activeStep > 2}>
+            <FormSection step={2} label="מחירים" active={activeStep === 2} done={activeStep > 2}>
               <div className="flex items-center justify-between">
                 <span className="text-xs" style={{ color: 'var(--color-tg-muted)' }}>
                   הזן Stop Loss / Take Profit ב:
@@ -1476,53 +1468,27 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
               </div>
               {/* REF-99: a ₪/$ toggle sat above this pair. The product is
                   dollar-only, so there is nothing to choose and the row is
-                  gone — the note below the fields names the currency. */}
-              <div className="flex flex-col gap-1.5">
-                <div className="grid grid-cols-2 gap-2">
-                  <div ref={(el) => { fieldRefs.current.units = el; }} style={fieldHighlightStyle('units')} className="flex flex-col gap-1">
-                    <label htmlFor="trade-units" className="text-xs font-medium text-tg-muted">יחידות/חוזים</label>
-                    <input
-                      id="trade-units"
-                      type="number"
-                      step="any"
-                      placeholder="0"
-                      value={form.units}
-                      // The note below the pair explains both fields, and the
-                      // error replaces nothing — it is read in addition.
-                      aria-describedby={pnlFieldsError && !hasUnits ? `${sizingNoteId} ${sizingErrorId}` : sizingNoteId}
-                      onChange={(e) => { setForm({ ...form, units: e.target.value }); setPnlFieldsError(false); }}
-                      className="w-full h-10 px-2 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors text-center"
-                      style={{
-                        background: 'var(--color-tg-surface-2)',
-                        borderColor: pnlFieldsError && !hasUnits ? 'var(--color-tg-danger)' : 'var(--color-tg-border)',
-                      }}
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <label htmlFor="trade-point-value" className="text-xs font-medium text-tg-muted">שווי נקודה ($)</label>
-                    <input
-                      id="trade-point-value"
-                      type="number"
-                      step="any"
-                      placeholder="1"
-                      value={form.point_value}
-                      aria-describedby={sizingNoteId}
-                      onChange={(e) => setForm({ ...form, point_value: e.target.value })}
-                      className="w-full h-10 px-2 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors text-center"
-                      style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)' }}
-                    />
-                  </div>
-                </div>
+                  gone — the note below the field names the currency.
+                  REF-123: and the "יחידות/חוזים" field that stood beside the
+                  point value is gone too — it was one of the eight required
+                  fields and it is not one any more. */}
+              <div className="flex flex-col gap-1">
+                <label htmlFor="trade-point-value" className="text-xs font-medium text-tg-muted">שווי נקודה ($)</label>
+                <input
+                  id="trade-point-value"
+                  type="number"
+                  step="any"
+                  placeholder="1"
+                  value={form.point_value}
+                  aria-describedby={sizingNoteId}
+                  onChange={(e) => setForm({ ...form, point_value: e.target.value })}
+                  className="w-full h-10 px-2 rounded-xl text-sm text-tg-text border focus:outline-none focus:border-tg-primary transition-colors text-center"
+                  style={{ background: 'var(--color-tg-surface-2)', borderColor: 'var(--color-tg-border)' }}
+                />
               </div>
               <p id={sizingNoteId} className="text-[10px] text-tg-muted">
-                יחידות/חוזים — שדה חובה. שווי נקודה ($) — אופציונלי, ברירת מחדל 1. נדרשים כדי שהמערכת תחשב עבורך רווח/הפסד ({TRADING_CURRENCY}) בסגירת העסקה
+                שווי נקודה ($) — אופציונלי, ברירת מחדל 1. משמש כדי שהמערכת תחשב עבורך רווח/הפסד ({TRADING_CURRENCY}) בסגירת עסקה ידנית
               </p>
-              {pnlFieldsError && (
-                <div id={sizingErrorId} className="px-3 py-2 rounded-xl text-xs animate-fade-in"
-                  style={{ background: 'var(--color-tg-danger-muted)', color: 'var(--color-tg-danger)' }}>
-                  יש למלא יחידות תקינות כדי להגיש את התוכנית
-                </div>
-              )}
               {rr !== null && rr > 0 && (
                 <div className="flex items-center justify-between px-4 py-2.5 rounded-xl animate-fade-in"
                   style={{

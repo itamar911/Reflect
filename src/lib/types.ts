@@ -294,7 +294,14 @@ export interface TradePlanInput {
   confidence_level: number;
   timeframe: Timeframe | '';
   direction: 'long' | 'short' | null;
-  units: string;
+  /**
+   * OPTIONAL SINCE REF-123, and the trade form no longer produces it at all:
+   * the "יחידות/חוזים" field was removed and the insert does not name the
+   * column, so a form-created row has `units IS NULL`. Kept on the type rather
+   * than deleted because nothing in `validateTradePlan` ever read it, so its
+   * absence breaks no caller — and `trade_plans.units` itself is untouched.
+   */
+  units?: string;
   point_value: string;
 }
 

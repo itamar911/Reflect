@@ -2750,7 +2750,10 @@ async function bothPathsAgree() {
     emotional_state: 4,
     confidence_level: 4,
     timeframe: '5m',
-    units: '1',
+    // No `units` — REF-123 took that field out of the form, so this payload
+    // describes what the form now submits. The verdicts below are unchanged:
+    // validateTradePlan never read `units` (nor `point_value`, kept here only
+    // because the form still writes it).
     point_value: '50',
   } as TradePlanInput;
 
