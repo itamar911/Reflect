@@ -201,7 +201,14 @@ interface RaceWindow {
 function storeAdmin(store: Map<string, Row>, writes: Writes, race?: RaceWindow) {
   const rows = () => [...store.values()];
 
-  function selectBuilder() {
+  /**
+   * @param options PostgREST's second `select` argument. Only
+   * `{ count: 'exact', head: true }` is used, by `countActiveConnections`
+   * (REF-112 follow-up item 5): the real call returns the number in a header
+   * and NO rows, so the stub must answer with a count and `data: null` rather
+   * than a list the production code would then try to read.
+   */
+  function selectBuilder(options?: { count?: string; head?: boolean }) {
     const filters: Array<(row: Row) => boolean> = [];
     let orderBy: string | null = null;
     let nullsFirst = false;
@@ -281,10 +288,19 @@ function storeAdmin(store: Map<string, Row>, writes: Writes, race?: RaceWindow) 
       // Awaitable, for the list query. Returns a plain promise rather than
       // itself, so awaiting cannot recurse.
       then<T>(
-        resolve: (value: { data: Row[]; error: null }) => T,
+        resolve: (value: { data: Row[] | null; error: null; count?: number }) => T,
         reject?: (reason: unknown) => T
       ) {
         const found = rows().filter((row) => filters.every((f) => f(row)));
+        // head: true — the count, and deliberately no rows. See selectBuilder's
+        // note: a stub that also returned the list would hide a caller reading
+        // rows the real query never sends.
+        if (options?.head) {
+          return Promise.resolve({ data: null, error: null, count: found.length }).then(
+            resolve,
+            reject
+          );
+        }
         if (orderBy) {
           // NULLs are ordered explicitly rather than coerced to '', which is
           // what the old sort did: an empty string sorts before every ISO
@@ -378,7 +394,8 @@ function storeAdmin(store: Map<string, Row>, writes: Writes, race?: RaceWindow) 
   return {
     from() {
       return {
-        select: () => selectBuilder(),
+        select: (_list?: string, options?: { count?: string; head?: boolean }) =>
+          selectBuilder(options),
         update: (values: Row) => updateBuilder(values),
         upsert: async (values: Row) => {
           writes.upserts += 1;
@@ -1752,6 +1769,83 @@ async function observePenalisedGate(params: {
   };
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// PART 3d — the summary line's level (REF-112 follow-up item 5)
+//
+// Two shapes of a run mean "the mechanism is not working for somebody", and
+// both were a silent `info`:
+//
+//   due=0 while somebody IS connected — the investigation's §2(e) signature,
+//   and the first thing its reading order says to check. The selection found
+//   nothing while a connection exists, so that trader's refresh token is
+//   running out unwatched.
+//
+//   nothing renewed while something was due — every attempt failed.
+//
+// The reason to raise them is the one the stranding warning already gives in
+// capitals: this line is not read until something is already wrong. So what
+// these cases assert is the LEVEL — the counts were never the problem.
+// ════════════════════════════════════════════════════════════════════════════
+
+/** Outside KEEPALIVE_WINDOW_MS (25h), so an active connection is NOT selected. */
+const REFRESH_EXPIRES_IN_40_H = 40 * 60 * 60_000;
+
+/**
+ * Run the keep-alive and report which level the summary line came out at.
+ *
+ * BOTH CHANNELS ARE CAPTURED AND THE LINE IS FOUND BY ITS PREFIX, not by
+ * position: the stranding warning can sit beside it, and a case that read
+ * `warnings[0]` would be asserting about whichever line happened to be first.
+ */
+async function observeSummaryLevel(params: {
+  rows: Row[];
+  grantStatus: number;
+  /** Lands a competing redemption mid-flight, to produce a SUPERSEDED run. */
+  beforeRespond?: (store: Map<string, Row>) => void;
+}): Promise<{ actual: string; note: string }> {
+  const store = new Map<string, Row>();
+  for (const row of params.rows) store.set(String(row.user_id), row);
+  const writes = noWrites();
+
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: unknown) => {
+    const href = String(url);
+    if (!href.includes('/auth/oauthtoken')) throw new Error(`unexpected call to ${href}`);
+    params.beforeRespond?.(store);
+    return {
+      ok: params.grantStatus >= 200 && params.grantStatus < 300,
+      status: params.grantStatus,
+      text: async () => (params.grantStatus === 200 ? grantBody() : 'Service Unavailable'),
+    };
+  }) as unknown as typeof fetch;
+
+  const realInfo = console.info;
+  const realWarn = console.warn;
+  const seen: Array<{ level: string; line: string }> = [];
+  console.info = (...args: unknown[]) => void seen.push({ level: 'info', line: String(args[0]) });
+  console.warn = (...args: unknown[]) => void seen.push({ level: 'warn', line: String(args[0]) });
+
+  clearAllCachedTokens();
+  let actual = '';
+  let note = '';
+  try {
+    const counts = await runKeepAlive({ admin: storeAdmin(store, writes), config: FAKE_CONFIG });
+    const summary = seen.find((entry) => entry.line.startsWith('[tradovate][keepalive] due='));
+    actual =
+      `level=${summary?.level ?? 'none'} refreshed=${counts.refreshed} ` +
+      `superseded=${counts.superseded}`;
+    note = summary ? summary.line.replace('[tradovate][keepalive] ', '') : 'no summary line';
+  } catch (thrown: unknown) {
+    actual = `threw ${thrown instanceof Error ? thrown.message : String(thrown)}`;
+  } finally {
+    globalThis.fetch = realFetch;
+    console.info = realInfo;
+    console.warn = realWarn;
+  }
+
+  return { actual, note };
+}
+
 async function main(): Promise<number> {
   let failures = 0;
   let total = 0;
@@ -2038,6 +2132,98 @@ async function main(): Promise<number> {
         `${penalisedCase.expected.padEnd(72)} ${actual}`
     );
     notes.push(`    ${penalisedCase.name} — ${penalisedCase.why}${note ? ` [${note}]` : ''}`);
+  }
+
+  // ── Part 3d ───────────────────────────────────────────────────────────────
+  console.log('\n\nREF-112 follow-up item 5 — the summary line is raised when it matters\n');
+  console.log('  The counts were never the problem. An `info` line is not read until');
+  console.log('  something is already wrong, which is the argument the stranding warning');
+  console.log('  beside it already makes in capitals.\n');
+  console.log(`  ${'case'.padEnd(36)} ${'expected'.padEnd(46)} actual`);
+  console.log(`  ${'-'.repeat(36)} ${'-'.repeat(46)} ${'-'.repeat(46)}`);
+
+  const levelCases: Array<{
+    name: string;
+    why: string;
+    expected: string;
+    run: () => Promise<{ actual: string; note: string }>;
+  }> = [
+    {
+      name: 'a healthy run stays info',
+      why: 'the baseline, and what keeps the two warnings below meaningful: one connection selected and renewed is the ordinary day',
+      expected: 'level=info refreshed=1 superseded=0',
+      run: () =>
+        observeSummaryLevel({
+          rows: [keepAliveRow({ userId: 'ffff6666-0000-4000-8000-000000000001' })],
+          grantStatus: 200,
+        }),
+    },
+    {
+      name: 'nothing renewed while due — warn',
+      why: 'every redemption failed. A 5xx writes nothing, so the row looks untouched and the connection quietly keeps running out',
+      expected: 'level=warn refreshed=0 superseded=0',
+      run: () =>
+        observeSummaryLevel({
+          rows: [keepAliveRow({ userId: 'ffff6666-0000-4000-8000-000000000002' })],
+          grantStatus: 503,
+        }),
+    },
+    {
+      name: 'due=0 with a connection — warn',
+      why: 'the §2(e) signature and the first thing the investigation says to check: the selection found nothing while somebody IS connected, so their refresh token is running out unwatched',
+      expected: 'level=warn refreshed=0 superseded=0',
+      run: () =>
+        observeSummaryLevel({
+          rows: [
+            keepAliveRow({
+              userId: 'ffff6666-0000-4000-8000-000000000003',
+              refreshExpiresInMs: REFRESH_EXPIRES_IN_40_H,
+            }),
+          ],
+          grantStatus: 200,
+        }),
+    },
+    {
+      name: 'due=0 with no connections — info',
+      why: 'so the case above is about a STRANDED connection and not about due=0: an empty table is a deployment nobody has connected to, which is not a fault and must not cry wolf every night',
+      expected: 'level=info refreshed=0 superseded=0',
+      run: () => observeSummaryLevel({ rows: [], grantStatus: 200 }),
+    },
+    {
+      name: 'superseded counts as renewed — info',
+      why: 'the one outcome that is already a success: another redemption rotated the token first, so the connection is alive and the mechanism demonstrably worked. Warning here would be the false alarm that teaches an operator to skip the line',
+      expected: 'level=info refreshed=0 superseded=1',
+      run: () =>
+        observeSummaryLevel({
+          rows: [keepAliveRow({ userId: 'ffff6666-0000-4000-8000-000000000004' })],
+          grantStatus: 200,
+          // A competing redemption commits while our grant is in flight, so our
+          // compare-and-swap matches nothing and the winner's tokens are
+          // adopted — exactly the Part 2 'concurrent rotation' interleaving.
+          beforeRespond: (store) => {
+            const userId = 'ffff6666-0000-4000-8000-000000000004';
+            const row = store.get(userId)!;
+            row.access_token_encrypted = encryptToken(WINNER_ACCESS, 'access', userId);
+            row.refresh_token_encrypted = encryptToken(WINNER_REFRESH, 'refresh', userId);
+            row.expires_at = new Date(Date.now() + ACCESS_LIFETIME_SEC * 1000).toISOString();
+            row.refresh_expires_at = new Date(
+              Date.now() + REFRESH_LIFETIME_SEC * 1000
+            ).toISOString();
+          },
+        }),
+    },
+  ];
+
+  for (const levelCase of levelCases) {
+    const { actual, note } = await levelCase.run();
+    const ok = actual === levelCase.expected;
+    total += 1;
+    if (!ok) failures += 1;
+    console.log(
+      `  ${(ok ? 'PASS ' : 'FAIL ') + levelCase.name.padEnd(31)} ` +
+        `${levelCase.expected.padEnd(46)} ${actual}`
+    );
+    notes.push(`    ${levelCase.name} — ${levelCase.why}${note ? ` [${note}]` : ''}`);
   }
 
   // ── Part 3b ───────────────────────────────────────────────────────────────

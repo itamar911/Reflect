@@ -40,6 +40,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { isUserAllowed } from './allowlist';
 import {
+  countActiveConnections,
   listConnectionsDueForRefresh,
   redeemRefreshToken,
   type RefreshRedemption,
@@ -237,13 +238,46 @@ export async function runKeepAlive(params: {
     }
   }
 
+  // REF-112 follow-up item 5. TWO SHAPES THAT MEAN "THE MECHANISM IS NOT
+  // WORKING FOR SOMEBODY", AND BOTH WERE A SILENT `info`. The reason to raise
+  // them is the one the stranding warning below already gives in capitals: this
+  // line is not read until something is already wrong.
+  //
+  //   due=0 with at least one active connection — the §2(e) signature of the
+  //   26.10 investigation, and the first thing it says to check. The selection
+  //   found nothing while somebody IS connected, so that trader's refresh token
+  //   is running out unwatched.
+  //
+  //   nothing renewed while something was due — every attempt failed.
+  //
+  // THE COUNT IS ONLY ASKED FOR WHEN IT CHANGES THE ANSWER. `due > 0` already
+  // proves somebody is connected, so the extra statement is spent exactly once
+  // a day and only on the run that would otherwise have nothing to say. A count
+  // that FAILS returns null and raises nothing: "I could not tell" is not an
+  // alarm, and an alarm nobody can act on is how a log line stops being read.
+  const activeConnections = due.length === 0 ? await countActiveConnections({ admin }) : null;
+  const nothingSelected = due.length === 0 && activeConnections !== null && activeConnections > 0;
+
+  // `superseded` COUNTS AS RENEWED HERE, and it has to. It means another
+  // redemption rotated the token first, so the connection is alive and the
+  // mechanism demonstrably worked — just not in this process. Treating it as a
+  // failure would warn about the one outcome that is already a success, which
+  // is precisely the false alarm that teaches an operator to skip the line.
+  const nothingRenewed = due.length > 0 && counts.refreshed === 0 && counts.superseded === 0;
+
   // Counts only, and the one line a healthy run leaves behind.
-  console.info(
+  const summary =
     `[tradovate][keepalive] due=${due.length} checked=${counts.checked} ` +
-      `refreshed=${counts.refreshed} superseded=${counts.superseded} ` +
-      `transient=${counts.transient} expired=${counts.expired} skipped=${counts.skipped} ` +
-      `strandedByEnvironment=${counts.strandedByEnvironment} nullLifetime=${counts.nullLifetime}`
-  );
+    `refreshed=${counts.refreshed} superseded=${counts.superseded} ` +
+    `transient=${counts.transient} expired=${counts.expired} skipped=${counts.skipped} ` +
+    `strandedByEnvironment=${counts.strandedByEnvironment} nullLifetime=${counts.nullLifetime}`;
+
+  // THE SAME LINE AT A DIFFERENT LEVEL, rather than a second sentence beside
+  // it. The counts ARE the diagnosis — the investigation's §3.1 reads this line
+  // as a decision table — so what was missing was never more words, only the
+  // severity that gets it in front of somebody.
+  if (nothingSelected || nothingRenewed) console.warn(summary);
+  else console.info(summary);
 
   // REF-112 §5.4. A SECOND LINE, AT WARN, BECAUSE THE FIRST ONE IS NOT READ
   // UNTIL SOMETHING IS ALREADY WRONG. Every connection in this count is going

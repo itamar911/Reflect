@@ -1612,6 +1612,41 @@ export async function listConnectionsDueForRefresh(params: {
   return data ?? [];
 }
 
+/**
+ * How many connections are 'active' (REF-112 follow-up item 5).
+ *
+ * A COUNT AND NOT A LIST, and `head: true` is what makes that true on the wire:
+ * PostgREST returns the number in a header and no rows at all. There is nothing
+ * here that could leak, which is the property the keep-alive needs from it — it
+ * exists only so that `due = 0` can be told apart from "nobody is connected",
+ * and a daily job over every connected trader is the wrong place to start
+ * reading rows it has no use for.
+ *
+ * NULL IS "COULD NOT TELL" AND NOT ZERO. The caller's decision is whether to
+ * raise an alarm, and a count that failed must not raise one: an alarm nobody
+ * can act on is how the line stops being read. See
+ * {@link import('./keepalive').runKeepAlive}.
+ */
+export async function countActiveConnections(params: {
+  admin: SupabaseClient;
+}): Promise<number | null> {
+  const { count, error } = await params.admin
+    .from('tradovate_connections')
+    .select('user_id', { count: 'exact', head: true })
+    .eq('status', 'active');
+
+  if (error) {
+    console.warn(
+      redactSecrets(
+        `[tradovate] could not count the active connections (${error.code ?? 'no code'}); ` +
+          'the keep-alive cannot tell an empty table from a selection that found nothing'
+      )
+    );
+    return null;
+  }
+  return count ?? 0;
+}
+
 /** One connection, as the daily import loop needs it. Two columns, no secret. */
 export interface ImportCandidate {
   user_id: string;
