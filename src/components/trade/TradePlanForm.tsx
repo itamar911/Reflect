@@ -1737,13 +1737,28 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                       timeframe={chartTimeframe}
                     />
                   ) : (
-                    // Same frame as the chart it stands in for — aspect ratio,
-                    // radius, border and surface are restated from
-                    // TradingViewChart's own outer box (which is why the two have
-                    // to stay in sync) so that revealing the chart drops it into
-                    // an already-reserved space instead of reflowing the column.
+                    // ON DESKTOP: the same frame as the chart it stands in for —
+                    // aspect ratio, radius, border and surface restated from
+                    // TradingViewChart's own outer box (which is why the two
+                    // have to stay in sync) so that revealing the chart drops
+                    // it into an already-reserved space instead of reflowing
+                    // the column.
+                    //
+                    // ON MOBILE: a button row, and `aspect-[4/3]` is gone
+                    // (REF-123). It was reserving a ~290px empty rectangle on a
+                    // 390px phone to hold one button and two lines of
+                    // disclaimer — the single largest piece of dead vertical
+                    // space in the sheet. The no-reflow argument it existed for
+                    // is a desktop side-by-side concern; on a phone the chart
+                    // is below the fold anyway, and the trader who opens it is
+                    // not also reading the price fields at that moment.
+                    //
+                    // The TradingView disclosure stays on both. It is the line
+                    // that tells the trader their symbol is about to leave the
+                    // page, so it is not something a narrower screen gets less
+                    // of — it just sits beside the button instead of under it.
                     <div
-                      className="flex flex-col items-center justify-center gap-2 w-full px-4 rounded-2xl aspect-[4/3] md:aspect-[16/9]"
+                      className="flex flex-row md:flex-col items-center justify-center gap-3 md:gap-2 w-full px-4 py-3 md:py-0 rounded-2xl md:aspect-[16/9]"
                       style={{ border: '1px solid var(--color-tg-border)', background: 'var(--color-tg-surface-2)' }}
                     >
                       <Button
@@ -1755,19 +1770,24 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                         aria-expanded={false}
                         aria-controls={chartRegionId}
                         aria-describedby={chartSymbol ? undefined : `${chartRegionId}-hint`}
-                        className={CHART_TOGGLE_FOCUS_RING}
+                        className={`shrink-0 ${CHART_TOGGLE_FOCUS_RING}`}
                       >
                         <LineChart size={14} aria-hidden />
                         הצג גרף
                       </Button>
-                      {!chartSymbol && (
-                        <p id={`${chartRegionId}-hint`} className="text-[10px] text-center" style={{ color: 'var(--color-tg-muted)' }}>
-                          הזן סימבול כדי להציג גרף
+                      {/* Beside the button on mobile, under it on desktop —
+                          one wrapper so the row is [button | text] and not
+                          three competing flex children. */}
+                      <div className="flex flex-col gap-1 md:items-center">
+                        {!chartSymbol && (
+                          <p id={`${chartRegionId}-hint`} className="text-[10px] text-start md:text-center" style={{ color: 'var(--color-tg-muted)' }}>
+                            הזן סימבול כדי להציג גרף
+                          </p>
+                        )}
+                        <p className="text-[10px] text-start md:text-center max-w-[34ch] leading-snug" style={{ color: 'var(--color-tg-muted)' }}>
+                          הגרף מסופק על ידי TradingView. בלחיצה, הסימבול שהזנת מועבר אליהם.
                         </p>
-                      )}
-                      <p className="text-[10px] text-center max-w-[34ch] leading-snug" style={{ color: 'var(--color-tg-muted)' }}>
-                        הגרף מסופק על ידי TradingView. בלחיצה, הסימבול שהזנת מועבר אליהם.
-                      </p>
+                      </div>
                     </div>
                   )}
                 </div>
