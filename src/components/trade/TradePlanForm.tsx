@@ -161,7 +161,10 @@ const EMPTY_FORM: TradePlanInput = {
   point_value: '1',
 };
 
-type FormState = 'empty' | 'editing' | 'validating' | 'warning' | 'blocked' | 'success' | 'error';
+// REF-123: 'validating' was a state of its own while the mandatory rules
+// pre-check existed. The check is part of the submit now and the button's own
+// `loading` flag covers it, so there is no screen left for it to describe.
+type FormState = 'empty' | 'editing' | 'warning' | 'blocked' | 'success' | 'error';
 
 /** Before the first load. Paired with `contextLoaded`, which is what the panel
  *  actually keys off — these zeros are never shown to the user as fact. */
@@ -928,6 +931,17 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
 
   const isFormFilled = missingFieldKeys.length === 0;
 
+  // What the one submit button says, and whether it is usable at all (REF-123).
+  //
+  // Both read the banner rather than formState, because every field's onChange
+  // calls setValidationResult(null) and none of them touches formState: after
+  // an edit, formState can still say 'blocked' about a plan that no longer is.
+  // While there were two buttons that could not show — the submit only
+  // rendered `{validationResult && …}` — and with one button it would be a
+  // trade the trader cannot file.
+  const isBlocked = validationResult?.status === 'blocked';
+  const hasPendingWarning = validationResult?.status === 'warning';
+
   const fieldRefs = useRef<Partial<Record<RequiredFieldKey, HTMLDivElement | null>>>({});
   const [highlightedFields, setHighlightedFields] = useState<Set<RequiredFieldKey>>(new Set());
   const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -954,8 +968,8 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     highlightTimeoutRef.current = setTimeout(() => setHighlightedFields(new Set()), 2000);
   }
 
-  // Ids of the 'warned' rule_violations rows logged by the most recent handleValidate
-  // call — upgraded to 'overridden' if the user goes on to submit this trade.
+  // Ids of the 'warned' rule_violations rows logged when a warning was last shown
+  // to the user — upgraded to 'overridden' if they go on to submit this trade.
   const warnedViolationIdsRef = useRef<string[]>([]);
 
   // Scrolls the warning banner into view + a brief glow, but only the first time a given
@@ -965,7 +979,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
   const lastWarningSignatureRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (formState === 'validating' || !validationResult || validationResult.status !== 'warning') {
+    if (!validationResult || validationResult.status !== 'warning') {
       lastWarningSignatureRef.current = null;
       return;
     }
@@ -977,7 +991,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     setWarningBannerPulse(true);
     const t = setTimeout(() => setWarningBannerPulse(false), 1500);
     return () => clearTimeout(t);
-  }, [validationResult, formState]);
+  }, [validationResult]);
 
   const step1Done = form.symbol.trim() !== '' && form.direction !== null && form.strategy !== '';
   const step2Done = hasEntry && slPrice !== null && tpPrice !== null;
@@ -988,42 +1002,39 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     return 4;
   }, [step1Done, step2Done]);
 
-  async function handleValidate() {
-    if (!isFormFilled || slPrice === null || tpPrice === null) return;
-    setFormState('validating');
-
-    await new Promise((r) => setTimeout(r, 800)); // simulate validation delay
-
-    const rules = presetRules ?? ({ ...DEFAULT_PRESET_RULES, id: '', user_id: userId, created_at: '', updated_at: '' } as PresetRules);
-    const planForValidation: TradePlanInput = { ...form, trade_reason: composedTradeReason, stop_loss: fmtPrice(slPrice), take_profit: fmtPrice(tpPrice) };
-    const result = applyRealTimeBlockingPolicy(validateTradePlan(
-      planForValidation, rules, todayCount, lossCount, todayLossAmount,
-      personalStrategyRows.map((s) => s.name),
-      selectedStrategy?.min_rr ?? null,
-    ), limits.realTimeBlocking);
-    setValidationResult(result);
-    setFormState(result.status === 'valid' ? 'editing' : result.status);
-
-    // Log warnings the moment they're first shown to the user (not on submit) — if the
-    // user abandons the form from here, these rows stay 'warned'; if they go on to
-    // submit, handleSubmit upgrades this exact batch to 'overridden'.
-    if (result.status === 'warning') {
-      const warnEntries: RuleViolationLogInput[] = result.violations
-        .filter((v) => v.severity === 'warn')
-        .map((v) => ({
-          userId, ruleSource: 'preset', customRuleId: null,
-          ruleKey: v.ruleKey, ruleName: v.ruleName, outcome: 'warned', tradePlanId: null,
-        }));
-      logRuleViolations(warnEntries).then((ids) => { warnedViolationIdsRef.current = ids; });
-    } else {
-      warnedViolationIdsRef.current = [];
-    }
-  }
-
+  /**
+   * The whole terminal interaction, in one click (REF-123).
+   *
+   * There used to be a mandatory `בדוק מול החוקים שלי` press before the submit
+   * button would even render, with 800ms of `setTimeout` pretending the check
+   * was slow — on a 30-second budget, 3% of it spent simulating work that is
+   * synchronous and local. Both are gone: the rules check runs here, and what
+   * the trader sees depends on its verdict.
+   *
+   * - valid: inserted on this click.
+   * - blocked: the banner, no insert. Unchanged.
+   * - warning: the banner, no insert, and the button becomes `הגש בכל זאת`.
+   *   A SECOND CLICK IS DELIBERATE AND IS NOT THE OLD GATE COMING BACK. The
+   *   `rule_violations` ledger distinguishes 'warned' from 'overridden', and
+   *   'overridden' is supposed to mean the trader was shown the warning and
+   *   went ahead anyway. Submitting through an unseen warning would write that
+   *   row for a decision nobody made, and the discipline history the coach
+   *   reads is built on it. So the clean path is one click and a warning costs
+   *   exactly one more — on the plan where stopping is the point.
+   *
+   * Re-shown rather than waved through when the warnings CHANGE between the
+   * two clicks: the acknowledgement is of a specific set of reasons, not of
+   * the idea of a warning.
+   */
   async function handleSubmit() {
     if (!isFormFilled || slPrice === null || tpPrice === null) return;
 
-    // Re-validate silently — preset rules
+    // From the first click, because the custom-rule re-check below makes a
+    // broker pull. The button is the only thing on screen that can say so now
+    // that there is no separate 'validating' state.
+    setSubmitLoading(true);
+
+    // Preset rules — synchronous and local (validateTradePlan is pure).
     const rules = presetRules ?? ({ ...DEFAULT_PRESET_RULES, id: '', user_id: userId, created_at: '', updated_at: '' } as PresetRules);
     const planForValidation: TradePlanInput = { ...form, trade_reason: composedTradeReason, stop_loss: fmtPrice(slPrice), take_profit: fmtPrice(tpPrice) };
     const result = applyRealTimeBlockingPolicy(validateTradePlan(
@@ -1070,10 +1081,46 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
           outcome: 'blocked' as const, tradePlanId: null,
         }] : []),
       ]);
+      setSubmitLoading(false);
       return;
     }
 
-    setSubmitLoading(true);
+    // ── A warning the trader has not been shown yet ─────────────────────────
+    //
+    // Logged as 'warned' at the moment it is first displayed, exactly as the
+    // removed handleValidate did: if the trader abandons the form here these
+    // rows stay 'warned', and if they press `הגש בכל זאת` the insert below
+    // upgrades this exact batch to 'overridden'.
+    // Off `validationResult` and NOT off formState, because editing any field
+    // clears the banner (`setValidationResult(null)`) without touching
+    // formState — so formState can still say 'warning' about a plan the trader
+    // has since changed, and this question is only ever about the reasons
+    // currently on screen.
+    const warningSignature = result.warningReasons.join('|');
+    const warningAlreadyShown = validationResult?.status === 'warning'
+      && validationResult.warningReasons.join('|') === warningSignature;
+
+    if (result.status === 'warning' && !warningAlreadyShown) {
+      setValidationResult(result);
+      setFormState('warning');
+      const warnEntries: RuleViolationLogInput[] = result.violations
+        .filter((v) => v.severity === 'warn')
+        .map((v) => ({
+          userId, ruleSource: 'preset', customRuleId: null,
+          ruleKey: v.ruleKey, ruleName: v.ruleName, outcome: 'warned', tradePlanId: null,
+        }));
+      logRuleViolations(warnEntries).then((ids) => { warnedViolationIdsRef.current = ids; });
+      setSubmitLoading(false);
+      return;
+    }
+
+    // Valid (blocked returned above, warning is the acknowledged case): no
+    // banner to show, and no 'warned' batch waiting to be upgraded.
+    if (result.status === 'valid') {
+      setValidationResult(null);
+      warnedViolationIdsRef.current = [];
+    }
+
     const entry = entryNum;
     const sl = slPrice;
     const tp = tpPrice;
@@ -1142,8 +1189,9 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     } else {
       const tradePlanId: string | null = insertedTrade?.id ?? null;
       if (tradePlanId) {
-        // Preset warnings were already logged as 'warned' when first shown in handleValidate —
-        // upgrade that exact batch now that the trade actually went through.
+        // Preset warnings were already logged as 'warned' when first shown, on the
+        // click before this one — upgrade that exact batch now that the trade
+        // actually went through.
         overrideRuleViolations(warnedViolationIdsRef.current, tradePlanId);
         // Custom-rule warnings are only discovered here (never shown separately beforehand),
         // so there's no prior 'warned' row to upgrade — log them straight as 'overridden'.
@@ -1180,13 +1228,8 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
     setSubmitLoading(false);
   }
 
-  // The two submit-ish buttons stay clickable even when fields are missing — clicking
-  // them just highlights what's missing instead of doing nothing (or silently no-op-ing).
-  function attemptValidate() {
-    if (missingFieldKeys.length > 0) { highlightMissingFields(); return; }
-    handleValidate();
-  }
-
+  // The submit button stays clickable even when fields are missing — clicking it
+  // just highlights what's missing instead of doing nothing (or silently no-op-ing).
   function attemptSubmit() {
     if (missingFieldKeys.length > 0) { highlightMissingFields(); return; }
     handleSubmit();
@@ -1272,7 +1315,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
             )}
 
             {/* Validation Banner */}
-            {validationResult && formState !== 'validating' && (
+            {validationResult && (
               <div
                 ref={warningBannerRef}
                 className={warningBannerPulse ? 'animate-pulse-warning rounded-xl' : 'rounded-xl'}
@@ -1877,7 +1920,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
             {/* Actions */}
             <div className="flex flex-col gap-2 pb-4">
               {/* Missing-fields hint (gray) — guidance, not an error state */}
-              {missingFieldKeys.length > 0 && formState !== 'validating' && (
+              {missingFieldKeys.length > 0 && (
                 <p dir="rtl" className="text-center text-xs text-zinc-400">
                   חסר: {missingFieldKeys.map((key) => REQUIRED_FIELD_LABELS[key]).join(', ')}
                 </p>
@@ -1885,7 +1928,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
 
               {/* Warning echo (amber) — repeats the active warnings right by the submit
                   button, so users who scrolled past the banner still see them before submitting. */}
-              {validationResult && validationResult.status === 'warning' && formState !== 'validating' && (
+              {validationResult && validationResult.status === 'warning' && (
                 <div dir="rtl" className="flex flex-col gap-1">
                   {validationResult.warningReasons.map((reason, i) => (
                     <div key={i} className="flex items-start gap-1.5 text-xs"
@@ -1897,34 +1940,28 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
                 </div>
               )}
 
-              {formState !== 'validating' && !validationResult && (
-                <Button
-                  fullWidth
-                  variant="secondary"
-                  onClick={attemptValidate}
-                >
-                  בדוק מול החוקים שלי
-                </Button>
-              )}
+              {/* ONE BUTTON (REF-123). It used to be two: a mandatory
+                  `בדוק מול החוקים שלי` in secondary, and only once it had been
+                  pressed did the submit button render at all. The check now
+                  runs inside handleSubmit, so this button is the whole terminal
+                  interaction — and `loading` covers the broker pull that the
+                  custom-rule re-check makes, which is the only part of it that
+                  is actually slow.
 
-              {formState === 'validating' && (
-                <Button fullWidth loading disabled>
-                  בודק מול חוקי המסחר שלך...
-                </Button>
-              )}
-
-              {validationResult && formState !== 'validating' && (
-                <Button
-                  fullWidth
-                  disabled={formState === 'blocked'}
-                  loading={submitLoading}
-                  onClick={attemptSubmit}
-                  variant={formState === 'blocked' ? 'danger' : 'primary'}
-                  size="lg"
-                >
-                  {formState === 'blocked' ? 'עסקה חסומה' : 'הגש תוכנית עסקה'}
-                </Button>
-              )}
+                  `הגש בכל זאת` is the second click a warning costs. See
+                  handleSubmit on why that one is kept. */}
+              <Button
+                fullWidth
+                disabled={isBlocked}
+                loading={submitLoading}
+                onClick={attemptSubmit}
+                variant={isBlocked ? 'danger' : 'primary'}
+                size="lg"
+              >
+                {isBlocked
+                  ? 'עסקה חסומה'
+                  : hasPendingWarning ? 'הגש בכל זאת' : 'הגש תוכנית עסקה'}
+              </Button>
 
               {!validationResult && (
                 <div className="text-center text-xs text-tg-muted mt-1">
