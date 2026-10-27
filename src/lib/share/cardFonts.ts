@@ -64,7 +64,7 @@ import type { TradingDay } from '@/lib/tradingDay';
 interface CardFont {
   name: string;
   data: ArrayBuffer;
-  weight: 400 | 600 | 700 | 800;
+  weight: 700 | 800;
   style: 'normal';
 }
 
@@ -117,29 +117,37 @@ const fontPath = (name: string) =>
  *
  * RUBIK IS CARRIED ONLY AS A HEBREW FALLBACK. The card is ENGLISH ONLY by
  * decision — every label, the provenance line and the domain — so the single
- * string on it that can hold a Hebrew glyph is the trader's chosen nickname.
+ * strings on it that can hold a Hebrew glyph are user data: the trader's
+ * chosen nickname and their broker account names.
  * Nunito is latin-only (verified: 545 mapped codepoints, ZERO in the Hebrew
  * block), so without Rubik in this list a Hebrew handle rasterises as a row of
  * tofu. satori picks the fallback per glyph when the first family cannot supply
  * one; `cardImage.tsx` additionally names Rubik outright on that one span so
  * the choice is not left to a fallback chain.
  *
- * Weights are the real static instances, not synthesised: ExtraBold is 800 and
- * SemiBold is 600, and asking for a weight no file supplies gets the nearest
- * one rather than a faux-bolded outline.
+ * NOTHING LIGHTER THAN 700 EXISTS HERE, AND THAT IS THE ENFORCEMENT.
+ *
+ * The review's third note was that the card reads too thin. The fix is not
+ * "remember to write 700" at forty call sites — it is that the SemiBold (600)
+ * and Rubik Regular (400) files are gone from the repo, so a `fontWeight: 600`
+ * that slips into `cardImage.tsx` cannot resolve to a lighter face. satori
+ * picks the nearest weight it was given, which is 700, and the card stays
+ * heavy by construction rather than by discipline.
+ *
+ * Weights are the real static instances, not synthesised: Bold is 700 and
+ * ExtraBold is 800, so neither is a faux-bolded outline.
  */
 const FACES = [
-  { file: fontPath('Nunito-SemiBold.ttf'), family: 'Nunito', weight: 600 as const },
+  { file: fontPath('Nunito-Bold.ttf'), family: 'Nunito', weight: 700 as const },
   { file: fontPath('Nunito-ExtraBold.ttf'), family: 'Nunito', weight: 800 as const },
-  { file: fontPath('Rubik-Regular.ttf'), family: 'Rubik', weight: 400 as const },
   { file: fontPath('Rubik-Bold.ttf'), family: 'Rubik', weight: 700 as const },
 ];
 
 /**
  * Read once per process, not once per request.
  *
- * ~255 KB across the four files. The route is public and a social unfurl can
- * arrive in bursts, so re-reading on every render would be four syscall pairs
+ * ~196 KB across the three files. The route is public and a social unfurl can
+ * arrive in bursts, so re-reading on every render would be three syscall pairs
  * per request for bytes that cannot change between deploys.
  */
 let cached: CardFont[] | null = null;
