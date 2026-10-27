@@ -1702,7 +1702,13 @@ async function syncRouteGroup() {
   const noSession = await call(good, { currentUserId: async () => null });
   const noDayStart = await call('');
   const withSeconds = await call('?dayStart=2026-10-14T21:00:30.000Z');
-  const tooOld = await call('?dayStart=2026-10-14T08:00:00.000Z');
+  // 2026-10-11, which is 110 hours before SYNC_NOW. This used to be
+  // 2026-10-14T08:00Z — thirty hours — and REF-125 widened the floor from 25
+  // hours to 74, because a Friday trading day stays open across the whole
+  // weekend gap and a boundary three days old is now legitimate. Thirty hours
+  // is therefore ACCEPTED now; the bound itself is pinned at the parse level
+  // in scripts/tradovate-today-check.ts, which has the weekend case too.
+  const tooOld = await call('?dayStart=2026-10-11T00:00:00.000Z');
   const sinceAhead = await call(`${good}&since=2026-10-16T00:00:00.000Z`);
 
   // The allowlist is answered BEFORE the window is parsed, and this is how
@@ -1741,9 +1747,9 @@ async function syncRouteGroup() {
     c('(1) no session: 401', [noSession.status, noSession.body.error], [401, 'Unauthorized']),
     c('(2) a missing dayStart is a 400',
       [noDayStart.status, noDayStart.body.error], [400, 'Invalid dayStart: missing']),
-    c('(3) a dayStart carrying seconds is not a midnight',
-      [withSeconds.status, withSeconds.body.error], [400, 'Invalid dayStart: not_midnight']),
-    c('(4) a dayStart 30 hours old is out of range',
+    c('(3) a dayStart carrying seconds is not a session open',
+      [withSeconds.status, withSeconds.body.error], [400, 'Invalid dayStart: not_an_open']),
+    c('(4) a dayStart older than any trading day is out of range',
       [tooOld.status, tooOld.body.error], [400, 'Invalid dayStart: out_of_range']),
     c('(5) a `since` in the future is a 400', sinceAhead.status, 400),
     c('(6) a refused user gets reflect_only, and the window is never parsed',
@@ -5022,7 +5028,18 @@ async function alertWindowGroup() {
   // winter, and in summer it is 22:00 UTC of the day before.
   const summerSmallHours = new Date('2026-07-15T22:30:00.000Z'); // 01:30 Israel on the 16th
 
-  group('an alert day starts at the trader\'s midnight, not the server\'s', [
+  // REF-125 SPLIT THIS GROUP IN TWO, because the two things it tested as one
+  // turned out to be different questions.
+  //
+  // `zonedDayStart` is the DISPATCH clock — "mail me at 21:00" means 21:00 in
+  // Israel — and it is unchanged. Cases (1) to (4) are exactly as they were,
+  // and they still guard the REF-107 §H bug: `setHours(0,0,0,0)` on a UTC
+  // server cost the trader the first three hours of their own day.
+  //
+  // What the email REPORTS ON moved to the CME trading day, so
+  // `alertRangeStart` no longer answers the same instant and gets its own
+  // group below.
+  group('the alert DISPATCH clock is still the trader\'s midnight', [
     c('(1) summer: the day starts at 21:00 UTC the previous evening',
       zonedDayStart(summerEvening).toISOString(), '2026-07-14T21:00:00.000Z'),
     c('(2) winter: at 22:00 UTC the previous evening',
@@ -5035,13 +5052,37 @@ async function alertWindowGroup() {
     // 01:30 Israel on the 16th belongs to the 16th, not the 15th.
     c('(4) the small hours belong to the day the trader is in',
       zonedDayStart(summerSmallHours).toISOString(), '2026-07-15T21:00:00.000Z'),
-    c('(5) end_of_day uses that boundary',
-      alertRangeStart('end_of_day', summerEvening), '2026-07-14T21:00:00.000Z'),
-    c('(6) pre_market uses it too',
-      alertRangeStart('pre_market', summerEvening), '2026-07-14T21:00:00.000Z'),
+  ]);
+
+  // The window the email's figures are cut at. 21:00 Israel on the 15th is
+  // 13:00 Chicago, so the trading day in progress is the 15th, and it opened
+  // at 17:00 Chicago on the 14th.
+  group('an alert REPORTS ON the trading day (REF-125)', [
+    c('(5) summer: end_of_day cuts at 17:00 Chicago the previous evening',
+      alertRangeStart('end_of_day', summerEvening), '2026-07-14T22:00:00.000Z'),
+    c('(6) pre_market cuts at the same instant',
+      alertRangeStart('pre_market', summerEvening), '2026-07-14T22:00:00.000Z'),
+    c('(7) winter: 23:00Z, because Chicago moved and so did Israel',
+      alertRangeStart('end_of_day', winterEvening), '2026-01-14T23:00:00.000Z'),
+    // WHAT MOVED, AND BY HOW MUCH. The window starts ONE HOUR LATER than the
+    // trader's midnight did, and that hour is 00:00-01:00 Israel — which is
+    // 16:00-17:00 Chicago, the CME maintenance break. Under the new definition
+    // it belongs to the trading day that just CLOSED, so a trade closed in it
+    // is reported in the previous day's email rather than this one.
+    //
+    // In practice nothing closes there, because the exchange is shut. These two
+    // cases exist so the shift is a decision on the record rather than
+    // something a later reader discovers by subtracting two numbers.
+    c('(8) the shift from the old boundary is exactly one hour',
+      (Date.parse(alertRangeStart('end_of_day', summerEvening)) -
+        zonedDayStart(summerEvening).getTime()) / 3_600_000, 1),
+    c('(9) and the hour it gave up is the Chicago maintenance break',
+      new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Chicago', hour: '2-digit', hourCycle: 'h23',
+      }).format(zonedDayStart(summerEvening)), '16'),
     // The weekly summary is a duration and not a calendar week; the product
-    // has never promised Sunday-to-Sunday.
-    c('(7) weekly_summary reaches back seven days from now',
+    // has never promised Sunday-to-Sunday, and REF-125 did not touch it.
+    c('(10) weekly_summary still reaches back seven days from now',
       alertRangeStart('weekly_summary', summerEvening), '2026-07-08T18:00:00.000Z'),
   ]);
 }
