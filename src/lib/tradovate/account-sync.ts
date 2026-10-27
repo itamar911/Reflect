@@ -531,6 +531,17 @@ export async function syncBrokerAccounts(
     // sync for every account the trader has ever closed.
     if (row.status === 'closed') continue;
 
+    // THE STATUS THIS RUN FOUND, read before the write and not after it.
+    //
+    // NOT A STYLE CHOICE (REF-124). `stored` holds the rows the select
+    // returned, and whether those objects are still the ones they were after
+    // an UPDATE against the same client is the client's business, not ours —
+    // the suite's fake one mutates in place, so reading `row.status` below the
+    // write saw `'closed'` and reported no transition at all. The prior status
+    // is what decides whether the trader is told, so it is captured where it
+    // is unambiguous.
+    const was = row.status;
+
     // `status` ALONE. `last_seen_at` is not touched — see the header; this is
     // the pull that NOTICED the account is gone, not the last one that saw it.
     const { error } = await client
@@ -556,7 +567,7 @@ export async function syncBrokerAccounts(
     // From 'active' only, so that an 'archived' row going 'closed' is silent:
     // that is a broker refining a status it already gave us, and the trader was
     // told when the account left 'active'.
-    if (row.status === 'active') {
+    if (was === 'active') {
       const accountId = Number(row.broker_account_id);
       const host = row.broker_host;
       if (Number.isFinite(accountId) && (host === 'live' || host === 'demo')) {

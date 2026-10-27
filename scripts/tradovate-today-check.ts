@@ -72,6 +72,7 @@ import {
   type BrokerTrade,
   type TradovateReader,
 } from '../src/lib/tradovate/fills';
+import type { KnownActiveAccount } from '../src/lib/tradovate/fills';
 import type { TradovateEnvironment } from '../src/lib/tradovate/hosts';
 import {
   closedToday,
@@ -691,6 +692,73 @@ function pullHostsFull(params: {
     environment: params.environment ?? 'live',
     dayStartMs: params.dayStartMs ?? DAY_START,
     tradovateUserId: params.tradovateUserId === undefined ? ACCOUNT.userId : params.tradovateUserId,
+    now: NOW,
+  });
+}
+
+// ── REF-124 fixtures: the account that closed mid-day ───────────────────────
+//
+// A SECOND ACCOUNT, because the failure needs one the host stops offering
+// while another carries on — that is the case where a bug here is invisible
+// (the trader still sees trades, just not all of them). The sole-account case
+// is the same fixtures with `accounts: []`, which is the real 27.10 shape.
+//
+// Same `userId` as the shared account: ownership is not what this is about, and
+// a different owner would fail the claim for an unrelated reason.
+const CLOSED_ACCOUNT: TradovateAccount = {
+  id: 7002,
+  name: 'EVAL7002',
+  userId: ACCOUNT.userId,
+  accountType: 'Customer',
+};
+
+/** The closed account's own position. `netPos: 0` — the round trip is finished. */
+const CLOSED_POSITION: TradovatePosition = {
+  id: 9002,
+  accountId: CLOSED_ACCOUNT.id,
+  contractId: CONTRACT_ID,
+  timestamp: '2026-10-14T05:30:00.000Z',
+  tradeDate: { year: 2026, month: 10, day: 14 },
+  netPos: 0,
+};
+
+/** What our own `accounts` table says, host-qualified. See `readActiveAccounts`. */
+const KNOWN_CLOSED: KnownActiveAccount[] = [{ host: 'live', accountId: CLOSED_ACCOUNT.id }];
+
+/**
+ * A scene holding ONLY the closed account's finished round trip.
+ *
+ * `accounts` is whatever the host is now willing to say — `[]` for the account
+ * that vanished, `[{ …, closed: true }]` for the one that was flagged. The
+ * position, the pair and the two fills are present either way, which is the
+ * assumption the whole fix rests on and the one thing nobody has measured: see
+ * §1 of the REF-124 investigation.
+ */
+function closedAccountScene(accounts: TradovateAccount[]): Scene {
+  const trip = roundTrip({
+    side: 'long',
+    openAt: '2026-10-14T05:30:00.000Z',
+    closeAt: '2026-10-14T06:00:00.000Z',
+    entry: 5000,
+    exit: 5004,
+    positionId: CLOSED_POSITION.id,
+  });
+  return scene({
+    accounts,
+    positions: [CLOSED_POSITION],
+    pairs: [trip.pair],
+    fills: trip.fills,
+  });
+}
+
+/** One host, with what our table says was open today. */
+function carriedPull(data: Scene, known?: KnownActiveAccount[]): Promise<BrokerDay> {
+  return coldPull({
+    readers: { live: reader(data) },
+    environment: 'live',
+    dayStartMs: DAY_START,
+    tradovateUserId: ACCOUNT.userId,
+    knownActiveAccounts: known,
     now: NOW,
   });
 }
@@ -2626,6 +2694,7 @@ async function main() {
   await liveCacheGroup();
   await liveFlatTransitionGroup();
   await liveClockGroup();
+  await closedMidDayGroup();
   liveNeverReachesRulesGroup();
 
   // ── REF-112 §4.5 item 4: the penalty ticket is replayed ───────────────────
@@ -5835,6 +5904,120 @@ function sourceUnder(dir: string): string {
   };
   walk(root);
   return out.join('\n');
+}
+
+async function closedMidDayGroup() {
+  // ── REF-124: an account the broker stopped offering mid-day ──────────────
+  //
+  // THE MEASURED CASE, 27.10.2026: a trader's last trade passed a prop firm's
+  // evaluation, the firm closed the evaluation account minutes later, and the
+  // trade that passed it was never imported. Every assertion below is written
+  // against that shape.
+  //
+  // WHAT THIS GROUP CANNOT PROVE, stated once so no reader of it is misled:
+  // these scenes SUPPLY the closed account's position, pair and fills, because
+  // whether a real Tradovate host still serves them for an account it has
+  // detached was never measured — /position/list is the hop that decides it.
+  // So this group proves the pull USES them when they are there. If upstream
+  // stops serving them the behaviour degrades to case (2) below, which is
+  // today's, and the notice in the import suite is what the trader gets.
+
+  const vanished = await carriedPull(closedAccountScene([]), KNOWN_CLOSED);
+  const vanishedToday = await carriedPull(closedAccountScene([]));
+  const flagged = await carriedPull(
+    closedAccountScene([{ ...CLOSED_ACCOUNT, closed: true }]),
+    KNOWN_CLOSED
+  );
+  const flaggedToday = await carriedPull(closedAccountScene([{ ...CLOSED_ACCOUNT, closed: true }]));
+  // The next run: the row this run closed is no longer `status = 'active'`, so
+  // `readActiveAccounts` answers with it absent. Nothing else about the scene
+  // changes — which is the point.
+  const nextRun = await carriedPull(closedAccountScene([]), []);
+  // The same id, claimed on the OTHER host. A bare-id carry-forward passes
+  // every assertion above and fails this one.
+  const wrongHost = await carriedPull(closedAccountScene([]), [
+    { host: 'demo', accountId: CLOSED_ACCOUNT.id },
+  ]);
+
+  group('REF-124: an account closed mid-day still traded that day', [
+    // (1) THE HEADLINE. 4 points on ES at $50 is $200 — the +$180 trade of the
+    // real case, near enough — and before this fix it was zero.
+    c('(1) the vanished account\'s round trip is pulled',
+      [vanished.trades.length, vanished.day.closedCount, vanished.day.net], [1, 1, 200]),
+    // (2) TODAY'S BEHAVIOUR, PINNED. This is the regression: the pair of
+    // assertions (1) and (2) is the whole of REF-124.
+    c('(2) and without our table saying so, it is lost — the bug',
+      [vanishedToday.trades.length, vanishedToday.day.net], [0, 0]),
+
+    // (3) ATTRIBUTION. The row has to name the account it was traded on, or the
+    // journal shows a prop evaluation's trade against the wrong portfolio.
+    c('(3) the trade is attributed to the closed account, not to the open one',
+      vanished.trades.map((t) => t.accountId), [CLOSED_ACCOUNT.id]),
+
+    // (4) ITEM 2: still listed, flagged untradeable. A firm can retire an
+    // account this way instead, and the trade is the same trade.
+    c('(4) an account flagged closed but still listed is also pulled',
+      [flagged.trades.length, flagged.day.net], [1, 200]),
+    c('(5) and that case was equally lost before',
+      flaggedToday.trades.length, 0),
+
+    // (6) ONE RUN ONLY, which is what makes this need no new column: the same
+    // sync that pulls the trade writes `status = 'closed'`.
+    c('(6) the next run does not carry it again',
+      [nextRun.trades.length, nextRun.day.net], [0, 0]),
+
+    // (7) HOST-QUALIFIED. An account identity is (id, host); a demo row must
+    // never move a live day.
+    c('(7) a row naming the other host carries nothing',
+      wrongHost.trades.length, 0),
+
+    // (8) The sole-account case is (1) — `accounts: []` — so the early return
+    // that skips the remaining six reads must not fire on it.
+    c('(8) the trader whose ONLY account closed still gets their day',
+      vanished.day.closedCount, 1),
+
+    // (9) "לא נמצאו חשבונות" beside a recovered trade is two statements that
+    // contradict each other, and the notice marks the day partial.
+    c('(9) no_accounts is not raised when something was carried',
+      vanished.notices.map((n) => n.kind), []),
+    c('(10) but it is still raised when nothing was',
+      vanishedToday.notices.map((n) => n.kind), ['no_accounts']),
+
+    // (11) A HOST THAT DID NOT ANSWER CARRIES NOTHING. The absence rule's whole
+    // safety: a demo outage must not pull a demo account's fills out of a live
+    // scene, and must not look like a closure either.
+    c('(11) a host that failed discovery carries none of its accounts',
+      (await coldPull({
+        readers: {
+          live: reader(scene()),
+          demo: failingReader(
+            closedAccountScene([]),
+            '/account/list',
+            () => new TradovateRequestError('/account/list', 403, '{"errorText":"Forbidden"}')
+          ),
+        },
+        environment: 'live',
+        dayStartMs: DAY_START,
+        tradovateUserId: ACCOUNT.userId,
+        knownActiveAccounts: [{ host: 'demo', accountId: CLOSED_ACCOUNT.id }],
+        now: NOW,
+      })).trades.length,
+      0),
+
+    // (12) THE OPEN ACCOUNT IS UNTOUCHED. Everything above adds; nothing may
+    // subtract. A trader with one open account and one that closed gets both.
+    c('(12) an ordinary day with no carried account is unchanged',
+      (await carriedPull(withTrips([roundTrip({
+        side: 'long', openAt: '2026-10-14T05:00:00.000Z', closeAt: '2026-10-14T06:00:00.000Z',
+        entry: 5000, exit: 5002,
+      })]), KNOWN_CLOSED)).trades.length,
+      1),
+
+    // (13) NOT ONE ID ON THE WIRE, for this group's own scene. The carried
+    // account id is a number the pull now handles in one more place.
+    c('(13) no notice from a carried pull carries an account id',
+      JSON.stringify(vanished.notices).includes(String(CLOSED_ACCOUNT.id)), false),
+  ]);
 }
 
 function liveNeverReachesRulesGroup() {

@@ -83,6 +83,7 @@ import {
 import type { StopHistory } from '../src/lib/tradovate/orders';
 import {
   BROKER_OWNED_FOR_TEST,
+  readActiveAccounts,
   syncBrokerAccounts,
 } from '../src/lib/tradovate/account-sync';
 import { accountIdentity, claimedAccounts } from '../src/lib/tradovate/accounts';
@@ -5601,6 +5602,222 @@ async function accountClosureGroup() {
   ]);
 }
 
+/**
+ * REF-124: the transition, the sentence, and the read the pull depends on.
+ *
+ * THE OTHER HALF OF THE FIX. scripts/tradovate-today-check.ts proves the day
+ * pull USES a carried account; this proves the three things only this module
+ * can answer — which rows are offered to be carried, when an account is first
+ * seen to have closed, and that the trader is told exactly once.
+ *
+ * WHY "ONCE" IS NOT A DEDUPE, and why that is worth a group of its own: the
+ * guarantee is that reporting the transition DESTROYS the condition that
+ * produces it, because the same statement writes the status. So the assertion
+ * that matters is the second run's — `syncTwice` with one database.
+ */
+async function closedTodayNoticeGroup() {
+  const storedActive = (over: Row = {}): Row[] => [
+    rowIn('accounts', {
+      id: 'acct-live',
+      user_id: USER,
+      broker: 'tradovate',
+      broker_account_id: ACCOUNT_ID,
+      broker_host: 'live',
+      display_name: 'EVAL-A',
+      status: 'active',
+      first_seen_at: '2026-09-01T00:00:00.000Z',
+      last_seen_at: '2026-10-15T08:00:00.000Z',
+      ...over,
+    }),
+  ];
+
+  // ── The 27.10 shape: the host stops listing an account that was open ─────
+  const vanishedDb = new FakeDb(storedActive());
+  const vanished = await syncTwice(vanishedDb, [answered('live', [])], ACCOUNT_LATER);
+
+  // ── Item 2: still listed, flagged closed ─────────────────────────────────
+  const flaggedDb = new FakeDb(storedActive());
+  const flagged = await syncTwice(
+    flaggedDb,
+    [answered('live', [{ ...BROKER_ACCOUNT, closed: true }])],
+    ACCOUNT_LATER
+  );
+
+  // ── The fail-safe: the host did not answer at all ────────────────────────
+  const outageDb = new FakeDb(storedActive());
+  const outage = await quietAccountSync({
+    client: outageDb.client(),
+    userId: USER,
+    hosts: [],
+    env: ON,
+    nowMs: ACCOUNT_LATER,
+  });
+
+  // ── A row that was ALREADY closed, and one that was archived ─────────────
+  const settledDb = new FakeDb(storedActive({ status: 'closed' }));
+  const settled = await quietAccountSync({
+    client: settledDb.client(),
+    userId: USER,
+    hosts: [answered('live', [])],
+    env: ON,
+    nowMs: ACCOUNT_LATER,
+  });
+
+  const archivedDb = new FakeDb(storedActive({ status: 'archived' }));
+  const archived = await quietAccountSync({
+    client: archivedDb.client(),
+    userId: USER,
+    hosts: [answered('live', [])],
+    env: ON,
+    nowMs: ACCOUNT_LATER,
+  });
+
+  // ── What the pull is offered, and what it is not ─────────────────────────
+  const mixedDb = new FakeDb([
+    ...storedActive(),
+    rowIn('accounts', {
+      id: 'acct-closed',
+      user_id: USER,
+      broker: 'tradovate',
+      broker_account_id: 1_805_111,
+      broker_host: 'demo',
+      display_name: 'EVAL-OLD',
+      status: 'closed',
+      first_seen_at: '2026-08-01T00:00:00.000Z',
+      last_seen_at: '2026-09-01T00:00:00.000Z',
+    }),
+    // A BIGINT as PostgREST hands it back. `identityOf` documents this trap;
+    // the carry-forward read has to survive it too or it silently carries
+    // nothing, which is the failure that looks exactly like a clean day.
+    rowIn('accounts', {
+      id: 'acct-string',
+      user_id: USER,
+      broker: 'tradovate',
+      broker_account_id: '1805222',
+      broker_host: 'demo',
+      display_name: 'EVAL-STR',
+      status: 'active',
+      first_seen_at: '2026-08-01T00:00:00.000Z',
+      last_seen_at: '2026-10-15T08:00:00.000Z',
+    }),
+    // A manual portfolio: no broker id, no host. Must not be offered.
+    rowIn('accounts', {
+      id: 'acct-manual',
+      user_id: USER,
+      broker: 'manual',
+      broker_account_id: null,
+      broker_host: null,
+      display_name: 'ידני',
+      status: 'active',
+    }),
+  ]);
+  const offered = await readActiveAccounts({ client: mixedDb.client(), userId: USER, env: ON });
+
+  const label = 'התיק של Lucid';
+
+  group('REF-124: an account that closed today, and the one sentence for it', [
+    // (1) THE TRANSITION. One account, named by host and id, with the broker's
+    // own label for ./sync.ts to resolve.
+    c('(1) a host that answered and stopped listing it reports a transition',
+      vanished.first.transitions,
+      [{ host: 'live', accountId: ACCOUNT_ID, name: 'EVAL-A', to: 'closed' }]),
+    // (2) THE WHOLE OF "ONCE". The second run is identical in every input.
+    c('(2) and the second identical run reports none',
+      [vanished.second.transitions.length, vanished.secondRunWrites], [0, 0]),
+
+    // (3) Item 2's half: the account the host still lists but no longer offers.
+    c('(3) an account flagged closed but still listed also transitions',
+      flagged.first.transitions,
+      [{ host: 'live', accountId: ACCOUNT_ID, name: 'EVAL-A', to: 'closed' }]),
+    c('(4) and that one is also reported exactly once',
+      flagged.second.transitions.length, 0),
+
+    // (5) THE FAIL-SAFE, restated for the notice. A demo outage must not tell a
+    // trader their account closed today — the assertion that would otherwise
+    // be found in production, by a trader who panicked.
+    c('(5) a pull where no host answered reports no transition',
+      [outage.transitions.length, outage.counts.accountsClosed], [0, 0]),
+
+    // (6) Already closed: nothing moved, so nothing to say.
+    c('(6) an already-closed row transitions nothing',
+      settled.transitions.length, 0),
+    // (7) 'archived' → 'closed' is the broker refining a status it already
+    // gave us. The trader was told when it left 'active'.
+    c('(7) nor does archived becoming closed',
+      archived.transitions.length, 0),
+
+    // (8) WHAT THE PULL IS OFFERED. Only `status = 'active'` Tradovate rows,
+    // with the id coerced, and the manual portfolio nowhere near it.
+    c('(8) only the active broker rows are offered to the pull',
+      [...offered].sort((a, b) => a.accountId - b.accountId),
+      [
+        { host: 'live', accountId: ACCOUNT_ID },
+        { host: 'demo', accountId: 1_805_222 },
+      ].sort((a, b) => a.accountId - b.accountId)),
+    c('(9) and a bigint returned as a string is still a usable id',
+      offered.some((known) => known.accountId === 1_805_222), true),
+
+    // (10) THE FLAG GATE. `accounts` is 037's table and a deployment may not
+    // have run it, so with the import off this must answer nothing rather
+    // than naming a column.
+    c('(10) with the import flag off, nothing is read and nothing is offered',
+      (await readActiveAccounts({ client: mixedDb.client(), userId: USER, env: OFF })).length, 0),
+
+    // (11) THE SENTENCE. Both forms, and the label is a label.
+    c('(11) the named sentence is the one the ticket asked for',
+      noticeLine({ kind: 'account_closed_today', account: label }),
+      `התיק ${label} נסגר היום — אם הייתה עסקה היום, הוסף אותה ידנית`),
+    c('(12) and an unresolved label degrades rather than rendering a gap',
+      noticeLine({ kind: 'account_closed_today', account: null }),
+      'אחד התיקים נסגר היום — אם הייתה עסקה היום, הוסף אותה ידנית'),
+
+    // (13) NOT AN ID, EVER. The wire type has no field for one, so this is
+    // about the SENTENCE: a label that is somehow an id must not read as one.
+    c('(13) no account id reaches either sentence',
+      [
+        noticeLine({ kind: 'account_closed_today', account: label }),
+        noticeLine({ kind: 'account_closed_today', account: null }),
+      ].some((line) => line.includes(String(ACCOUNT_ID))),
+      false),
+
+    // (14) ORDERING. It outranks the two "we do not support this" lines: they
+    // will still be true tomorrow, this has until the nightly reset.
+    c('(14) it is ordered above the unsupported-account lines',
+      orderNotices([
+        { kind: 'unpriced_product', root: 'ES' },
+        { kind: 'account_type', account: 'B' },
+        { kind: 'account_closed_today', account: 'A' },
+      ]).map((n) => n.kind),
+      ['account_closed_today', 'account_type', 'unpriced_product']),
+
+    // (15) It survives the wire parser, which is what a deployment skew needs.
+    c('(15) it round-trips through readNotices',
+      readNotices([{ kind: 'account_closed_today', account: label }]),
+      [{ kind: 'account_closed_today', account: label }]),
+    c('(16) and an empty label becomes the unnamed form rather than a gap',
+      readNotices([{ kind: 'account_closed_today', account: '' }]),
+      [{ kind: 'account_closed_today', account: null }]),
+
+    // (17) NOT A PARTIAL DAY. The pull now carries the account, so the
+    // ordinary version of this day is COMPLETE — and marking it partial would
+    // drop the rules to Reflect's own rows every time a prop account closes.
+    // See the note beside PARTIAL_DAY_KINDS.
+    c('(17) it does not mark the day partial',
+      makesDayPartial([{ kind: 'account_closed_today' }]), false),
+
+    // (18) A clean sync says nothing, which is what keeps all of this free.
+    c('(18) an ordinary sync reports no transition',
+      (await quietAccountSync({
+        client: new FakeDb(storedActive()).client(),
+        userId: USER,
+        hosts: [answered('live', [BROKER_ACCOUNT])],
+        env: ON,
+        nowMs: ACCOUNT_LATER,
+      })).transitions.length,
+      0),
+  ]);
+}
+
 async function accountStampGroup() {
   /** An already-imported trade, with no account pointed at it yet. */
   const importedRow = (over: Row = {}): Row => ({
@@ -7488,6 +7705,7 @@ async function main() {
   await accountRecordGroup();
   await accountBoundaryGroup();
   await accountClosureGroup();
+  await closedTodayNoticeGroup();
   await accountStampGroup();
 
   // REF-113 Stage 3 — the broker's stop, written.
