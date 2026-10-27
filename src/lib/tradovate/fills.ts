@@ -437,14 +437,23 @@ export type PullNotice =
    * to cast — and a cast is exactly what must not stand between a type that
    * holds a broker account id and a type that crosses the wire.
    */
-  | SkippedAccountNotice<'account_currency'>
-  | SkippedAccountNotice<'account_type'>
+  | AccountNotice<'account_currency'>
+  | AccountNotice<'account_type'>
+  /**
+   * An account the broker stopped offering during the day (REF-124).
+   *
+   * THE ONE MEMBER NO PULL PRODUCES. It is raised by ./account-sync.ts, which
+   * is the only code that can see a row CHANGE, and joins this union in
+   * ./sync.ts so that it reaches the trader through the same reducer and the
+   * same label resolution as the rest. See {@link import('./notices').BrokerNotice}.
+   */
+  | AccountNotice<'account_closed_today'>
   | { kind: 'no_accounts' }
   | { kind: 'host_degraded' }
   | { kind: 'unpriced_product'; root: string | null };
 
-/** One account left out of the pull, with what it takes to name it. */
-interface SkippedAccountNotice<K extends 'account_currency' | 'account_type'> {
+/** One account the trader needs told about, with what it takes to name it. */
+interface AccountNotice<K extends 'account_currency' | 'account_type' | 'account_closed_today'> {
   kind: K;
   host: TradovateEnvironment;
   accountId: number;

@@ -170,6 +170,45 @@ export interface AccountSyncResult {
   counts: AccountSyncCounts;
   /** Empty when the flag is off, which is what makes the import's column optional. */
   identities: Map<string, string>;
+  /**
+   * The accounts that stopped being open DURING this run (REF-124).
+   *
+   * Empty on every ordinary sync, which is what makes it free to carry, and
+   * what makes a non-empty one worth a sentence. See {@link AccountTransition}.
+   */
+  transitions: AccountTransition[];
+}
+
+/**
+ * One account that was open to us when this run started and is not now
+ * (REF-124).
+ *
+ * THIS IS THE ONLY PLACE A TRANSITION CAN BE SEEN. The day pull compares a
+ * host's answer against our table and can tell that an account is missing, but
+ * only this module knows whether the row was ALREADY closed on an earlier run
+ * — and "the account closed today" and "the account has been closed for a
+ * fortnight" are the same `/account/list` absence. The difference is a status
+ * column, which is here.
+ *
+ * ONCE PER ACCOUNT, EVER, AND NOT BY A DEDUPE. Both branches that produce one
+ * fire only on a row whose stored status is `'active'`, and both write a
+ * different status in the same statement. So the second run cannot produce it
+ * again — not because something remembered, but because the condition is
+ * destroyed by the act of reporting it. That is why this needs no notices
+ * table, no `dismissed_at`, and no migration.
+ *
+ * CARRIES THE BROKER'S OWN `display_name` AS `name`, never an id. ./sync.ts
+ * resolves it to the trader's nickname where there is one, by the same path and
+ * the same rule as every other account-bearing notice; the wire type has no
+ * field an id could travel in.
+ */
+export interface AccountTransition {
+  host: TradovateEnvironment;
+  accountId: number;
+  /** The broker's label, as the fallback. `''` when the row never held one. */
+  name: string;
+  /** What it moved to. Both are "the trader cannot trade this any more". */
+  to: Exclude<AccountStatus, 'active'>;
 }
 
 /**
@@ -181,7 +220,7 @@ export interface AccountSyncResult {
  * and can safely be shared.
  */
 function didNotRun(): AccountSyncResult {
-  return { counts: NOTHING, identities: new Map() };
+  return { counts: NOTHING, identities: new Map(), transitions: [] };
 }
 
 /**
@@ -391,6 +430,8 @@ export async function syncBrokerAccounts(
   const counts: AccountSyncCounts = { ...NOTHING, ran: true };
   const refusals: string[] = [];
   const seenAt = new Date(nowMs).toISOString();
+  /** Rows that left `'active'` in this run. See {@link AccountTransition}. */
+  const transitions: AccountTransition[] = [];
 
   // One read for every Tradovate account this trader has, including the ones
   // no host listed today — those are what the closure rule is about, so the
@@ -409,7 +450,10 @@ export async function syncBrokerAccounts(
     // answer.
     counts.failed = 1;
     report(counts, [`read:${readError.code ?? 'none'}`]);
-    return { counts, identities: new Map() };
+    // No transitions either, and for the same reason as the empty identities: a
+    // failure to ask is not an answer, so nothing here may claim an account
+    // closed today.
+    return { counts, identities: new Map(), transitions: [] };
   }
 
   const stored = new Map<string, StoredAccount>();
@@ -447,14 +491,28 @@ export async function syncBrokerAccounts(
       seen.add(key);
       counts.accountsSeen += 1;
 
+      const status = statusFor(account, tradeable);
       const wanted: Record<string, string> = {
         display_name: account.name,
-        status: statusFor(account, tradeable),
+        status,
         last_seen_at: seenAt,
       };
 
       const existing = stored.get(key);
       if (existing) {
+        // THE STILL-LISTED HALF OF REF-124's TRANSITION. A firm can retire an
+        // evaluation account without removing it: flag it `closed`, flag it
+        // `restricted`, make it read-only. The absence branch below never sees
+        // that account — the host listed it, so it is `seen` — and before
+        // REF-124 the status moved to 'closed' with nothing said about it.
+        //
+        // Read BEFORE the restate, because the restate is what destroys the
+        // evidence. `'active'` and not `!== status` is the test: a row moving
+        // 'archived' → 'closed' is a broker refining what it already said, not
+        // an account closing today.
+        if (existing.status === 'active' && status !== 'active') {
+          transitions.push({ host: host.host, accountId: account.id, name: account.name, to: status });
+        }
         await restate(client, userId, existing, wanted, counts, refusals);
         continue;
       }
@@ -487,6 +545,29 @@ export async function syncBrokerAccounts(
       continue;
     }
     counts.accountsClosed += 1;
+
+    // REF-124: AFTER THE WRITE SUCCEEDED, AND ONLY FROM 'active'.
+    //
+    // After, because a notice promising the trader their account closed today
+    // while the row still says `active` would repeat on every sync until the
+    // write finally landed — the once-per-account guarantee is the status
+    // column, so it is only earned once the column moved.
+    //
+    // From 'active' only, so that an 'archived' row going 'closed' is silent:
+    // that is a broker refining a status it already gave us, and the trader was
+    // told when the account left 'active'.
+    if (row.status === 'active') {
+      const accountId = Number(row.broker_account_id);
+      const host = row.broker_host;
+      if (Number.isFinite(accountId) && (host === 'live' || host === 'demo')) {
+        transitions.push({
+          host,
+          accountId,
+          name: typeof row.display_name === 'string' ? row.display_name : '',
+          to: 'closed',
+        });
+      }
+    }
   }
 
   // Stage 2's half: point the rows that already carry the ids at the accounts
@@ -500,7 +581,7 @@ export async function syncBrokerAccounts(
   });
 
   report(counts, refusals);
-  return { counts, identities };
+  return { counts, identities, transitions };
 }
 
 /** `${host}:${id}` for a stored row, or null when the row cannot be keyed. */

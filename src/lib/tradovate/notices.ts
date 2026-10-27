@@ -117,6 +117,32 @@ export type BrokerNotice =
   /** An account whose `accountType` this integration does not handle (§5.12). */
   | { kind: 'account_type'; account: string | null }
   /**
+   * An account the broker stopped offering DURING this trading day (REF-124).
+   *
+   * THE ONE MEMBER THAT IS NOT ABOUT A LIMIT OF REFLECT'S. Every sibling says
+   * "we cannot handle this" — a currency, an account type, a product, a host.
+   * This one says something happened at the broker, inside the day, that the
+   * trader is better placed to check than we are: a prop firm closes an
+   * evaluation account the moment it is passed or breached, and the trade that
+   * did it is in the day that is still running.
+   *
+   * IT IS RAISED EVEN THOUGH THE PULL NOW TRIES TO RECOVER THAT TRADE
+   * (./fills.ts' carry-forward), and that is deliberate rather than
+   * belt-and-braces. Whether the fills are still reachable for an account the
+   * broker has detached is NOT MEASURED — `/position/list` is the hop that
+   * decides it and no probe has ever asked — so the recovery is best-effort by
+   * construction. A sentence that costs nothing is the difference between a
+   * trader checking one number and a trader never learning the trade is
+   * missing. See also: it is not in {@link PARTIAL_DAY_KINDS}, and the note
+   * there says why.
+   *
+   * ONCE PER ACCOUNT, EVER. Not a standing condition like its siblings — it is
+   * a TRANSITION, and ./account-sync.ts raises it from the one branch that can
+   * only fire once per account because it is the branch that writes the status
+   * which stops it firing again.
+   */
+  | { kind: 'account_closed_today'; account: string | null }
+  /**
    * One of the two hosts did not answer, so the day may be short (§5.2).
    *
    * DELIBERATELY GENERIC. Which host failed, what it answered and how many
@@ -140,14 +166,23 @@ const KIND_ORDER: readonly BrokerNotice['kind'][] = [
   'connection_environment',
   'connection_expiring',
   'no_accounts',
+  // ABOVE THE TWO "WE DO NOT SUPPORT THIS" LINES (REF-124). A trade that may be
+  // missing from today outranks an account or a product Reflect cannot handle:
+  // the second two will still be true tomorrow and can be read at leisure,
+  // while this one has until the nightly reset to be acted on.
+  'account_closed_today',
   'account_currency',
   'account_type',
   'host_degraded',
   'unpriced_product',
 ];
 
-/** The two members carrying a trader-visible account label. */
-const ACCOUNT_KINDS: readonly BrokerNotice['kind'][] = ['account_currency', 'account_type'];
+/** The members carrying a trader-visible account label. */
+const ACCOUNT_KINDS: readonly BrokerNotice['kind'][] = [
+  'account_currency',
+  'account_type',
+  'account_closed_today',
+];
 
 // ── The copy ────────────────────────────────────────────────────────────────
 //
@@ -184,6 +219,18 @@ export function noticeLine(notice: BrokerNotice): string {
       return notice.account === null
         ? 'אחד מחשבונות הברוקר מסוג שאינו נתמך — צור קשר ונבדוק'
         : `החשבון ${notice.account} מסוג שאינו נתמך — צור קשר ונבדוק`;
+    case 'account_closed_today':
+      // THE ONE SENTENCE IN THIS FUNCTION THAT ASKS THE TRADER TO DO SOMETHING
+      // WITH THEIR OWN JOURNAL, and it is allowed for the reason the other two
+      // exceptions give: it instructs about REFLECT, names no market, no
+      // position and no price, and the alternative is a trade that silently
+      // never existed. "אם הייתה" is load-bearing — we do not know whether
+      // there was a trade today on that account, and a sentence that assumed
+      // one would be wrong for every trader who closed an account they had
+      // already finished with.
+      return notice.account === null
+        ? 'אחד התיקים נסגר היום — אם הייתה עסקה היום, הוסף אותה ידנית'
+        : `התיק ${notice.account} נסגר היום — אם הייתה עסקה היום, הוסף אותה ידנית`;
     case 'host_degraded':
       return 'חלק מהנתונים מהברוקר לא נטענו — ננסה שוב בסנכרון הבא';
     case 'unpriced_product':
@@ -356,6 +403,29 @@ export const PARTIAL_DAY_KINDS: readonly string[] = [
   'unpriced_product',
 ];
 
+// `account_closed_today` IS DELIBERATELY NOT IN THAT LIST (REF-124), and the
+// REF-124 investigation argued the opposite before the fix existed — so the
+// reversal is worth recording.
+//
+// The argument for including it was that the day may be missing a trade, and an
+// under-counted day makes every rule more permissive. That was correct while
+// nothing could be done about it. Items 1-3 now CARRY the closed account
+// through the pull, so on the ordinary version of this day the trade is
+// imported and the day is complete — and marking it partial would drop the
+// rules back to Reflect's own rows for a trader whose broker figures are
+// entirely sound, every time a prop account closes.
+//
+// What is left is the case where the recovery found nothing because the broker
+// stopped serving the position too. That day IS short, and this flag cannot
+// tell it apart from the complete one: both produce exactly this notice. Of the
+// two ways to be wrong, a sentence the trader can act on beats a silent
+// fallback they cannot see — which is the same reasoning that put the sentence
+// there in the first place.
+//
+// It would also have no effect today: `makesDayPartial` is read by /today and
+// /trades over the PULL's notices, and this one is raised by ./account-sync.ts
+// on the /sync path, which those routes do not run.
+
 /**
  * Whether these notices mean the day's figures are incomplete.
  *
@@ -408,7 +478,11 @@ export function noticeLines(notices: readonly BrokerNotice[]): string[] {
  */
 function noticeKey(notice: BrokerNotice): string {
   if (notice.kind === 'unpriced_product') return `${notice.kind}:${notice.root ?? ''}`;
-  if (notice.kind === 'account_currency' || notice.kind === 'account_type') {
+  if (
+    notice.kind === 'account_currency' ||
+    notice.kind === 'account_type' ||
+    notice.kind === 'account_closed_today'
+  ) {
     return `${notice.kind}:${notice.account ?? ''}`;
   }
   return notice.kind;
@@ -474,7 +548,7 @@ export function readNotices(value: unknown): BrokerNotice[] {
     if (typeof kind === 'string' && ACCOUNT_KINDS.includes(kind as BrokerNotice['kind'])) {
       const account = record.account;
       notices.push({
-        kind: kind as 'account_currency' | 'account_type',
+        kind: kind as 'account_currency' | 'account_type' | 'account_closed_today',
         account: typeof account === 'string' && account !== '' ? account : null,
       });
       continue;

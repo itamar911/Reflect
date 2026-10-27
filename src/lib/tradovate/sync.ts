@@ -235,7 +235,10 @@ async function toWireNotices(params: {
   if (notices.length === 0) return [];
 
   const named = notices.some(
-    (notice) => notice.kind === 'account_currency' || notice.kind === 'account_type'
+    (notice) =>
+      notice.kind === 'account_currency' ||
+      notice.kind === 'account_type' ||
+      notice.kind === 'account_closed_today'
   );
 
   const labels = new Map<string, string>();
@@ -251,7 +254,11 @@ async function toWireNotices(params: {
 
   return orderNotices(
     notices.map((notice) => {
-      if (notice.kind !== 'account_currency' && notice.kind !== 'account_type') {
+      if (
+        notice.kind !== 'account_currency' &&
+        notice.kind !== 'account_type' &&
+        notice.kind !== 'account_closed_today'
+      ) {
         // `no_accounts`, `host_degraded` and `unpriced_product` carry nothing
         // that needs resolving, and the last of the three already holds a root
         // rather than a contract.
@@ -373,7 +380,13 @@ async function pullAndImport(request: SyncRequest): Promise<SyncResult> {
   // REF-124. See {@link readActiveAccounts}.
   const knownActiveAccounts = await readActiveAccounts({ client, userId, env });
 
-  const { day, trades, held, notices: pulled, accounts: hosts } = await loadBrokerDay({
+  const {
+    day,
+    trades,
+    held,
+    notices: pulledByHosts,
+    accounts: hosts,
+  } = await loadBrokerDay({
     readers: {
       live: readerFor(api.hosts.live.url),
       demo: readerFor(api.hosts.demo.url),
@@ -396,12 +409,41 @@ async function pullAndImport(request: SyncRequest): Promise<SyncResult> {
   // `hosts` carries one entry per host that ANSWERED discovery, which is what
   // scopes the closure rule. It costs ZERO UPSTREAM REQUESTS: every account in
   // it came out of the `/account/list` the pull above already made.
-  const { counts: accounts, identities } = await syncBrokerAccounts({
+  const {
+    counts: accounts,
+    identities,
+    transitions,
+  } = await syncBrokerAccounts({
     client,
     userId,
     hosts,
     env,
   });
+
+  // ── The sentence for an account that closed today (REF-124 item 4) ────────
+  //
+  // JOINED TO THE PULL'S OWN NOTICES RATHER THAN CARRIED SEPARATELY, so it
+  // reaches the trader through one reducer, one ordering, one de-duplication
+  // and one label resolution. A second channel to the same panel would be a
+  // second place to forget to strip an account id.
+  //
+  // THE ONLY NOTICE IN THE PRODUCT THAT IS NOT DERIVED FROM STATE. Every other
+  // member of the union is re-computed from the world on each run and is
+  // therefore self-healing if a run is lost. This one is a transition, so a
+  // sync that throws between the status write and this line loses the
+  // sentence — the write is what the once-per-account guarantee is made of, and
+  // it has already happened. That is the right side to fail on: the wrong one
+  // is a notice the trader sees every day forever because nothing could ever
+  // retract it.
+  const pulled: PullNotice[] = [
+    ...pulledByHosts,
+    ...transitions.map((transition) => ({
+      kind: 'account_closed_today' as const,
+      host: transition.host,
+      accountId: transition.accountId,
+      name: transition.name,
+    })),
+  ];
 
   // THE STOP ORDERS, AND ONLY FOR THE TRADES THAT STILL NEED THEM (REF-113
   // Stage 3). Two reads gate it and both matter: `tradesNeedingStopHistory` is
