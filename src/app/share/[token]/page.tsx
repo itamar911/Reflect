@@ -31,6 +31,7 @@ import { notFound } from 'next/navigation';
 
 import { SiteDisclosureFooter } from '@/components/legal/SiteDisclosureFooter';
 import SharedDayCard from '@/components/share/SharedDayCard';
+import { CARD_SIZES } from '@/lib/share/cardImage';
 import { readSharedCard } from '@/lib/share/store';
 import { tradingDayLabel } from '@/lib/tradingDay';
 
@@ -49,11 +50,27 @@ export const dynamic = 'force-dynamic';
 /**
  * Per-card metadata, and the first `generateMetadata` in this codebase.
  *
- * NO `openGraph.images` YET. The image is Stage 3, and a card pointing at an
- * image route that does not exist would unfurl worse than one with no image at
- * all — `twitter: { card: 'summary_large_image' }` in the root layout degrades
- * to a plain summary on its own, which is the current behaviour everywhere
- * else in the app and is the honest state until there are bytes to serve.
+ * THE OG IMAGE IS THE POINT OF STAGE 3. `openGraph.images` and the Twitter
+ * card both name ./image, the 1200×630 render — so pasting a link into
+ * WhatsApp, X or Telegram shows the day's card rather than a text-only
+ * preview. The root layout has declared `twitter: { card:
+ * 'summary_large_image' }` since before this feature existed and had no image
+ * to put in it; `openGraph.images` was the missing piece (REF-125 §1.7).
+ *
+ * THE URL IS RELATIVE, resolved against `metadataBase` in the root layout
+ * (`https://reflecttrading.app`). An absolute URL built here from a request
+ * header would be forgeable and would also get the scheme wrong behind the
+ * proxy; `metadataBase` is the one place the canonical origin is stated.
+ *
+ * A REVOKED CARD ADVERTISES NO IMAGE. The `card === null` branch returns
+ * metadata with no `openGraph` block at all, so an unfurler is never pointed
+ * at a route that will 404 on it — and a platform re-scraping a withdrawn link
+ * is told there is nothing to show rather than being handed a broken
+ * reference.
+ *
+ * THE ALT TEXT CARRIES NO FIGURE, for the same reason the title does not: alt
+ * text is read aloud and is indexed, and the trader chose to publish a number
+ * on a card, not into every surface that quotes the card.
  *
  * `index: false`, `follow: false` — AND THE PAGE IS STILL FETCHABLE, which is
  * the distinction robots.ts:5-11 already reasons about for /demo: blocking the
@@ -76,17 +93,29 @@ export async function generateMetadata({
   if (card === null) {
     return { title: 'Reflect', robots: { index: false, follow: false } };
   }
+
+  const title = `${tradingDayLabel(card.tradingDay)} — Reflect`;
+  const description = 'יום מסחר ששותף מ-Reflect.';
+  const image = {
+    url: `/share/${token}/image`,
+    width: CARD_SIZES.og.width,
+    height: CARD_SIZES.og.height,
+    alt: 'כרטיס יום המסחר',
+  };
+
   return {
-    title: `${tradingDayLabel(card.tradingDay)} — Reflect`,
-    description: 'יום מסחר ששותף מ-Reflect.',
+    title,
+    description,
     robots: { index: false, follow: false },
     openGraph: {
       type: 'article',
       locale: 'he_IL',
       siteName: 'Reflect',
-      title: `${tradingDayLabel(card.tradingDay)} — Reflect`,
-      description: 'יום מסחר ששותף מ-Reflect.',
+      title,
+      description,
+      images: [image],
     },
+    twitter: { card: 'summary_large_image', title, description, images: [image] },
   };
 }
 
