@@ -916,6 +916,16 @@ export async function loadHostTrades(params: {
   host: TradovateEnvironment;
   /** This host's eligible accounts, from {@link discoverHostAccounts}. */
   accounts: readonly TradovateAccount[];
+  /**
+   * Accounts on THIS host whose fills still count for this run although
+   * `/account/list` no longer offers them up (REF-124).
+   *
+   * Ids only, and they are ids the caller has already proved are this trader's
+   * — see {@link BrokerDayRequest.knownActiveAccounts}. There is no
+   * `TradovateAccount` to put here: the whole point is that the host did not
+   * return one.
+   */
+  carriedAccountIds?: ReadonlySet<number>;
   dayStartMs: number;
   /**
    * The earliest close this pull has to be able to state, when that is before
@@ -951,13 +961,30 @@ export async function scanHost(params: Parameters<typeof loadHostTrades>[0]): Pr
   // query parameter, so a window can only widen what gets priced.
   const windowStartMs = Math.min(dayStartMs, params.windowStartMs ?? dayStartMs);
 
+  // THE ACCOUNTS THE HOST STILL OFFERS, PLUS THE ONES IT STOPPED OFFERING TODAY
+  // (REF-124). The second group is the fix: an account the host listed on an
+  // earlier run today and does not list now had a trading day, and the fills
+  // from it are reachable for as long as this trading day lasts.
+  //
+  // ONE SET AND NOT TWO, deliberately. Everything downstream — the position
+  // filter, the pair filter, ./cycles.ts' attribution — asks exactly one
+  // question, "is this account id one of ours", and a carried account's answer
+  // is yes for precisely the same reason a listed one's is. Splitting it would
+  // mean two answers to one question, which is the shape of bug this module's
+  // header is a monument to.
+  const accountIds = new Set(accounts.map((account) => account.id));
+  for (const accountId of params.carriedAccountIds ?? []) accountIds.add(accountId);
+
   // No account of this trader's own that could have been traded. An honest
   // zero, not a failure: see the closing note in ./accounts.ts. The caller does
   // not even get here — it drops such a host before asking — but the guard
   // stays, because this function's contract should not depend on that.
-  if (accounts.length === 0) return { trades: [], held: [], notices: [] };
-
-  const accountIds = new Set(accounts.map((account) => account.id));
+  //
+  // TESTED ON THE MERGED SET AND NOT ON `accounts`, which is REF-124's own
+  // case: a trader whose ONLY account was closed this morning has an empty
+  // `accounts` and one carried id, and the early return is exactly what would
+  // throw their last trade away.
+  if (accountIds.size === 0) return { trades: [], held: [], notices: [] };
 
   // Positions exist to answer one question — whose trade is this — so they are
   // filtered by account and by nothing else. In particular NOT by `tradeDate`,
@@ -1429,8 +1456,50 @@ export interface BrokerDayRequest {
    * not be able to restate a discipline figure.
    */
   windowStartMs?: number;
+  /**
+   * The accounts OUR OWN TABLE holds as `active`, host-qualified (REF-124).
+   *
+   * THE ONE FACT THE PULL CANNOT READ UPSTREAM, and the whole of the REF-124
+   * fix. A prop firm closes an evaluation account the moment it is passed or
+   * breached — in the measured case, minutes after the trade that passed it.
+   * The next sync's `/account/list` no longer holds that account, so the day
+   * pull filters its position out, its fill pairs with it, and the trade that
+   * passed the evaluation is never imported. After the nightly reset the
+   * `depthDays = 0` endpoints cannot reach it again, so it is gone for good.
+   *
+   * What this says is "we saw this account open earlier today", which is a
+   * claim only our own `accounts` table can make. Absent — every caller before
+   * REF-124, and any caller that cannot cheaply read it — the pull behaves
+   * EXACTLY as it did, which is what makes this additive.
+   *
+   * NOT A WIDER OWNERSHIP RULE. Every entry here is an account that already
+   * passed {@link import('./accounts').claimedAccounts} on an earlier run to
+   * get its row at all, so nothing can enter the day through this door that
+   * was not already this trader's. See the carry-forward block in
+   * {@link loadBrokerDay}, which is also where the "host answered" scope is.
+   */
+  knownActiveAccounts?: readonly KnownActiveAccount[];
   /** Injected so the day pull is deterministic under test. */
   now?: number;
+}
+
+/**
+ * One account our own `accounts` table holds as `active` (REF-124).
+ *
+ * HOST-QUALIFIED, because an account identity in this integration is
+ * `(broker_account_id, broker_host)` and nothing documents the two id spaces as
+ * shared — the reversal {@link loadBrokerDay}'s header sets out at length. A
+ * bare id would carry a demo account's claim onto a live host, which is the
+ * exact class of bug REF-112 §5.3 was.
+ *
+ * Declared here rather than in ./account-sync.ts, which is the module that
+ * reads the table, for the reason `accountIdentity` lives in ./accounts.ts: the
+ * reader already imports this module's types, and the day pull must not import
+ * the writer's.
+ */
+export interface KnownActiveAccount {
+  host: TradovateEnvironment;
+  accountId: number;
 }
 
 /**
@@ -1510,7 +1579,8 @@ export interface BrokerDayRequest {
  * the route maps those to `broker_unavailable`.
  */
 export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDay> {
-  const { readers, environment, dayStartMs, tradovateUserId, windowStartMs } = request;
+  const { readers, environment, dayStartMs, tradovateUserId, windowStartMs, knownActiveAccounts } =
+    request;
   const now = request.now ?? Date.now();
   const asOf = new Date(now).toISOString();
 
@@ -1535,6 +1605,16 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
   let crossHostCollisions = 0;
   /** How many hosts were dropped by rule 1. Counted for the log line. */
   let hostsDropped = 0;
+  /**
+   * How many accounts this pull carried past a host that stopped listing them
+   * (REF-124). Counted for the log line, and read once below.
+   *
+   * A COUNT, NEVER AN ID. The log-line rule two paragraphs down in this
+   * function is the strictest in the integration and this number obeys it: on
+   * an ordinary day it is 0, and a non-zero value is the first evidence we have
+   * ever had that this path runs in production at all.
+   */
+  let carriedAccounts = 0;
   const pooled: BrokerTrade[] = [];
   /** What no host could state. See {@link HeldGroup}. */
   const held: HeldGroup[] = [];
@@ -1547,9 +1627,12 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
     const reader = readers[env]!;
 
     let accepted: TradovateAccount[];
+    /** This host's claimed accounts, for REF-124's carry-forward below. */
+    let hostClaimed: ClaimedAccount[];
     try {
       const discovered = await discoverHostAccounts(reader, tradovateUserId);
       accepted = discovered.accepted;
+      hostClaimed = discovered.claimed;
       // PUSHED HERE AND NOWHERE ELSE: past the catch, so the list holds exactly
       // the hosts that returned something. A host dropped by rule 1 below is
       // absent, and the accounts sync reads that absence as "not asked" rather
@@ -1602,11 +1685,45 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
       bareIds.add(account.id);
     }
 
+    // ── The accounts this host stopped listing TODAY (REF-124) ─────────────
+    //
+    // INSIDE THE `try`'s SUCCESS PATH, WHICH IS THE WHOLE SAFETY OF IT. It is
+    // the same scope ./account-sync.ts' closure rule uses and for the same
+    // reason: a host that did not answer has said nothing about its accounts,
+    // and treating its silence as "they all closed" would carry a trader's
+    // whole portfolio into every pull on the first bad morning. A host that
+    // answered has told us what it holds, and an account our table recorded as
+    // open today that is not in that answer stopped being offered today.
+    //
+    // HOST-QUALIFIED ON BOTH SIDES. Only entries naming THIS host are
+    // considered, so a demo row can never be carried onto live — the §5.3
+    // reversal above, applied to the one new input.
+    //
+    // NOT ADDED TO `claimed` OR `bareIds`. Those two measure what
+    // `/account/list` said: `claimed.size` is what the accounts sync records
+    // and what the `no_accounts` notice keys on, and `bareIds` exists to
+    // measure a cross-host id collision in the LISTS. A carried account is
+    // precisely an account no list holds, so counting it in either would make
+    // both numbers lie about their own subject.
+    const listedHere = new Set(hostClaimed.map((entry) => entry.account.id));
+    const carriedHere = new Set(
+      (knownActiveAccounts ?? [])
+        .filter((known) => known.host === env && !listedHere.has(known.accountId))
+        .map((known) => known.accountId)
+    );
+    carriedAccounts += carriedHere.size;
+
     // Nothing eligible here: this host holds none of this trader's accounts.
     // There is nothing to continue with, so the six remaining reads are not
     // made — (a′)'s whole saving, and all that is left of it now that an
     // account on the second host is never "the first host's".
-    if (fresh.length === 0) continue;
+    //
+    // THE CARRIED SET COUNTS AS SOMETHING TO CONTINUE WITH (REF-124). The
+    // trader whose only account closed this morning has `fresh.length === 0`
+    // and one carried id, and this `continue` is the line that would lose them
+    // the trade that closed the account. The saving is unaffected on every
+    // ordinary pull, where the carried set is empty.
+    if (fresh.length === 0 && carriedHere.size === 0) continue;
 
     // Rule 2: no try/catch. This host returned eligible accounts, so a failure
     // from here on is a day that cannot be stated, and the pull fails whole.
@@ -1614,6 +1731,7 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
       reader,
       host: env,
       accounts: fresh,
+      carriedAccountIds: carriedHere,
       dayStartMs,
       windowStartMs,
     });
@@ -1644,7 +1762,13 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
   // A pull where no host answered never reaches here (the mint host rethrows),
   // and a pull with no readers at all has nothing to say about a scope it
   // never saw.
-  if (accounts.length > 0 && claimed.size === 0) {
+  // AND NOT WHEN SOMETHING WAS CARRIED (REF-124). "לא נמצאו תיקים" beside a
+  // journal row recovered from an account that closed an hour ago is two
+  // statements that contradict each other, and the notice is in
+  // PARTIAL_DAY_KINDS — so it would also mark a day short that this pull just
+  // finished completing. The trader is told about that account by the closure
+  // notice ./account-sync.ts raises instead, which is the accurate sentence.
+  if (accounts.length > 0 && claimed.size === 0 && carriedAccounts === 0) {
     notices.push({ kind: 'no_accounts' });
   }
 

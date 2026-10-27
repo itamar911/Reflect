@@ -82,7 +82,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { accountIdentity } from './accounts';
-import type { HostAccounts } from './fills';
+import type { HostAccounts, KnownActiveAccount } from './fills';
 import type { TradovateEnvironment } from './hosts';
 import { isImportEnabled } from './import';
 import { redactSecrets } from './redact';
@@ -294,6 +294,72 @@ export interface AccountSyncRequest {
    * seen after it was last seen.
    */
   nowMs?: number;
+}
+
+/**
+ * The accounts this trader's table holds as OPEN, for the day pull (REF-124).
+ *
+ * WHY THE PULL NEEDS THIS AT ALL. `/account/list` answers "what does the broker
+ * offer right now", and the day pull built its whole account filter out of that
+ * one answer. But a prop firm closes an evaluation account the moment it is
+ * passed or breached, and the trade that passed it is in the same trading day.
+ * From the next pull's point of view that account never existed, so its
+ * position is filtered out, its fill pairs go with it, and the trade is lost at
+ * the nightly reset. The missing fact is not upstream — it is here, in the row
+ * this integration wrote the last time the account WAS listed.
+ *
+ * `status = 'active'` IS THE WHOLE PREDICATE, AND IT IS ALSO THE EXPIRY. The
+ * same run that pulls a carried account's fills marks its row `'closed'`
+ * ({@link syncBrokerAccounts}), so the next run does not see it here and does
+ * not carry it. That is what makes the carry-forward last exactly one run with
+ * no new column, no timestamp comparison and no migration — the window is a
+ * consequence of the write that was already happening.
+ *
+ * NEVER THROWS, AND ANSWERS `[]` FOR EVERY DOUBT. A failure here must cost the
+ * pull nothing: an empty answer is byte-for-byte the behaviour every caller had
+ * before REF-124, while a thrown error would turn a cosmetic read into a dead
+ * day pull. The flag gate is ./import.ts' — the `accounts` table is 037's and a
+ * deployment may not have run it — and a refused read is swallowed for the same
+ * reason. Both are the SAFE direction here, because the day's figures cannot be
+ * made worse by this returning nothing; they are merely not improved.
+ *
+ * THE ROW SHAPE IS READ DEFENSIVELY, for `identityOf`'s reason: PostgREST
+ * returns a BIGINT as a string often enough that assuming `number` is how a
+ * join silently never matches. `broker_host` is checked against the two values
+ * 037's CHECK permits rather than cast, so a row that somehow holds anything
+ * else is skipped instead of carried onto a host it does not name.
+ *
+ * COUNTS NOTHING AND LOGS NOTHING. The pull logs the carried count; see the
+ * log-line rule in this module's header for why not here.
+ */
+export async function readActiveAccounts(params: {
+  client: SupabaseClient;
+  userId: string;
+  env?: NodeJS.ProcessEnv;
+}): Promise<KnownActiveAccount[]> {
+  const { client, userId, env = process.env } = params;
+
+  if (typeof userId !== 'string' || userId.length === 0) return [];
+  if (!isImportEnabled(env)) return [];
+
+  const { data, error } = await client
+    .from('accounts')
+    .select('broker_account_id, broker_host')
+    .eq('user_id', userId)
+    .eq('broker', 'tradovate')
+    .eq('status', 'active');
+
+  if (error) return [];
+
+  const known: KnownActiveAccount[] = [];
+  for (const row of (data ?? []) as unknown as StoredAccount[]) {
+    const host = row.broker_host;
+    if (host !== 'live' && host !== 'demo') continue;
+    const accountId = Number(row.broker_account_id);
+    if (row.broker_account_id === null || !Number.isFinite(accountId)) continue;
+    known.push({ host, accountId });
+  }
+  return known;
 }
 
 /**

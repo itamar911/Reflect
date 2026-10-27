@@ -53,7 +53,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { portfolioLabel } from '../portfolios/portfolio';
 import { readPortfolios } from '../portfolios/read';
 import { accountIdentity } from './accounts';
-import { syncBrokerAccounts, type AccountSyncCounts } from './account-sync';
+import { readActiveAccounts, syncBrokerAccounts, type AccountSyncCounts } from './account-sync';
 import { flushUserCalls } from './call-meter';
 import { tradovateGet } from './client';
 import { getUserTradingApi, notingPenalty, readIsTradeSource } from './connections';
@@ -364,6 +364,15 @@ async function pullAndImport(request: SyncRequest): Promise<SyncResult> {
       ),
   });
 
+  // WHAT OUR OWN TABLE SAYS WAS OPEN TODAY, READ BEFORE THE PULL (REF-124).
+  //
+  // The order is forced: the pull needs this to decide which accounts' fills
+  // count, and `syncBrokerAccounts` below is what makes it stale again by
+  // closing the rows the pull just found missing. One read, no upstream cost,
+  // and `[]` on any doubt — which is exactly the behaviour this path had before
+  // REF-124. See {@link readActiveAccounts}.
+  const knownActiveAccounts = await readActiveAccounts({ client, userId, env });
+
   const { day, trades, held, notices: pulled, accounts: hosts } = await loadBrokerDay({
     readers: {
       live: readerFor(api.hosts.live.url),
@@ -373,6 +382,7 @@ async function pullAndImport(request: SyncRequest): Promise<SyncResult> {
     dayStartMs,
     windowStartMs,
     tradovateUserId: api.tradovateUserId,
+    knownActiveAccounts,
   });
 
   // THE ACCOUNTS FIRST, AND THE ORDER IS THE POINT (REF-110 Stages 1-2).
