@@ -20,7 +20,8 @@
     "test:broker-import": "tsx scripts/broker-import-check.ts",
     "test:broker-orders": "tsx scripts/broker-orders-check.ts",
     "test:broker-cycles": "tsx scripts/broker-cycles-check.ts",
-    "test:accounts": "tsx scripts/accounts-check.ts"
+    "test:accounts": "tsx scripts/accounts-check.ts",
+    "test:share": "tsx scripts/share-leak-check.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.96.0",

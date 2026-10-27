@@ -4,9 +4,14 @@ import { NextResponse, type NextRequest } from 'next/server';
 // App sections browsable in demo mode (everything else under /demo bounces home)
 // phone-showcase is internal tooling: the fixture-fed composition Playwright
 // captures for the auth-page phone mockup (not linked anywhere in the UI).
+// 'share' (REF-125) is the one section here that is ALREADY PUBLIC at its real
+// path — /share/<token> needs no session. It is listed anyway so the
+// translation suite can exercise the route against fixtures instead of against
+// a real token in a real database, and so that path gets X-Robots-Tag: noindex
+// for free from the rewrite below.
 const DEMO_SECTIONS = new Set([
   'dashboard', 'journal', 'trades', 'stats', 'setups',
-  'notebook', 'coach', 'rules', 'strategies', 'phone-showcase',
+  'notebook', 'coach', 'rules', 'strategies', 'phone-showcase', 'share',
 ]);
 
 export async function proxy(request: NextRequest) {

@@ -7,6 +7,7 @@
 
 import { isWinningTrade, tradeMoneyPnl } from '@/lib/pnl';
 import { TRADING_CURRENCY } from '@/lib/money';
+import { currentTradingDay } from '@/lib/tradingDay';
 
 // ── Demo user ─────────────────────────────────────────────────────────────────
 
@@ -371,10 +372,74 @@ const DEMO_RULE_VIOLATIONS = DEMO_TRADES
     created_at: t.submitted_at,
   }));
 
+// ── Share cards (REF-125) ─────────────────────────────────────────────────────
+
+/**
+ * The token `/demo/share/<token>` is served under.
+ *
+ * MUST BE AT LEAST 24 URL-SAFE CHARACTERS, because `isWellFormedShareToken`
+ * rejects anything shorter BEFORE the demo client is ever consulted — so a
+ * shorter fixture token would 404 the demo page without reaching a fixture at
+ * all, which looks exactly like a broken fixture and is not one.
+ *
+ * scripts/share-leak-check.ts asserts that the literal route in
+ * scripts/translation-check.mjs still contains this string. That script is
+ * plain node and cannot import TypeScript, so the path there is a literal;
+ * the assertion is what stops the two drifting into a suite that quietly
+ * tests a 404 page and passes.
+ */
+export const DEMO_SHARE_TOKEN = 'demoshare0000000000000000demo';
+
+/**
+ * One live share card, dated into the demo day so it always looks current.
+ *
+ * `.eq()` IS A NO-OP IN THE DEMO STUB (demoDb.ts' header: "filters are
+ * no-ops — fixtures are single-user"), so `/demo/share/<any well-formed
+ * token>` serves this row. That is enough for what the demo path is for —
+ * proving the route renders under a translator — and it is why the REVOKED
+ * case is asserted in share-leak-check.ts against the real reader instead of
+ * here: a stub whose filters do not apply cannot demonstrate a filter.
+ *
+ * `provenance: 'manual'` matches the trade fixtures, which carry no `source`
+ * key at all — so this row prints no provenance tag, which is the same thing a
+ * manual trader's real card does.
+ */
+const DEMO_DAILY_SHARES = [
+  {
+    id: 'demo-share-01',
+    user_id: DEMO_USER_ID,
+    token: DEMO_SHARE_TOKEN,
+    trading_day: currentTradingDay(new Date()),
+    snapshot: {
+      v: 1,
+      day: currentTradingDay(new Date()),
+      pnl: 412,
+      trades: 3,
+      wins: 2,
+      losses: 1,
+      followedPlan: { met: 3, answered: 3 },
+      stopHeld: { met: 2, answered: 3 },
+      best: 310,
+      worst: -98,
+      provenance: 'manual',
+      // NULL AND NOT 'סוחר דמו'. The demo profile's `display_name` is exactly
+      // the value REF-125 §2.6 refuses to publish by default, and a fixture
+      // that printed a name would make the anonymous default look like the
+      // exception rather than the rule.
+      nickname: null,
+    },
+    visibility: { nickname: false, accounts: false, balance: false },
+    revoked_at: null,
+    created_at: iso(0, 18),
+    updated_at: iso(0, 18),
+  },
+];
+
 /** Table name → fixture rows, consumed by the demo query stub. */
 export const DEMO_TABLES: Record<string, Record<string, unknown>[]> = {
   profiles: [DEMO_PROFILE],
   trade_plans: DEMO_TRADES,
+  daily_shares: DEMO_DAILY_SHARES,
   rule_violations: DEMO_RULE_VIOLATIONS,
   preset_rules: [DEMO_PRESET_RULES],
   custom_rules: DEMO_CUSTOM_RULES,

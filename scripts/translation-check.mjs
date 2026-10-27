@@ -29,6 +29,17 @@ const ROUTES = [
   '/', '/terms', '/privacy', '/risk-disclosure', '/login', '/signup',
   '/demo/dashboard', '/demo/trades', '/demo/stats', '/demo/journal',
   '/demo/setups', '/demo/notebook', '/demo/coach', '/demo/rules', '/demo/strategies',
+  // REF-125. The public share card, through /demo so it renders from fixtures
+  // rather than needing a live token in a real database.
+  //
+  // THE TOKEN MUST STAY IN STEP WITH `DEMO_SHARE_TOKEN` in
+  // src/lib/demo/fixtures.ts, and it is a literal here because this script is
+  // plain node and cannot import TypeScript. scripts/share-leak-check.ts
+  // asserts the two match — without that, drifting them makes this entry visit
+  // the not-found page, find no error boundary, and pass green while testing
+  // nothing. The same is true if '/share' ever leaves isMarketingRoute in
+  // src/proxy.ts, which that suite also checks.
+  '/demo/share/demoshare0000000000000000demo',
 ];
 
 // The error boundary's heading (src/app/error.tsx). Its presence means a

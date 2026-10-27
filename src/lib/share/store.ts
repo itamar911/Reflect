@@ -412,10 +412,20 @@ export interface SharedCard {
  * /demo rewrite. So this branch is reachable from /demo/* and from nowhere
  * else.
  */
-export async function readSharedCard(token: string): Promise<SharedCard | null> {
+export async function readSharedCard(
+  token: string,
+  options: { client?: SupabaseClient } = {}
+): Promise<SharedCard | null> {
   if (!isWellFormedShareToken(token)) return null;
 
-  const client = await publicReadClient();
+  // `options.client ?? <the real one>` is this repo's testability idiom —
+  // lib/tradovate/connections.ts and lib/account/deleteAccount.ts take their
+  // admin client the same way. scripts/share-leak-check.ts passes a recording
+  // stub so that "a revoked token is not found" is asserted against THIS
+  // function and its actual filters, rather than against a restatement of
+  // them: the revocation guarantee lives in the query below, so a test that
+  // did not run the query would not be testing it.
+  const client = options.client ?? (await publicReadClient());
 
   const { data, error } = await client
     .from('daily_shares')

@@ -54,7 +54,7 @@ const MOUNTS = [
   // revoked link is a page a stranger reaches and reads, and the disclosures
   // are required on every page rather than on every successful one.
   'src/app/share/[token]/page.tsx',
-  'src/app/share/not-found.tsx',
+  'src/app/share/[token]/not-found.tsx',
 ];
 
 const failures: string[] = [];

@@ -98,8 +98,16 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
   // link, and a snapshot that will not parse. The store filters
   // `revoked_at IS NULL` in the query, so a revoked token is indistinguishable
   // from an invented one and this page cannot be used to probe which tokens
-  // are real. `notFound()` gives a real 404 status — see share/not-found.tsx
-  // for what a visitor is told, and why it names revocation anyway.
+  // are real. `notFound()` gives a real 404 status — see ./not-found.tsx for
+  // what a visitor is told, and why it names revocation anyway.
+  //
+  // THAT BOUNDARY LIVES IN THIS SEGMENT AND NOT IN `share/`, which is a
+  // placement that was verified by serving it rather than assumed. At
+  // src/app/share/not-found.tsx it did not catch this page's `notFound()` at
+  // all: the 404 rendered the root layout with an empty body — no message, no
+  // footer — which is both a worse page for the stranger who opened a revoked
+  // link and a compliance gap, since the disclosures are required on every
+  // page. Keep it beside the page it covers.
   if (card === null) notFound();
 
   return (
