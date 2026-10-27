@@ -10,6 +10,7 @@ import { visibleTrades, withAccount, withHidden } from '@/lib/trades/visible';
 import LivePositions from '@/components/tradovate/LivePositions';
 import type { DashTrade } from '@/lib/dashboard/trades';
 import { tradeMoneyPnl, hasMoneyPnl, isWinningTrade, tradeDirection, tradePointsPnl } from '@/lib/pnl';
+import { currentTradingDay, tradingDayOfTrade, tradingDaysEndingAt } from '@/lib/tradingDay';
 import { getPlanLimits, type PlanTier } from '@/lib/plans/config';
 import { useMediaQuery, useBrowserTranslated } from '@/lib/hooks';
 import { useModalDialog } from '@/lib/a11y/useModalDialog';
@@ -58,7 +59,20 @@ const calcPnl = tradePointsPnl;
 function effectivePnl(t: DashTrade): number {
   return hasMoneyPnl(t) ? tradeMoneyPnl(t) : calcPnl(t) ?? 0;
 }
-function dayKey(iso: string) { return iso.slice(0, 10); }
+/**
+ * Which trading day a row's money belongs to (REF-125).
+ *
+ * WAS `iso.slice(0, 10)` — the UTC calendar date — which is the single
+ * divergence the investigation's §2.2 table is about: on an Israeli clock
+ * every trade closed between midnight and 02:00 was filed under the previous
+ * day HERE and under the right one in the journal, the email and the rule
+ * engine. One trade, two days, both on screen.
+ *
+ * Null for a row whose timestamps are unreadable, and callers skip it. That is
+ * what `slice` did too, just silently: it produced a key no series ever looked
+ * up, so the row fell out of every bucket. Same outcome, stated.
+ */
+function dayKey(t: DashTrade): string | null { return tradingDayOfTrade(t); }
 
 /** Accessible name for a "עסקאות אחרונות" row's open-detail button. Same
     composition as the trades table's rowAccessibleName: title first so the
@@ -88,39 +102,75 @@ function fmtDateTime(iso: string) {
 // ── Series builders ───────────────────────────────────────────────────────────
 type BarItem = { label: string; value: number };
 
-function buildDailySeries(dm: Record<string, number>, n: number, now: Date): BarItem[] {
-  return Array.from({ length: n }, (_, i) => {
-    const d = new Date(now); d.setDate(d.getDate() - (n - 1 - i));
-    const k = d.toISOString().slice(0, 10);
-    return { label: k.slice(5).replace('-', '/'), value: dm[k] ?? 0 };
-  });
+/**
+ * The last `n` TRADING days, oldest first (REF-125).
+ *
+ * Two things changed. The axis now steps over trading days rather than
+ * calendar days, so thirty bars are thirty sessions instead of thirty dates of
+ * which eight or nine are a shut market drawn as a zero. And the keys come
+ * from lib/tradingDay.ts rather than from `toISOString()` on a local `Date`,
+ * which is what kept this honest: the bucket keys are Chicago civil dates now,
+ * and a local date formatted as UTC would have missed them by one for half the
+ * day.
+ */
+function buildDailySeries(dm: Record<string, number>, n: number, today: string): BarItem[] {
+  return tradingDaysEndingAt(today, n).map((day) => ({
+    label: day.slice(5).replace('-', '/'),
+    value: dm[day] ?? 0,
+  }));
 }
-function buildWeeklySeries(dm: Record<string, number>, n: number, now: Date): BarItem[] {
+/**
+ * Twelve calendar weeks, each the sum of the trading days inside it.
+ *
+ * STILL CUT ON SUNDAY-TO-SATURDAY CIVIL WEEKS, which is what the product has
+ * always shown and not something REF-125 decides. What changed is that the
+ * range is compared as `YYYY-MM-DD` STRINGS against the bucket keys instead of
+ * being re-derived from a `Date` per day: the keys are civil dates with no
+ * instant in them, so string order is date order and there is no zone left to
+ * get wrong. A Sunday contributes nothing on its own — the Sunday 17:00 open
+ * belongs to Monday — so a week is Monday to Friday, correctly.
+ */
+function buildWeeklySeries(dm: Record<string, number>, n: number, today: string): BarItem[] {
+  const [year, month, day] = today.split('-').map(Number);
+  const anchor = new Date(Date.UTC(year, month - 1, day));
+  const keys = Object.keys(dm);
   return Array.from({ length: n }, (_, i) => {
-    const start = new Date(now);
-    start.setDate(start.getDate() - start.getDay() - (n - 1 - i) * 7);
+    const start = new Date(anchor);
+    start.setUTCDate(anchor.getUTCDate() - anchor.getUTCDay() - (n - 1 - i) * 7);
+    const end = new Date(start);
+    end.setUTCDate(start.getUTCDate() + 6);
+    const from = start.toISOString().slice(0, 10);
+    const to = end.toISOString().slice(0, 10);
     let sum = 0;
-    for (let d = 0; d < 7; d++) {
-      const day = new Date(start); day.setDate(start.getDate() + d);
-      sum += dm[day.toISOString().slice(0, 10)] ?? 0;
-    }
+    for (const k of keys) if (k >= from && k <= to) sum += dm[k];
     return { label: `W${i + 1}`, value: sum };
   });
 }
-function buildMonthlySeries(dm: Record<string, number>, n: number, now: Date): BarItem[] {
+/**
+ * Twelve months, each the sum of the trading days inside it.
+ *
+ * Buckets are matched on the key's `YYYY-MM` PREFIX. This used to do
+ * `new Date(k).getMonth()`, which parses the key at UTC midnight and then
+ * reads the month back on the LOCAL clock — so for any trader west of
+ * Greenwich the first of every month was counted into the month before. Nobody
+ * had hit it because the product is Israeli, but the keys are Chicago civil
+ * dates now and the shape of the bug is the one REF-125 exists to remove.
+ */
+function buildMonthlySeries(dm: Record<string, number>, n: number, today: string): BarItem[] {
+  const [year, month] = today.split('-').map(Number);
+  const keys = Object.keys(dm);
   return Array.from({ length: n }, (_, i) => {
-    const d = new Date(now.getFullYear(), now.getMonth() - (n - 1 - i), 1);
-    const yr = d.getFullYear(), mo = d.getMonth();
-    const sum = Object.keys(dm).reduce<number>((s, k) => {
-      const kd = new Date(k);
-      return kd.getFullYear() === yr && kd.getMonth() === mo ? s + (dm[k] ?? 0) : s;
-    }, 0);
-    return { label: `${mo + 1}/${String(yr).slice(2)}`, value: sum };
+    const d = new Date(Date.UTC(year, month - 1 - (n - 1 - i), 1));
+    const yr = d.getUTCFullYear(), mo = d.getUTCMonth() + 1;
+    const prefix = `${yr}-${String(mo).padStart(2, '0')}`;
+    let sum = 0;
+    for (const k of keys) if (k.startsWith(prefix)) sum += dm[k];
+    return { label: `${mo}/${String(yr).slice(2)}`, value: sum };
   });
 }
-function buildCumulativeSeries(dm: Record<string, number>, n: number, now: Date): BarItem[] {
+function buildCumulativeSeries(dm: Record<string, number>, n: number, today: string): BarItem[] {
   let cum = 0;
-  return buildDailySeries(dm, n, now).map(d => { cum += d.value; return { label: d.label, value: cum }; });
+  return buildDailySeries(dm, n, today).map(d => { cum += d.value; return { label: d.label, value: cum }; });
 }
 
 // ── Window scoring helper (for trend computation) ─────────────────────────────
@@ -162,7 +212,8 @@ function windowAvgScores(wClosed: DashTrade[]): { disc: number; perf: number } {
   const al = wMoneyLosses.length > 0 ? gl / wMoneyLosses.length : 0;
   const wDayMap: Record<string, number> = {};
   for (const t of wClosed) {
-    const k = dayKey(t.closed_at ?? t.submitted_at);
+    const k = dayKey(t);
+    if (k === null) continue;
     wDayMap[k] = (wDayMap[k] ?? 0) + tradeMoneyPnl(t);
   }
   const wDayVals    = Object.values(wDayMap);
@@ -227,11 +278,15 @@ function computeAll(trades: DashTrade[], now: Date) {
       ? s + tradeMoneyPnl(t) : s;
   }, 0);
 
-  const todayStr    = now.toISOString().slice(0, 10);
+  // THE DAY THIS SCREEN IS ABOUT (REF-125). `now.toISOString().slice(0, 10)`
+  // stood here — the UTC date — and it is the reason the dashboard's "today"
+  // and the journal's disagreed for the first two or three hours of every
+  // Israeli morning. Both now ask lib/tradingDay.ts.
+  const todayStr    = currentTradingDay(now);
   const startOfWeek = new Date(now);
   startOfWeek.setDate(now.getDate() - now.getDay());
   startOfWeek.setHours(0, 0, 0, 0);
-  const todayTrades   = closed.filter(t => (t.closed_at ?? t.submitted_at).slice(0, 10) === todayStr);
+  const todayTrades   = closed.filter(t => tradingDayOfTrade(t) === todayStr);
   const weekTrades    = closed.filter(t => new Date(t.closed_at ?? t.submitted_at) >= startOfWeek);
   const monthTrades   = closed.filter(t => {
     const d = new Date(t.closed_at ?? t.submitted_at);
@@ -247,7 +302,8 @@ function computeAll(trades: DashTrade[], now: Date) {
 
   const dayMap: Record<string, number> = {};
   for (const t of closed) {
-    const k = dayKey(t.closed_at ?? t.submitted_at);
+    const k = dayKey(t);
+    if (k === null) continue;
     dayMap[k] = (dayMap[k] ?? 0) + tradeMoneyPnl(t);
   }
 
@@ -355,10 +411,10 @@ function computeAll(trades: DashTrade[], now: Date) {
     disciplineScores, performanceScores, hasStrategyConditions, hasDrawdownCtrl,
     disciplineTrend, performanceTrend,
     dayMap,
-    dailySeries:      buildDailySeries(dayMap, 30, now),
-    weeklySeries:     buildWeeklySeries(dayMap, 12, now),
-    monthlySeries:    buildMonthlySeries(dayMap, 12, now),
-    cumulativeSeries: buildCumulativeSeries(dayMap, 60, now),
+    dailySeries:      buildDailySeries(dayMap, 30, todayStr),
+    weeklySeries:     buildWeeklySeries(dayMap, 12, todayStr),
+    monthlySeries:    buildMonthlySeries(dayMap, 12, todayStr),
+    cumulativeSeries: buildCumulativeSeries(dayMap, 60, todayStr),
   };
 }
 

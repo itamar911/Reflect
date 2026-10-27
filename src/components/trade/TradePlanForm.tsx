@@ -29,7 +29,7 @@ import type { TodayTradeLine } from '@/lib/rules/todayLines';
 import { logRuleViolations, overrideRuleViolations, type RuleViolationLogInput } from '@/lib/rules/logRuleViolation';
 import {
   loadTradeRuleContext,
-  startOfTodayIso,
+  startOfTradingDayIso,
   type TodayClosedSummary,
 } from '@/lib/rules/tradeRuleContext';
 import { tradeDirection } from '@/lib/pnl';
@@ -585,7 +585,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
       loadBrokerDayPull(userId).then((broker) => loadTradeRuleContext(userId, broker, supabase)),
       // Plans still open from BEFORE today (REF-82 §5.2).
       //
-      // The day boundary is startOfTodayIso() from tradeRuleContext — the same
+      // The day boundary is startOfTradingDayIso() from tradeRuleContext — the same
       // seam loadTradeRuleContext uses for "trades taken today", and
       // deliberately not a second calculation. With two, a plan submitted just
       // after local midnight could be counted against today's limit AND
@@ -599,7 +599,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
         .select(OPEN_PLAN_SELECT)
         .eq('user_id', userId)
         .eq('status', 'open')
-        .lt('submitted_at', startOfTodayIso())
+        .lt('submitted_at', startOfTradingDayIso())
         .order('submitted_at', { ascending: true }),
       readPortfolios(supabase, userId, portfoliosEnabled),
       readLastUsedPortfolioId(supabase, userId, portfoliosEnabled),
@@ -865,7 +865,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
 
   useEffect(() => {
     if (!selectedStrategy || selectedStrategy.max_daily_trades == null) return;
-    const todayStart = startOfTodayIso();
+    const todayStart = startOfTradingDayIso();
     let cancelled = false;
     supabase
       .from('trade_plans')

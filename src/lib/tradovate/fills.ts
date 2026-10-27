@@ -1450,7 +1450,13 @@ export interface BrokerDayRequest {
    * cross-host account-id collision.
    */
   environment: TradovateEnvironment;
-  /** The trader's local midnight, from startOfTodayIso(). See ./trading-day.ts. */
+  /**
+   * The trading day's open, from startOfTradingDayIso(). See ./trading-day.ts.
+   *
+   * 17:00 America/Chicago on the previous calendar date (REF-125), so this
+   * reaches up to 24 hours back on a weekday and up to 72 across a weekend —
+   * not the "today, since midnight" the name suggests at a call site.
+   */
   dayStartMs: number;
   /** `tradovate_connections.tradovate_user_id`, for the ownership filter. */
   tradovateUserId: number | null;

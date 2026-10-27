@@ -24,7 +24,7 @@ import {
 } from '@/lib/journal/stopHistory';
 import { realisedRr, rrRow } from '@/lib/journal/realisedRr';
 import { readTradeStages, stagePieces, stagesSentence } from '@/lib/journal/stages';
-import { startOfTodayIso } from '@/lib/rules/tradeRuleContext';
+import { startOfTradingDayIso } from '@/lib/rules/tradeRuleContext';
 import { DAY_START_PARAM, MAX_SINCE_AGE_MS, SINCE_PARAM } from '@/lib/tradovate/trading-day';
 import EmotionalStateSlider from '@/components/trade/EmotionalStateSlider';
 import { createClient } from '@/lib/supabase/client';
@@ -276,7 +276,7 @@ const PAGE_SIZES = [15, 30, 50, 100];
  */
 async function requestWideSync(): Promise<void> {
   const params = new URLSearchParams({
-    [DAY_START_PARAM]: startOfTodayIso(),
+    [DAY_START_PARAM]: startOfTradingDayIso(),
     [SINCE_PARAM]: new Date(Date.now() - MAX_SINCE_AGE_MS).toISOString(),
   });
   try {

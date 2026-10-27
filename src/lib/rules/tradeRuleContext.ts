@@ -1,11 +1,12 @@
 import { createClient } from '@/lib/supabase/client';
 import { stopWasWidened } from '@/lib/journal/stopHistory';
 import { hasMoneyPnl, tradeMoneyPnl } from '@/lib/pnl';
+import { currentTradingDayStart } from '@/lib/tradingDay';
 import { visibleTrades } from '@/lib/trades/visible';
 import type { RuleContextSource } from '@/lib/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 // Type-only, so there is no runtime import cycle: that module imports
-// startOfTodayIso() from this one to send the day boundary to the route.
+// startOfTradingDayIso() from this one to send the day boundary to the route.
 import type { BrokerDayPull } from './brokerDayContext';
 
 /**
@@ -229,7 +230,7 @@ export interface TradeRuleContext {
 const MONEY_FIELDS = 'status, exit_price, pnl_amount, actual_pnl';
 
 /**
- * Midnight this morning, local time, as an ISO timestamp.
+ * When the current trading day opened, as an ISO timestamp (REF-125).
  *
  * Exported because the trade form has to ask "which plans are still open from
  * BEFORE today" (REF-82 §5.2) and that question has to use the same seam as
@@ -237,11 +238,18 @@ const MONEY_FIELDS = 'status, exit_price, pnl_amount, actual_pnl';
  * against today's limit and simultaneously be offered as yesterday's leftover.
  * One definition, the same reason the rest of this module exists.
  *
- * Local, not UTC: a trading day belongs to the trader's clock, and this runs in
- * their browser. Vercel's UTC would file an 01:00 Tel Aviv plan under yesterday.
+ * WHAT CHANGED, AND WHY THE NAME CHANGED WITH IT. This used to be
+ * `startOfTodayIso()` — `setHours(0, 0, 0, 0)`, the browser's own midnight —
+ * and its note argued that a trading day belongs to the trader's clock. It
+ * does not: it belongs to the exchange's. 17:00 America/Chicago is now the
+ * boundary (lib/tradingDay.ts), which on an Israeli clock is 01:00 the night
+ * BEFORE the day it names. So the window this returns is up to 24 hours wide
+ * and starts in the previous calendar evening, and on a Friday it stays open
+ * across the whole weekend gap. Every reader of this function was written
+ * against "midnight this morning"; the rename is what makes them re-read.
  */
-export function startOfTodayIso(): string {
-  return new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
+export function startOfTradingDayIso(): string {
+  return currentTradingDayStart(new Date()).toISOString();
 }
 
 /**
@@ -417,7 +425,21 @@ export async function loadTradeRuleContext(
   broker: BrokerDayPull,
   client: SupabaseClient = createClient()
 ): Promise<TradeRuleContext> {
-  const todayStart = startOfTodayIso();
+  // The current trading day's open — 17:00 Chicago, lib/tradingDay.ts. BOTH
+  // queries below are cut at it, which is the whole of REF-125 as it lands
+  // here: the loss total and the trade count now measure the same day as the
+  // dashboard, the journal and the email.
+  //
+  // WHAT IS NOT CHANGING IS WHICH COLUMN EACH ONE READS. The count stays on
+  // `submitted_at` and the money stays on `closed_at`, and the comments on the
+  // two queries say why at length. REF-125 moved the day boundary; it did not
+  // merge the two scopes, and TodayContextPanel's header is explicit that a
+  // third definition of "today's trades" is the bug class this module exists
+  // to have ended. `max_daily_trades` is a budget of plans the trader may take
+  // in a session, so it counts plans in the session they were taken in; a daily
+  // loss limit is about money realised, so it counts closes. Same window, two
+  // columns, deliberately.
+  const todayStart = startOfTradingDayIso();
 
   // E7's declaration, from the route. See the header.
   //
@@ -440,8 +462,9 @@ export async function loadTradeRuleContext(
   const brokerIsSource = broker.isTradeSource === true;
 
   const [takenRes, closedTodayRes, recentRes] = await Promise.all([
-    // Taken today — by submitted_at, so a plan counts the moment it is logged
-    // whether or not it has been closed.
+    // Taken this trading day — by submitted_at, so a plan counts the moment it
+    // is logged whether or not it has been closed. See the `todayStart` note
+    // above for why this column survives REF-125 unchanged.
     //
     // Except a plan the user has told us they never entered. Without the neq a
     // 'not_entered' row would be counted against max_daily_trades and
@@ -461,8 +484,16 @@ export async function loadTradeRuleContext(
       .eq('user_id', userId)
       .neq('status', 'not_entered')
       .gte('submitted_at', todayStart),
-    // Closed today — by closed_at, because the loss is realised on the close,
-    // not on the entry. A trade opened yesterday and closed today counts today.
+    // Closed this trading day — by closed_at, because the loss is realised on
+    // the close, not on the entry. A trade opened yesterday and closed today
+    // counts today.
+    //
+    // LOWER BOUND ONLY, STILL. The trading day has a real upper bound now
+    // (tradingDayBounds().end) and adding it here would be dead weight at
+    // best: `now` is inside the current day by construction, so nothing has
+    // closed past its end. A row that did would be a broker clock in the
+    // future, and counting it today is the honest answer — the same call
+    // lib/tradovate/trading-day.ts' `closedToday` makes, for the same reason.
     //
     // REF-82 also selected pnl_currency here, to split the panel's totals per
     // currency. REF-99 made the product dollar-only, so there is nothing to

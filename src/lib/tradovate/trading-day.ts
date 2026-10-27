@@ -1,26 +1,27 @@
 /**
- * The day boundary the broker pull filters on (REF-90 §4).
+ * The day boundary the broker pull filters on (REF-90 §4, REF-125).
  *
  * ONE DEFINITION OF "TODAY", AND IT IS ALREADY CHOSEN
  * ---------------------------------------------------
  *
- * `startOfTodayIso()` in lib/rules/tradeRuleContext.ts is local midnight on the
- * clock of the browser the trader is sitting in front of, and its own note says
- * why: a trading day belongs to the trader, and Vercel's UTC would file an
- * 01:00 Tel Aviv plan under yesterday. Every "today" in the rule engine is
- * measured from there.
+ * `startOfTradingDayIso()` in lib/rules/tradeRuleContext.ts is the open of the
+ * current CME trading day — 17:00 America/Chicago on the previous calendar
+ * date — and lib/tradingDay.ts is where that is worked out. Every "today" in
+ * the product is measured from there.
  *
  * The broker pull has to use the SAME instant or the two halves of one answer
  * disagree — "trades taken today" from Reflect against "money lost today" from
- * Tradovate, cut at two different midnights. But the pull runs in a route
- * handler, on Vercel, in UTC, where that instant cannot be computed: the
- * server does not know the trader's offset. Nothing in `profiles` records a
- * timezone (checked), and adding one is a product change, not this ticket.
+ * Tradovate, cut at two different boundaries. The server CAN compute this one,
+ * unlike the browser midnight it replaced: 17:00 Chicago is a property of the
+ * exchange, not of the trader, so no `profiles.timezone` is needed for it.
  *
- * So the browser SENDS it. The client calls startOfTodayIso() — the one
- * function — and passes the result; {@link parseDayStart} validates it and the
- * route filters on it. There is still exactly one definition, and it is still
- * the trader's clock.
+ * The browser still SENDS it, and that is now a compatibility fact rather than
+ * a necessity. The client calls startOfTradingDayIso() and passes the result;
+ * {@link parseDayStart} validates it and the route filters on it. Collapsing
+ * the parameter and computing the boundary server-side is a worthwhile
+ * follow-up — it would delete this module's trust argument outright — but it
+ * touches four routes and two crons, and REF-125's scope was the day
+ * definition itself.
  *
  * ON TRUSTING THE CLIENT WITH IT. The value only ever narrows or widens one
  * user's view of their OWN broker data, and the route authenticates that user
@@ -32,35 +33,37 @@
  * or a mangled parameter, not a security boundary.
  *
  *
- * WHY `tradeDate` IS NOT USED
- * ---------------------------
+ * WHY `tradeDate` IS STILL NOT USED — AND IT IS A CLOSER CALL NOW
+ * --------------------------------------------------------------
  *
  * `Fill`, `Position` and `CashBalance` all carry a `tradeDate` — a
  * `{year, month, day}` session label — and it looks like the obvious filter.
- * It is not, for one disqualifying reason: THE HOUR AT WHICH IT ROLLS OVER IS
- * NOT DOCUMENTED. Not on the endpoint pages, not in the architecture overview,
- * not in the cheat sheet. US futures convention puts it at 17:00 CT, which
- * would mean `tradeDate` changes in the middle of the Israeli night and shifts
- * twice a year as the US and Israeli DST transitions cross — but that figure
- * comes from a support article that is not fetchable, so it is a guess, and a
- * guess is not something to cut a discipline rule on.
+ * The reason it was refused was that THE HOUR AT WHICH IT ROLLS OVER IS NOT
+ * DOCUMENTED anywhere Tradovate publishes: US futures convention puts it at
+ * 17:00 CT, but that came from an unfetchable support article, so it was a
+ * guess, and a guess is not something to cut a discipline rule on.
  *
- * `Fill.timestamp` is a real instant. Converting an instant to a day on a clock
- * we chose is arithmetic we control; adopting a session label whose boundary we
- * cannot read is not. So the pull dates every round trip by the timestamp of
- * the fill that closed it, and `tradeDate` is read nowhere.
+ * REF-125 makes that guess the product's own decision: 17:00 Chicago is now
+ * OUR boundary, whatever Tradovate's label does. That removes the disagreement
+ * but not the argument. `Fill.timestamp` is a real instant and converting an
+ * instant to a day on a clock we chose is arithmetic we control; adopting a
+ * label we would now merely EXPECT to agree with us means a silent upstream
+ * change to it becomes a silent change to every daily loss limit. So the pull
+ * still dates every round trip by the timestamp of the fill that closed it,
+ * and `tradeDate` is read nowhere. If the two are ever observed to disagree,
+ * that is a finding about Tradovate and not a reason to switch.
  */
 
-/** Query parameter the client passes `startOfTodayIso()` in. */
+/** Query parameter the client passes `startOfTradingDayIso()` in. */
 export const DAY_START_PARAM = 'dayStart';
 
 /**
  * Query parameter for "everything since I connected" (REF-107 Stage 1).
  *
- * An instant, not a midnight: a connection happens at a wall-clock moment and
- * the journal's question is "what have I traded since then", so there is no
- * local-day arithmetic in it and none of {@link parseDayStart}'s midnight check
- * applies.
+ * An instant, not a session boundary: a connection happens at a wall-clock
+ * moment and the journal's question is "what have I traded since then", so
+ * there is no day arithmetic in it and none of {@link parseDayStart}'s
+ * whole-minute check applies.
  */
 export const SINCE_PARAM = 'since';
 
@@ -81,20 +84,32 @@ export const SINCE_PARAM = 'since';
 export const MAX_SINCE_AGE_MS = 7 * 24 * 60 * 60_000;
 
 /**
- * How far back a plausible local midnight can be.
+ * How far back a plausible trading-day open can be.
  *
- * Under 24 hours by construction — a local midnight is the start of the local
- * day the sender is currently in — plus an hour of tolerance for a clock that
- * disagrees with ours.
+ * 🔴 THIS WAS 25 HOURS AND REF-125 BREAKS THAT, which is the one change in
+ * this file that is not prose. The old boundary was the sender's local
+ * midnight, "under 24 hours by construction". A trading-day open is not:
+ *
+ *   - Monday to Thursday it is 17:00 Chicago the previous evening, so at most
+ *     24 hours back — the old bound would have held.
+ *   - On a FRIDAY it stays open across the whole weekend gap. Friday's day
+ *     opens at 17:00 Chicago on Thursday and the last instant inside it is
+ *     just before 17:00 Chicago on Sunday, which is 72 hours later (71 or 73
+ *     across a US DST weekend, since both transitions land inside this gap).
+ *
+ * So a trader opening the trade form at Sunday noon legitimately sends a
+ * boundary three days old, and a 25-hour bound would have answered 400 —
+ * silently taking the rule engine down to REFLECT_ONLY for the whole weekend.
+ * 74 hours is the 73-hour worst case plus an hour of clock tolerance.
  */
-const MAX_DAY_START_AGE_MS = 25 * 60 * 60_000;
+const MAX_DAY_START_AGE_MS = 74 * 60 * 60_000;
 
-/** A local midnight is never ahead of now. This is skew tolerance, nothing more. */
+/** An open is never ahead of now. This is skew tolerance, nothing more. */
 const MAX_DAY_START_SKEW_MS = 5 * 60_000;
 
 export type DayStartParse =
   | { ok: true; dayStartMs: number }
-  | { ok: false; reason: 'missing' | 'unparseable' | 'not_midnight' | 'out_of_range' };
+  | { ok: false; reason: 'missing' | 'unparseable' | 'not_an_open' | 'out_of_range' };
 
 /**
  * Validate a `dayStart` parameter into an instant.
@@ -110,11 +125,15 @@ export function parseDayStart(raw: string | null | undefined, now: number): DayS
   const ms = Date.parse(raw);
   if (!Number.isFinite(ms)) return { ok: false, reason: 'unparseable' };
 
-  // Midnight on any real clock lands on a whole minute: every UTC offset in use
-  // is a multiple of 15 minutes. A value carrying seconds is not a midnight, it
-  // is "now" sent by mistake — worth catching, because the failure it produces
-  // is a silently short day rather than an error.
-  if (ms % 60_000 !== 0) return { ok: false, reason: 'not_midnight' };
+  // A trading-day open lands on a whole minute — on a whole HOUR, in fact,
+  // since Chicago's offsets are whole hours — and so did the local midnight
+  // this used to accept, because every UTC offset in use is a multiple of 15
+  // minutes. A value carrying seconds is neither: it is "now" sent by mistake.
+  // Worth catching, because the failure it produces is a silently short day
+  // rather than an error. The check stays at whole-minute rather than tighten
+  // to whole-hour, so that a future boundary on a half-hour-offset exchange
+  // does not have to come back here.
+  if (ms % 60_000 !== 0) return { ok: false, reason: 'not_an_open' };
 
   if (ms > now + MAX_DAY_START_SKEW_MS) return { ok: false, reason: 'out_of_range' };
   if (now - ms > MAX_DAY_START_AGE_MS) return { ok: false, reason: 'out_of_range' };
@@ -125,7 +144,7 @@ export function parseDayStart(raw: string | null | undefined, now: number): DayS
 export type TradesWindowParse =
   | {
       ok: true;
-      /** The trader's local midnight, as {@link parseDayStart} validated it. */
+      /** The trading day's open, as {@link parseDayStart} validated it. */
       dayStartMs: number;
       /** The earliest close to return. Equals `dayStartMs` when no `since` was asked for. */
       windowStartMs: number;
@@ -139,9 +158,9 @@ export type TradesWindowParse =
  * back behind it (REF-107 Stage 1).
  *
  * `dayStart` is required even when `since` is given, and that is not redundancy.
- * It is the one definition of the trader's today (above), the thing no server
- * can compute, and the boundary the day's own figures are cut at — the window
- * only ever says how much further back the LIST goes.
+ * It is the one definition of today (above) and the boundary the day's own
+ * figures are cut at — the window only ever says how much further back the
+ * LIST goes.
  *
  * THE CLAMP IS REPORTED, NOT SILENT. A `since` older than
  * {@link MAX_SINCE_AGE_MS} is answered with the seven days we can price rather
@@ -176,9 +195,9 @@ export function parseTradesWindow(
   const sinceMs = clamped ? floor : asked;
 
   // A `since` LATER than the day boundary narrows nothing: today's trades are
-  // the point of the route and the day's scalars are measured from midnight
-  // regardless, so the window is the earlier of the two. A client that asks for
-  // "since 14:00" gets today, which is the honest superset.
+  // the point of the route and the day's scalars are measured from the day's
+  // open regardless, so the window is the earlier of the two. A client that
+  // asks for "since 14:00" gets today, which is the honest superset.
   return {
     ok: true,
     dayStartMs: dayStart.dayStartMs,
@@ -188,7 +207,7 @@ export function parseTradesWindow(
 }
 
 /**
- * Whether a close falls in the trader's today.
+ * Whether a close falls in the current trading day.
  *
  * Lower bound only, deliberately: this is the same shape as the rule engine's
  * `.gte('closed_at', todayStart)`, which has no upper bound either. A close

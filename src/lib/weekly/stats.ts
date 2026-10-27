@@ -16,6 +16,7 @@
  */
 import { tradeMoneyPnl, tradePointsPnl, isWinningTrade } from '@/lib/pnl';
 import { averageOf, scaleValue, intentText } from '@/lib/intent';
+import { tradingDayOfTrade } from '@/lib/tradingDay';
 
 export interface DailyPnl {
   date: string;
@@ -112,10 +113,24 @@ export function computeWeeklyStats(trades: TradeRow[], weekStart: Date): WeeklyS
     ? Math.round(scored.reduce((s, t) => s + Number(t.plan_score), 0) / scored.length)
     : null;
 
+  // Keyed by TRADING DAY (REF-125), where this used to take the UTC date off
+  // the ISO string. The weekly card draws these seven bars and the coach's
+  // prompt is handed the same array, so a trade closed at 01:30 Israel landed
+  // on the previous bar here and on the correct day in the journal — and the
+  // AI then reasoned out loud about a Monday loss the trader remembers taking
+  // on Tuesday.
+  //
+  // THE WEEK'S OWN BOUNDS ARE UNCHANGED and still Sunday-to-Saturday civil
+  // dates from `weekStart`; `dailyPnl` below looks up those seven dates in
+  // this map. The two agree because a trading day is NAMED by a civil date, so
+  // Monday's session — which opens on Sunday evening — is keyed "Monday" and
+  // lands in the right slot. Sunday's slot is now structurally always empty,
+  // which is true: the Sunday 17:00 open is Monday's.
   const dayMap: Record<string, number> = {};
   const dayCountMap: Record<string, number> = {};
   for (const r of rows) {
-    const day = (r.trade.closed_at ?? r.trade.submitted_at).slice(0, 10);
+    const day = tradingDayOfTrade(r.trade);
+    if (day === null) continue;
     dayMap[day] = (dayMap[day] ?? 0) + r.pnl;
     dayCountMap[day] = (dayCountMap[day] ?? 0) + 1;
   }
@@ -142,7 +157,9 @@ export function computeWeeklyStats(trades: TradeRow[], weekStart: Date): WeeklyS
   const toBestWorst = (r: typeof rows[number]): BestWorstTrade => ({
     strategy: intentText(r.trade.strategy) ?? '',
     pnl: Math.round(r.pnl * 100) / 100,
-    date: (r.trade.closed_at ?? r.trade.submitted_at).slice(0, 10),
+    // The same day the bar chart above filed this trade under, so "the week's
+    // worst trade" and the bar it came out of cannot name two dates.
+    date: tradingDayOfTrade(r.trade) ?? (r.trade.closed_at ?? r.trade.submitted_at).slice(0, 10),
   });
 
   // A row with no strategy is not a strategy named "null" — it gets no bucket,

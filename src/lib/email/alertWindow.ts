@@ -25,6 +25,19 @@
  * module is that one calculation, moved out so it can be asserted.
  *
  *
+ * AND WHERE THAT WINDOW WENT (REF-125)
+ * ------------------------------------
+ *
+ * The fix above replaced UTC midnight with the trader's midnight, which was
+ * right about the direction and still one of SIX different "today"s in the
+ * product. REF-125 settled it: a day is the CME trading day, 17:00
+ * America/Chicago to 16:00 Chicago, and lib/tradingDay.ts computes it.
+ * {@link alertRangeStart} now asks that module, so this file's remaining job
+ * is the DISPATCH HOUR — which trader is due an email at this moment — and
+ * {@link zonedDayStart} is what answers it. The two were always separate
+ * questions; they were only ever cut at the same instant by coincidence.
+ *
+ *
  * WHY NOT A TIMEZONE LIBRARY, AND WHY NOT `profiles.timezone`
  * -----------------------------------------------------------
  *
@@ -40,7 +53,16 @@
  * that is why it takes one rather than hard-coding the string inside.
  */
 
-/** The zone every alert is cut at until `profiles.timezone` exists. */
+import { currentTradingDayStart } from '@/lib/tradingDay';
+
+/**
+ * The zone every alert is DISPATCHED on until `profiles.timezone` exists.
+ *
+ * "Cut at" until REF-125, which moved the query window to the exchange's
+ * trading day (lib/tradingDay.ts). What is left on this zone is the hour the
+ * mail goes out, which is genuinely about the trader: `end_of_day_time` is a
+ * wall-clock time they chose.
+ */
 export const ALERT_TIME_ZONE = 'Asia/Jerusalem';
 
 /**
@@ -107,18 +129,37 @@ export function zonedDayStart(now: Date, timeZone: string = ALERT_TIME_ZONE): Da
 /**
  * The window an alert of this type reports on, as an ISO lower bound.
  *
- * Both daily alerts are cut at the trader's own midnight; the weekly one
- * reaches back seven times twenty-four hours from now, which is a duration
- * and not a calendar week — the product has never promised Sunday-to-Sunday,
- * and changing that is a product decision rather than a bug fix.
+ * BOTH DAILY ALERTS ARE NOW CUT AT THE TRADING DAY'S OPEN (REF-125), not at
+ * the trader's midnight. That is the one thing this ticket changes in this
+ * file, and it is a narrowing of what `zonedDayStart` is for rather than a
+ * replacement of it: the DISPATCH HOUR is still a question about the trader's
+ * own clock — "mail me at 21:00" means 21:00 in Israel — and the cron still
+ * uses `zonedDayStart` for that. Only the question "which trades does this
+ * email report on" belongs to the exchange.
+ *
+ * The practical difference is one to three hours at the front of the window
+ * and the reason the email and the dashboard used to disagree: a trade closed
+ * at 01:30 Israel was inside the email's day and outside the dashboard's. It
+ * is now in the same day in both.
+ *
+ * THE `timeZone` PARAMETER IS GONE, and dropping it rather than leaving it
+ * ignored is the point: a zone argument on a function that no longer consults
+ * one is an invitation to pass `profiles.timezone` here the day that column
+ * lands and expect the day boundary to follow it. It must not. When per-user
+ * zones arrive they move the DISPATCH HOUR, which is `zonedDayStart`'s job
+ * above and still takes a zone.
+ *
+ * The weekly one reaches back seven times twenty-four hours from now, which is
+ * a duration and not a calendar week — the product has never promised
+ * Sunday-to-Sunday, and changing that is a product decision rather than a bug
+ * fix. REF-125 did not touch it.
  */
 export function alertRangeStart(
   type: 'pre_market' | 'end_of_day' | 'weekly_summary',
-  now: Date,
-  timeZone: string = ALERT_TIME_ZONE
+  now: Date
 ): string {
   if (type === 'weekly_summary') {
     return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
   }
-  return zonedDayStart(now, timeZone).toISOString();
+  return currentTradingDayStart(now).toISOString();
 }

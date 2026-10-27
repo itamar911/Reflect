@@ -57,7 +57,7 @@
  * re-runs the gate for exactly that reason.
  */
 
-import { startOfTodayIso } from './tradeRuleContext';
+import { startOfTradingDayIso } from './tradeRuleContext';
 import {
   TradovateNotConnectedError,
   TradovateUnpriceableError,
@@ -312,9 +312,9 @@ export async function loadBrokerDayPull(
 async function requestBrokerDay(): Promise<BrokerDayPull> {
   try {
     // The day boundary travels with the request: the route runs in UTC on
-    // Vercel and cannot work out the trader's local midnight. startOfTodayIso()
+    // Vercel and cannot work out the trader's local midnight. startOfTradingDayIso()
     // is the one definition of it — see lib/tradovate/trading-day.ts.
-    const url = `${BROKER_TODAY_PATH}?${DAY_START_PARAM}=${encodeURIComponent(startOfTodayIso())}`;
+    const url = `${BROKER_TODAY_PATH}?${DAY_START_PARAM}=${encodeURIComponent(startOfTradingDayIso())}`;
     const res = await fetch(url, { cache: 'no-store' });
 
     // A signed-out or forbidden caller has no broker view and no problem to

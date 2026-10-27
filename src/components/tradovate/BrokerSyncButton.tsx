@@ -57,7 +57,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { RefreshCw } from 'lucide-react';
 
-import { startOfTodayIso } from '@/lib/rules/tradeRuleContext';
+import { startOfTradingDayIso } from '@/lib/rules/tradeRuleContext';
 import { shareBrokerSync, shouldAutoSync } from '@/lib/tradovate/syncClock';
 import {
   describeSyncOutcome,
@@ -253,7 +253,7 @@ export default function BrokerSyncButton({
  * comes from lib/tradovate/sync-response.ts like every other sentence here.
  */
 async function requestSync({ explicit }: { explicit: boolean }): Promise<BrokerSyncOutcome> {
-  const params = new URLSearchParams({ [DAY_START_PARAM]: startOfTodayIso() });
+  const params = new URLSearchParams({ [DAY_START_PARAM]: startOfTradingDayIso() });
 
   // Only the deliberate trigger reaches back a week. See the header on cost.
   if (explicit) {

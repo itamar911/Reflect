@@ -786,10 +786,19 @@ async function main() {
     c('not a date', parseDayStart('yesterday', NOW), { ok: false, reason: 'unparseable' }),
     c('carries seconds (a "now" sent by mistake)', parseDayStart('2026-10-14T06:59:30.000Z', NOW), {
       ok: false,
-      reason: 'not_midnight',
+      reason: 'not_an_open',
     }),
     c('ahead of now', parseDayStart('2026-10-14T21:00:00.000Z', NOW), { ok: false, reason: 'out_of_range' }),
-    c('older than a local day can be', parseDayStart('2026-10-11T21:00:00.000Z', NOW), {
+    // REF-125 WIDENED THE FLOOR FROM 25 HOURS TO 74, and these two cases are
+    // the guard on it. A Friday trading day stays open across the whole weekend
+    // gap, so a boundary nearly three days old is legitimate: 2026-10-11T21:00Z
+    // is 58 hours before NOW and must now be ACCEPTED. The case this replaced
+    // asserted exactly the opposite, and was the only thing pinning the bound.
+    c('a weekend-old Friday open is in range', parseDayStart('2026-10-11T21:00:00.000Z', NOW), {
+      ok: true,
+      dayStartMs: Date.parse('2026-10-11T21:00:00.000Z'),
+    }),
+    c('older than any trading day can be', parseDayStart('2026-10-10T06:00:00.000Z', NOW), {
       ok: false,
       reason: 'out_of_range',
     }),
@@ -3577,7 +3586,7 @@ async function bothPathsAgree() {
     c('(10) and still validated by parseDayStart', windowOf({ dayStart: '2026-10-14T06:59:30.000Z' }), {
       ok: false,
       param: 'dayStart',
-      reason: 'not_midnight',
+      reason: 'not_an_open',
     }),
     c('(11) the bound is seven days', MAX_SINCE_AGE_MS, 7 * 24 * 60 * 60_000),
   ]);

@@ -15,6 +15,7 @@ import { isImportEnabled } from '@/lib/tradovate/import';
 import { resolveAccountParam, tradesInAccount, type RawSearchParams } from '@/lib/portfolios/filter';
 import { readPortfolioLabel } from '@/lib/portfolios/read';
 import { tradePointsPnl, tradeMoneyPnl, hasMoneyPnl, isWinningTrade } from '@/lib/pnl';
+import { tradingDayOfTrade } from '@/lib/tradingDay';
 import { averageOf, rrValue, intentText } from '@/lib/intent';
 import { behaviourDisciplineScore } from '@/lib/scoring/disciplineAggregate';
 import { TrendingUp, BarChart2, Target, CandlestickChart } from 'lucide-react';
@@ -124,10 +125,28 @@ export default async function StatsPage({ searchParams }: {
     const win  = isWinningTrade(t) ? 1 : 0;
     const date = new Date(t.submitted_at);
 
-    const dKey = t.submitted_at.slice(0, 10);
-    const dLbl = date.toLocaleDateString('he-IL', { day: 'numeric', month: 'numeric' });
-    const dPrev = dailyMap.get(dKey) ?? { label: dLbl, pnl: 0, trades: 0, wins: 0 };
-    dailyMap.set(dKey, { ...dPrev, pnl: dPrev.pnl + p, trades: dPrev.trades + 1, wins: dPrev.wins + win });
+    // THE DAILY BUCKET IS A TRADING DAY NOW, AND IT CHANGED COLUMN (REF-125).
+    // It was `t.submitted_at.slice(0, 10)` — the UTC date a plan was LOGGED on
+    // — which made this chart the only daily P&L in the product keyed by
+    // submission while the dashboard, the journal and the weekly card all keyed
+    // by the close. A trade planned on Monday evening and closed Tuesday showed
+    // its money on Monday's bar here and on Tuesday's everywhere else.
+    //
+    // `tradingDayOfTrade` resolves both at once: `closed_at` when there is one,
+    // and the day boundary is 17:00 Chicago. The weekly and monthly buckets
+    // below are deliberately LEFT on `submitted_at` — they are period charts
+    // whose grain is far wider than the shift, and re-cutting a trader's
+    // historical weeks is a product change rather than this consistency fix.
+    const dKey = tradingDayOfTrade(t);
+    if (dKey !== null) {
+      const dLbl = new Date(`${dKey}T00:00:00Z`).toLocaleDateString('he-IL', {
+        timeZone: 'UTC',
+        day: 'numeric',
+        month: 'numeric',
+      });
+      const dPrev = dailyMap.get(dKey) ?? { label: dLbl, pnl: 0, trades: 0, wins: 0 };
+      dailyMap.set(dKey, { ...dPrev, pnl: dPrev.pnl + p, trades: dPrev.trades + 1, wins: dPrev.wins + win });
+    }
 
     const yr   = date.getFullYear();
     const wNum = Math.ceil(((date.getTime() - new Date(yr, 0, 1).getTime()) / 86400000 + new Date(yr, 0, 1).getDay() + 1) / 7);

@@ -14,9 +14,12 @@
  *      precede everyone. So the import happens here, per user, at the hour
  *      that user chose, which is the only moment that is right for all of
  *      them.
- *   2. **The day window is the trader's midnight, not the server's.**
+ *   2. **The day window is not the server's midnight.**
  *      `setHours(0,0,0,0)` runs in UTC on Vercel, which is 02:00 or 03:00 in
- *      Israel — see lib/email/alertWindow.ts.
+ *      Israel. Stage 3a moved it to the trader's own midnight; REF-125 moved
+ *      it again, to the CME trading day's 17:00 Chicago open, which is the
+ *      boundary the whole product now shares — see lib/tradingDay.ts and
+ *      lib/email/alertWindow.ts. The DISPATCH HOUR is still the trader's.
  *   3. **A profitable short counts as a win.** The win test was
  *      `exit_price > entry_price`, the REF-107 §0ד bug, which Stage 4 fixed
  *      in the identity card, the stats page and the weekly summary and did
@@ -35,7 +38,8 @@ import { isUserAllowed } from '@/lib/tradovate/allowlist';
 import { listConnectionsForImport, markCronProgress } from '@/lib/tradovate/connections';
 import { syncUserTrades } from '@/lib/tradovate/sync';
 import { isWinningTrade, pnlRow, tradeMoneyPnl } from '@/lib/pnl';
-import { alertRangeStart, zonedDayStart } from '@/lib/email/alertWindow';
+import { alertRangeStart } from '@/lib/email/alertWindow';
+import { currentTradingDayStart } from '@/lib/tradingDay';
 import {
   dailySummaryEmail,
   preMarketEmail,
@@ -117,11 +121,22 @@ export async function importBeforeSummary(
       // it. The same construction api/cron/tradovate-import uses.
       client: admin,
       admin,
-      dayStartMs: zonedDayStart(now).getTime(),
+      // THE TRADING DAY'S OPEN (REF-125), where this was `zonedDayStart(now)`
+      // — the trader's midnight. The summary this import feeds counts trades
+      // with `summarise` over a query cut at `alertRangeStart`, so the two have
+      // to be the same instant or the email reports on trades the pull was
+      // never asked to fetch. They are now, because both call lib/tradingDay.ts.
+      dayStartMs: currentTradingDayStart(now).getTime(),
       // The day only. This runs at the trader's own end of day, so the window
       // that matters is the one that just finished; a wider one would price
       // contracts the daily cron has already imported.
-      windowStartMs: zonedDayStart(now).getTime(),
+      //
+      // ON A MONDAY THAT WINDOW NOW REACHES BACK INTO SUNDAY EVENING, and on a
+      // Sunday-evening send it reaches back to Thursday — the weekend gap is
+      // Friday's trading day. That is more to price than a midnight window
+      // was, and it is the correct amount: a trade closed at 01:30 Israel is
+      // inside the day this email is about.
+      windowStartMs: currentTradingDayStart(now).getTime(),
       // THE STOP ORDERS, AND THIS IS ONE OF THE TWO PLACES THEY CAN BE READ AT
       // ALL (REF-113 Stage 3). This job runs per user at the hour that user
       // chose, which is inside the same trading day as the trades it is

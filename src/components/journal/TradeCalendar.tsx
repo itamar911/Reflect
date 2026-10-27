@@ -1,6 +1,7 @@
 'use client';
 import { useState, useMemo } from 'react';
 import { tradeMoneyPnl, hasMoneyPnl } from '@/lib/pnl';
+import { currentTradingDay, tradingDayOfTrade } from '@/lib/tradingDay';
 import { formatMoney } from '@/lib/money';
 
 // Intent columns are nullable — a trade with no plan behind it carries none
@@ -53,8 +54,18 @@ const MIN_CELL_H = 110;
 const WEEK_COL = '92px';
 const COLS = `repeat(7, 1fr) ${WEEK_COL}`;
 
-function toDayKey(d: Date): string {
-  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+/**
+ * A cell's key: the trading day it stands for, `YYYY-MM-DD` (REF-125).
+ *
+ * WAS `toDayKey(d)` = `${y}-${m + 1}-${d}` — UNPADDED, and derived from a local
+ * `Date`. Both halves had to go. The padding, because these keys are now
+ * compared against lib/tradingDay.ts' output and `2026-10-7` is not
+ * `2026-10-07`; the local `Date`, because which bucket a trade lands in must
+ * stop being a function of the reader's own clock. `month` is the React-state
+ * month, so it is still 0-based here.
+ */
+function cellKey(year: number, month: number, day: number): string {
+  return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
 // Large values drop the fraction and gain thousands separators — otherwise
@@ -80,7 +91,13 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
   const dailyMap = useMemo<Map<string, DayData>>(() => {
     const map = new Map<string, DayData>();
     for (const t of trades) {
-      const key  = toDayKey(new Date(t.submitted_at));
+      // THE CELL A TRADE LANDS IN CHANGED TWICE OVER (REF-125): from the
+      // reader's local date to the trading day, and from `submitted_at` to the
+      // close. This was the only daily surface in the journal still filing a
+      // trade by when its PLAN was logged, so a plan written Monday night and
+      // closed Tuesday coloured Monday's cell with Tuesday's money.
+      const key  = tradingDayOfTrade(t);
+      if (key === null) continue;
       const prev = map.get(key) ?? { pnl: 0, tradeCount: 0, hasViolation: false };
       const pnl  = tradeMoneyPnl(t);
       // A row with no self-report is not a day flagged for low emotional
@@ -104,11 +121,16 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
     let winPnl = 0, lossPnl = 0, closed = 0;
     const tradingDays = new Set<string>();
 
+    // The month filter runs on the trading day too, so the header stats total
+    // exactly the cells drawn below them. `monthPrefix` is a string compare
+    // against a `YYYY-MM-DD` key, which needs no `Date` and therefore has no
+    // zone to get wrong.
+    const monthPrefix = `${year}-${String(month + 1).padStart(2, '0')}`;
     for (const t of trades) {
-      const d = new Date(t.submitted_at);
-      if (d.getFullYear() !== year || d.getMonth() !== month) continue;
+      const day = tradingDayOfTrade(t);
+      if (day === null || !day.startsWith(monthPrefix)) continue;
       totalCount++;
-      tradingDays.add(toDayKey(d));
+      tradingDays.add(day);
 
       if (hasMoneyPnl(t)) {
         const pnl = tradeMoneyPnl(t);
@@ -146,7 +168,7 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
       let wPnl = 0, wTrades = 0;
       for (const d of slice) {
         if (!d) continue;
-        const data = dailyMap.get(`${year}-${month + 1}-${d}`);
+        const data = dailyMap.get(cellKey(year, month, d));
         if (data) { wPnl += data.pnl; wTrades += data.tradeCount; }
       }
       return { days: slice, pnl: wPnl, trades: wTrades };
@@ -159,7 +181,10 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
     setMonth(d.getMonth());
   }
 
-  const todayKey = toDayKey(today);
+  // Which cell gets the "today" ring. The current TRADING day (REF-125), so
+  // after 17:00 Chicago — 01:00 in Israel — the ring is already on tomorrow's
+  // cell, which is where a trade closed at that hour will appear.
+  const todayKey = currentTradingDay(today);
 
   const pfLabel = monthStats.profitFactor === Infinity
     ? '∞'
@@ -291,7 +316,7 @@ export default function TradeCalendar({ trades }: { trades: Trade[] }) {
                   );
                 }
 
-                const key   = `${year}-${month + 1}-${day}`;
+                const key   = cellKey(year, month, day);
                 const data  = dailyMap.get(key);
                 const isToday = key === todayKey;
 

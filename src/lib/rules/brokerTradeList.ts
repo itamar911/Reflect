@@ -33,7 +33,7 @@
 
 import { readTodayTradeLines, type TodayTradeLine } from './todayLines';
 import { DAY_START_PARAM } from '@/lib/tradovate/trading-day';
-import { startOfTodayIso } from './tradeRuleContext';
+import { startOfTradingDayIso } from './tradeRuleContext';
 
 /** The route. One place, so the component and the tests cannot drift. */
 const BROKER_TRADES_PATH = '/api/tradovate/trades';
@@ -53,7 +53,7 @@ export async function loadTodayTradeLines(): Promise<TodayTradeLine[] | null> {
     // /today: the route runs in UTC on Vercel and cannot work out the trader's
     // local midnight. No `since` — this panel is about TODAY, and the wider
     // window would price contracts nothing here will show.
-    const url = `${BROKER_TRADES_PATH}?${DAY_START_PARAM}=${encodeURIComponent(startOfTodayIso())}`;
+    const url = `${BROKER_TRADES_PATH}?${DAY_START_PARAM}=${encodeURIComponent(startOfTradingDayIso())}`;
     const res = await fetch(url, { cache: 'no-store' });
     if (!res.ok) return null;
     return readTodayTradeLines(await res.json());
