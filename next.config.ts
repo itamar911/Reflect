@@ -8,7 +8,9 @@ const nextConfig: NextConfig = {
   devIndicators: { position: 'top-left' },
 
   /**
-   * The two Rubik TTFs the share card is rasterised with (REF-125 Stage 3).
+   * The four TTFs the share card is rasterised with (REF-125 Stage 3) — two
+   * Nunito weights for the card's own type, two Rubik weights carried only so a
+   * Hebrew nickname has glyphs to fall back to.
    *
    * They are read at runtime with `readFileSync` (src/lib/share/cardFonts.ts),
    * which no bundler can follow into a file list — so without this entry they

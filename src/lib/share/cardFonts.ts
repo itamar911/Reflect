@@ -28,13 +28,16 @@
  * character this card can render present in both — Hebrew letters, digits,
  * `REFLECT`, the provenance words, and `$ + - . , / : · —`.
  *
- * Rubik rather than Heebo or Noto Sans Hebrew because it is the family the
- * product already uses everywhere else; a share card in a different typeface
- * would be the only Reflect surface that is not Rubik.
+ * The same two checks were run on the two NUNITO instances added when the card
+ * was redesigned: static magic, no `fvar`, cmap format 4, 545 mapped
+ * codepoints, and every character the card prints present in both weights —
+ * letters, digits, `$ + - . , / % ' ·`. ZERO of those codepoints are in the
+ * Hebrew block, which is deliberate and is why Rubik stays (see FACES).
  *
- * SIL Open Font License 1.1 — ./fonts/OFL.txt, copied in with the files. The
- * licence requires the notice to travel with the bytes, so it is committed
- * beside them rather than referenced.
+ * SIL Open Font License 1.1 — ./fonts/OFL.txt, copied in with the files. It
+ * covers both families: Rubik and Nunito ship under the same licence, and the
+ * one copy carries both copyright lines. The licence requires the notice to
+ * travel with the bytes, so it is committed beside them rather than referenced.
  *
  *
  * NEVER FETCHED AT RUNTIME, AND THAT IS THE POINT
@@ -61,7 +64,7 @@ import type { TradingDay } from '@/lib/tradingDay';
 interface CardFont {
   name: string;
   data: ArrayBuffer;
-  weight: 400 | 700;
+  weight: 400 | 600 | 700 | 800;
   style: 'normal';
 }
 
@@ -103,24 +106,48 @@ const FONT_DIR = 'src/lib/share/fonts';
 const fontPath = (name: string) =>
   join(/* turbopackIgnore: true */ process.cwd(), FONT_DIR, name);
 
+/**
+ * TWO FAMILIES, AND THEY HAVE DIFFERENT JOBS.
+ *
+ * NUNITO is the card's typeface and the card's alone — a rounded grotesque that
+ * reads as a product rather than as a spreadsheet, which is the whole of why
+ * the first cut was rejected. The app keeps Rubik; nothing outside
+ * `cardImage.tsx` may reference Nunito, because adding it to a page would mean
+ * a second webfont on the critical path for a face used by one PNG.
+ *
+ * RUBIK IS CARRIED ONLY AS A HEBREW FALLBACK. The card is ENGLISH ONLY by
+ * decision — every label, the provenance line and the domain — so the single
+ * string on it that can hold a Hebrew glyph is the trader's chosen nickname.
+ * Nunito is latin-only (verified: 545 mapped codepoints, ZERO in the Hebrew
+ * block), so without Rubik in this list a Hebrew handle rasterises as a row of
+ * tofu. satori picks the fallback per glyph when the first family cannot supply
+ * one; `cardImage.tsx` additionally names Rubik outright on that one span so
+ * the choice is not left to a fallback chain.
+ *
+ * Weights are the real static instances, not synthesised: ExtraBold is 800 and
+ * SemiBold is 600, and asking for a weight no file supplies gets the nearest
+ * one rather than a faux-bolded outline.
+ */
 const FACES = [
-  { file: fontPath('Rubik-Regular.ttf'), weight: 400 as const },
-  { file: fontPath('Rubik-Bold.ttf'), weight: 700 as const },
+  { file: fontPath('Nunito-SemiBold.ttf'), family: 'Nunito', weight: 600 as const },
+  { file: fontPath('Nunito-ExtraBold.ttf'), family: 'Nunito', weight: 800 as const },
+  { file: fontPath('Rubik-Regular.ttf'), family: 'Rubik', weight: 400 as const },
+  { file: fontPath('Rubik-Bold.ttf'), family: 'Rubik', weight: 700 as const },
 ];
 
 /**
  * Read once per process, not once per request.
  *
- * ~120 KB across the two files. The route is public and a social unfurl can
- * arrive in bursts, so re-reading on every render would be a syscall pair per
- * request for bytes that cannot change between deploys.
+ * ~255 KB across the four files. The route is public and a social unfurl can
+ * arrive in bursts, so re-reading on every render would be four syscall pairs
+ * per request for bytes that cannot change between deploys.
  */
 let cached: CardFont[] | null = null;
 
 export function shareCardFonts(): CardFont[] {
   if (cached === null) {
-    cached = FACES.map(({ file, weight }) => ({
-      name: 'Rubik',
+    cached = FACES.map(({ file, family, weight }) => ({
+      name: family,
       // The Buffer is copied into a standalone ArrayBuffer because a Node
       // Buffer is a VIEW onto a shared pool — handing satori `buffer.buffer`
       // would hand it the whole pool, including whatever else happened to be
