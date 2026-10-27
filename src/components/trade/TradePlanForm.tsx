@@ -14,6 +14,7 @@ import EmotionalStateSlider from './EmotionalStateSlider';
 import ConfidenceLevelSlider from './ConfidenceLevelSlider';
 import OpenPlanPrompt, { type OpenPlanFromPreviousDay } from './OpenPlanPrompt';
 import TodayContextPanel from './TodayContextPanel';
+import { currentTradingDay } from '@/lib/tradingDay';
 import CloseTrade from '@/components/journal/CloseTrade';
 import dynamic from 'next/dynamic';
 const TradingViewChart = dynamic(() => import('./TradingViewChart'), { ssr: false });
@@ -1371,6 +1372,14 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
               headingId={todayContextHeadingId}
               loaded={contextLoaded}
               tradeCount={todayCount}
+              // The day the panel names, computed where the figures beside it
+              // are assembled rather than inside the panel (REF-125 item 4).
+              // Read at render like TradeCalendar's own `new Date()`, which is
+              // the house precedent for a client surface that has to know what
+              // day it is — and unlike that one this is zone-proof: the day
+              // comes from an INSTANT converted to Chicago, so a server render
+              // and a browser render of the same moment agree.
+              tradingDay={currentTradingDay(new Date())}
               closed={todayClosed}
               // The user's OWN limits, from their rules row — not
               // DEFAULT_PRESET_RULES. The validator falls back to those

@@ -16,6 +16,7 @@ import { useMediaQuery, useBrowserTranslated } from '@/lib/hooks';
 import { useModalDialog } from '@/lib/a11y/useModalDialog';
 import { renderPlainAiText, segmentByLineMarker, joinLines, CHECK_CHARS, CROSS_CHARS } from '@/lib/ai/textFormatting';
 import BrokerSyncButton, { ReflectOnlyNote } from '@/components/tradovate/BrokerSyncButton';
+import TradingDayLabel from '@/components/ui/TradingDayLabel';
 
 export type { DashTrade } from '@/lib/dashboard/trades';
 
@@ -411,6 +412,7 @@ function computeAll(trades: DashTrade[], now: Date) {
     disciplineScores, performanceScores, hasStrategyConditions, hasDrawdownCtrl,
     disciplineTrend, performanceTrend,
     dayMap,
+    tradingDay: todayStr,
     dailySeries:      buildDailySeries(dayMap, 30, todayStr),
     weeklySeries:     buildWeeklySeries(dayMap, 12, todayStr),
     monthlySeries:    buildMonthlySeries(dayMap, 12, todayStr),
@@ -1657,9 +1659,17 @@ export default function DashboardClient({
       {/* ── Greeting ──────────────────────────────────────────────────────── */}
       <div style={{ marginBottom: 4, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
         <div>
-          <p style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: MUTED, marginBottom: 4 }}>
-            {dateStr}
-          </p>
+          {/* The calendar date the trader is living in, then the trading day
+              the figures below are cut at (REF-125 item 4). Two facts and not
+              one, because on any evening after 17:00 Chicago — 01:00 in
+              Israel — they genuinely differ, and the day panel, the journal
+              and the email all name the second one. */}
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
+            <p style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: MUTED }}>
+              {dateStr}
+            </p>
+            <TradingDayLabel day={stats.tradingDay} color={MUTED} />
+          </div>
           <h1 style={{ fontSize: 22, fontWeight: 700, color: TEXT, letterSpacing: '-0.02em', lineHeight: 1 }}>
             {greeting && `${greeting}, `}<span style={{ color: ACCENT }}>{displayName}</span>
           </h1>

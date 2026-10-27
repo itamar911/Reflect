@@ -18,6 +18,8 @@ import { describeStages } from '@/lib/journal/stages';
 import { PARTIAL_DAY_NOTE } from '@/lib/tradovate/notices';
 import type { RuleContextSource } from '@/lib/types';
 import LivePositions from '@/components/tradovate/LivePositions';
+import TradingDayLabel from '@/components/ui/TradingDayLabel';
+import type { TradingDay } from '@/lib/tradingDay';
 
 /**
  * "Your day so far" — the context panel at the top of the trade form
@@ -304,6 +306,17 @@ export interface TodayContextPanelProps {
   loaded: boolean;
   /** Trades TAKEN today, excluding plans marked 'not_entered'. */
   tradeCount: number;
+  /**
+   * Which trading day "today" is, `YYYY-MM-DD` (REF-125 item 4).
+   *
+   * A PROP AND NOT A CLOCK READ IN HERE, for the reason every number on this
+   * panel is a prop: the figures and the day they are labelled with have to
+   * come from the same moment. A panel that worked out the day for itself
+   * could name one day while rendering a loss total the form fetched on the
+   * other side of 17:00 Chicago — which is precisely the class of disagreement
+   * this ticket closed between the dashboard and the journal.
+   */
+  tradingDay: TradingDay;
   /** Today's closes — display figures, straight from loadTradeRuleContext. */
   closed: TodayClosedSummary;
   /** The user's own limits, or null when their rules row has not been read. */
@@ -347,6 +360,7 @@ export default function TodayContextPanel({
   headingId,
   loaded,
   tradeCount,
+  tradingDay,
   closed,
   maxDailyTrades,
   maxDailyLoss,
@@ -404,10 +418,25 @@ export default function TodayContextPanel({
         )}
         <div className="flex flex-col gap-1 min-w-0">
           {/* h3: the sheet's title is the h2, so this is the next level down and
-              the hierarchy stays correct (§9). */}
-          <h3 id={headingId} className="text-sm font-semibold text-tg-text">
-            היום שלך
-          </h3>
+              the hierarchy stays correct (§9).
+
+              THE DAY IS NAMED BESIDE THE HEADING (REF-125 item 4), not inside
+              it. "היום שלך" is this panel's accessible name, so folding a date
+              into the `<h3>` would change what a screen reader announces every
+              time the trade form opens; the label is a sibling instead. The
+              day it names is the same one the dashboard header names, which is
+              the entire point of the ticket — before it, these two surfaces
+              could print different days from the same trades.
+
+              Outside the `loaded` branch, because which day it is is known
+              before the figures are. A panel that waited for the broker to
+              answer before naming the day would look like it did not know. */}
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <h3 id={headingId} className="text-sm font-semibold text-tg-text">
+              היום שלך
+            </h3>
+            <TradingDayLabel day={tradingDay} color="var(--color-tg-muted)" fontSize={10} />
+          </div>
 
           {/* ── What is open right now (REF-108) ───────────────────────────
               ABOVE the day's figures and OUTSIDE the `loaded` branch, both
