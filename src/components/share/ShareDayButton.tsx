@@ -35,7 +35,7 @@
 
 import { useCallback, useEffect, useId, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, Copy, Share2, X } from 'lucide-react';
+import { Check, Copy, Download, Share2, X } from 'lucide-react';
 
 import { useModalDialog } from '@/lib/a11y/useModalDialog';
 import {
@@ -332,35 +332,64 @@ function ShareDayDialog({
         </div>
 
         {/* ── What will be published ──────────────────────────────────────── */}
-        <div
-          className="rounded-xl p-3 flex flex-col gap-1"
-          style={{ background: 'var(--color-tg-surface-2)', border: '1px solid var(--color-tg-border)' }}
-        >
-          {preview === null ? (
-            <p className="text-xs" style={{ color: 'var(--color-tg-muted)' }}>
-              לא הצלחנו לבנות תצוגה מקדימה.
-            </p>
-          ) : (
-            shareSnapshotLines(preview).map((line, i) => (
-              <p
-                key={`${i}-${line}`}
-                // Every line can contain a figure or a fraction, and bidi
-                // reorders both — "4/5" becomes "5/4" in an RTL run, which
-                // inverts a discipline claim invisibly. `isolate` per line is
-                // the cheap correct thing here; the public card does the same
-                // per value.
-                style={{
-                  fontSize: 12,
-                  unicodeBidi: 'isolate',
-                  color: i === 0 ? 'var(--color-tg-text)' : 'var(--color-tg-muted)',
-                  fontWeight: i === 0 ? 700 : 400,
-                }}
-              >
-                {line}
+        {/* TWO PREVIEWS, AND WHICH ONE SHOWS IS NOT CosmETIC.
+            Before the link exists there is no token, so there is no image to
+            render — the lines are the only honest preview available, and they
+            come from the same builder the mint will use.
+            Once the link exists, the IMAGE is the preview, because the image
+            is what the trader is actually about to send: it is the bytes a
+            social platform will unfurl and the bytes the download button
+            produces. Showing the text summary at that point would be
+            previewing a different artefact from the one being shared. */}
+        {live === null ? (
+          <div
+            className="rounded-xl p-3 flex flex-col gap-1"
+            style={{ background: 'var(--color-tg-surface-2)', border: '1px solid var(--color-tg-border)' }}
+          >
+            {preview === null ? (
+              <p className="text-xs" style={{ color: 'var(--color-tg-muted)' }}>
+                לא הצלחנו לבנות תצוגה מקדימה.
               </p>
-            ))
-          )}
-        </div>
+            ) : (
+              shareSnapshotLines(preview).map((line, i) => (
+                <p
+                  key={`${i}-${line}`}
+                  // Every line can contain a figure or a fraction, and bidi
+                  // reorders both — "4/5" becomes "5/4" in an RTL run, which
+                  // inverts a discipline claim invisibly. `isolate` per line is
+                  // the cheap correct thing here; the public card does the same
+                  // per value.
+                  style={{
+                    fontSize: 12,
+                    unicodeBidi: 'isolate',
+                    color: i === 0 ? 'var(--color-tg-text)' : 'var(--color-tg-muted)',
+                    fontWeight: i === 0 ? 700 : 400,
+                  }}
+                >
+                  {line}
+                </p>
+              ))
+            )}
+          </div>
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element -- deliberate: next/image would route this through the optimizer to re-encode a PNG we already render at exactly one size, adding a per-transform cost for a ~110 KB image in a dialog the trader opened on purpose. It would also be optimising a URL that 404s the moment the link is revoked.
+          <img
+            // The 1200×630 render — the same bytes an unfurler gets, not a
+            // reconstruction of it in DOM. `aspect-ratio` plus the intrinsic
+            // width/height reserve the box before the PNG arrives, so the
+            // dialog does not jump when it does.
+            src={`/share/${live.token}/image`}
+            width={1200}
+            height={630}
+            alt="תצוגה מקדימה של כרטיס היום"
+            className="w-full h-auto rounded-xl"
+            style={{
+              aspectRatio: '1200 / 630',
+              border: '1px solid var(--color-tg-border)',
+              background: 'var(--color-tg-surface-2)',
+            }}
+          />
+        )}
 
         {/* ── Consent ─────────────────────────────────────────────────────── */}
         <div className="flex flex-col gap-1">
@@ -438,9 +467,33 @@ function ShareDayDialog({
                 aria-label="העתק את הקישור"
               >
                 {copied ? <Check aria-hidden="true" size={13} /> : <Copy aria-hidden="true" size={13} />}
-                העתק
+                העתק קישור
               </button>
             </div>
+
+            {/* THE SQUARE, NOT THE ONE ABOVE. The preview is 1200×630 because
+                that is what unfurls; the download is 1080×1080 because the
+                thing a trader does with a downloaded card is post it to
+                Instagram or a status, where a landscape crop loses the
+                number. Both come from the same renderer.
+
+                A PLAIN ANCHOR WITH `download`, not JournalExport's
+                blob-and-synthetic-anchor: that pattern exists because the CSV
+                is built in the browser and has no URL. This has a URL, it is
+                same-origin, and letting the browser stream it straight to
+                disk avoids holding a 150 KB PNG in memory to hand it back to
+                the same browser. The filename carries the day so a folder of
+                these is sortable. */}
+            <a
+              href={`/share/${live.token}/image?size=square`}
+              download={`reflect-${live.tradingDay}.png`}
+              className={ACTION_CLASS}
+              style={{ ...ACTION_STYLE, justifyContent: 'center', padding: '8px 12px' }}
+            >
+              <Download aria-hidden="true" size={13} />
+              הורד תמונה
+            </a>
+
             <button
               type="button"
               onClick={() => void revoke()}
