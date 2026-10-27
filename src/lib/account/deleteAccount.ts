@@ -55,6 +55,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { createAdminClient } from '@/lib/supabase/admin';
+import { isMissingTable } from '@/lib/supabase/missing';
 import { disconnectUser } from '@/lib/tradovate/connections';
 
 import { USER_STORAGE_BUCKET, USER_TABLES } from './userData';
@@ -96,8 +97,11 @@ export class AccountDeletionError extends Error {
   }
 }
 
-/** PostgREST codes meaning "no such table" — proof of absence, not a failure. */
-const MISSING_TABLE_CODES = new Set(['42P01', 'PGRST205']);
+// "No such table" is proof of absence here rather than a failure — a table
+// that does not exist cannot hold data. The codes moved to
+// lib/supabase/missing.ts when REF-125 needed the same classification for the
+// opposite reading ("the feature is not deployed yet"); the pair has to mean
+// the same thing to both callers, which is what a shared definition buys.
 
 /** Storage list page size, and the batch size for remove(). */
 const STORAGE_PAGE = 100;
@@ -161,7 +165,7 @@ async function findSurvivors(
       .eq(column, userId);
 
     if (error) {
-      if (MISSING_TABLE_CODES.has(error.code ?? '')) {
+      if (isMissingTable(error)) {
         absent.push(table);
         continue;
       }

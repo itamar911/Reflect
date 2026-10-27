@@ -78,6 +78,20 @@ export const USER_TABLES: readonly UserTable[] = [
   { table: 'setups',                column: 'user_id', expectation: 'cascade' },
   { table: 'notebook_pages',        column: 'user_id', expectation: 'cascade' },
   { table: 'rule_violations',       column: 'user_id', expectation: 'cascade' },
+
+  // REF-125. The constraint is `REFERENCES auth.users(id) ON DELETE CASCADE`,
+  // written in migration 043 rather than read out of pg_constraint — which is
+  // the weaker evidence this file warns about, and is why the verification
+  // pass matters here more than for the rows above: until the owner has run
+  // 043, the sweep reports this table as ABSENT (isMissingTable), and absent
+  // is proof the rows are gone rather than a failure.
+  //
+  // THE ONE ROW CLASS IN THIS LIST THAT WAS PUBLIC WHILE IT EXISTED. Deleting
+  // the account stops every link the trader ever minted from resolving, which
+  // is the half this cascade delivers. It does not retract a copy already
+  // fetched or cached by a social platform — nothing can, and the revoke
+  // dialog says so rather than implying otherwise.
+  { table: 'daily_shares',          column: 'user_id', expectation: 'cascade' },
 ];
 
 /**
