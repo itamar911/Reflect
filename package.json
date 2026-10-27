@@ -21,7 +21,8 @@
     "test:broker-orders": "tsx scripts/broker-orders-check.ts",
     "test:broker-cycles": "tsx scripts/broker-cycles-check.ts",
     "test:accounts": "tsx scripts/accounts-check.ts",
-    "test:share": "tsx scripts/share-leak-check.ts"
+    "test:share": "tsx scripts/share-leak-check.ts",
+    "test:share-card": "tsx scripts/share-card-check.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.96.0",
@@ -31,6 +32,7 @@
     "lucide-react": "^1.14.0",
     "next": "16.2.6",
     "next-themes": "^0.4.6",
+    "qrcode-generator": "^2.0.4",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "recharts": "^3.9.0",
