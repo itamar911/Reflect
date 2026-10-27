@@ -53,6 +53,7 @@
  */
 
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import type { TradingDay } from '@/lib/tradingDay';
 
@@ -65,18 +66,46 @@ interface CardFont {
 }
 
 /**
- * `new URL(…, import.meta.url)` AND NOT `path.join(process.cwd(), …)`.
+ * WHERE THE BYTES ARE, AND WHY IT IS SPELLED LIKE THIS.
  *
- * The bundler understands the first form: it treats the file as an asset,
- * emits it into the server output, and rewrites the URL to point at the copy.
- * A `process.cwd()` path is an opaque string it cannot follow, so the font
- * would be missing from the deployment bundle and the route would throw ENOENT
- * in production while working perfectly in `next dev` — the worst available
- * failure mode for a change whose whole purpose is a file on disk.
+ * The obvious form — `readFileSync(new URL('./fonts/x.ttf', import.meta.url))`
+ * — builds and runs, but Turbopack cannot follow it. It emits:
+ *
+ *   "Encountered unexpected file in NFT list. A file was traced that indicates
+ *    that the whole project was traced unintentionally."
+ *
+ * i.e. having failed to resolve the reference statically, it gives up and
+ * traces EVERYTHING into the serverless bundle for this route. That is a real
+ * cost on a public route, and it makes the fonts' presence in the deployment
+ * an accident of over-tracing rather than something declared — which would
+ * stop being true the moment the trace got tighter.
+ *
+ * So this does BOTH halves of what that warning asks for:
+ *
+ *   - `/* turbopackIgnore: true *\/` tells the bundler to stop trying to
+ *     resolve the path, which is what stops the over-trace. It is the escape
+ *     hatch the warning itself names.
+ *   - `outputFileTracingIncludes` in next.config.ts then names these two files
+ *     for this route explicitly, so they are in the bundle BECAUSE A CONFIG
+ *     SAYS SO rather than because the tracer gave up and took everything.
+ *
+ * Only doing the first half would be the real bug: the warning would go away
+ * and the fonts would go with it. The two edits belong together, and the
+ * config carries the same note.
+ *
+ * Kept in `src/` next to the module that reads them rather than in `public/`:
+ * these are not public assets. Serving the raw TTFs at a URL would invite a
+ * hotlink and says nothing to a browser that the app does not already get from
+ * next/font.
  */
+const FONT_DIR = 'src/lib/share/fonts';
+
+const fontPath = (name: string) =>
+  join(/* turbopackIgnore: true */ process.cwd(), FONT_DIR, name);
+
 const FACES = [
-  { file: new URL('./fonts/Rubik-Regular.ttf', import.meta.url), weight: 400 as const },
-  { file: new URL('./fonts/Rubik-Bold.ttf', import.meta.url), weight: 700 as const },
+  { file: fontPath('Rubik-Regular.ttf'), weight: 400 as const },
+  { file: fontPath('Rubik-Bold.ttf'), weight: 700 as const },
 ];
 
 /**
@@ -92,10 +121,10 @@ export function shareCardFonts(): CardFont[] {
   if (cached === null) {
     cached = FACES.map(({ file, weight }) => ({
       name: 'Rubik',
-      // `readFileSync` takes a file: URL directly. The Buffer is copied into a
-      // standalone ArrayBuffer because a Node Buffer is a VIEW onto a shared
-      // pool — handing satori `buffer.buffer` would hand it the whole pool,
-      // including whatever else happened to be allocated beside it.
+      // The Buffer is copied into a standalone ArrayBuffer because a Node
+      // Buffer is a VIEW onto a shared pool — handing satori `buffer.buffer`
+      // would hand it the whole pool, including whatever else happened to be
+      // allocated beside it.
       data: toArrayBuffer(readFileSync(file)),
       weight,
       style: 'normal' as const,
