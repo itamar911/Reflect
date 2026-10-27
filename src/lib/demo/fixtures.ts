@@ -427,8 +427,16 @@ const DEMO_DAILY_SHARES = [
       // that printed a name would make the anonymous default look like the
       // exception rather than the rule.
       nickname: null,
+      // Two accounts, so the demo exercises the panel the 28.10 revision
+      // added rather than the withheld-whole branch. Invented names: the demo
+      // fixtures carry no real account, and `display_name` is exactly the
+      // field this feature made public.
+      accounts: [
+        { name: 'Main Futures', pnl: 510, broker: true },
+        { name: 'Swing Account', pnl: -98, broker: false },
+      ],
     },
-    visibility: { nickname: false, accounts: false, balance: false },
+    visibility: { nickname: false, balance: false },
     revoked_at: null,
     created_at: iso(0, 18),
     updated_at: iso(0, 18),

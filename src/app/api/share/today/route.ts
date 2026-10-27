@@ -82,7 +82,7 @@ export async function GET(request: Request) {
     supabase,
     userId: user.id,
     day,
-    visibility: { nickname: false, accounts: false, balance: false },
+    visibility: { nickname: false, balance: false },
   });
 
   return NextResponse.json(

@@ -46,7 +46,7 @@ import {
 } from '@/lib/share/snapshot';
 
 /** The one `visibility` the UI can currently produce. See the toggles below. */
-const ALL_OFF: ShareVisibility = { nickname: false, accounts: false, balance: false };
+const ALL_OFF: ShareVisibility = { nickname: false, balance: false };
 
 interface OwnShareWire {
   token: string;
@@ -423,13 +423,18 @@ function ShareDayDialog({
             </label>
           )}
 
-          {/* The two toggles the ticket lists that have nothing behind them
-              yet. Rendered disabled rather than omitted so the dialog says
-              what it will and will not publish — and because a trader who
-              reads "accounts" and "balance" as available-but-off learns the
-              wrong thing about what this card can ever contain. REF-125 §2.5
-              is why neither is in the snapshot at all. */}
-          <ShareToggle label="הצג שמות תיקים" pressed={false} disabled hint="בקרוב" />
+          {/* THE ACCOUNTS TOGGLE IS GONE, and its absence is the honest render
+              of what the card now does: account names are ALWAYS published
+              (Imri, 28.10). A disabled switch reading "הצג שמות תיקים" beside
+              a card that shows them regardless would tell the trader the
+              opposite of the truth, which is worse than saying nothing — so
+              the line below says it in words instead, where the preview the
+              trader is looking at already lists the names.
+
+              Balance keeps its placeholder: nothing publishes it. */}
+          <p className="px-1 text-[11px]" style={{ color: 'var(--color-tg-muted)' }}>
+            שמות התיקים שלך מופיעים על הכרטיס, כפי שהם בתצוגה המקדימה למעלה.
+          </p>
           <ShareToggle label="הצג יתרה" pressed={false} disabled hint="בקרוב" />
         </div>
 

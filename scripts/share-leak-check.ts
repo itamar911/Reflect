@@ -36,6 +36,7 @@
 import { readFileSync } from 'node:fs';
 
 import {
+  MAX_SHARE_ACCOUNT_NAME,
   buildDailyShareSnapshot,
   readDailyShareSnapshot,
   readPublicNickname,
@@ -69,13 +70,47 @@ function group(name: string) {
 const SECRETS = {
   'user id': 'leakcheck-user-9f3a1c',
   'account id': 'leakcheck-account-7b2e44',
-  'broker account display_name': 'Topstep Evaluation 50K',
+  /**
+   * STILL A SECRET, AND THE DISTINCTION IS NOW THE WHOLE POINT.
+   *
+   * Account NAMES are published on purpose as of the 28.10 revision — but only
+   * the ones the store resolved from the `accounts` table under the trader's
+   * own RLS and handed in as `accounts: [{ id, label }]`. This value is a
+   * `display_name` column sitting on a TRADE ROW, where it arrives through
+   * `select('*')` and names an account nobody checked the ownership of. A
+   * builder that spread the row would publish it.
+   *
+   * So the suite now asserts BOTH directions: this string must never appear,
+   * and {@link PUBLISHED.account} must. One of them arriving by the other's
+   * path is the bug.
+   */
+  'broker account display_name on a trade row': 'Topstep Evaluation 50K',
   'account nickname': 'leakcheck-nickname-portfolio',
   email: 'leakcheck@example.com',
   'broker trade key': 'live:leakcheck-884421',
   'symbol with contract month': 'MESZ5',
   'journal free text': 'leakcheck private trade reason',
 } as const;
+
+/**
+ * The values that MUST appear — the other half of a leak suite, and new here.
+ *
+ * A test that only checks for absence passes perfectly on a builder that emits
+ * nothing at all. Now that a field was deliberately moved from "never leaves
+ * the server" to "always published", the suite has to pin the new behaviour as
+ * hard as it pins the old one, or the next person cannot tell the difference
+ * between the decision and a regression.
+ */
+const PUBLISHED = {
+  account: 'Main Futures',
+  secondAccount: 'Eval 50K',
+} as const;
+
+/** The trader's own accounts, as the store resolves them before the builder. */
+const OWN_ACCOUNTS = [
+  { id: SECRETS['account id'], label: PUBLISHED.account },
+  { id: 'leakcheck-account-second', label: PUBLISHED.secondAccount },
+];
 
 const DAY = '2026-10-27';
 /** 18:00 Chicago on the 26th is inside the 27th's session. */
@@ -106,7 +141,7 @@ function dirtyRow(overrides: Record<string, unknown> = {}): ShareTradeRow {
     broker_account_id: 1234567,
     broker_host: 'live',
     broker_trade_key: SECRETS['broker trade key'],
-    display_name: SECRETS['broker account display_name'],
+    display_name: SECRETS['broker account display_name on a trade row'],
     nickname: SECRETS['account nickname'],
     email: SECRETS.email,
     symbol: SECRETS['symbol with contract month'],
@@ -120,8 +155,8 @@ function dirtyRow(overrides: Record<string, unknown> = {}): ShareTradeRow {
   } as ShareTradeRow;
 }
 
-const ALL_OFF: ShareVisibility = { nickname: false, accounts: false, balance: false };
-const NICKNAME_ON: ShareVisibility = { nickname: true, accounts: false, balance: false };
+const ALL_OFF: ShareVisibility = { nickname: false, balance: false };
+const NICKNAME_ON: ShareVisibility = { nickname: true, balance: false };
 
 // `async function main()` + `void main()` at the foot, which is
 // scripts/accounts-check.ts' shape. Group 7 drives the real `readSharedCard`,
@@ -164,6 +199,88 @@ for (const visibility of [ALL_OFF, NICKNAME_ON]) {
   check(`${which}: the snapshot still carries the day`, snapshot.day === DAY);
   check(`${which}: the snapshot still counts the trades`, snapshot.trades === 2);
   check(`${which}: the snapshot still carries the money`, snapshot.pnl === 65);
+}
+
+// ── 1b. Account names: published by the resolved path, never by the row ─────
+
+group('1b. account names are published, account ids are not');
+
+{
+  const snapshot = buildDailyShareSnapshot({
+    rows: [
+      dirtyRow(),
+      dirtyRow({ actual_pnl: -60, pnl_amount: -60, account_id: 'leakcheck-account-second' }),
+    ],
+    day: DAY,
+    visibility: ALL_OFF,
+    accounts: OWN_ACCOUNTS,
+  });
+  const json = JSON.stringify(snapshot);
+  const lines = shareSnapshotLines(snapshot).join(' | ');
+
+  check('both accounts are itemised', snapshot.accounts.length === 2);
+  check('the published name is in the JSON', json.includes(PUBLISHED.account));
+  check('the published name is in the preview text', lines.includes(PUBLISHED.account));
+  check('the second account is named too', json.includes(PUBLISHED.secondAccount));
+  // The per-account money, and the fact that it still sums to the day.
+  check('the winning account carries its own money',
+    snapshot.accounts.find((a) => a.name === PUBLISHED.account)?.pnl === 125);
+  check('the losing account carries its own money',
+    snapshot.accounts.find((a) => a.name === PUBLISHED.secondAccount)?.pnl === -60);
+  check('biggest account first', snapshot.accounts[0]?.name === PUBLISHED.account);
+  check('the rows sum to the day', snapshot.accounts.reduce((s, a) => s + (a.pnl ?? 0), 0) === 65);
+
+  // AND THE ID IS STILL NOT THERE. It is the key the names were looked up by,
+  // so it is the one value most likely to be carried along by accident.
+  check('the account id is still absent from the JSON',
+    !json.includes(SECRETS['account id']));
+  check('the account id is still absent from the preview',
+    !lines.includes(SECRETS['account id']));
+}
+
+{
+  // AN ID THE TRADER DOES NOT OWN RESOLVES TO NO NAME.
+  //
+  // `trade_plans`' RLS asks whose ROW it is, not whose ACCOUNT the id names
+  // (figures.ts:152-162), so a crafted write can point a trader's own trade at
+  // somebody else's account. On a public card that would mean printing a name
+  // for an account they do not own — so the builder treats an unknown id as
+  // unassigned and never looks it up.
+  const snapshot = buildDailyShareSnapshot({
+    rows: [dirtyRow({ account_id: 'leakcheck-account-SOMEBODY-ELSE' })],
+    day: DAY,
+    visibility: ALL_OFF,
+    accounts: OWN_ACCOUNTS,
+  });
+  check('an unowned account id is not resolved to a name',
+    snapshot.accounts.every((a) => a.name === 'Unassigned'));
+  check('an unowned account id does not reach the JSON',
+    !JSON.stringify(snapshot).includes('SOMEBODY-ELSE'));
+}
+
+{
+  // NO ACCOUNTS HANDED IN — migration 037 absent, or the import gate shut.
+  const snapshot = buildDailyShareSnapshot({ rows: [dirtyRow()], day: DAY, visibility: ALL_OFF });
+  check('no account sources: the panel is empty, not invented',
+    snapshot.accounts.length === 1 && snapshot.accounts[0]?.name === 'Unassigned');
+  check('no account sources: the trade row display_name is still not published',
+    !JSON.stringify(snapshot).includes(SECRETS['broker account display_name on a trade row']));
+}
+
+{
+  // The name is BOUNDED. A prop-firm string carrying an account number is cut
+  // before the digits that identify it — the only mitigation left on this
+  // field now that the toggle is gone.
+  const long = 'Topstep Evaluation 50K-884421-live-xyz';
+  const snapshot = buildDailyShareSnapshot({
+    rows: [dirtyRow({ account_id: 'leakcheck-account-long' })],
+    day: DAY,
+    visibility: ALL_OFF,
+    accounts: [{ id: 'leakcheck-account-long', label: long }],
+  });
+  const name = snapshot.accounts[0]?.name ?? '';
+  check('a long account name is truncated', name.length <= MAX_SHARE_ACCOUNT_NAME);
+  check('the truncation drops the account number', !name.includes('884421'));
 }
 
 // The one field the toggle controls, in both directions.
@@ -591,6 +708,7 @@ if (failures.length > 0) {
 }
 console.log('share-leak-check: ok');
 console.log(`  ${Object.keys(SECRETS).length} denied values absent from the JSON and the preview text`);
+console.log('  account NAMES published on purpose; account IDs still never, and an unowned id resolves to none');
 console.log('  provenance per case, including the empty day that must not read as broker');
 console.log("  stop discipline excludes 'none' and 'unknown'; a tightening counts as held");
 console.log('  readers fail closed; tokens match migration 043\'s CHECK');
