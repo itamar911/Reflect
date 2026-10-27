@@ -42,8 +42,16 @@ import { randomBytes } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { headers } from 'next/headers';
 
+import { portfolioLabel } from '@/lib/portfolios/portfolio';
+import { readPortfolios } from '@/lib/portfolios/read';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { isMissingColumn, isMissingTable } from '@/lib/supabase/missing';
+// SERVER-ONLY, and this file is the right place for it: `import.ts` reads
+// `process.env`, so it must not reach a browser bundle. `store.ts` is imported
+// only by route handlers and server components (never by ShareDayButton, which
+// takes `MAX_PUBLIC_NICKNAME` from `snapshot.ts` instead) — and `readPortfolios`
+// takes the flag as an argument precisely so it stays client-safe itself.
+import { isImportEnabled } from '@/lib/tradovate/import';
 import { tradingDayBounds, type TradingDay } from '@/lib/tradingDay';
 
 import {
@@ -52,6 +60,7 @@ import {
   readPublicNickname,
   readShareVisibility,
   type DailyShareSnapshot,
+  type ShareAccountSource,
   type ShareTradeRow,
   type ShareVisibility,
 } from './snapshot';
@@ -237,8 +246,36 @@ export async function previewDailyShare({
       day,
       visibility,
       publicNickname: visibility.nickname ? await readOwnPublicNickname(supabase, userId) : null,
+      accounts: await readOwnAccountLabels(supabase, userId),
     }),
   };
+}
+
+/**
+ * The trader's own accounts, as `{ id, label }` — the only place this feature
+ * touches the `accounts` table.
+ *
+ * RESOLVED HERE AND NOT IN THE BUILDER, so `snapshot.ts` keeps the property
+ * its header claims: it names every field it emits and reads no table. It also
+ * keeps `portfolioLabel` out of that module, which its docblock asks for
+ * explicitly.
+ *
+ * UNDER THE TRADER'S OWN RLS. `supabase` is the session-scoped client, so this
+ * returns their accounts and nobody else's — which is what makes the `known`
+ * set in `accountRowsOf` meaningful rather than decorative.
+ *
+ * `readPortfolios` swallows its own errors into `[]` and issues no statement at
+ * all when `isImportEnabled()` is false, so a deployment without migration 037
+ * reaches this line, gets nothing, and mints a card with no accounts panel.
+ * That is the designed empty state and not a failure — see
+ * `DailyShareSnapshot.accounts`.
+ */
+async function readOwnAccountLabels(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<ShareAccountSource[]> {
+  const portfolios = await readPortfolios(supabase, userId, isImportEnabled());
+  return portfolios.map((p) => ({ id: p.id, label: portfolioLabel(p) }));
 }
 
 /**

@@ -105,12 +105,73 @@ export interface ShareFraction {
  */
 export type ShareProvenance = 'broker' | 'mixed' | 'manual';
 
-/** What the trader agreed to show. All false is the resting state. */
+/**
+ * What the trader agreed to show. All false is the resting state.
+ *
+ * `accounts` IS GONE FROM THIS DOCUMENT AS OF THE STAGE 3 REVISION, and its
+ * absence is deliberate rather than an oversight. Per-account names are now
+ * ALWAYS on the card (Imri, 28.10), so there is no consent to record — and a
+ * flag nobody reads is worse than no flag, because it reads as a control that
+ * exists. `readShareVisibility` therefore does not parse it, and a stored
+ * document from before this change simply has a key nobody looks at.
+ *
+ * THE PRIVACY CONSEQUENCE IS REAL AND IS NOT MINE TO SOFTEN: `display_name` is
+ * broker-supplied free text, and on a prop account it is a FIRM'S NAME
+ * (portfolios/read.ts:29-53). That module's header forbids this table reaching
+ * a log or an AI prompt; a public share card is now a third destination, by
+ * decision. The one mitigation kept is {@link MAX_SHARE_ACCOUNT_NAME}.
+ */
 export interface ShareVisibility {
   nickname: boolean;
-  accounts: boolean;
   balance: boolean;
 }
+
+/**
+ * One broker account's share of the day.
+ *
+ * `name` IS `nickname ?? display_name`, NOT `display_name` ALONE, and that is
+ * a deliberate reading of "the real account name". `portfolioLabel()` is what
+ * every other screen in the product shows, and a trader who renamed
+ * "Topstep Evaluation 50K" to "החשבון שלי" has already said which of those two
+ * strings is their account's name. Publishing the broker's string over the
+ * trader's own rename would be the more surprising and the less private of the
+ * two choices. The label is resolved by the STORE and handed in — see
+ * {@link buildDailyShareSnapshot} — so this module still never reads the
+ * `accounts` table and still names every field it emits.
+ */
+export interface ShareAccountRow {
+  /** Bounded by {@link MAX_SHARE_ACCOUNT_NAME}. Never an id. */
+  name: string;
+  /** This account's money over its counted trades. Null when none carried one. */
+  pnl: number | null;
+  /** Whether every counted trade here came from a broker. Drives the row mark. */
+  broker: boolean;
+}
+
+/**
+ * The longest account name the card prints.
+ *
+ * A display bound AND the only privacy mitigation left on this field now that
+ * the toggle is gone: a prop-firm string that carries an account number
+ * ("Topstep Evaluation 50K-884421") is cut before the digits that identify it.
+ * It is not a guarantee — a short name can still be identifying — and the
+ * report says so rather than pretending otherwise.
+ */
+export const MAX_SHARE_ACCOUNT_NAME = 22;
+
+/**
+ * The most account rows a snapshot stores.
+ *
+ * The card shows five and says "+N more"; this is the bound on what is
+ * WRITTEN, which is a different question. Storing every account would put
+ * names in the row that no surface ever renders, and the stored document is
+ * the thing that outlives the design — so it holds a little more than the card
+ * needs and nothing like all of it.
+ */
+export const MAX_SHARE_ACCOUNTS = 8;
+
+/** Our word for "no account", never a trader's. See `figures.ts:140`. */
+export const SHARE_UNASSIGNED_NAME = 'Unassigned';
 
 export interface DailyShareSnapshot {
   /** {@link SHARE_SNAPSHOT_VERSION} at mint time. */
@@ -141,6 +202,20 @@ export interface DailyShareSnapshot {
   provenance: ShareProvenance;
   /** The opt-in handle, or null — which is anonymous and is the default. */
   nickname: string | null;
+  /**
+   * The day split per account, biggest first, `Unassigned` always last.
+   *
+   * EMPTY IS A REAL AND COMMON STATE, not a failure: migration 037 is applied
+   * by hand and the whole accounts layer is behind `isImportEnabled()`, so a
+   * deployment without it hands the builder no accounts and this is `[]`. Every
+   * reader must render nothing rather than an empty panel.
+   *
+   * ADDITIVE — `SHARE_SNAPSHOT_VERSION` is unchanged. A card minted before this
+   * deploy has no `accounts` key at all, `readDailyShareSnapshot` answers `[]`
+   * for it, and it renders exactly as it did yesterday. That is the whole
+   * reason the version did not move.
+   */
+  accounts: ShareAccountRow[];
 }
 
 /**
@@ -154,6 +229,15 @@ export interface DailyShareSnapshot {
  * reason the builder needs no migration flag to be safe.
  */
 export interface ShareTradeRow {
+  /**
+   * Which account the trade was filed under, or absent/null for UNASSIGNED.
+   *
+   * NULL MEANS UNASSIGNED AND NOT MANUAL (037:146-156) — every row written
+   * before REF-110 is in that state. Declared optional for the same reason the
+   * rest of this interface is: a database without 037 has no such column and
+   * `select('*')` returns no key.
+   */
+  account_id?: string | null;
   status?: string | null;
   exit_price?: number | string | null;
   entry_price?: number | string | null;
@@ -326,6 +410,90 @@ function provenanceOf(rows: readonly ShareTradeRow[]): ShareProvenance {
 }
 
 /**
+ * An account the TRADER OWNS, with its label already resolved.
+ *
+ * The store builds these from `readPortfolios` + `portfolioLabel` and hands
+ * them in. This module therefore still does not import the portfolios layer
+ * and still does not read the `accounts` table — which is what keeps the
+ * allow-list property in the header true: every field this file emits is a
+ * field it was given or computed, never a column it reached for.
+ */
+export interface ShareAccountSource {
+  id: string;
+  /** Already `nickname ?? display_name`. See {@link ShareAccountRow}. */
+  label: string;
+}
+
+/**
+ * Split the counted trades per account.
+ *
+ * THE `known` SET IS A SECURITY BOUNDARY HERE, not a tidiness measure.
+ * `figures.ts:152-162` records the hole: `trade_plans`' RLS policy asks whose
+ * ROW it is and not whose ACCOUNT the id names, so a crafted write can point a
+ * trader's own trade at an account id belonging to somebody else. On the
+ * accounts SCREEN that costs a trade falling into the wrong bucket. On a
+ * PUBLIC CARD it would mean rendering a name we looked up for an id the trader
+ * does not own — so an id that is not in the trader's own account list is
+ * treated as unassigned and never resolved to a name.
+ *
+ * Only accounts the trader owns can therefore be named, and the complete fix
+ * is still the `WITH CHECK` migration that file asks for.
+ */
+function accountRowsOf(
+  counted: readonly ShareTradeRow[],
+  sources: readonly ShareAccountSource[]
+): ShareAccountRow[] {
+  const labels = new Map(sources.map((s) => [s.id, s.label]));
+
+  const UNASSIGNED = ' unassigned';
+  const buckets = new Map<string, ShareTradeRow[]>();
+  for (const row of counted) {
+    const id = row.account_id ?? null;
+    const key = id !== null && labels.has(id) ? id : UNASSIGNED;
+    const bucket = buckets.get(key);
+    if (bucket) bucket.push(row);
+    else buckets.set(key, [row]);
+  }
+
+  const rows: Array<ShareAccountRow & { unassigned: boolean }> = [];
+  for (const [key, bucketRows] of buckets) {
+    const amounts = bucketRows
+      .map((row) => pnlRow(row as Record<string, unknown>))
+      .filter(hasMoneyPnl)
+      .map(tradeMoneyPnl);
+
+    // The unassigned bucket is only worth a row when it carries MONEY. With no
+    // amount it adds a nameless line that explains nothing, and the card's
+    // total is unaffected by it either way — so it stays off.
+    if (key === UNASSIGNED && amounts.length === 0) continue;
+
+    rows.push({
+      name:
+        key === UNASSIGNED
+          ? SHARE_UNASSIGNED_NAME
+          : (labels.get(key) ?? SHARE_UNASSIGNED_NAME).slice(0, MAX_SHARE_ACCOUNT_NAME).trim(),
+      pnl: amounts.length === 0 ? null : amounts.reduce((sum, value) => sum + value, 0),
+      broker: bucketRows.every(isBrokerRow),
+      unassigned: key === UNASSIGNED,
+    });
+  }
+
+  // Biggest money first so the card leads with the account that moved the day,
+  // `Unassigned` always last because it is our word and not an account, and
+  // the name as the final tie-break so a re-mint of the same day cannot
+  // reorder the rows. A frozen document has to be deterministic.
+  rows.sort((a, b) => {
+    if (a.unassigned !== b.unassigned) return a.unassigned ? 1 : -1;
+    const left = a.pnl ?? Number.NEGATIVE_INFINITY;
+    const right = b.pnl ?? Number.NEGATIVE_INFINITY;
+    if (left !== right) return right - left;
+    return a.name.localeCompare(b.name);
+  });
+
+  return rows.slice(0, MAX_SHARE_ACCOUNTS).map(({ name, pnl, broker }) => ({ name, pnl, broker }));
+}
+
+/**
  * Build the frozen card for one trading day.
  *
  * TAKES THE VISIBILITY AND APPLIES IT HERE rather than leaving the caller to
@@ -343,11 +511,20 @@ export function buildDailyShareSnapshot({
   day,
   visibility,
   publicNickname,
+  accounts = [],
 }: {
   rows: readonly ShareTradeRow[];
   day: TradingDay;
   visibility: ShareVisibility;
   publicNickname?: unknown;
+  /**
+   * The trader's OWN accounts, labels already resolved by the store.
+   *
+   * Defaulted to empty, which is the state on any deployment without migration
+   * 037 or with the import gate shut — and the state every caller that does
+   * not care about accounts gets for free.
+   */
+  accounts?: readonly ShareAccountSource[];
 }): DailyShareSnapshot {
   const counted = countedShareTrades(rows, day);
 
@@ -390,6 +567,7 @@ export function buildDailyShareSnapshot({
     worst: amounts.length === 0 ? null : Math.min(...amounts),
     provenance: provenanceOf(counted),
     nickname,
+    accounts: accountRowsOf(counted, accounts),
   };
 }
 
@@ -430,6 +608,15 @@ export function shareSnapshotLines(snapshot: DailyShareSnapshot): string[] {
   }
   if (snapshot.stopHeld !== null) {
     lines.push(`הסטופ לא הורחק ${snapshot.stopHeld.met}/${snapshot.stopHeld.answered}`);
+  }
+
+  // THE ACCOUNT NAMES ARE IN THE PREVIEW BECAUSE THEY ARE ON THE CARD. This
+  // function's contract is that a trader who reads these lines and presses
+  // "צור קישור" gets a page saying the same things — and the names are now the
+  // single most consequential thing the card publishes, so they are the last
+  // thing that should be missing from the screen that precedes consent.
+  for (const account of snapshot.accounts) {
+    lines.push(`${account.name}: ${account.pnl === null ? '—' : formatMoney(account.pnl)}`);
   }
 
   // The same three states the card renders, including the manual case that
@@ -495,9 +682,10 @@ export function readShareVisibility(value: unknown): ShareVisibility {
   const raw = (value && typeof value === 'object' && !Array.isArray(value)
     ? value
     : {}) as Record<string, unknown>;
+  // `accounts` is deliberately NOT read — see {@link ShareVisibility}. A
+  // document stored before the revision still has the key; nothing looks at it.
   return {
     nickname: raw.nickname === true,
-    accounts: raw.accounts === true,
     balance: raw.balance === true,
   };
 }
@@ -574,5 +762,36 @@ export function readDailyShareSnapshot(value: unknown): DailyShareSnapshot | nul
     // verification nothing supports, 'mixed' would claim a mixture.
     provenance,
     nickname: readPublicNickname(raw.nickname),
+    accounts: readAccountRows(raw.accounts),
   };
+}
+
+/**
+ * The per-account rows, read defensively — and bounded on the way out.
+ *
+ * A MISSING KEY IS `[]` AND NOT A FAILURE. Every card minted before this
+ * revision has no `accounts` key, and those cards must keep rendering exactly
+ * as they did; returning an empty list is what makes the addition additive and
+ * is why `SHARE_SNAPSHOT_VERSION` did not move.
+ *
+ * The name is re-bounded here rather than trusted from the document. The
+ * builder already cut it, but this reader's whole contract is that it trusts
+ * nothing in the JSONB — and the one field in this list that a bad value could
+ * do real damage with is a free-text name on a public page.
+ */
+function readAccountRows(value: unknown): ShareAccountRow[] {
+  if (!Array.isArray(value)) return [];
+  const rows: ShareAccountRow[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const raw = entry as Record<string, unknown>;
+    if (typeof raw.name !== 'string') continue;
+    const name = raw.name.replace(/\s+/g, ' ').trim().slice(0, MAX_SHARE_ACCOUNT_NAME);
+    // A nameless row is a row with nothing to say; it is dropped rather than
+    // rendered as a blank line beside a figure.
+    if (name === '') continue;
+    rows.push({ name, pnl: num(raw.pnl), broker: raw.broker === true });
+    if (rows.length === MAX_SHARE_ACCOUNTS) break;
+  }
+  return rows;
 }
