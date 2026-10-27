@@ -1813,11 +1813,29 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
   // this happens, per pull, in production.
   const skippedAccounts = notices.filter((n) => n.kind === 'account_currency').length;
   const unpricedContracts = notices.filter((n) => n.kind === 'unpriced_product').length;
-  if (hostsDropped > 0 || crossHostCollisions > 0 || skippedAccounts > 0 || unpricedContracts > 0) {
+  // `includedMissing` IS THE NUMBER REF-124 WAS BUILT TO MEASURE, and until now
+  // nothing anywhere could have reported it. It counts accounts this pull
+  // carried past a host that stopped offering them — zero on every ordinary
+  // day, which is what makes a non-zero value worth reading. It is also the
+  // only evidence we will ever get that the carry-forward path runs in
+  // production at all, and the first half of the question §1 of the
+  // investigation could not answer: a run with `includedMissing=1` that imports
+  // a trade says `/position/list` still serves a detached account.
+  //
+  // A COUNT, LIKE EVERY OTHER FIELD ON THIS LINE. No account id, no host name,
+  // no symbol, no figure — see the rule above.
+  if (
+    hostsDropped > 0 ||
+    crossHostCollisions > 0 ||
+    skippedAccounts > 0 ||
+    unpricedContracts > 0 ||
+    carriedAccounts > 0
+  ) {
     console.warn(
       `[tradovate][day] hostsAsked=${order.length} hostsDropped=${hostsDropped} ` +
         `accounts=${claimed.size} crossHostIdCollisions=${crossHostCollisions} ` +
-        `skippedAccounts=${skippedAccounts} unpricedContracts=${unpricedContracts}`
+        `skippedAccounts=${skippedAccounts} unpricedContracts=${unpricedContracts} ` +
+        `includedMissing=${carriedAccounts}`
     );
   }
 
