@@ -23,12 +23,38 @@
  *
  * - `accountType` must be `Customer`. The other five (`Employee`, `Giveup`,
  *   `House`, `Omnibus`, `Wash`) are not an end trader's own trading account.
- * - `closed` and `restricted` must not be set: nothing was traded there today.
+ * - `closed` and `restricted` must not be set.
  * - `readonly` and `futuresDisabled` must not be set, for the same reason.
  *
  * `active` is checked when present for the same reason, and its absence is not
  * treated as inactive — these flags are optional in the schema and a missing
  * boolean is "not stated", not `false`.
+ *
+ *
+ * A CORRECTION, AND IT COST A TRADER A TRADE (REF-124)
+ * ----------------------------------------------------
+ *
+ * The four state-flag lines above used to carry a reason: *"nothing was traded
+ * there today"*. **That sentence was false, and it is the whole of REF-124.**
+ * These flags say an account cannot be traded **now**; the day pull read them
+ * as saying it was not traded **today**, and those are different claims for
+ * every account that closed while the market was open.
+ *
+ * The measured case, 27.10.2026: a trader's last trade passed a prop firm's
+ * evaluation, the firm closed the evaluation account minutes later, and the
+ * trade that passed it was never imported — the account was already gone from
+ * `/account/list` by the next sync. A firm that had instead flagged the account
+ * `closed` and left it listed would have lost the same trade by this filter
+ * rather than by its absence. Same failure, different line.
+ *
+ * SO THE FILTER IS UNCHANGED AND THE INFERENCE IS GONE. Everything here still
+ * answers only "could this account be traded right now", which is the right
+ * question for the rules and the only one these flags can answer. "Was it
+ * traded today" is now asked where the evidence for it lives — our own
+ * `accounts` table, through `BrokerDayRequest.knownActiveAccounts` and the
+ * carry-forward block in ./fills.ts' `loadBrokerDay`. Nothing in this module
+ * needed to change for that, which is the point: the bug was a reason in a
+ * comment being load-bearing somewhere else.
  *
  *
  * "THIS TRADER'S" IS TWO WAYS, NOT ONE (REF-90 Stage 2)

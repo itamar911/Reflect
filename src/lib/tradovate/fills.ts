@@ -1627,12 +1627,9 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
     const reader = readers[env]!;
 
     let accepted: TradovateAccount[];
-    /** This host's claimed accounts, for REF-124's carry-forward below. */
-    let hostClaimed: ClaimedAccount[];
     try {
       const discovered = await discoverHostAccounts(reader, tradovateUserId);
       accepted = discovered.accepted;
-      hostClaimed = discovered.claimed;
       // PUSHED HERE AND NOWHERE ELSE: past the catch, so the list holds exactly
       // the hosts that returned something. A host dropped by rule 1 below is
       // absent, and the accounts sync reads that absence as "not asked" rather
@@ -1699,16 +1696,29 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
     // considered, so a demo row can never be carried onto live — the §5.3
     // reversal above, applied to the one new input.
     //
+    // THE TEST IS AGAINST `accepted` AND NOT AGAINST THE LIST (REF-124 item 2),
+    // which widens this from "the host stopped listing it" to "the host stopped
+    // offering it", and the two are the same failure wearing different clothes.
+    // A firm can retire an evaluation account by dropping it from the list, by
+    // flagging it `closed`, by flagging it `restricted` or `readonly`, or by
+    // revoking the trading permission that made it the trader's — and the
+    // trade that triggered any of those is in the day that is still running.
+    // `accepted` is exactly "whose fills count this run", so subtracting it
+    // asks the one question worth asking: was this account open to us earlier
+    // today and is it not now. Every route to that state is covered by one
+    // expression rather than by a list of flags somebody has to remember to
+    // extend. See the correction at the head of ./accounts.ts.
+    //
     // NOT ADDED TO `claimed` OR `bareIds`. Those two measure what
     // `/account/list` said: `claimed.size` is what the accounts sync records
     // and what the `no_accounts` notice keys on, and `bareIds` exists to
     // measure a cross-host id collision in the LISTS. A carried account is
-    // precisely an account no list holds, so counting it in either would make
-    // both numbers lie about their own subject.
-    const listedHere = new Set(hostClaimed.map((entry) => entry.account.id));
+    // precisely an account the pull would otherwise not count, so counting it
+    // in either would make both numbers lie about their own subject.
+    const offeredHere = new Set(accepted.map((account) => account.id));
     const carriedHere = new Set(
       (knownActiveAccounts ?? [])
-        .filter((known) => known.host === env && !listedHere.has(known.accountId))
+        .filter((known) => known.host === env && !offeredHere.has(known.accountId))
         .map((known) => known.accountId)
     );
     carriedAccounts += carriedHere.size;
