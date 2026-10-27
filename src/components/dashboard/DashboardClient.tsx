@@ -16,6 +16,7 @@ import { useMediaQuery, useBrowserTranslated } from '@/lib/hooks';
 import { useModalDialog } from '@/lib/a11y/useModalDialog';
 import { renderPlainAiText, segmentByLineMarker, joinLines, CHECK_CHARS, CROSS_CHARS } from '@/lib/ai/textFormatting';
 import BrokerSyncButton, { ReflectOnlyNote } from '@/components/tradovate/BrokerSyncButton';
+import ShareDayButton from '@/components/share/ShareDayButton';
 import TradingDayLabel from '@/components/ui/TradingDayLabel';
 
 export type { DashTrade } from '@/lib/dashboard/trades';
@@ -1690,13 +1691,28 @@ export default function DashboardClient({
             <LivePositions userId={userId} enabled={canSync} layout="portfolios" />
           </div>
         </div>
-        {/* NO `refreshOnChange` HERE, and that is the point of the prop. The
-            realtime subscription below already refetches on a
-            `postgres_changes` INSERT for this user, which is exactly the event
-            a sync produces — so this page is the one that updates itself for
-            free, and a router.refresh() would re-run the 500-row query to
-            reach the same list. */}
-        {canSync ? <BrokerSyncButton userId={userId} /> : <ReflectOnlyNote />}
+        {/* WRAPPED, AND THE WRAPPER IS LOAD-BEARING (REF-125 item 5). The row
+            above is `justify-content: space-between` with exactly two
+            children; a third DIRECT child would spread the two actions to
+            opposite ends of the header instead of grouping them. The journal
+            page's own header does the same thing for the same reason.
+
+            `items-start` matches the row's own alignment so the sync button's
+            aria-live region still grows downward without dragging the share
+            button with it. */}
+        <div className="flex items-start gap-2">
+          {/* Renders nothing at all until GET /api/share/today says the table
+              exists, which is what makes this safe to deploy before migration
+              043 runs. See ShareDayButton. */}
+          <ShareDayButton />
+          {/* NO `refreshOnChange` HERE, and that is the point of the prop. The
+              realtime subscription below already refetches on a
+              `postgres_changes` INSERT for this user, which is exactly the
+              event a sync produces — so this page is the one that updates
+              itself for free, and a router.refresh() would re-run the 500-row
+              query to reach the same list. */}
+          {canSync ? <BrokerSyncButton userId={userId} /> : <ReflectOnlyNote />}
+        </div>
       </div>
 
       {/* ── Empty state ───────────────────────────────────────────────────── */}

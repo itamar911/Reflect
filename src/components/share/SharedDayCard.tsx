@@ -29,7 +29,8 @@
  */
 
 import { formatMoney } from '@/lib/money';
-import type { DailyShareSnapshot, ShareFraction, ShareProvenance } from '@/lib/share/snapshot';
+import { shareProvenanceNote } from '@/lib/share/snapshot';
+import type { DailyShareSnapshot, ShareFraction } from '@/lib/share/snapshot';
 import { tradingDayLabel, type TradingDay } from '@/lib/tradingDay';
 
 const SURFACE = 'var(--color-tg-surface)';
@@ -50,35 +51,6 @@ function Ltr({ children, style }: { children: React.ReactNode; style?: React.CSS
       {children}
     </span>
   );
-}
-
-/**
- * The provenance line, in English, as the ticket specifies.
- *
- * `'manual'` RENDERS NOTHING, and that is the repo's own rule rather than a
- * gap: link.ts:68-69 — "a journal that labels its own default case 'ידני'
- * treats hand entry as the exception." A manual day is the default day.
- *
- * "before fees" IS NOT OPTIONAL ON THE BROKER CASE. JournalClient.tsx:1617-1627
- * records that a broker row's P&L is GROSS — `(sell − buy) × qty ×
- * valuePerPoint`, with no commissions and no exchange fees — so it "reads
- * slightly BETTER than the trader's own account statement, always in the same
- * direction". A public page asserting a broker-verified number without that
- * qualifier is the sharpest reputational risk in this ticket (REF-125 §3.4),
- * and it is the reason the two strings are not interchangeable: the mixed case
- * makes no verification claim, so it carries no fee qualifier either.
- *
- * NOTE WHAT THIS DOES NOT SAY: it does not say "verified", and it names the
- * SYNC rather than the card. TodayContextPanel.tsx:530-536 already argues that
- * one provenance sentence gets over-read as covering figures it does not
- * cover — and the discipline fractions below are entirely intent-side, backed
- * by nothing a broker knows (REF-125 §3.2). "Broker-synced" is a claim about
- * where the closes came from, which is all that is true.
- */
-function provenanceNote(provenance: ShareProvenance): string | null {
-  if (provenance === 'broker') return 'Broker-synced · before fees';
-  if (provenance === 'mixed') return 'Partially broker-synced';
-  return null;
 }
 
 function Stat({ label, children }: { label: string; children: React.ReactNode }) {
@@ -128,7 +100,10 @@ export default function SharedDayCard({
   /** The row's own column, which the page trusts over the document's copy. */
   tradingDay: TradingDay;
 }) {
-  const note = provenanceNote(snapshot.provenance);
+  // The same function the dialog's preview calls, so a provenance claim cannot
+  // differ between what the trader was shown and what the page prints. The
+  // wording argument lives on that function.
+  const note = shareProvenanceNote(snapshot.provenance);
   const pnl = snapshot.pnl;
 
   return (

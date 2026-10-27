@@ -20,6 +20,7 @@ import { NextResponse } from 'next/server';
 import {
   createDailyShare,
   listOwnShares,
+  previewDailyShare,
   readOwnPublicNickname,
   writeOwnPublicNickname,
 } from '@/lib/share/store';
@@ -69,11 +70,27 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'share_list_failed' }, { status: 500, headers: NO_STORE });
   }
 
+  // The card as it WOULD be published right now, built and not stored.
+  //
+  // ALWAYS WITH `nickname: false`, so the handle is not in this response
+  // unless the trader asks for it — the toggle is client state, and the
+  // dialog patches the name into its own copy to preview it (see
+  // ShareDayDialog). The alternative, building the preview with the name in
+  // and letting the client hide it, would put the handle on the wire for
+  // every dialog open including the ones that publish nothing.
+  const preview = await previewDailyShare({
+    supabase,
+    userId: user.id,
+    day,
+    visibility: { nickname: false, accounts: false, balance: false },
+  });
+
   return NextResponse.json(
     {
       available: true,
       day,
       nickname: await readOwnPublicNickname(supabase, user.id),
+      preview: preview.ok ? preview.value : null,
       shares: shares.value,
     },
     { headers: NO_STORE }

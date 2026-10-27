@@ -66,9 +66,10 @@
  * scripts/features-null-safety-check.ts exists to pin.
  */
 
+import { formatMoney } from '@/lib/money';
 import { hasMoneyPnl, isWinningTrade, pnlRow, tradeMoneyPnl } from '@/lib/pnl';
 import { readStopHistory, stopWasWidened } from '@/lib/journal/stopHistory';
-import { tradingDayOfTrade, type TradingDay } from '@/lib/tradingDay';
+import { tradingDayLabel, tradingDayOfTrade, type TradingDay } from '@/lib/tradingDay';
 
 /** The snapshot format. Bumped when a field changes meaning, never for an addition. */
 export const SHARE_SNAPSHOT_VERSION = 1;
@@ -390,6 +391,71 @@ export function buildDailyShareSnapshot({
     provenance: provenanceOf(counted),
     nickname,
   };
+}
+
+/**
+ * The card as lines of text — what the dialog shows the trader BEFORE they
+ * publish anything.
+ *
+ * SAME SOURCE AS THE CARD, which is the only reason this lives here rather
+ * than in the dialog. "Preview" is a promise: a trader who reads these lines
+ * and presses "צור קישור" must get a page saying the same things, so the
+ * preview and the page have to be two renderings of one snapshot rather than
+ * two descriptions of one day. Every number below comes from the same fields
+ * SharedDayCard reads, and a field added to one without the other shows up as
+ * a preview that lies.
+ *
+ * ALSO WHAT THE LEAK SUITE GREPS. The lines are flat strings, so
+ * scripts/share-leak-check.ts can assert over the text a human actually sees
+ * as well as over the serialised JSON — the two are different surfaces and a
+ * name could in principle reach one without the other.
+ */
+export function shareSnapshotLines(snapshot: DailyShareSnapshot): string[] {
+  const lines: string[] = [tradingDayLabel(snapshot.day)];
+
+  if (snapshot.nickname !== null) lines.push(snapshot.nickname);
+
+  lines.push(`תוצאת היום: ${snapshot.pnl === null ? '—' : formatMoney(snapshot.pnl)}`);
+  lines.push(
+    `${snapshot.trades} עסקאות סגורות · ${snapshot.wins} מנצחות, ${snapshot.losses} מפסידות`
+  );
+
+  if (snapshot.best !== null && snapshot.worst !== null) {
+    lines.push(
+      `הטובה ${formatMoney(snapshot.best)} · החלשה ${formatMoney(snapshot.worst)}`
+    );
+  }
+  if (snapshot.followedPlan !== null) {
+    lines.push(`עמד בתוכנית ${snapshot.followedPlan.met}/${snapshot.followedPlan.answered}`);
+  }
+  if (snapshot.stopHeld !== null) {
+    lines.push(`הסטופ לא הורחק ${snapshot.stopHeld.met}/${snapshot.stopHeld.answered}`);
+  }
+
+  // The same three states the card renders, including the manual case that
+  // prints nothing. Kept in step by being the same switch, not a copy of it.
+  const note = shareProvenanceNote(snapshot.provenance);
+  if (note !== null) lines.push(note);
+
+  return lines;
+}
+
+/**
+ * The provenance line, in English, as the ticket specifies — or nothing.
+ *
+ * HERE RATHER THAN IN THE COMPONENT because both the card and the dialog's
+ * preview print it, and a provenance claim that differs between the two would
+ * be the worst possible place for a copy to drift. SharedDayCard's docblock
+ * carries the full argument for the wording; the short version is that
+ * "before fees" is not optional on the broker case (a broker row's P&L is
+ * gross, and reads systematically better than the trader's statement), and
+ * that neither string says "verified" — the discipline fractions are
+ * intent-side and backed by nothing a broker knows.
+ */
+export function shareProvenanceNote(provenance: ShareProvenance): string | null {
+  if (provenance === 'broker') return 'Broker-synced · before fees';
+  if (provenance === 'mixed') return 'Partially broker-synced';
+  return null;
 }
 
 // ── The defensive readers ───────────────────────────────────────────────────

@@ -201,6 +201,47 @@ export async function writeOwnPublicNickname(
 }
 
 /**
+ * Build today's card WITHOUT publishing it — what the dialog previews.
+ *
+ * THE SAME FUNCTION THE MINT USES, which is the whole point:
+ * `createDailyShare` calls this and inserts the result, so the trader cannot
+ * be shown one thing and publish another. A separate "preview" code path is
+ * precisely the bug this shape forecloses, and it is a bug that would be
+ * invisible in review — two builders agreeing today and drifting in six
+ * months.
+ *
+ * Costs the same two reads as the mint and writes nothing. The dialog calls it
+ * on open, so pressing "צור קישור" immediately afterwards does repeat them;
+ * that is accepted rather than cached, because a snapshot is a claim about a
+ * moment and the moment that matters is the one the trader published in, not
+ * the one they opened a dialog in.
+ */
+export async function previewDailyShare({
+  supabase,
+  userId,
+  day,
+  visibility,
+}: {
+  supabase: SupabaseClient;
+  userId: string;
+  day: TradingDay;
+  visibility: ShareVisibility;
+}): Promise<ShareResult<DailyShareSnapshot>> {
+  const rows = await readTradesForDay(supabase, userId, day);
+  if (!rows.ok) return rows;
+
+  return {
+    ok: true,
+    value: buildDailyShareSnapshot({
+      rows: rows.value,
+      day,
+      visibility,
+      publicNickname: visibility.nickname ? await readOwnPublicNickname(supabase, userId) : null,
+    }),
+  };
+}
+
+/**
  * Freeze today's card and mint a link for it.
  *
  * TWO READS AND ONE WRITE, in that order, and the order is the only thing here
@@ -226,15 +267,9 @@ export async function createDailyShare({
   day: TradingDay;
   visibility: ShareVisibility;
 }): Promise<ShareResult<OwnShare>> {
-  const rows = await readTradesForDay(supabase, userId, day);
-  if (!rows.ok) return rows;
-
-  const snapshot = buildDailyShareSnapshot({
-    rows: rows.value,
-    day,
-    visibility,
-    publicNickname: visibility.nickname ? await readOwnPublicNickname(supabase, userId) : null,
-  });
+  const built = await previewDailyShare({ supabase, userId, day, visibility });
+  if (!built.ok) return built;
+  const snapshot = built.value;
 
   const token = mintShareToken();
   const { data, error } = await supabase
