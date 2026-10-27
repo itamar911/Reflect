@@ -42,9 +42,10 @@ import { computeStats as computeStrategyStats } from '../src/components/strategi
 import { computeWeeklyStats, type TradeRow } from '../src/lib/weekly/stats';
 import { exportRow, type ExportTrade } from '../src/lib/journal/csv';
 import { tradeDirection, tradePointsPnl, tradeMoneyPnl, isWinningTrade, pnlRow } from '../src/lib/pnl';
-import { averageOf, rrValue, scaleValue, intentText, intentNumber } from '../src/lib/intent';
+import { averageOf, rrValue, scaleValue, intentText, intentNumber, type RawValue } from '../src/lib/intent';
 import { readTradeFacts, tradeFactsLine, tradeFactsSummaryLine } from '../src/lib/ai/tradeFacts';
 import { readStopHistory, stopMoveSentence } from '../src/lib/journal/stopHistory';
+import { realisedRr, rrLabel, rrRow } from '../src/lib/journal/realisedRr';
 import { describeStages } from '../src/lib/journal/stages';
 
 // ── Harness ──────────────────────────────────────────────────────────────────
@@ -821,6 +822,132 @@ group('REF-120: the facts a model is given, and the four it never is', [
       unknownLine.includes('הודק'),
     ],
     [true, false, false]),
+]);
+
+// ── REF-123: the realised R:R ────────────────────────────────────────────────
+//
+// `|exit - entry| / |entry - broker_stop_loss|` — what the trade returned
+// against the stop the position actually OPENED under, rather than against the
+// one the trader typed into a form.
+//
+// THE FIXTURES ARE BUILT ON ONE TRADE WITH ONE RISK so that every ratio below
+// can be checked by eye: a long from 100 with its broker stop at 95 is risking
+// FIVE POINTS, so the exit price alone decides the answer. Four of the six
+// cases assert a null, which is the proportion this file exists to defend —
+// a ratio is only worth printing when every one of its three inputs is real.
+
+/** The stop document for a stop that was placed, held and read cleanly. */
+const rrStopDoc = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+  verdict: 'kept',
+  reason: null,
+  initialStop: 95,
+  initialStopSide: 'risk',
+  finalStop: 95,
+  movedCount: 0,
+  direction: null,
+  trailing: false,
+  stopCount: 1,
+  stopAtEntry: true,
+  lateStop: null,
+  cancelledUnreplaced: false,
+  ...over,
+});
+
+/** A long from 100, five points of real risk, exited wherever the case needs. */
+const rrRow100 = (exit: number | null, doc: Record<string, unknown> | null = rrStopDoc()) => ({
+  id: 'rr-123',
+  status: exit === null ? 'open' : 'closed',
+  symbol: 'NQ',
+  direction: 'long' as const,
+  entry_price: 100,
+  exit_price: exit,
+  stop_loss: 96,
+  take_profit: 112,
+  rr_ratio: 3,
+  broker_stop_loss: 95,
+  stop_history: doc,
+  submitted_at: '2026-10-20T10:00:00.000Z',
+  closed_at: exit === null ? null : '2026-10-20T11:00:00.000Z',
+});
+
+const rrOf = (row: Record<string, unknown>) =>
+  realisedRr(readStopHistory(row.stop_history), row.broker_stop_loss, row.entry_price as RawValue,
+    row.exit_price as RawValue);
+
+group('REF-123: the R:R the trade actually returned', [
+  // (1) THE WIN. 10.5 points made on 5 risked. The planned figure on this row
+  // is 3, so the pair is also the sentence the coach could not previously say:
+  // the trader planned 1:3 and banked 1:2.1.
+  c('(1) a win reports the realised ratio, to one decimal',
+    [rrOf(rrRow100(110.5)), rrRow(3, rrOf(rrRow100(110.5)))],
+    [2.1, 'תוכנן 1:3 · בפועל 1:2.1']),
+
+  // (2) A LOSS SHORT OF THE STOP: out at 98, so two of the five points at risk
+  // were lost and the ratio is below one. IT IS NOT NEGATIVE AND NOT ZERO —
+  // the magnitude is the fact, and `[הפסד]` beside it in the facts line is
+  // what says which way it went (lib/journal/realisedRr.ts).
+  c('(2) a sub-1R loss keeps its ratio rather than reading as a win of 0',
+    [rrOf(rrRow100(98)), rrLabel(rrOf(rrRow100(98))!)],
+    [0.4, '1:0.4']),
+
+  // (3) NO STOP WAS PLACED. There is no risk denominator to divide by — not a
+  // zero, not the planned stop two columns over. `brokerStopToShow` already
+  // refuses the price for this verdict and the ratio refuses with it.
+  c('(3) a trade with no broker stop states no realised ratio',
+    [
+      rrOf(rrRow100(110.5, rrStopDoc({ verdict: 'none', initialStop: null }))),
+      rrOf(rrRow100(110.5, null)),
+      rrOf({ ...rrRow100(110.5), broker_stop_loss: null, stop_history: null }),
+    ],
+    [null, null, null]),
+
+  // (4) THE WRONG-SIDE STOP, which is the case that would have shipped a
+  // confident falsehood. On 19.10 a long stored an initial stop ABOVE its
+  // entry; that distance is not risk, and 10.5 divided by it is a precise
+  // meaningless number. Asserted through the document, as the UI reads it.
+  c('(4) a wrong-side stop states no ratio, however readable its price',
+    [rrOf(rrRow100(110.5, rrStopDoc({ initialStopSide: 'wrong', initialStop: 148 })))],
+    [null]),
+
+  // (5) A ZERO DENOMINATOR. `calcRR` answers 0 here and is right to, for a form
+  // that needs a number in a box; a realised 0 would be a MEASUREMENT reading
+  // "this trade returned nothing".
+  c('(5) entry and stop at the same price state no ratio, not zero',
+    [rrOf({ ...rrRow100(110.5), broker_stop_loss: 100,
+            stop_history: rrStopDoc({ initialStop: 100, finalStop: 100 }) })],
+    [null]),
+
+  // (6) AN OPEN TRADE HAS NO REALISED ANYTHING, and the row renders exactly
+  // what it has always rendered — the bare planned number, with no `בפועל`
+  // half and no dash standing in for one.
+  c('(6) an open trade adds nothing, and the planned-only row is unchanged',
+    [rrOf(rrRow100(null)), rrRow(3, null), rrRow(null, null)],
+    [null, '3', null]),
+
+  // (7) THE COACH IS TOLD, in the one line it reads per trade, and the figure
+  // is the same function's — not a second implementation of the division.
+  // 67.5 points on 35.5 risked, off the REF-120 fixture above.
+  c('(7) the facts line carries the realised ratio beside the planned one',
+    [
+      linkedLine.includes('R:R 2 · יחס בפועל 1:1.9'),
+      readTradeFacts(LINKED_WITH_STOPS)!.realisedRr,
+      // And a wrong-side document silences it in the prompt too, so the model
+      // is never handed a ratio the trader was not shown.
+      readTradeFacts({
+        ...LINKED_WITH_STOPS,
+        stop_history: { ...(LINKED_WITH_STOPS.stop_history as object), initialStopSide: 'wrong' },
+      })!.realisedRr,
+      // THE PIECE THIS TICKET ADDS IS A RATIO AND NOT A PRICE, asserted on the
+      // piece itself rather than by grepping the line for the stop price: the
+      // broker's stop already reaches the prompt inside `stopMoveSentence`'s
+      // from→to range (`הסטופ הודק לכיוון הרווח (מ-29870.25 ...)`), which
+      // REF-113 shipped and REF-120 reused on purpose. A bare substring test
+      // for it would also match `סטופ מתוכנן 29870` — the TRADER'S planned
+      // stop, which belongs there — and that is the exact landmine the header
+      // of lib/ai/tradeFacts.ts records this file stepping on once already.
+      linkedLine.split(' · ').find((p) => p.startsWith('יחס בפועל')),
+    ],
+    [true, 1.9, null, 'יחס בפועל 1:1.9']),
 ]);
 
 // ── Summary ──────────────────────────────────────────────────────────────────

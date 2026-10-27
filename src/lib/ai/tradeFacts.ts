@@ -47,6 +47,24 @@
  * {@link StopSentence} — a verdict, never a price. One policy in one module
  * rather than one per call site.
  *
+ * `realisedRr` IS NOT AN EXCEPTION TO THAT, AND THE DISTINCTION IS THE POINT
+ * (REF-123). A RATIO IS NOT A PRICE. The rule above exists because a model
+ * handed `broker_stop_loss` would do arithmetic on it and present the output as
+ * fact; the fix is to do the arithmetic ourselves, in a tested pure function
+ * with the five null cases spelled out, and hand over the RESULT.
+ * `lib/journal/realisedRr.ts` will not emit a number at all where
+ * `brokerStopToShow` declines to show one, so the coach can never reason about
+ * a stop the trader was not shown either. Same shape as the stop sentence
+ * directly above: a derived verdict, never a price of its own.
+ *
+ * TO BE EXACT ABOUT WHAT "NO BROKER STOP PRICE" HAS MEANT SINCE REF-113: the
+ * COLUMN is not read, and `stopMoveSentence` nonetheless quotes the price
+ * inside its from→to range (`הסטופ הודק לכיוון הרווח (מ-29870.25 ל-29850.50)`).
+ * That is deliberate and it is the sentence the trader reads, so the rule above
+ * is narrower than it first sounds — it forbids handing the model a bare stop
+ * price to do arithmetic on, not every mention of one. Worth knowing before
+ * reading the rule as a guarantee that the figure is absent.
+ *
  *
  * VALIDATE AT THE BOUNDARY, EVERY FIELD OPTIONAL, NULL MEANS SAY NOTHING
  * ---------------------------------------------------------------------
@@ -92,6 +110,7 @@
 
 import { linkState, LINK_STATE_COPY } from '@/lib/journal/link';
 import { readStopHistory, stopMoveSentence } from '@/lib/journal/stopHistory';
+import { realisedRr, rrLabel } from '@/lib/journal/realisedRr';
 import { readTradeStages, stagesSentence } from '@/lib/journal/stages';
 import { intentNumber, intentText, rrValue, scaleValue, type RawValue } from '@/lib/intent';
 import { formatMoney } from '@/lib/money';
@@ -124,6 +143,17 @@ export interface TradeFacts {
   /** The target the TRADER PLANNED. */
   plannedTarget: number | null;
   rr: number | null;
+  /**
+   * What the trade RETURNED against the stop the broker held, as a ratio
+   * (REF-123). Null whenever `lib/journal/realisedRr.ts` declines to state one
+   * — an open trade, no readable broker stop, a wrong-side stop.
+   *
+   * THE ONE FACT HERE DERIVED FROM A DENIED COLUMN, which is allowed precisely
+   * because it is derived — see the header. A coach that can compare `rr`
+   * against this one can say "you planned 1:3 and took 1:1.2", which is the
+   * sentence the planned figure alone could never support.
+   */
+  realisedRr: number | null;
   strategy: string | null;
   /** The 1..5 self-report, or null when the row carries none. */
   emotionalState: number | null;
@@ -212,6 +242,14 @@ export function readTradeFacts(row: unknown): TradeFacts | null {
     plannedStop: intentNumber(raw.stop_loss as RawValue),
     plannedTarget: intentNumber(raw.take_profit as RawValue),
     rr: rrValue(raw.rr_ratio as RawValue),
+    // The same four arguments the trade card passes, so the figure in the
+    // prompt is the figure on the card.
+    realisedRr: realisedRr(
+      stops,
+      raw.broker_stop_loss,
+      raw.entry_price as RawValue,
+      raw.exit_price as RawValue
+    ),
     strategy: intentText(raw.strategy as string | null | undefined),
     emotionalState: scaleValue(raw.emotional_state as RawValue),
     outcome: win === null ? (raw.status === 'closed' ? null : 'open') : win ? 'win' : 'loss',
@@ -289,6 +327,11 @@ export function tradeFactsLine(f: TradeFacts): string {
     f.plannedStop !== null ? `סטופ מתוכנן ${f.plannedStop}` : null,
     f.plannedTarget !== null ? `יעד מתוכנן ${f.plannedTarget}` : null,
     f.rr !== null ? `R:R ${f.rr}` : null,
+    // DIRECTLY AFTER THE PLANNED R:R, so the two sit side by side in the one
+    // line the model reads — the comparison is the whole value of the fact.
+    // Labelled and in `1:x` form where `rr` above is bare: an unlabelled second
+    // ratio would be indistinguishable from the first.
+    f.realisedRr !== null ? `יחס בפועל ${rrLabel(f.realisedRr)}` : null,
     f.money !== null ? `תוצאה ${formatMoney(f.money)}` : null,
     f.openedAt !== null ? `נכנסה ${minute(f.openedAt)}` : null,
     f.closedAt !== null ? `נסגרה ${minute(f.closedAt)}` : null,

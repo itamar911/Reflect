@@ -22,6 +22,7 @@ import {
   readStopHistory,
   stopMoveSentence,
 } from '@/lib/journal/stopHistory';
+import { realisedRr, rrRow } from '@/lib/journal/realisedRr';
 import { readTradeStages, stagePieces, stagesSentence } from '@/lib/journal/stages';
 import { startOfTodayIso } from '@/lib/rules/tradeRuleContext';
 import { DAY_START_PARAM, MAX_SINCE_AGE_MS, SINCE_PARAM } from '@/lib/tradovate/trading-day';
@@ -1793,6 +1794,14 @@ function TradeDetailModal({ trade, plans, onClose, onLinkResolved, onUnlink, deb
   // for "what happened to my stop" is already looking.
   const stopSentenceAfter = brokerStop !== null ? 'סטופ בברוקר' : 'Stop Loss';
 
+  // ── What that stop actually bought (REF-123) ──────────────────────────────
+  //
+  // Off the SAME document and the same column as `brokerStop` above, which is
+  // the one property that matters here: the stop in the denominator is the stop
+  // printed four rows up, so a trader who checks the division by hand gets this
+  // number back. lib/journal/realisedRr.ts states the rest.
+  const realised = realisedRr(stops, trade.broker_stop_loss, trade.entry_price, trade.exit_price);
+
   // ── How many pieces the position was taken in (REF-117 Stage 6) ───────────
   //
   // A ROW AND NOT A SENTENCE, unlike the stop beside it, because this one IS a
@@ -1843,7 +1852,11 @@ function TradeDetailModal({ trade, plans, onClose, onLinkResolved, onUnlink, deb
       ? ([['סטופ בברוקר', brokerStop.toFixed(2)]] as [string, string][])
       : []),
     ['Take Profit', fmtPriceCell(trade.take_profit)],
-    ['יחס R:R', trade.rr_ratio ?? '—'],
+    // PLANNED AND REALISED IN ONE ROW, because the comparison is the point and
+    // a second row would be a second label for the same quantity (REF-123).
+    // `rrRow` keeps the planned-only case byte-identical to what this row has
+    // always rendered — a bare number — so no historic trade's display moves.
+    ['יחס R:R', rrRow(trade.rr_ratio, realised) ?? '—'],
     ['מצב רגשי', trade.emotional_state != null ? `${trade.emotional_state}/5` : '—'],
     ['סיבת כניסה', trade.trade_reason ?? '—'],
     // Three statuses, one label function — the ternary this replaces read
