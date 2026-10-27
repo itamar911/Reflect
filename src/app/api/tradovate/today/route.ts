@@ -103,6 +103,7 @@ import { isUserAllowed } from '@/lib/tradovate/allowlist';
 import { tradovateGet } from '@/lib/tradovate/client';
 import { flushUserCalls } from '@/lib/tradovate/call-meter';
 import { getUserTradingApi, notingPenalty, readIsTradeSource } from '@/lib/tradovate/connections';
+import { readActiveAccounts } from '@/lib/tradovate/account-sync';
 import { loadBrokerDay, type BrokerTrade, type TradovateReader } from '@/lib/tradovate/fills';
 import { importBrokerTrades, isImportEnabled } from '@/lib/tradovate/import';
 import { makesDayPartial } from '@/lib/tradovate/notices';
@@ -274,6 +275,23 @@ export async function GET(request: Request) {
     // skipped account or an unresolvable product left the day SHORT with
     // nothing on this wire saying so. Only the boolean crosses — see
     // BrokerDayPull.partial for why not the list.
+    // THE SAME INCLUSION THE JOURNAL USES (REF-124 item 3), and this route is
+    // the one where it matters most. An account closed mid-day is a day whose
+    // realised loss is LARGER than the pull would otherwise state, and an
+    // under-counted day makes every discipline rule MORE PERMISSIVE — the one
+    // direction this integration must never fail in (see ./fills.ts' header).
+    // So this is not merely consistency with /sync: it is the safe direction
+    // for the figures the rules act on.
+    //
+    // It also has to be consistency with /sync. The alternative is a journal
+    // holding a trade that today's `max_daily_loss` cannot see, which is the
+    // two-sides-disagreeing failure REF-90 shipped once already.
+    //
+    // `supabase` is the user's own session client, so this read runs under
+    // their RLS, and it answers `[]` on any doubt — which is exactly what this
+    // route did before REF-124.
+    const knownActiveAccounts = await readActiveAccounts({ client: supabase, userId: user.id });
+
     const { day, trades, notices } = await loadBrokerDay({
       readers: {
         live: readerFor(api.hosts.live.url),
@@ -282,6 +300,7 @@ export async function GET(request: Request) {
       environment: api.environment,
       dayStartMs: dayStart.dayStartMs,
       tradovateUserId: api.tradovateUserId,
+      knownActiveAccounts,
     });
 
     // THE FREE TRIGGER (E9). `supabase` is the user's own session client, built

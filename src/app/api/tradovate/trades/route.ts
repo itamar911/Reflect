@@ -70,6 +70,7 @@ import { isUserAllowed } from '@/lib/tradovate/allowlist';
 import { tradovateGet } from '@/lib/tradovate/client';
 import { flushUserCalls } from '@/lib/tradovate/call-meter';
 import { getUserTradingApi, notingPenalty } from '@/lib/tradovate/connections';
+import { readActiveAccounts } from '@/lib/tradovate/account-sync';
 import { loadBrokerDay, type BrokerTrade, type TradovateReader } from '@/lib/tradovate/fills';
 import { makesDayPartial } from '@/lib/tradovate/notices';
 import { redactSecrets } from '@/lib/tradovate/redact';
@@ -318,6 +319,16 @@ export async function GET(request: Request) {
         // field on BrokerTradesPull. The sentences themselves reach the trader
         // through the sync panel, which has an account label this route does
         // not and must not resolve.
+        // THE SAME INCLUSION /today AND /sync USE (REF-124 item 3). This is the
+        // journal's own pull, so an account closed mid-day is exactly the row a
+        // trader comes here looking for and cannot find. Its own session
+        // client, so the read runs under their RLS; `[]` on any doubt, which is
+        // what this route did before REF-124.
+        const knownActiveAccounts = await readActiveAccounts({
+          client: await createClient(),
+          userId,
+        });
+
         const { day, trades, notices } = await loadBrokerDay({
           readers: {
             live: readerFor(api.hosts.live.url),
@@ -329,6 +340,7 @@ export async function GET(request: Request) {
           // only one that changes what the pull prices.
           windowStartMs: window.windowStartMs,
           tradovateUserId: api.tradovateUserId,
+          knownActiveAccounts,
         });
 
         // `day` is dropped here, and the suite asserts the two routes agree:
