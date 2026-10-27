@@ -100,6 +100,16 @@ const CASES: ReadonlyArray<{ name: string; snapshot: DailyShareSnapshot }> = [
 
 const SIZES: readonly ShareCardSize[] = ['og', 'square'];
 
+/**
+ * An INVENTED token, at the real length.
+ *
+ * 32 random bytes as base64url is 43 characters, and the QR encodes the whole
+ * share URL — so a short placeholder here would render a smaller symbol than
+ * production ever produces and the renders would under-report how dense the QR
+ * actually is. This string is not a token that exists; nothing looks it up.
+ */
+const FIXTURE_TOKEN = 'JvZ3k1Qx7LpR2mN8tYw0aBcDeFgHiJkLmNoPqRsTuVw';
+
 async function main() {
   const outDir = process.argv[2] ?? join(process.cwd(), 'tmp', 'share-cards');
   mkdirSync(outDir, { recursive: true });
@@ -109,7 +119,7 @@ async function main() {
   for (const { name, snapshot } of CASES) {
     for (const size of SIZES) {
       const response = new ImageResponse(
-        <ShareCardImage snapshot={snapshot} tradingDay={snapshot.day} size={size} />,
+        <ShareCardImage snapshot={snapshot} tradingDay={snapshot.day} size={size} token={FIXTURE_TOKEN} />,
         { ...CARD_SIZES[size], fonts }
       );
       const bytes = Buffer.from(await response.arrayBuffer());

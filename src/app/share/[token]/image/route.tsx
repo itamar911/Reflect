@@ -87,7 +87,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const size = readSize(request.nextUrl.searchParams.get('size'));
 
   return new ImageResponse(
-    <ShareCardImage snapshot={card.snapshot} tradingDay={card.tradingDay} size={size} />,
+    <ShareCardImage snapshot={card.snapshot} tradingDay={card.tradingDay} size={size} token={token} />,
     {
       ...CARD_SIZES[size],
       // Always explicit. REF-125 §5.3 found that an ImageResponse with no

@@ -1,5 +1,5 @@
 /**
- * The share card, as pixels (REF-125 Stage 3 item 2).
+ * The share card, as pixels (REF-125 Stage 3, redesigned).
  *
  * This is JSX for SATORI, not for the DOM. It never hydrates, never reaches a
  * browser, and must stay inside the flexbox subset satori implements — so no
@@ -9,46 +9,46 @@
  * what keeps a later edit from silently relying on block layout that is not
  * there).
  *
- * ONE RENDERER FOR BOTH SIZES. The 1200×630 unfurl card and the 1080×1080
- * download are the same component under a different `layout`, because they
- * make the same claims about the same day. Two components would be two places
- * for the provenance line to drift, and the provenance line is the one piece
- * of text on this card that a reputational problem could come from.
  *
+ * THE CARD IS ENGLISH ONLY, AND THAT IS THE FIX FOR TWO SEPARATE PROBLEMS
+ * -----------------------------------------------------------------------
  *
- * SATORI HAS NO BIDI ENGINE, AND THAT SHAPES EVERY ROW
- * ----------------------------------------------------
+ * The first cut of this file was rejected twice over, and one decision answers
+ * both rejections.
  *
- * REF-125 §5.4 verified it by rendering three identical panels differing only
- * in `direction` (unset / rtl / ltr) and getting three PIXEL-IDENTICAL images.
- * Re-verified here against the real committed Rubik rather than the system
- * font the investigation stood in. Two consequences, and they are not
- * stylistic:
+ *   1. EVERY HEBREW STRING ON IT WAS LETTER-REVERSED. `תוצאת היום` rasterised
+ *      as `םויה תאצות`. The previous version of this docblock asserted that
+ *      "intra-run Hebrew ordering IS correct — satori reverses within a run".
+ *      It does not. satori has NO bidi engine whatsoever: it lays glyphs out in
+ *      logical order, left to right, which is right for Latin and exactly
+ *      backwards for Hebrew. The claim survived because it lived in a comment,
+ *      where nothing could contradict it — see `scripts/share-card-check.ts`,
+ *      which is the assertion that would have caught it.
  *
- *   1. `direction: 'rtl'` DOES NOTHING. A row whose Hebrew label must sit on
- *      the right gets `flexDirection: 'row-reverse'` instead. Every label/value
- *      row below uses {@link Row}, which is the one place that is written.
+ *   2. IT READ LIKE A REPORT RATHER THAN A PRODUCT. Four label/value rows in a
+ *      grey box is a table, and a table is what somebody screenshots from a
+ *      spreadsheet, not what they paste into a group chat.
  *
- *   2. HEBREW AND LATIN NEVER SHARE A TEXT NODE. A single node holding
- *      "היום שלי — Reflect" lays out with an LTR base direction and puts the
- *      Latin run on the wrong side, with nothing to override it. So the date,
- *      the money, the fractions and the provenance line are each their own
- *      element, ordered explicitly by the layout rather than by an algorithm
- *      that is not running.
+ * Making the card English removes the first problem at the root: there is no
+ * RTL text left on the image to lay out wrongly, so no amount of satori's
+ * missing bidi can hurt it. `/share/[token]` — the page a reader lands on — is
+ * still Hebrew, because it is a real browser page with a real bidi
+ * implementation and has never had this problem.
  *
- * Intra-run Hebrew ordering IS correct — satori reverses within a run — which
- * is why a Hebrew label on its own needs no special handling at all.
+ * THE ONE EXCEPTION is the trader's nickname, which is user data and may be
+ * Hebrew. It goes through `toVisualOrder()` (src/lib/share/cardBidi.ts), which
+ * is grapheme-aware, keeps embedded Latin and digits in their own order, and is
+ * covered by assertions. Nothing else on this card may take Hebrew text.
  *
  *
  * WHAT IS ON THE CARD IS A PRODUCT DECISION, NOT A LAYOUT ONE
  * -----------------------------------------------------------
  *
- * Imri, 27.10: the card carries ONLY the day's P&L, the two discipline
- * fractions, the closed-trade count and win rate, the logo, the date, the
- * optional nickname, the provenance line and the link. BEST AND WORST TRADE
- * ARE DELIBERATELY ABSENT — they stay on the verification page as a secondary
- * block. A card is read at a glance and in a feed; five numbers compete, seven
- * are noise.
+ * The card carries ONLY the day's P&L, the closed-trade count, the win rate,
+ * the two discipline fractions, the logo, the date, the optional nickname, the
+ * provenance line and a QR to the page. BEST AND WORST TRADE ARE DELIBERATELY
+ * ABSENT — they stay on the verification page as a secondary block. A card is
+ * read at a glance and in a feed; five numbers compete, seven are noise.
  *
  * The WIN RATE is derived here (`wins / trades`) rather than added to the
  * stored snapshot. It is arithmetic over two frozen fields, so deriving it
@@ -60,7 +60,10 @@
  */
 
 import { formatMoney } from '@/lib/money';
+import { toVisualOrder } from '@/lib/share/cardBidi';
 import { cardDateLabel } from '@/lib/share/cardFonts';
+import { fitFontSize } from '@/lib/share/cardMetrics';
+import { qrSvgDataUri, shareUrlForToken } from '@/lib/share/cardQr';
 import { shareProvenanceNote, type DailyShareSnapshot, type ShareFraction } from '@/lib/share/snapshot';
 import type { TradingDay } from '@/lib/tradingDay';
 
@@ -77,10 +80,9 @@ export const CARD_SIZES: Record<ShareCardSize, { width: number; height: number }
 // ── Palette ─────────────────────────────────────────────────────────────────
 //
 // Hard-coded hex, NOT `var(--color-tg-*)`. satori resolves no cascade and no
-// custom properties — a `var()` here renders as nothing at all, silently. These
-// are the dark-theme values of the tokens in globals.css, and the card is
-// always dark regardless of the viewer's theme because it is an image in
-// somebody else's feed, not a page with a theme to inherit.
+// custom properties — a `var()` here renders as nothing at all, silently. The
+// card is always dark regardless of the viewer's theme because it is an image
+// in somebody else's feed, not a page with a theme to inherit.
 
 /**
  * EXPORTED, BECAUSE THE PAGE USES IT TOO.
@@ -92,17 +94,38 @@ export const CARD_SIZES: Record<ShareCardSize, { width: number; height: number }
  * image cannot, so the shared thing is the VALUES.
  */
 export const CARD_PALETTE = {
-  ink: '#f1f5f9', // --color-tg-text
-  muted: '#a8adb8', // --color-tg-muted
-  teal: '#00d2d2', // --color-tg-primary, the one accent (CLAUDE.md)
-  green: '#22c55e', // --color-tg-success
-  red: '#ef4444', // --color-tg-danger
-  hairline: 'rgba(255,255,255,0.10)',
-  panel: 'rgba(255,255,255,0.035)',
-  /** Deep charcoal into navy; the teal only arrives in the far corner. */
-  backdrop: 'linear-gradient(135deg, #15151c 0%, #1b1b26 48%, #10222a 100%)',
-  backdropFlat: '#15151c',
-  glow: 'radial-gradient(circle, rgba(0,210,210,0.16) 0%, rgba(0,210,210,0) 70%)',
+  ink: '#F2F7FA',
+  muted: '#8FA3B0',
+  /** Dimmer than `muted`, for the small-caps labels that must not compete. */
+  faint: '#6B7F8C',
+  /**
+   * The one accent. `#00d2d2` and not the `#2DD4BF` the design sketch named:
+   * CLAUDE.md fixes the product's turquoise at `#00d2d2`, and a share card is
+   * the single most-seen Reflect surface to get the brand colour wrong on.
+   */
+  teal: '#00d2d2',
+  /** Softer than the app's `#22c55e`/`#ef4444`: a feed is not a dashboard. */
+  green: '#3DDC97',
+  red: '#FF5C5C',
+  /**
+   * Canvas: Reflect navy into a teal-tinted dark, as ONE gradient string
+   * because the page draws the same one.
+   *
+   * The midpoint stop is not decorative — a straight two-stop ramp from the
+   * navy to the teal-tinted dark passes through a muddy blue across the middle
+   * third, which is exactly where the hero number sits.
+   */
+  backdrop: 'linear-gradient(135deg, #0B1220 0%, #0C1C26 52%, #0E2A2E 100%)',
+  /** The flat fallback under the gradient, and the QR's module colour. */
+  canvasFlat: '#0B1220',
+  /** The frame's teal edge and its outer bloom, shared with the page. */
+  frameBorder: 'rgba(0,210,210,0.55)',
+  frameGlow: '0 0 40px rgba(0,210,210,0.40)',
+  /** The framed surface, a touch lighter than the canvas behind it. */
+  surface: 'rgba(255,255,255,0.028)',
+  /** Mini-card and panel fills, and the hairlines that bound them. */
+  well: 'rgba(255,255,255,0.04)',
+  hairline: 'rgba(255,255,255,0.09)',
   /** The mark's own two colours, from components/ui/Logo.tsx. */
   markGradient: 'linear-gradient(135deg, #00c9c9, #0a4f6e)',
   markReflection: '#15535f',
@@ -110,13 +133,23 @@ export const CARD_PALETTE = {
 
 const INK = CARD_PALETTE.ink;
 const MUTED = CARD_PALETTE.muted;
+const FAINT = CARD_PALETTE.faint;
 const TEAL = CARD_PALETTE.teal;
-const GREEN = CARD_PALETTE.green;
-const RED = CARD_PALETTE.red;
 const HAIRLINE = CARD_PALETTE.hairline;
-const PANEL = CARD_PALETTE.panel;
-const MARK_GRADIENT = CARD_PALETTE.markGradient;
-const MARK_REFLECTION = CARD_PALETTE.markReflection;
+const WELL = CARD_PALETTE.well;
+
+/**
+ * The outer glow the design asks for, as a real shadow.
+ *
+ * satori implements `box-shadow`, so this is a 40px teal bloom around the card
+ * frame rather than the absolutely-positioned radial-gradient div the previous
+ * version faked one with. The fake had to be hand-placed and drifted out from
+ * behind the number it belonged to the moment the layout changed; a shadow is
+ * attached to the thing casting it and cannot.
+ */
+const FRAME_GLOW = CARD_PALETTE.frameGlow;
+
+// ── Generated artwork ───────────────────────────────────────────────────────
 
 /**
  * The dot grid, as ONE image rather than several hundred divs.
@@ -127,62 +160,76 @@ const MARK_REFLECTION = CARD_PALETTE.markReflection;
  * social platform may hit in bursts.
  *
  * `fill-opacity` and not an `opacity` on the whole rect: the grid has to stay
- * under the content without washing the gradient out, and 0.05 is the point at
- * which it reads as texture rather than as dots.
+ * under the content without washing the gradient out.
  */
 function dotGridUri(width: number, height: number): string {
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">` +
-    `<defs><pattern id="d" width="26" height="26" patternUnits="userSpaceOnUse">` +
-    `<circle cx="1.6" cy="1.6" r="1.6" fill="#ffffff" fill-opacity="0.05"/>` +
+    `<defs><pattern id="d" width="28" height="28" patternUnits="userSpaceOnUse">` +
+    `<circle cx="1.7" cy="1.7" r="1.7" fill="#ffffff" fill-opacity="0.06"/>` +
     `</pattern></defs><rect width="100%" height="100%" fill="url(#d)"/></svg>`;
   return `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
 }
 
 /**
- * The P&L type size, chosen from the string's own length.
+ * The teal check badge beside the nickname.
  *
- * SATORI DOES NOT SHRINK TEXT TO FIT. There is no `text-overflow`, no
- * auto-sizing and no measurement available before layout, so a six-figure loss
- * at a fixed size does not ellipsise — it overflows the column and collides
- * with the panel beside it. A trader's worst day is exactly when the number is
- * longest, which makes "it fits in testing" the wrong assurance. The steps are
- * measured against the real font at the real widths.
+ * An SVG data URI rather than a Lucide component: `lucide-react` returns React
+ * elements built for the DOM, and satori's SVG support does not cover the
+ * `currentColor` inheritance and prop spreading they rely on. One flat data URI
+ * rasterises identically every time, which is what a logo-adjacent mark needs.
+ *
+ * ⚠️ THIS BADGE MAKES NO CLAIM ABOUT IDENTITY. It is the design's "this came
+ * from Reflect" mark, sitting above a provenance line that states exactly what
+ * is and is not broker-backed. See the note at the call site: a check beside a
+ * name is read as account verification on every social platform, and Reflect
+ * verifies no trader's identity.
  */
-function moneyFontSize(text: string, base: number): number {
-  if (text.length <= 10) return base;
-  if (text.length <= 13) return Math.round(base * 0.84);
-  return Math.round(base * 0.72);
+function checkBadgeUri(): string {
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">` +
+    `<circle cx="12" cy="12" r="11" fill="${TEAL}" fill-opacity="0.16" stroke="${TEAL}" stroke-width="1.6"/>` +
+    `<path d="M7.2 12.4l3.1 3.1 6.4-6.9" fill="none" stroke="${TEAL}" stroke-width="2.4" ` +
+    `stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  return `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
 }
+
+/**
+ * How much of the hero column the number is allowed to occupy.
+ *
+ * Not 100%: a figure that ends exactly on the column edge reads as clipped even
+ * when it is not, and the 4% keeps a descender-free gap between the longest
+ * loss and the discipline panel beside it.
+ */
+const HERO_WIDTH_RATIO = 0.96;
 
 // ── Pieces ──────────────────────────────────────────────────────────────────
 
 /**
- * The Reflect mark: an R, a gradient hairline, and the R reflected.
+ * The Reflect mark: an R, a gradient hairline, and the R reflected — with the
+ * wordmark and tagline stacked beside it.
  *
- * REF-125 §1.6 concluded this mark "cannot be reused as-is" because it leans
- * on `background-clip: text` and `transform: scaleX(-1)`, both listed as
- * unsupported — so the investigation recommended a letterspaced wordmark
- * instead. THAT FINDING IS WRONG, and it was wrong because it was read rather
- * than run: both properties render correctly in the version of satori this
- * repo has (verified by rendering them, Stage 3). So the card carries the
- * actual mark rather than a reduction of it.
+ * REF-125 §1.6 concluded this mark "cannot be reused as-is" because it leans on
+ * `background-clip: text` and `transform: scaleX(-1)`, both listed as
+ * unsupported, and recommended a letterspaced wordmark instead. THAT FINDING IS
+ * WRONG, and it was wrong because it was read rather than run: both properties
+ * render correctly in the version of satori this repo has. So the card carries
+ * the actual mark rather than a reduction of it.
  *
- * The letterform is Rubik Bold and not Poppins, which is the one genuine
- * compromise: Poppins is latin-only and committing a second family for two
- * glyphs is not worth ~100 KB on a route that already carries two faces. Rubik
- * is also the family every other Reflect surface uses.
+ * The letterform is NUNITO EXTRABOLD and not Poppins. Poppins is latin-only and
+ * committing a third family for two glyphs is not worth the bytes, and Nunito's
+ * rounded terminals are closer to the product mark than Rubik's were.
  */
-function Mark({ scale }: { scale: number }) {
-  const size = Math.round(62 * scale);
+function Mark({ u }: { u: (n: number) => number }) {
+  const size = u(44);
   return (
     <div style={{ display: 'flex', alignItems: 'center' }}>
       <span
         style={{
           fontSize: size,
-          fontWeight: 700,
+          fontWeight: 800,
           lineHeight: 1,
-          backgroundImage: MARK_GRADIENT,
+          backgroundImage: CARD_PALETTE.markGradient,
           backgroundClip: 'text',
           WebkitBackgroundClip: 'text',
           color: 'transparent',
@@ -192,9 +239,9 @@ function Mark({ scale }: { scale: number }) {
       </span>
       <div
         style={{
-          width: Math.max(2, Math.round(2 * scale)),
-          height: Math.round(size * 0.82),
-          margin: `0 ${Math.round(3 * scale)}px`,
+          width: Math.max(2, u(2)),
+          height: Math.round(size * 0.78),
+          margin: `0 ${u(3)}px`,
           backgroundImage:
             'linear-gradient(to bottom, rgba(0,201,201,0), rgba(0,201,201,0.55), rgba(0,201,201,0))',
         }}
@@ -204,75 +251,146 @@ function Mark({ scale }: { scale: number }) {
       <span
         style={{
           fontSize: size,
-          fontWeight: 700,
+          fontWeight: 800,
           lineHeight: 1,
-          color: MARK_REFLECTION,
+          color: CARD_PALETTE.markReflection,
           transform: 'scaleX(-1)',
         }}
       >
         R
       </span>
-      <span
-        style={{
-          fontSize: Math.round(19 * scale),
-          fontWeight: 700,
-          letterSpacing: Math.round(6 * scale),
-          color: INK,
-          marginLeft: Math.round(20 * scale),
-        }}
-      >
-        REFLECT
-      </span>
+      <div style={{ display: 'flex', flexDirection: 'column', marginLeft: u(18) }}>
+        <span
+          style={{
+            fontSize: u(21),
+            fontWeight: 800,
+            letterSpacing: u(5),
+            lineHeight: 1,
+            color: INK,
+          }}
+        >
+          REFLECT
+        </span>
+        <span
+          style={{
+            fontSize: u(14),
+            fontWeight: 600,
+            letterSpacing: u(2),
+            lineHeight: 1,
+            color: FAINT,
+            marginTop: u(7),
+          }}
+        >
+          Trading Journal
+        </span>
+      </div>
     </div>
   );
 }
 
 /**
- * One label/value row, Hebrew label to the RIGHT.
+ * A small-caps label. The card has exactly one label treatment and this is it.
  *
- * `row-reverse` IS THE RTL. See the header: `direction: 'rtl'` is a verified
- * no-op in satori, so the reversal is done by the flex container. Children are
- * written in logical order — label first, value second — and the container
- * puts the label on the right, which means a reader of this file sees the same
- * order a reader of the card does.
+ * Written uppercase in the source rather than set with `text-transform`: satori
+ * supports the property, but a literal is what makes the string in the file the
+ * string on the image, which matters when the next person greps for a label
+ * they saw in a render.
  */
-function Row({
+function Label({ children, u }: { children: string; u: (n: number) => number }) {
+  return (
+    <span style={{ fontSize: u(15), fontWeight: 600, letterSpacing: u(2), color: FAINT }}>
+      {children}
+    </span>
+  );
+}
+
+/** One of the two bordered mini-cards under the P&L. */
+function MiniCard({
   label,
   value,
-  scale,
-  accent,
+  u,
+  grow,
 }: {
   label: string;
   value: string;
-  scale: number;
-  accent?: string;
+  u: (n: number) => number;
+  grow?: boolean;
 }) {
   return (
     <div
       style={{
         display: 'flex',
-        flexDirection: 'row-reverse',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        width: '100%',
+        flexDirection: 'column',
+        flexGrow: grow ? 1 : 0,
+        padding: `${u(16)}px ${u(20)}px`,
+        borderRadius: u(16),
+        background: WELL,
+        border: `1px solid ${HAIRLINE}`,
       }}
     >
-      <span style={{ fontSize: Math.round(23 * scale), color: MUTED }}>{label}</span>
-      <span
-        style={{
-          fontSize: Math.round(27 * scale),
-          fontWeight: 700,
-          color: accent ?? INK,
-        }}
-      >
+      <Label u={u}>{label}</Label>
+      <span style={{ fontSize: u(34), fontWeight: 800, color: INK, marginTop: u(8), lineHeight: 1 }}>
         {value}
       </span>
     </div>
   );
 }
 
-/** "4/5" — its own element so bidi cannot reorder it into "5/4". */
-const fractionText = (f: ShareFraction): string => `${f.met}/${f.answered}`;
+/**
+ * One discipline row: a name, a fraction, and a bar.
+ *
+ * THE BAR IS WHY THIS CARD STOPPED LOOKING LIKE A SPREADSHEET. "4/5" on its own
+ * is a table cell; the same number with a filled track is a product telling you
+ * how the day went. The fill is the only place teal touches a figure, and it is
+ * deliberately not green — green and red on this card are semantic and belong
+ * to the P&L alone, so a bar that turned red on a bad discipline day would be
+ * the card passing judgement in the P&L's own colours.
+ */
+function DisciplineRow({
+  label,
+  fraction,
+  u,
+}: {
+  label: string;
+  fraction: ShareFraction;
+  u: (n: number) => number;
+}) {
+  // `answered` is the honest denominator and snapshot.ts never returns a zero
+  // one, but the guard is kept: a division by zero here would render a bar of
+  // width `NaN%`, which satori lays out as a full-width teal block — i.e. a
+  // perfect score, drawn on a day nobody answered anything about.
+  const pct = fraction.answered > 0 ? Math.round((fraction.met / fraction.answered) * 100) : 0;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', width: '100%' }}>
+        <span style={{ fontSize: u(20), fontWeight: 600, color: MUTED }}>{label}</span>
+        <span style={{ fontSize: u(22), fontWeight: 800, color: INK }}>
+          {`${fraction.met}/${fraction.answered}`}
+        </span>
+      </div>
+      <div
+        style={{
+          display: 'flex',
+          width: '100%',
+          height: u(7),
+          marginTop: u(11),
+          borderRadius: u(4),
+          background: 'rgba(255,255,255,0.07)',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            width: `${pct}%`,
+            height: '100%',
+            borderRadius: u(4),
+            background: TEAL,
+          }}
+        />
+      </div>
+    </div>
+  );
+}
 
 // ── The card ────────────────────────────────────────────────────────────────
 
@@ -281,15 +399,26 @@ export interface ShareCardProps {
   /** The row's own column, which the page and the image both trust over the document. */
   tradingDay: TradingDay;
   size: ShareCardSize;
+  /** The card's own token — the QR points at the page this image unfurls for. */
+  token: string;
 }
 
-export function ShareCardImage({ snapshot, tradingDay, size }: ShareCardProps) {
+export function ShareCardImage({ snapshot, tradingDay, size, token }: ShareCardProps) {
   const { width, height } = CARD_SIZES[size];
   const square = size === 'square';
-  // One multiplier rather than two sets of numbers, so the square card cannot
-  // drift into being a different design.
-  const scale = square ? 1.18 : 1;
-  const pad = Math.round(58 * scale);
+
+  /**
+   * ONE MULTIPLIER, applied through `u()`, rather than two sets of numbers.
+   *
+   * The 1200×630 unfurl card and the 1080×1080 download are the same component
+   * under a different scale, because they make the same claims about the same
+   * day. Two components would be two places for the provenance line to drift,
+   * and that line is the one piece of text here a reputational problem could
+   * come from. Only the ARRANGEMENT branches on `square`; no size, colour or
+   * string does.
+   */
+  const scale = square ? 1.16 : 1;
+  const u = (n: number) => Math.round(n * scale);
 
   const pnl = snapshot.pnl;
 
@@ -297,83 +426,310 @@ export function ShareCardImage({ snapshot, tradingDay, size }: ShareCardProps) {
    * THE ABSENT DAY GETS WORDS, NOT A DASH.
    *
    * SharedDayCard renders `—` for a null P&L and that is right on the page,
-   * where the figure is ~34px and a dash reads as a dash. At 112px an em dash
-   * is a 75px horizontal BAR — it rendered as what looks exactly like a
-   * missing-glyph box, which was found by looking at the output rather than by
-   * reasoning about it. A card that appears broken is worse than one that says
-   * nothing, and this is a public artefact with no caption to explain it.
+   * where the figure is ~34px. At 120px an em dash is an 80px horizontal BAR —
+   * it rendered as what looks exactly like a missing-glyph box, which was found
+   * by looking at the output rather than by reasoning about it. A card that
+   * appears broken is worse than one that says nothing, and this is a public
+   * artefact with no caption to explain it.
    *
    * Still NOT `$0.00`: a day whose closed trades recorded no amount is not a
    * breakeven day, and a zero under a broker tag is a claim we cannot support.
-   * The sentence says the true thing instead.
+   * English now, like everything else on the card.
    */
   const moneyAbsent = pnl === null;
-  const money = moneyAbsent ? 'לא נרשם סכום' : formatMoney(pnl);
-  const moneyColour = moneyAbsent ? MUTED : pnl >= 0 ? GREEN : RED;
-  const moneySize = moneyAbsent
-    ? Math.round((square ? 132 : 112) * 0.42)
-    : moneyFontSize(money, square ? 132 : 112);
+  const money = moneyAbsent ? 'No amount recorded' : formatMoney(pnl);
+  const moneyColour = moneyAbsent ? MUTED : pnl >= 0 ? CARD_PALETTE.green : CARD_PALETTE.red;
+
+  /**
+   * The geometry the hero has to fit inside, derived rather than written down.
+   *
+   * These are the same numbers the JSX below uses, computed once so the fitted
+   * font size and the actual column cannot disagree. The landscape card gives
+   * the number a fixed 536px and the panel a fixed 424px — FIXED on both sides,
+   * because a panel that grew with its contents would move the hero, and a
+   * one-fraction day and a two-fraction day must compose identically.
+   */
+  const canvasPad = u(square ? 26 : 22);
+  const framePad = u(square ? 52 : 36);
+  const contentWidth = width - 2 * canvasPad - 4 /* the frame's 2px border */ - 2 * framePad;
+  const panelWidth = 400;
+  const heroColumn = square ? contentWidth : 600;
+
+  const heroTracking = u(-3);
+  // MEASURED, not guessed. See cardMetrics.ts: the previous length-based steps
+  // put a 643px number in a 536px column and the card folded.
+  const moneySize = fitFontSize(
+    money,
+    heroColumn * HERO_WIDTH_RATIO,
+    u(square ? 132 : 120),
+    heroTracking
+  );
 
   // Withheld rather than printed as 0% when nothing was counted — the same
   // honest-denominator rule the two fractions already follow.
-  const winRate = snapshot.trades > 0 ? `${Math.round((snapshot.wins / snapshot.trades) * 100)}%` : null;
+  const winRate =
+    snapshot.trades > 0 ? `${Math.round((snapshot.wins / snapshot.trades) * 100)}%` : '—';
 
   const note = shareProvenanceNote(snapshot.provenance);
 
-  const stats = (
+  /**
+   * The handle, reordered for a renderer with no bidi — and ONLY the handle.
+   *
+   * `toVisualOrder` is a no-op on Latin text, so a trader called "Index Trader"
+   * goes through it untouched; a Hebrew handle comes back in the visual order
+   * satori will actually paint. This is the single call site on the card, and
+   * it must stay that way: everything else here is a literal we control.
+   *
+   * "Reflect trader" when the toggle is off. Not an empty space and not the
+   * word "Anonymous" — the first leaves the badge floating next to nothing, and
+   * the second sounds like something withheld rather than something not asked.
+   */
+  const displayName = toVisualOrder(snapshot.nickname ?? 'Reflect trader');
+
+  /**
+   * The discipline score: both fractions pooled, not averaged.
+   *
+   * Pooling counts every answered question once; averaging two percentages
+   * would let a 1/1 and a 2/10 average to 60%, which is not a thing that
+   * happened. Withheld entirely when nothing was answered — see the panel.
+   */
+  const met = (snapshot.followedPlan?.met ?? 0) + (snapshot.stopHeld?.met ?? 0);
+  const answered = (snapshot.followedPlan?.answered ?? 0) + (snapshot.stopHeld?.answered ?? 0);
+  const disciplineScore = answered > 0 ? Math.round((met / answered) * 100) : null;
+
+  // ── Blocks, composed differently by the two sizes ────────────────────────
+
+  const header = (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+      <Mark u={u} />
+      {/* Digits only, pinned to the trading day string — never a Date, so there
+          is no server timezone for it to be wrong about. */}
+      <span style={{ fontSize: u(20), fontWeight: 600, color: MUTED, letterSpacing: u(1) }}>
+        {cardDateLabel(tradingDay)}
+      </span>
+    </div>
+  );
+
+  const hero = (
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      <Label u={u}>TODAY&apos;S P&amp;L</Label>
+      {/* `nowrap` IS LOAD-BEARING, not tidiness. Without it the fitted size is
+          only a suggestion: satori breaks the string at the column edge and
+          `+$1,240.50` becomes a `+` on one line and the amount on the next,
+          which is what the first render of this design did. */}
+      <span
+        style={{
+          fontSize: moneySize,
+          fontWeight: 800,
+          lineHeight: 1.1,
+          letterSpacing: heroTracking,
+          color: moneyColour,
+          marginTop: u(14),
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {money}
+      </span>
+    </div>
+  );
+
+  const miniCards = (
+    <div style={{ display: 'flex', width: '100%' }}>
+      <MiniCard label="TRADES" value={String(snapshot.trades)} u={u} grow />
+      <div style={{ display: 'flex', width: u(16) }} />
+      <MiniCard label="WIN RATE" value={winRate} u={u} grow />
+    </div>
+  );
+
+  /**
+   * The discipline panel — withheld whole when neither fraction was answered.
+   *
+   * snapshot.ts returns null rather than `{met:0,answered:0}`, and REF-125 §2.4
+   * names the cost of losing that distinction: "0/100" on a public page would
+   * be defamatory of the trader's own day. An empty bordered panel saying
+   * DISCIPLINE with nothing under it makes the same claim more quietly, so the
+   * whole block goes.
+   */
+  const hasDiscipline = snapshot.followedPlan !== null || snapshot.stopHeld !== null;
+  const discipline = hasDiscipline ? (
     <div
       style={{
         display: 'flex',
         flexDirection: 'column',
-        width: square ? '100%' : 430,
-        padding: Math.round(30 * scale),
-        borderRadius: Math.round(22 * scale),
-        background: PANEL,
+        width: '100%',
+        padding: u(26),
+        borderRadius: u(20),
+        background: WELL,
         border: `1px solid ${HAIRLINE}`,
       }}
     >
-      <Row label="עסקאות סגורות" value={String(snapshot.trades)} scale={scale} />
-      <div style={{ display: 'flex', height: Math.round(16 * scale) }} />
-      {/* NO ACCENT ON THE WIN RATE. The teal is the card's single accent and
-          it is decorative — it marks the brand and the link. Putting it on a
-          figure makes it read as praise, and a 29% win rate highlighted in the
-          brand colour on a losing day is the card congratulating a trader on
-          their worst number. Semantic colour on this card is green and red,
-          and it belongs to the P&L alone. */}
-      {winRate !== null && <Row label="אחוז הצלחה" value={winRate} scale={scale} />}
-
-      {/* The discipline half, separated by a hairline — and the whole block is
-          withheld when neither fraction answered. snapshot.ts returns null and
-          never {met:0,answered:0}, and REF-125 §2.4 names the cost of losing
-          that distinction: "0/100" on a public page would be defamatory of the
-          trader's own day. */}
-      {(snapshot.followedPlan !== null || snapshot.stopHeld !== null) && (
-        <div style={{ display: 'flex', flexDirection: 'column' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+        <Label u={u}>DISCIPLINE</Label>
+        {disciplineScore !== null && (
           <div
             style={{
               display: 'flex',
-              height: 1,
-              width: '100%',
-              background: HAIRLINE,
-              margin: `${Math.round(20 * scale)}px 0`,
+              padding: `${u(5)}px ${u(13)}px`,
+              borderRadius: u(999),
+              background: 'rgba(0,210,210,0.12)',
+              border: `1px solid rgba(0,210,210,0.35)`,
             }}
-          />
-          {snapshot.followedPlan !== null && (
-            <Row label="עמד בתוכנית" value={fractionText(snapshot.followedPlan)} scale={scale} />
-          )}
-          {snapshot.followedPlan !== null && snapshot.stopHeld !== null && (
-            <div style={{ display: 'flex', height: Math.round(16 * scale) }} />
-          )}
-          {/* "לא הורחק" and not "לא הוזז" — Stage 2's one deliberate departure
-              from the ticket's wording. The counted predicate treats a
-              TIGHTENING as held (Imri 19.10), and a tightened stop was moved,
-              so "לא הוזז" over this number would be false on exactly the
-              trades the product decided to reward. */}
-          {snapshot.stopHeld !== null && (
-            <Row label="הסטופ לא הורחק" value={fractionText(snapshot.stopHeld)} scale={scale} />
-          )}
-        </div>
+          >
+            <span style={{ fontSize: u(17), fontWeight: 800, color: TEAL }}>{`${disciplineScore}%`}</span>
+          </div>
+        )}
+      </div>
+      <div style={{ display: 'flex', height: u(22) }} />
+      {snapshot.followedPlan !== null && (
+        <DisciplineRow label="Followed plan" fraction={snapshot.followedPlan} u={u} />
       )}
+      {snapshot.followedPlan !== null && snapshot.stopHeld !== null && (
+        <div style={{ display: 'flex', height: u(20) }} />
+      )}
+      {/* "Stop held" — the counted predicate treats a TIGHTENING as held
+          (Imri 19.10), so this says the stop HELD rather than that it was never
+          moved, which would be false on exactly the trades the product decided
+          to reward. */}
+      {snapshot.stopHeld !== null && <DisciplineRow label="Stop held" fraction={snapshot.stopHeld} u={u} />}
+    </div>
+  ) : null;
+
+  /**
+   * 104px, and the size is a SCANNING constraint rather than a visual one.
+   *
+   * A 43-character token makes the share URL 76 bytes, which at error level M
+   * is a version 5 symbol — 37×37 modules. At the 88px this started out as,
+   * each module rasterised to 2.38 device pixels (measured off the PNG, not
+   * estimated), which is under the ~3px a camera wants and leaves nothing for
+   * the resampling a social platform does on the way to a feed. 104px puts it
+   * at 2.81. Bigger would start to read as a white block on a dark card.
+   *
+   * The printed `reflecttrading.app` under it is the fallback, and the page is
+   * a tap away from the unfurl itself — the QR is a convenience for somebody
+   * looking at the card on another person's screen, not the only way in.
+   */
+  const qrModule = u(104);
+  const footer = (
+    // CENTRED against the QR, not bottom-aligned. The QR column is ~140px tall
+    // and the name block ~75px, so pinning both to the baseline left a visible
+    // hole above the nickname while the right-hand side was full.
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          {/* ⚠️ A CHECK BESIDE A NAME READS AS ACCOUNT VERIFICATION on every
+              social platform there is, and Reflect verifies no trader's
+              identity. It is here because the design calls for it; the line
+              directly under it is what carries the only claim this card
+              actually makes, and that line says "before fees" rather than
+              "verified". Flagged for Imri in the Stage 3 report. */}
+          {/* eslint-disable-next-line @next/next/no-img-element -- satori JSX, not the DOM. */}
+          <img src={checkBadgeUri()} width={u(28)} height={u(28)} alt="" />
+          <span style={{ fontSize: u(23), fontWeight: 800, color: INK, marginLeft: u(12) }}>
+            {displayName}
+          </span>
+        </div>
+        {/* English, LTR, and its own element. "before fees" is not optional on
+            the broker case: a broker row's P&L is GROSS and reads
+            systematically better than the trader's own statement
+            (JournalClient.tsx:1617-1627). Neither string says "verified" — the
+            discipline fractions are intent-side and backed by nothing a broker
+            knows. An empty span holds the block's height when the day is manual
+            and there is no claim to make. */}
+        <span style={{ fontSize: u(17), fontWeight: 600, color: FAINT, marginTop: u(10) }}>
+          {note ?? ''}
+        </span>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        {/* A WHITE TILE, not light modules on the dark card. Inverted QR codes
+            are decoded by most modern scanners and not by all of them, and this
+            is the one element on the card a reader has to ACT on. The 12px
+            padding is the four-module quiet zone a scanner needs, expressed as
+            layout so it cannot disagree with the tile's rounding. */}
+        <div
+          style={{
+            display: 'flex',
+            padding: u(12),
+            borderRadius: u(14),
+            background: '#FFFFFF',
+          }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element -- satori JSX, not the DOM. */}
+          <img
+            src={qrSvgDataUri(shareUrlForToken(token), CARD_PALETTE.canvasFlat)}
+            width={qrModule}
+            height={qrModule}
+            alt=""
+          />
+        </div>
+        <span style={{ fontSize: u(16), fontWeight: 600, color: TEAL, marginTop: u(12), letterSpacing: u(1) }}>
+          reflecttrading.app
+        </span>
+      </div>
+    </div>
+  );
+
+  /**
+   * The middle band.
+   *
+   * `flexGrow: 1` AND CENTRED, rather than a third child of a space-between
+   * column. (`flexGrow`, never the `flex` shorthand — satori does not expand
+   * it, so `flex: 1` silently leaves the band at its content height and the
+   * whole composition collapses upward. The mini-cards grew correctly while
+   * this band did not, which is what gave the difference away.)
+   * Letting the outer column distribute three rows pushed the money to wherever
+   * the panel's height left it — so a day with one discipline fraction and a
+   * day with two composed differently, and the hero drifted down the card as
+   * the panel shrank. Giving the middle band the leftover height and centring
+   * inside it makes the composition identical whatever the panel contains,
+   * which is what "nothing cramped" needs to survive the withheld-field cases.
+   */
+  const middle = square ? (
+    // `paddingTop` AND centring. Without the padding the stack centres so
+    // close under the header that "TODAY'S P&L" and the mark's "Trading
+    // Journal" tagline — both small, both muted — read as one smudged line.
+    <div
+      style={{
+        display: 'flex',
+        flexGrow: 1,
+        flexDirection: 'column',
+        justifyContent: 'center',
+        width: '100%',
+        paddingTop: u(30),
+      }}
+    >
+      {hero}
+      <div style={{ display: 'flex', height: u(30) }} />
+      {miniCards}
+      {discipline !== null && <div style={{ display: 'flex', height: u(22) }} />}
+      {discipline}
+    </div>
+  ) : (
+    <div style={{ display: 'flex', flexGrow: 1, alignItems: 'stretch', width: '100%' }}>
+      {/* SPREAD, not stacked-and-centred. With the two blocks pushed to the top
+          and bottom of the band, the hero sits directly under the header and
+          the mini-cards sit directly above the footer — which is what closes
+          the dead strip the centred version left down the left-hand side while
+          the taller QR column filled the same height on the right. */}
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+          width: heroColumn,
+          paddingTop: u(14),
+          paddingBottom: u(2),
+        }}
+      >
+        {hero}
+        {miniCards}
+      </div>
+      <div style={{ display: 'flex', flexGrow: 1 }} />
+      {/* The panel takes a fixed width rather than growing: a two-fraction day
+          and a one-fraction day must put the hero in the same place, and a
+          growing panel would move it. Centred in the band so the withheld-field
+          cases do not leave it hanging off the top. */}
+      <div style={{ display: 'flex', width: panelWidth, alignItems: 'center' }}>{discipline}</div>
     </div>
   );
 
@@ -383,27 +739,25 @@ export function ShareCardImage({ snapshot, tradingDay, size }: ShareCardProps) {
         width,
         height,
         display: 'flex',
-        flexDirection: 'column',
         position: 'relative',
-        fontFamily: 'Rubik',
-        backgroundColor: CARD_PALETTE.backdropFlat,
+        padding: canvasPad,
+        fontFamily: 'Nunito',
+        backgroundColor: CARD_PALETTE.canvasFlat,
         backgroundImage: CARD_PALETTE.backdrop,
       }}
     >
-      {/* Texture, under everything. */}
+      {/* Texture, under everything. ONE grid across the whole canvas, drawn
+          before the frame so it reads through the frame's translucent surface
+          as well as around it — that continuity is what makes the frame look
+          like a pane laid on a textured backdrop rather than a drawn rectangle
+          sitting on flat colour. */}
       {/* eslint-disable-next-line @next/next/no-img-element -- satori JSX, not the DOM: this tree is rasterised server-side and never hydrates, so next/image has nothing to optimise and its output would not render here at all. */}
-      <img src={dotGridUri(width, height)} width={width} height={height} style={{ position: 'absolute', top: 0, left: 0 }} alt="" />
-
-      {/* A single teal glow, behind the number it belongs to. */}
-      <div
-        style={{
-          position: 'absolute',
-          top: Math.round(-200 * scale),
-          left: Math.round(-160 * scale),
-          width: Math.round(820 * scale),
-          height: Math.round(820 * scale),
-          backgroundImage: CARD_PALETTE.glow,
-        }}
+      <img
+        src={dotGridUri(width, height)}
+        width={width}
+        height={height}
+        style={{ position: 'absolute', top: 0, left: 0 }}
+        alt=""
       />
 
       <div
@@ -413,90 +767,22 @@ export function ShareCardImage({ snapshot, tradingDay, size }: ShareCardProps) {
           justifyContent: 'space-between',
           width: '100%',
           height: '100%',
-          padding: pad,
+          padding: framePad,
+          borderRadius: u(28),
+          border: `2px solid ${CARD_PALETTE.frameBorder}`,
+          // The surface is DELIBERATELY TRANSLUCENT (2.8% white) rather than an
+          // opaque panel: it lifts the framed area off the canvas by a hair
+          // while letting the gradient and the dot grid carry straight through
+          // it. An opaque fill here flattened the card into two stacked
+          // rectangles.
+          background: CARD_PALETTE.surface,
+          boxShadow: FRAME_GLOW,
           position: 'relative',
         }}
       >
-        {/* ── Top: mark left, date right ──────────────────────────────────── */}
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', width: '100%' }}>
-          <Mark scale={scale} />
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-            {/* Digits only, pinned to the trading day string — never a Date, so
-                there is no server timezone for it to be wrong about. */}
-            <span style={{ fontSize: Math.round(24 * scale), fontWeight: 700, color: INK }}>
-              {cardDateLabel(tradingDay)}
-            </span>
-            {/* The opt-in handle: the only name this card can carry, and absent
-                unless the trader both set one and turned the toggle on. */}
-            {snapshot.nickname !== null && (
-              <span style={{ fontSize: Math.round(19 * scale), color: MUTED, marginTop: Math.round(6 * scale) }}>
-                {snapshot.nickname}
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* ── Middle: the number, and the panel ───────────────────────────── */}
-        {/* `flex: 1` AND CENTRED, rather than a third child of a
-            space-between column. Letting the outer column distribute three
-            rows pushed the money to wherever the panel's height left it — so
-            a day with one discipline fraction and a day with two composed
-            differently, and the left column drifted down the card as the
-            panel shrank. Giving the middle band the leftover height and
-            centring inside it makes the composition identical whatever the
-            panel contains, which is what "nothing cramped" needs to survive
-            the withheld-field cases. */}
-        <div
-          style={{
-            display: 'flex',
-            flex: 1,
-            flexDirection: square ? 'column' : 'row',
-            alignItems: square ? 'stretch' : 'center',
-            // Spread on the landscape card (money left, panel right, as the
-            // design asks); stacked and centred on the square one.
-            justifyContent: square ? 'center' : 'space-between',
-            width: '100%',
-          }}
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', marginBottom: square ? Math.round(44 * scale) : 0 }}>
-            <span style={{ fontSize: Math.round(26 * scale), color: MUTED, marginBottom: Math.round(10 * scale) }}>
-              תוצאת היום
-            </span>
-            <span
-              style={{
-                fontSize: moneySize,
-                fontWeight: 700,
-                lineHeight: 1,
-                letterSpacing: Math.round(-3 * scale),
-                color: moneyColour,
-              }}
-            >
-              {/* "—" and not "$0.00" when no counted trade carried an amount.
-                  A day of closed trades that recorded no money is not a
-                  breakeven day, and a zero under a broker tag is a claim we
-                  cannot support. */}
-              {money}
-            </span>
-          </div>
-          {stats}
-        </div>
-
-        {/* ── Bottom: provenance left, link right ─────────────────────────── */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-          {/* English, LTR, and its own element. "before fees" is not optional
-              on the broker case: a broker row's P&L is GROSS and reads
-              systematically better than the trader's own statement
-              (JournalClient.tsx:1617-1627). Neither string says "verified" —
-              the discipline fractions are intent-side and backed by nothing a
-              broker knows. An empty span holds the row's layout when the day
-              is manual and there is no claim to make. */}
-          <span style={{ fontSize: Math.round(19 * scale), color: MUTED, letterSpacing: 0.4 }}>
-            {note ?? ''}
-          </span>
-          <span style={{ fontSize: Math.round(19 * scale), color: TEAL, letterSpacing: 0.4 }}>
-            reflecttrading.app
-          </span>
-        </div>
+        {header}
+        {middle}
+        {footer}
       </div>
     </div>
   );
