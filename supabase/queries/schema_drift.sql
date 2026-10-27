@@ -97,7 +97,8 @@ WHERE NOT t.tgisinternal
   AND t.tgname NOT IN (
     'on_auth_user_created', 'on_profile_created', 'profiles_updated_at',
     'preset_rules_updated_at', 'personal_strategies_updated_at',
-    'alert_settings_updated_at', 'tradovate_connections_updated_at'
+    'alert_settings_updated_at', 'tradovate_connections_updated_at',
+    'daily_shares_updated_at'
   )
 ORDER BY n.nspname, c.relname, t.tgname;
 
@@ -141,7 +142,10 @@ WHERE policyname NOT IN (
   'Users can manage own strategies', 'Users can manage own weekly summaries',
   'personal_strategies_select', 'personal_strategies_insert',
   'personal_strategies_update', 'personal_strategies_delete',
-  'tradovate_connections_select_own', 'setup_images_select'
+  'tradovate_connections_select_own', 'setup_images_select',
+  -- 043 (REF-125). Three and not one: `FOR ALL` would grant DELETE, and a
+  -- share row is revoked by a stamp rather than deleted. See 043 step 3.
+  'daily_shares_select_own', 'daily_shares_insert_own', 'daily_shares_update_own'
 )
 ORDER BY schemaname, tablename, policyname;
 
@@ -193,7 +197,8 @@ WITH expected(schema_name, table_name, trigger_name, defined_in) AS (
     ('public', 'preset_rules',          'preset_rules_updated_at',         'schema.sql'),
     ('public', 'personal_strategies',   'personal_strategies_updated_at',  '002'),
     ('public', 'alert_settings',        'alert_settings_updated_at',       '002'),
-    ('public', 'tradovate_connections', 'tradovate_connections_updated_at','017')
+    ('public', 'tradovate_connections', 'tradovate_connections_updated_at','017'),
+    ('public', 'daily_shares',          'daily_shares_updated_at',         '043')
 )
 SELECT e.defined_in, e.schema_name, e.table_name, e.trigger_name, 'MISSING' AS status
 FROM expected e
@@ -252,7 +257,8 @@ WITH expected(table_name, defined_in) AS (
     ('weekly_summaries',      '001'),
     ('personal_strategies',   '002'),
     ('alert_settings',        '002'),
-    ('tradovate_connections', '017')
+    ('tradovate_connections', '017'),
+    ('daily_shares',          '043')
 )
 SELECT e.defined_in, e.table_name, 'MISSING' AS status
 FROM expected e
@@ -293,7 +299,14 @@ WITH expected(table_name, policy_name) AS (
     ('personal_strategies',   'personal_strategies_insert'),
     ('personal_strategies',   'personal_strategies_update'),
     ('personal_strategies',   'personal_strategies_delete'),
-    ('tradovate_connections', 'tradovate_connections_select_own')
+    ('tradovate_connections', 'tradovate_connections_select_own'),
+    -- 043 (REF-125). All three must be present and all three must be
+    -- `{authenticated}`; a MISSING here means the share feature is closed to
+    -- its own owner, and a FOURTH policy on this table means somebody added a
+    -- DELETE path to a table whose rows are a published record.
+    ('daily_shares',          'daily_shares_select_own'),
+    ('daily_shares',          'daily_shares_insert_own'),
+    ('daily_shares',          'daily_shares_update_own')
 )
 SELECT
   e.table_name,
