@@ -64,7 +64,12 @@ import { toVisualOrder } from '@/lib/share/cardBidi';
 import { cardDateLabel } from '@/lib/share/cardFonts';
 import { fitFontSize } from '@/lib/share/cardMetrics';
 import { qrSvgDataUri, shareUrlForToken } from '@/lib/share/cardQr';
-import { shareProvenanceNote, type DailyShareSnapshot, type ShareFraction } from '@/lib/share/snapshot';
+import {
+  shareProvenanceNote,
+  type DailyShareSnapshot,
+  type ShareAccountRow,
+  type ShareFraction,
+} from '@/lib/share/snapshot';
 import type { TradingDay } from '@/lib/tradingDay';
 
 /** The two sizes the route serves. */
@@ -274,7 +279,7 @@ function Mark({ u }: { u: (n: number) => number }) {
         <span
           style={{
             fontSize: u(14),
-            fontWeight: 600,
+            fontWeight: 700,
             letterSpacing: u(2),
             lineHeight: 1,
             color: FAINT,
@@ -298,96 +303,138 @@ function Mark({ u }: { u: (n: number) => number }) {
  */
 function Label({ children, u }: { children: string; u: (n: number) => number }) {
   return (
-    <span style={{ fontSize: u(15), fontWeight: 600, letterSpacing: u(2), color: FAINT }}>
+    <span style={{ fontSize: u(15), fontWeight: 700, letterSpacing: u(2), color: FAINT }}>
       {children}
     </span>
   );
 }
 
-/** One of the two bordered mini-cards under the P&L. */
+/**
+ * One of the three bordered mini-cards under the P&L.
+ *
+ * `sub` is the discipline card's second line and nothing else uses it. It is
+ * part of THIS component rather than a third variant because the three cards
+ * sit in one row and must agree on padding, radius and baseline — a separate
+ * component for the one with a subline is how those drift apart.
+ */
 function MiniCard({
   label,
   value,
+  sub,
   u,
-  grow,
 }: {
   label: string;
   value: string;
+  sub?: string;
   u: (n: number) => number;
-  grow?: boolean;
 }) {
   return (
     <div
       style={{
         display: 'flex',
         flexDirection: 'column',
-        flexGrow: grow ? 1 : 0,
-        padding: `${u(16)}px ${u(20)}px`,
+        flexGrow: 1,
+        flexBasis: 0,
+        padding: `${u(16)}px ${u(18)}px`,
         borderRadius: u(16),
         background: WELL,
         border: `1px solid ${HAIRLINE}`,
       }}
     >
       <Label u={u}>{label}</Label>
-      <span style={{ fontSize: u(34), fontWeight: 800, color: INK, marginTop: u(8), lineHeight: 1 }}>
+      <span style={{ fontSize: u(32), fontWeight: 800, color: INK, marginTop: u(8), lineHeight: 1 }}>
         {value}
+      </span>
+      {/* Reserved whether or not it is filled: without the empty span the
+          discipline card is one line taller than its two neighbours and the
+          row stops sharing a baseline. */}
+      <span
+        style={{
+          fontSize: u(14),
+          fontWeight: 700,
+          color: FAINT,
+          marginTop: u(7),
+          lineHeight: 1,
+          height: u(14),
+        }}
+      >
+        {sub ?? ''}
       </span>
     </div>
   );
 }
 
 /**
- * One discipline row: a name, a fraction, and a bar.
+ * The mark at the start of an account row.
  *
- * THE BAR IS WHY THIS CARD STOPPED LOOKING LIKE A SPREADSHEET. "4/5" on its own
- * is a table cell; the same number with a filled track is a product telling you
- * how the day went. The fill is the only place teal touches a figure, and it is
- * deliberately not green — green and red on this card are semantic and belong
- * to the P&L alone, so a bar that turned red on a bad discipline day would be
- * the card passing judgement in the P&L's own colours.
+ * ⚠️ DELIBERATELY NOT THE TRADOVATE LOGO. `PlatformsSection.tsx:76-80` already
+ * settled this for the whole product: "permission to display the mark covers
+ * NinjaTrader only. Naming a platform to say what works is nominative use;
+ * putting up its logo would not be." Tradovate is a NinjaTrader Group company,
+ * and `SiteDisclosureFooter` carries a disclaimer stating that no NinjaTrader
+ * company has any affiliation with this product — so stamping their mark on an
+ * artefact traders publish is the exact affiliation that sentence disclaims.
+ *
+ * This is OURS: a teal rhombus for a broker-synced account, hollow for one
+ * that is not. It carries the same at-a-glance signal (where did this money
+ * come from) with no trademark attached. Swapping in a real vendor asset later
+ * is this function and nothing else.
  */
-function DisciplineRow({
-  label,
-  fraction,
-  u,
-}: {
-  label: string;
-  fraction: ShareFraction;
-  u: (n: number) => number;
-}) {
-  // `answered` is the honest denominator and snapshot.ts never returns a zero
-  // one, but the guard is kept: a division by zero here would render a bar of
-  // width `NaN%`, which satori lays out as a full-width teal block — i.e. a
-  // perfect score, drawn on a day nobody answered anything about.
-  const pct = fraction.answered > 0 ? Math.round((fraction.met / fraction.answered) * 100) : 0;
+function AccountMark({ broker, u }: { broker: boolean; u: (n: number) => number }) {
+  const size = u(10);
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', width: '100%' }}>
-        <span style={{ fontSize: u(20), fontWeight: 600, color: MUTED }}>{label}</span>
-        <span style={{ fontSize: u(22), fontWeight: 800, color: INK }}>
-          {`${fraction.met}/${fraction.answered}`}
-        </span>
-      </div>
-      <div
+    <div
+      style={{
+        display: 'flex',
+        width: size,
+        height: size,
+        marginRight: u(12),
+        transform: 'rotate(45deg)',
+        borderRadius: u(2),
+        background: broker ? TEAL : 'transparent',
+        border: `${Math.max(1, u(2))}px solid ${broker ? TEAL : CARD_PALETTE.muted}`,
+      }}
+    />
+  );
+}
+
+/** One account: mark, name, and that account's money. */
+function AccountRow({
+  account,
+  u,
+  nameSize,
+}: {
+  account: ShareAccountRow;
+  u: (n: number) => number;
+  /** ONE size for the whole column — see the call site. */
+  nameSize: number;
+}) {
+  const money = account.pnl === null ? '—' : formatMoney(account.pnl);
+  const colour =
+    account.pnl === null ? MUTED : account.pnl >= 0 ? CARD_PALETTE.green : CARD_PALETTE.red;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+      <AccountMark broker={account.broker} u={u} />
+      {/* `nowrap` AND a measured size, for the same reason the hero has them:
+          satori will happily wrap an account name onto a second line and push
+          every row below it down. The name is bounded at 22 characters by the
+          snapshot, and the size is fitted to the column that is actually
+          there. */}
+      <span
         style={{
-          display: 'flex',
-          width: '100%',
-          height: u(7),
-          marginTop: u(11),
-          borderRadius: u(4),
-          background: 'rgba(255,255,255,0.07)',
+          fontSize: nameSize,
+          fontWeight: 800,
+          color: INK,
+          whiteSpace: 'nowrap',
+          flexGrow: 1,
+          flexBasis: 0,
         }}
       >
-        <div
-          style={{
-            display: 'flex',
-            width: `${pct}%`,
-            height: '100%',
-            borderRadius: u(4),
-            background: TEAL,
-          }}
-        />
-      </div>
+        {toVisualOrder(account.name)}
+      </span>
+      <span style={{ fontSize: u(21), fontWeight: 800, color: colour, whiteSpace: 'nowrap' }}>
+        {money}
+      </span>
     </div>
   );
 }
@@ -504,7 +551,7 @@ export function ShareCardImage({ snapshot, tradingDay, size, token }: ShareCardP
       <Mark u={u} />
       {/* Digits only, pinned to the trading day string — never a Date, so there
           is no server timezone for it to be wrong about. */}
-      <span style={{ fontSize: u(20), fontWeight: 600, color: MUTED, letterSpacing: u(1) }}>
+      <span style={{ fontSize: u(26), fontWeight: 800, color: INK, letterSpacing: u(1) }}>
         {cardDateLabel(tradingDay)}
       </span>
     </div>
@@ -533,25 +580,72 @@ export function ShareCardImage({ snapshot, tradingDay, size, token }: ShareCardP
     </div>
   );
 
+  /**
+   * DISCIPLINE IS A MINI-CARD NOW, not a panel.
+   *
+   * The score is the headline and the two fractions are the evidence for it,
+   * so they read as one claim on one card rather than as two bars competing
+   * with the day's money. `4/5 · 5/5` in a subline is the whole of what the
+   * panel's two rows were saying.
+   *
+   * WITHHELD WHOLE when neither fraction was answered — `—` and no subline,
+   * never `0%`. snapshot.ts returns null rather than `{met:0,answered:0}` and
+   * REF-125 §2.4 names the cost of losing that distinction: a zero on a public
+   * page would be defamatory of the trader's own day.
+   */
+  const disciplineSub = [snapshot.followedPlan, snapshot.stopHeld]
+    .filter((f): f is ShareFraction => f !== null)
+    .map((f) => `${f.met}/${f.answered}`)
+    .join(' · ');
+
   const miniCards = (
     <div style={{ display: 'flex', width: '100%' }}>
-      <MiniCard label="TRADES" value={String(snapshot.trades)} u={u} grow />
-      <div style={{ display: 'flex', width: u(16) }} />
-      <MiniCard label="WIN RATE" value={winRate} u={u} grow />
+      <MiniCard label="TRADES" value={String(snapshot.trades)} u={u} />
+      <div style={{ display: 'flex', width: u(14) }} />
+      <MiniCard label="WIN RATE" value={winRate} u={u} />
+      <div style={{ display: 'flex', width: u(14) }} />
+      <MiniCard
+        label="DISCIPLINE"
+        value={disciplineScore === null ? '—' : `${disciplineScore}%`}
+        sub={disciplineSub || undefined}
+        u={u}
+      />
     </div>
   );
 
   /**
-   * The discipline panel — withheld whole when neither fraction was answered.
+   * The accounts panel — where the day's money actually came from.
    *
-   * snapshot.ts returns null rather than `{met:0,answered:0}`, and REF-125 §2.4
-   * names the cost of losing that distinction: "0/100" on a public page would
-   * be defamatory of the trader's own day. An empty bordered panel saying
-   * DISCIPLINE with nothing under it makes the same claim more quietly, so the
-   * whole block goes.
+   * WITHHELD WHOLE WHEN THERE IS NOTHING TO ATTRIBUTE. An empty bordered panel
+   * headed ACCOUNTS says "this trader has no accounts", which is a claim about
+   * a deployment state (migration 037 unrun, or the import gate shut) rather
+   * than about the day — and it is the only thing on the card that would be
+   * asserting something nobody measured.
+   *
+   * FIVE ROWS, THEN "+N more". The cap is a reading decision: past five the
+   * panel stops being a breakdown and becomes a table, which is the thing this
+   * redesign exists to have stopped being. The snapshot stores up to eight, so
+   * the count is honest about what was cut.
    */
-  const hasDiscipline = snapshot.followedPlan !== null || snapshot.stopHeld !== null;
-  const discipline = hasDiscipline ? (
+  const ACCOUNT_ROWS = 5;
+  const shownAccounts = snapshot.accounts.slice(0, ACCOUNT_ROWS);
+  const omittedAccounts = snapshot.accounts.length - shownAccounts.length;
+  /**
+   * ONE TYPE SIZE FOR THE WHOLE NAME COLUMN, fitted to the LONGEST name.
+   *
+   * Fitting each row on its own looked like a bug: "Main Futures" came out a
+   * point or two larger than "Topstep Combine" directly beneath it, because
+   * each was independently maximised against the same column. A list of
+   * accounts is one column of one kind of thing, so it gets one size — the
+   * largest at which every row still fits.
+   */
+  const accountNameWidth = panelWidth - u(26) * 2 - u(10) - u(12) - u(118);
+  const accountNameSize = shownAccounts.reduce(
+    (size, account) => Math.min(size, fitFontSize(toVisualOrder(account.name), accountNameWidth, u(21))),
+    u(21)
+  );
+
+  const accounts = snapshot.accounts.length > 0 ? (
     <div
       style={{
         display: 'flex',
@@ -563,34 +657,22 @@ export function ShareCardImage({ snapshot, tradingDay, size, token }: ShareCardP
         border: `1px solid ${HAIRLINE}`,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-        <Label u={u}>DISCIPLINE</Label>
-        {disciplineScore !== null && (
-          <div
-            style={{
-              display: 'flex',
-              padding: `${u(5)}px ${u(13)}px`,
-              borderRadius: u(999),
-              background: 'rgba(0,210,210,0.12)',
-              border: `1px solid rgba(0,210,210,0.35)`,
-            }}
-          >
-            <span style={{ fontSize: u(17), fontWeight: 800, color: TEAL }}>{`${disciplineScore}%`}</span>
-          </div>
-        )}
-      </div>
-      <div style={{ display: 'flex', height: u(22) }} />
-      {snapshot.followedPlan !== null && (
-        <DisciplineRow label="Followed plan" fraction={snapshot.followedPlan} u={u} />
+      {/* "ACCOUNTS · TODAY'S P&L" as one label rather than two: the middle dot
+          is what makes the right-hand column a heading for the figures rather
+          than a second title. */}
+      <Label u={u}>ACCOUNTS · TODAY&apos;S P&amp;L</Label>
+      <div style={{ display: 'flex', height: u(20) }} />
+      {shownAccounts.map((account, i) => (
+        <div key={account.name + i} style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
+          {i > 0 && <div style={{ display: 'flex', height: u(16) }} />}
+          <AccountRow account={account} u={u} nameSize={accountNameSize} />
+        </div>
+      ))}
+      {omittedAccounts > 0 && (
+        <span style={{ fontSize: u(16), fontWeight: 700, color: FAINT, marginTop: u(16) }}>
+          {`+${omittedAccounts} more`}
+        </span>
       )}
-      {snapshot.followedPlan !== null && snapshot.stopHeld !== null && (
-        <div style={{ display: 'flex', height: u(20) }} />
-      )}
-      {/* "Stop held" — the counted predicate treats a TIGHTENING as held
-          (Imri 19.10), so this says the stop HELD rather than that it was never
-          moved, which would be false on exactly the trades the product decided
-          to reward. */}
-      {snapshot.stopHeld !== null && <DisciplineRow label="Stop held" fraction={snapshot.stopHeld} u={u} />}
     </div>
   ) : null;
 
@@ -635,7 +717,7 @@ export function ShareCardImage({ snapshot, tradingDay, size, token }: ShareCardP
             discipline fractions are intent-side and backed by nothing a broker
             knows. An empty span holds the block's height when the day is manual
             and there is no claim to make. */}
-        <span style={{ fontSize: u(17), fontWeight: 600, color: FAINT, marginTop: u(10) }}>
+        <span style={{ fontSize: u(17), fontWeight: 700, color: FAINT, marginTop: u(10) }}>
           {note ?? ''}
         </span>
       </div>
@@ -662,7 +744,7 @@ export function ShareCardImage({ snapshot, tradingDay, size, token }: ShareCardP
             alt=""
           />
         </div>
-        <span style={{ fontSize: u(16), fontWeight: 600, color: TEAL, marginTop: u(12), letterSpacing: u(1) }}>
+        <span style={{ fontSize: u(16), fontWeight: 700, color: TEAL, marginTop: u(12), letterSpacing: u(1) }}>
           reflecttrading.app
         </span>
       </div>
@@ -701,8 +783,8 @@ export function ShareCardImage({ snapshot, tradingDay, size, token }: ShareCardP
       {hero}
       <div style={{ display: 'flex', height: u(30) }} />
       {miniCards}
-      {discipline !== null && <div style={{ display: 'flex', height: u(22) }} />}
-      {discipline}
+      {accounts !== null && <div style={{ display: 'flex', height: u(22) }} />}
+      {accounts}
     </div>
   ) : (
     <div style={{ display: 'flex', flexGrow: 1, alignItems: 'stretch', width: '100%' }}>
@@ -729,7 +811,7 @@ export function ShareCardImage({ snapshot, tradingDay, size, token }: ShareCardP
           and a one-fraction day must put the hero in the same place, and a
           growing panel would move it. Centred in the band so the withheld-field
           cases do not leave it hanging off the top. */}
-      <div style={{ display: 'flex', width: panelWidth, alignItems: 'center' }}>{discipline}</div>
+      <div style={{ display: 'flex', width: panelWidth, alignItems: 'center' }}>{accounts}</div>
     </div>
   );
 

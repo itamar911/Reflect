@@ -45,6 +45,14 @@ const WIN_DAY: DailyShareSnapshot = {
   worst: -210,
   provenance: 'broker',
   nickname: 'סוחר מדד',
+  // Three accounts, mixed signs — the common broker-synced shape, and the one
+  // that shows the panel doing its job: the hero is the SUM, and the rows say
+  // where it came from.
+  accounts: [
+    { name: 'Main Futures', pnl: 1480.5, broker: true },
+    { name: 'Topstep Combine', pnl: 95, broker: true },
+    { name: 'Eval 50K', pnl: -335, broker: true },
+  ],
 };
 
 /** A red day, mixed provenance, anonymous, one fraction unanswered. */
@@ -61,6 +69,12 @@ const LOSS_DAY: DailyShareSnapshot = {
   worst: -960.75,
   provenance: 'mixed',
   nickname: null,
+  // Two accounts, both red, one of them manual — so the row mark is not
+  // uniform and the panel has to survive that.
+  accounts: [
+    { name: 'Main Futures', pnl: -640.25, broker: true },
+    { name: 'Swing Account', pnl: -1235, broker: false },
+  ],
 };
 
 /**
@@ -81,6 +95,9 @@ const QUIET_DAY: DailyShareSnapshot = {
   worst: null,
   provenance: 'manual',
   nickname: null,
+  // Nothing happened, so there is nothing to attribute. The panel is withheld
+  // whole rather than rendered empty.
+  accounts: [],
 };
 
 /** A six-figure loss — the longest string the money slot ever holds. */
@@ -89,6 +106,22 @@ const BIG_LOSS_DAY: DailyShareSnapshot = {
   day: '2026-10-23',
   pnl: -124875.5,
   nickname: 'חשבון הדגמה',
+  /**
+   * SEVEN accounts, so the card has to cut the list and say "+2 more" — and a
+   * Hebrew account name, because `display_name` is free text the trader chose
+   * and the card is English. It is the one string on the panel that can hold a
+   * Hebrew glyph, so it goes through the same reordering the nickname does.
+   * The longest money string sits beside the longest list on purpose.
+   */
+  accounts: [
+    { name: 'Main Futures', pnl: 14200, broker: true },
+    { name: 'Topstep Combine', pnl: 2180.25, broker: true },
+    { name: 'החשבון הראשי שלי', pnl: -1120, broker: true },
+    { name: 'Eval 50K', pnl: -8400, broker: true },
+    { name: 'Apex 100K', pnl: -22650.75, broker: true },
+    { name: 'Swing Account', pnl: -44320, broker: false },
+    { name: 'Unassigned', pnl: -64765, broker: false },
+  ],
 };
 
 const CASES: ReadonlyArray<{ name: string; snapshot: DailyShareSnapshot }> = [

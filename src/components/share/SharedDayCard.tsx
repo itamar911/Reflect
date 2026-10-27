@@ -62,7 +62,7 @@
 import { formatMoney } from '@/lib/money';
 import { CARD_PALETTE } from '@/lib/share/cardImage';
 import { shareProvenanceNote } from '@/lib/share/snapshot';
-import type { DailyShareSnapshot, ShareFraction } from '@/lib/share/snapshot';
+import type { DailyShareSnapshot, ShareAccountRow, ShareFraction } from '@/lib/share/snapshot';
 import { tradingDayLabel, type TradingDay } from '@/lib/tradingDay';
 
 const {
@@ -139,7 +139,7 @@ function ReflectMark() {
         <span style={{ fontSize: 15, fontWeight: 800, letterSpacing: 4, lineHeight: 1, color: INK }}>
           REFLECT
         </span>
-        <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: 1.5, lineHeight: 1, color: FAINT, marginTop: 5 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.5, lineHeight: 1, color: FAINT, marginTop: 5 }}>
           Trading Journal
         </span>
       </span>
@@ -150,56 +150,83 @@ function ReflectMark() {
 /** The card's one label treatment: small, spaced, and quiet. */
 function Label({ children }: { children: React.ReactNode }) {
   return (
-    <span style={{ fontSize: 12, fontWeight: 600, letterSpacing: 1.5, color: FAINT }}>{children}</span>
+    <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1.5, color: FAINT }}>{children}</span>
   );
 }
 
-/** One of the two bordered mini-cards under the hero figure. */
-function MiniCard({ label, value }: { label: string; value: React.ReactNode }) {
+/** One of the three bordered mini-cards under the hero figure. */
+function MiniCard({
+  label,
+  value,
+  sub,
+}: {
+  label: string;
+  value: React.ReactNode;
+  sub?: string;
+}) {
   return (
     <div
-      className="flex-1 min-w-0 flex flex-col gap-2 px-5 py-4 rounded-2xl"
+      className="flex-1 min-w-0 flex flex-col gap-2 px-4 sm:px-5 py-4 rounded-2xl"
       style={{ background: WELL, border: `1px solid ${HAIRLINE}` }}
     >
       <Label>{label}</Label>
       <Ltr style={{ fontSize: 26, fontWeight: 800, color: INK, lineHeight: 1 }}>{value}</Ltr>
+      {/* Reserved whether filled or not, so the three cards keep one baseline
+          — the same reason the image reserves it. */}
+      <Ltr style={{ fontSize: 12, fontWeight: 700, color: FAINT, lineHeight: 1, minHeight: 12 }}>
+        {sub ?? ''}
+      </Ltr>
     </div>
   );
 }
 
 /**
- * A discipline fraction with its bar — or the row withheld entirely.
+ * The mark at the start of an account row.
  *
- * NULL RENDERS NOTHING RATHER THAN A ZERO. `behaviourDisciplineScore()` returns
- * null and never 0 when no row answered (disciplineAggregate.ts), and REF-125
- * §2.4 names the consequence of losing that distinction here: "rendering that
- * as '0/100 discipline' would be defamatory of the user's own day." The builder
- * already answers null; this is the half that does not print it.
- *
- * The bar is teal and never green or red. Green and red are semantic on both
- * surfaces and belong to the P&L alone — a discipline bar that turned red would
- * be the page passing judgement in the figure's own colours.
+ * ⚠️ DELIBERATELY NOT THE TRADOVATE LOGO — the card's `AccountMark` carries the
+ * full argument. The short version: `PlatformsSection.tsx:76-80` already ruled
+ * that permission to show a mark covers NinjaTrader only, Tradovate is a
+ * NinjaTrader Group company, and `SiteDisclosureFooter` disclaims any
+ * affiliation with them. This rhombus is ours.
  */
-function DisciplineRow({ label, value }: { label: string; value: ShareFraction | null }) {
-  if (value === null) return null;
-  // Guarded for the same reason the image guards it: a zero denominator would
-  // compute a NaN width, which lays out as a full bar — a perfect score drawn
-  // on a day nobody answered anything about.
-  const pct = value.answered > 0 ? Math.round((value.met / value.answered) * 100) : 0;
+function AccountMark({ broker }: { broker: boolean }) {
   return (
-    <div className="flex flex-col gap-2.5">
-      <div className="flex items-baseline justify-between gap-4">
-        <span style={{ fontSize: 15, color: MUTED }}>{label}</span>
-        <Ltr style={{ fontSize: 16, fontWeight: 800, color: INK }}>
-          {value.met}/{value.answered}
-        </Ltr>
-      </div>
-      <div
-        aria-hidden="true"
-        style={{ height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.07)' }}
+    <span
+      aria-hidden="true"
+      className="shrink-0"
+      style={{
+        width: 9,
+        height: 9,
+        transform: 'rotate(45deg)',
+        borderRadius: 2,
+        background: broker ? TEAL : 'transparent',
+        border: `2px solid ${broker ? TEAL : MUTED}`,
+      }}
+    />
+  );
+}
+
+/** One account: mark, name, and that account's money. */
+function AccountRow({ account }: { account: ShareAccountRow }) {
+  return (
+    <div className="flex items-center gap-3 min-w-0">
+      <AccountMark broker={account.broker} />
+      {/* `min-w-0` + `truncate`: the name is bounded at 22 characters by the
+          snapshot, but a narrow phone is narrower than 22 characters and the
+          figure beside it must not be pushed off. */}
+      <span className="min-w-0 truncate" style={{ fontSize: 15, fontWeight: 800, color: INK }}>
+        {account.name}
+      </span>
+      <span className="flex-1" />
+      <Ltr
+        style={{
+          fontSize: 15,
+          fontWeight: 800,
+          color: account.pnl === null ? MUTED : account.pnl >= 0 ? GREEN : RED,
+        }}
       >
-        <div style={{ width: `${pct}%`, height: '100%', borderRadius: 3, background: TEAL }} />
-      </div>
+        {account.pnl === null ? '—' : formatMoney(account.pnl)}
+      </Ltr>
     </div>
   );
 }
@@ -270,7 +297,12 @@ export default function SharedDayCard({
   const met = (snapshot.followedPlan?.met ?? 0) + (snapshot.stopHeld?.met ?? 0);
   const answered = (snapshot.followedPlan?.answered ?? 0) + (snapshot.stopHeld?.answered ?? 0);
   const disciplineScore = answered > 0 ? Math.round((met / answered) * 100) : null;
-  const hasDiscipline = snapshot.followedPlan !== null || snapshot.stopHeld !== null;
+  // The two fractions as the discipline card's evidence line, in the same
+  // order and the same `met/answered` shape the image prints.
+  const disciplineSub = [snapshot.followedPlan, snapshot.stopHeld]
+    .filter((f): f is ShareFraction => f !== null)
+    .map((f) => `${f.met}/${f.answered}`)
+    .join(' · ');
 
   return (
     <div
@@ -316,7 +348,9 @@ export default function SharedDayCard({
             somewhere that looks like it. */}
         <div className="flex flex-row-reverse items-center justify-between gap-4 flex-wrap">
           <ReflectMark />
-          <h1 style={{ fontSize: 15, fontWeight: 600, color: MUTED }}>{tradingDayLabel(tradingDay)}</h1>
+          {/* Larger and heavier than it was — the review's "everything is too thin",
+              applied to the page as well as the image so the twins stay twins. */}
+          <h1 style={{ fontSize: 18, fontWeight: 800, color: INK }}>{tradingDayLabel(tradingDay)}</h1>
         </div>
 
         {/* ── The day's money, and the discipline panel ───────────────────── */}
@@ -358,49 +392,48 @@ export default function SharedDayCard({
               </Ltr>
             </div>
 
-            <div className="flex gap-4" style={{ textAlign: 'right' }}>
+            {/* THREE mini-cards now: discipline joined them as a score with
+                its fractions as a subline, which is what freed the right-hand
+                panel for the accounts breakdown. `—` and no subline when
+                nothing was answered — never 0%, for the reason REF-125 §2.4
+                gives: a zero on a public page would be defamatory of the
+                trader's own day.
+
+                The fractions are inside an `Ltr`, which is load-bearing: "4/5"
+                in an RTL run is reordered to "5/4" by the browser's bidi
+                algorithm, silently inverting a discipline claim. */}
+            <div className="flex gap-3 sm:gap-4" style={{ textAlign: 'right' }}>
               <MiniCard label="עסקאות סגורות" value={snapshot.trades} />
               <MiniCard label="אחוז הצלחה" value={winRate} />
+              <MiniCard
+                label="משמעת"
+                value={disciplineScore === null ? '—' : `${disciplineScore}%`}
+                sub={disciplineSub || undefined}
+              />
             </div>
           </div>
 
-          {/* The discipline panel — withheld whole when neither fraction was
-              answered, for the reason on DisciplineRow. An empty bordered panel
-              headed DISCIPLINE makes the same false claim more quietly. */}
-          {hasDiscipline && (
+          {/* ── The accounts panel ───────────────────────────────────────────
+              Withheld whole when there is nothing to attribute: an empty panel
+              headed "תיקים" would be a claim about a DEPLOYMENT state —
+              migration 037 unrun, or the import gate shut — dressed up as a
+              fact about the day. */}
+          {snapshot.accounts.length > 0 && (
             <div
-              className="w-full md:w-[380px] shrink-0 flex flex-col gap-5 p-5 md:p-6 rounded-2xl"
+              className="w-full md:w-[380px] shrink-0 flex flex-col gap-4 p-5 md:p-6 rounded-2xl"
               style={{ background: WELL, border: `1px solid ${HAIRLINE}` }}
             >
-              <div className="flex items-center justify-between gap-4">
-                <Label>משמעת</Label>
-                {disciplineScore !== null && (
-                  <Ltr
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 800,
-                      color: TEAL,
-                      padding: '4px 11px',
-                      borderRadius: 999,
-                      background: 'rgba(0,210,210,0.12)',
-                      border: '1px solid rgba(0,210,210,0.35)',
-                    }}
-                  >
-                    {disciplineScore}%
-                  </Ltr>
-                )}
+              <Label>תיקים · תוצאת היום</Label>
+              {/* THE PAGE LISTS THEM ALL. The card caps at five and says
+                  "+N more" because it is read at a glance in a feed; somebody
+                  who followed the link is reading, and the thing they followed
+                  it to verify is exactly this breakdown. The snapshot stores at
+                  most eight either way. */}
+              <div className="flex flex-col gap-3.5">
+                {snapshot.accounts.map((account, i) => (
+                  <AccountRow key={account.name + i} account={account} />
+                ))}
               </div>
-              <DisciplineRow label="עמד בתוכנית" value={snapshot.followedPlan} />
-              {/* "לא הורחק" AND NOT "לא הוזז", which is the one piece of copy
-                  on this page that departs from the ticket's wording,
-                  deliberately. The counted predicate treats a TIGHTENING as
-                  held — Imri's 19.10 decision, stopHistory.ts:46-57, "a trader
-                  who moves a stop TOWARD the profit is managing risk, not
-                  breaking discipline" — and a tightened stop WAS moved. So
-                  "לא הוזז" over this number would be false on exactly the
-                  trades the product decided to reward. "הורחק" is also the
-                  vocabulary the journal already uses. */}
-              <DisciplineRow label="הסטופ לא הורחק" value={snapshot.stopHeld} />
             </div>
           )}
         </div>
