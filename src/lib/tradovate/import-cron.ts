@@ -288,12 +288,18 @@ export async function runBrokerImport(params: {
   // fail-closed default, and after the inversion an unset variable is the state
   // in which every connection IS imported. `run.skippedUsers` already carries
   // the number a restricted deployment leaves out.
-  // THE DAY BOUNDARY THIS JOB CANNOT KNOW (§C10.5). A cron has no browser to
-  // ask, and `profiles.timezone` does not exist. UTC midnight is used, and it
-  // is harmless HERE in a way it would not be in the rule engine: the scalars
-  // cut at this instant are discarded by syncUserTrades, every column the
-  // import writes takes its value from the broker's own fill timestamps, and
-  // the window below is what actually decides which trades are reached.
+  // THE DAY BOUNDARY THIS JOB DELIBERATELY DOES NOT USE (REF-125).
+  // `currentTradingDayStart()` is computable here now — 17:00 America/Chicago
+  // is the exchange's hour, not the trader's, so unlike the browser midnight
+  // this replaced it needs no `profiles.timezone` and no request to ask. It is
+  // still not what this job wants, and the reason is COST rather than
+  // correctness: `fills.ts` takes `min(dayStartMs, windowStartMs)` as the
+  // window it prices, and a trading-day open reaches up to 72 hours back
+  // across a weekend where UTC midnight reaches at most 24. That would widen
+  // what a cron prices, every night, to no end — the scalars cut at this
+  // instant are discarded by `syncUserTrades`, every column the import writes
+  // takes its value from the broker's own fill timestamps, and `windowStartMs`
+  // below is what actually decides which trades are reached.
   const dayStartMs = new Date(now).setUTCHours(0, 0, 0, 0);
   const windowStartMs = now - lookbackMs;
 

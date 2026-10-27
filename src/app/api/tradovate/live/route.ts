@@ -683,11 +683,13 @@ export async function GET() {
           userId,
           client: await supabase(),
           admin: createAdminClient(),
-          // UTC midnight, like both crons. This route takes no parameters, on
-          // purpose (see the header), so the trader's own midnight is not
-          // available here — and it does not matter: `syncUserTrades` discards
-          // the scalars cut at this instant, and `windowStartMs` below is what
-          // decides which trades are reached.
+          // UTC midnight, like both crons, and deliberately NOT the trading
+          // day's open (REF-125). That boundary is computable here now, but
+          // `fills.ts` prices `min(dayStartMs, windowStartMs)` and a trading
+          // day reaches up to 72 hours back across a weekend — so using it
+          // would widen what this route prices for nothing. `syncUserTrades`
+          // discards the scalars cut at this instant, and `windowStartMs`
+          // below is what decides which trades are reached.
           dayStartMs: new Date(now).setUTCHours(0, 0, 0, 0),
           // The same day the dedicated cron reaches, and the same constant, so
           // the two triggers cannot disagree about what "today's trades" means.

@@ -277,12 +277,18 @@ export async function runStopCapture(params: {
   // not rewritten — see the same place in ./keepalive.ts. It described the
   // fail-closed default, and an unset variable now means every connection is
   // read. `run.skippedUsers` already carries a restricted deployment's number.
-  // THE DAY BOUNDARY THIS JOB CANNOT KNOW (§C10.5), and here it matters even
-  // less than it does nightly: `syncUserTrades` discards the scalars cut at
-  // `dayStartMs`, every column the import writes takes its value from the
-  // broker's own fill timestamps, and `windowStartMs` is what decides which
-  // trades are reached. UTC midnight, like the nightly job, so there is one
-  // convention rather than two.
+  // THE DAY BOUNDARY THIS JOB DELIBERATELY DOES NOT USE (REF-125).
+  // `currentTradingDayStart()` is computable here now — 17:00 America/Chicago
+  // is the exchange's hour, not the trader's, so unlike the browser midnight
+  // this replaced it needs no `profiles.timezone` and no request to ask. It is
+  // still not what this job wants, and the reason is COST rather than
+  // correctness: `fills.ts` takes `min(dayStartMs, windowStartMs)` as the
+  // window it prices, and a trading-day open reaches up to 72 hours back
+  // across a weekend where UTC midnight reaches at most 24. That would widen
+  // what a cron prices, every night, to no end — the scalars cut at this
+  // instant are discarded by `syncUserTrades`, every column the import writes
+  // takes its value from the broker's own fill timestamps, and `windowStartMs`
+  // below is what actually decides which trades are reached.
   const dayStartMs = new Date(now).setUTCHours(0, 0, 0, 0);
   const windowStartMs = now - lookbackMs;
 
