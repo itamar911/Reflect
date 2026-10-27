@@ -141,65 +141,48 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
 
   return (
     <>
+      {/* The page's own background stays THEMED while the artefact inside it is
+          hard-coded dark — see SharedDayCard's header. The card is dark in
+          everybody's feed so it must be dark in everybody's browser, but
+          SiteDisclosureFooter below is legally-required text with a measured
+          contrast floor, and it keeps the viewer's theme. */}
       <main
         id="main-content"
         dir="rtl"
         style={{
-          minHeight: '100dvh',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
-          justifyContent: 'center',
-          gap: 20,
-          padding: '32px 16px',
+          gap: 18,
+          // Generous, and deliberately not vertically centred any more: the
+          // artefact is now up to 1100px wide and tall enough that centring it
+          // in the viewport pushed the attribution below the fold on a laptop.
+          padding: '40px 16px 28px',
           background: 'var(--color-tg-bg)',
         }}
       >
         <SharedDayCard snapshot={card.snapshot} tradingDay={card.tradingDay} />
 
-        {/* The mark, and the only outbound link on the page. A plain <a> and
-            not next/link: this is a route out of the app to the marketing
-            apex, so there is nothing to prefetch and no client router to
-            involve on a page that ships no other interactivity. */}
+        {/* Attribution, under somebody else's day. A plain <a> and not
+            next/link: this is a route out of the app to the marketing apex, so
+            there is nothing to prefetch and no client router to involve on a
+            page that ships no other interactivity. */}
         <a
           href="https://reflecttrading.app"
-          style={{ display: 'inline-flex', alignItems: 'center', textDecoration: 'none' }}
-          aria-label="Reflect — reflecttrading.app"
+          className="w-full max-w-[1100px]"
+          style={{
+            fontSize: 12,
+            color: 'var(--color-tg-muted)',
+            textDecoration: 'none',
+          }}
         >
-          <ReflectMark />
+          מופעל על ידי{' '}
+          <span dir="ltr" style={{ fontWeight: 700, letterSpacing: 2 }}>
+            REFLECT
+          </span>
         </a>
       </main>
       <SiteDisclosureFooter />
     </>
-  );
-}
-
-/**
- * The wordmark, reconstructed small.
- *
- * NOT `components/ui/Logo` — that mark is pinned at 38px because it is sized
- * for the landing nav and the sidebar (its own comment says the px must stay
- * px), and at that size it is the loudest thing on a card this narrow. This is
- * the attribution at the foot of somebody else's day, so it is the letterspaced
- * wordmark alone, which is the same reduction src/lib/email/template.ts:151
- * already makes for the one other surface that cannot use the real logo.
- *
- * Rubik rather than Montserrat, because it is the font this page already
- * loaded from the root layout and a second webfont for seven letters is not
- * worth a request on a link opened over mobile data.
- */
-function ReflectMark() {
-  return (
-    <span
-      dir="ltr"
-      style={{
-        fontSize: 13,
-        fontWeight: 600,
-        letterSpacing: 4,
-        color: 'var(--color-tg-muted)',
-      }}
-    >
-      REFLECT
-    </span>
   );
 }

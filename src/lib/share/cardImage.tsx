@@ -82,17 +82,41 @@ export const CARD_SIZES: Record<ShareCardSize, { width: number; height: number }
 // always dark regardless of the viewer's theme because it is an image in
 // somebody else's feed, not a page with a theme to inherit.
 
-const INK = '#f1f5f9'; // --color-tg-text
-const MUTED = '#a8adb8'; // --color-tg-muted
-const TEAL = '#00d2d2'; // --color-tg-primary, the one accent (CLAUDE.md)
-const GREEN = '#22c55e'; // --color-tg-success
-const RED = '#ef4444'; // --color-tg-danger
-const HAIRLINE = 'rgba(255,255,255,0.10)';
-const PANEL = 'rgba(255,255,255,0.035)';
+/**
+ * EXPORTED, BECAUSE THE PAGE USES IT TOO.
+ *
+ * /share/[token] is the card's twin — a stranger who follows the link has to
+ * arrive somewhere that looks like the image they clicked. Importing one
+ * palette is what stops "the teal" from becoming two slightly different teals
+ * the first time either side is touched. The page can resolve `var()` and the
+ * image cannot, so the shared thing is the VALUES.
+ */
+export const CARD_PALETTE = {
+  ink: '#f1f5f9', // --color-tg-text
+  muted: '#a8adb8', // --color-tg-muted
+  teal: '#00d2d2', // --color-tg-primary, the one accent (CLAUDE.md)
+  green: '#22c55e', // --color-tg-success
+  red: '#ef4444', // --color-tg-danger
+  hairline: 'rgba(255,255,255,0.10)',
+  panel: 'rgba(255,255,255,0.035)',
+  /** Deep charcoal into navy; the teal only arrives in the far corner. */
+  backdrop: 'linear-gradient(135deg, #15151c 0%, #1b1b26 48%, #10222a 100%)',
+  backdropFlat: '#15151c',
+  glow: 'radial-gradient(circle, rgba(0,210,210,0.16) 0%, rgba(0,210,210,0) 70%)',
+  /** The mark's own two colours, from components/ui/Logo.tsx. */
+  markGradient: 'linear-gradient(135deg, #00c9c9, #0a4f6e)',
+  markReflection: '#15535f',
+} as const;
 
-/** The mark's own two colours, from components/ui/Logo.tsx. */
-const MARK_GRADIENT = 'linear-gradient(135deg, #00c9c9, #0a4f6e)';
-const MARK_REFLECTION = '#15535f';
+const INK = CARD_PALETTE.ink;
+const MUTED = CARD_PALETTE.muted;
+const TEAL = CARD_PALETTE.teal;
+const GREEN = CARD_PALETTE.green;
+const RED = CARD_PALETTE.red;
+const HAIRLINE = CARD_PALETTE.hairline;
+const PANEL = CARD_PALETTE.panel;
+const MARK_GRADIENT = CARD_PALETTE.markGradient;
+const MARK_REFLECTION = CARD_PALETTE.markReflection;
 
 /**
  * The dot grid, as ONE image rather than several hundred divs.
@@ -362,10 +386,8 @@ export function ShareCardImage({ snapshot, tradingDay, size }: ShareCardProps) {
         flexDirection: 'column',
         position: 'relative',
         fontFamily: 'Rubik',
-        backgroundColor: '#15151c',
-        // Deep charcoal into navy, with the teal only arriving in the far
-        // corner. Imri: one accent colour, and the accent is not the backdrop.
-        backgroundImage: 'linear-gradient(135deg, #15151c 0%, #1b1b26 48%, #10222a 100%)',
+        backgroundColor: CARD_PALETTE.backdropFlat,
+        backgroundImage: CARD_PALETTE.backdrop,
       }}
     >
       {/* Texture, under everything. */}
@@ -380,7 +402,7 @@ export function ShareCardImage({ snapshot, tradingDay, size }: ShareCardProps) {
           left: Math.round(-160 * scale),
           width: Math.round(820 * scale),
           height: Math.round(820 * scale),
-          backgroundImage: 'radial-gradient(circle, rgba(0,210,210,0.16) 0%, rgba(0,210,210,0) 70%)',
+          backgroundImage: CARD_PALETTE.glow,
         }}
       />
 
