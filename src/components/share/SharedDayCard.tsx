@@ -1,6 +1,6 @@
 /**
  * A shared trading day, as a stranger sees it (REF-125 Stage 2 item 4,
- * redesigned in Stage 3 item 4).
+ * redesigned in Stage 3).
  *
  * A SERVER COMPONENT WITH NO INTERACTIVITY. No `'use client'`, no state, no
  * effect — it takes a validated snapshot and renders it. That is what lets the
@@ -14,17 +14,24 @@
  *
  * Somebody arrives here by clicking a card they saw in a feed. If the page
  * looks like an app screen instead of like the thing they clicked, the link
- * reads as a bait-and-switch — so this carries the same backdrop, the same dot
- * grid, the same single teal accent and the same mark as
- * lib/share/cardImage.tsx. The two import ONE palette (`CARD_PALETTE`) rather
- * than agreeing on hex values twice.
+ * reads as a bait-and-switch — so this carries the same canvas gradient, the
+ * same dot grid, the same teal-edged frame with its outer glow, the same
+ * mini-cards and the same discipline bars as lib/share/cardImage.tsx. The two
+ * import ONE palette (`CARD_PALETTE`) rather than agreeing on hex values twice.
  *
- * Where they deliberately differ: this page is the VERIFICATION surface, so it
- * carries the best/worst block the card does not (Imri, 27.10 — the card shows
- * only the day's headline figures; the detail lives here). It is also real
- * CSS, so it can do the things satori cannot: media queries, `direction: rtl`
- * that actually works, and a dot grid as a repeating background rather than a
- * tiled SVG.
+ * WHERE THEY DIFFER, AND WHY EACH DIFFERENCE IS DELIBERATE:
+ *
+ *   - THIS PAGE IS HEBREW; THE IMAGE IS ENGLISH. Not an inconsistency — it is
+ *     the fix for the bug that got the first card rejected. satori has no bidi
+ *     engine and rendered every Hebrew string on the image letter-reversed; a
+ *     browser has a real bidi implementation and has never had that problem.
+ *     The card is the artefact that travels, so it speaks the language that
+ *     survives the renderer; the page is where the trader's own language lives.
+ *   - THE PAGE CARRIES BEST/WORST. Imri, 27.10 — the card shows the day's
+ *     headline only, and the detail belongs where somebody is reading rather
+ *     than glancing.
+ *   - NO QR CODE. The card's QR exists to get a reader HERE. Printing one on
+ *     the destination would be a link to the page you are already on.
  *
  * THE ARTEFACT IS HARD-CODED DARK, THE FOOTER IS NOT. The card is dark in
  * everybody's feed, so this must be dark in everybody's browser — a
@@ -58,8 +65,16 @@ import { shareProvenanceNote } from '@/lib/share/snapshot';
 import type { DailyShareSnapshot, ShareFraction } from '@/lib/share/snapshot';
 import { tradingDayLabel, type TradingDay } from '@/lib/tradingDay';
 
-const { ink: INK, muted: MUTED, teal: TEAL, green: GREEN, red: RED, hairline: HAIRLINE, panel: PANEL } =
-  CARD_PALETTE;
+const {
+  ink: INK,
+  muted: MUTED,
+  faint: FAINT,
+  teal: TEAL,
+  green: GREEN,
+  red: RED,
+  hairline: HAIRLINE,
+  well: WELL,
+} = CARD_PALETTE;
 
 /** Numbers and symbols isolated from the surrounding Hebrew. */
 function Ltr({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
@@ -74,20 +89,22 @@ function Ltr({ children, style }: { children: React.ReactNode; style?: React.CSS
 }
 
 /**
- * The Reflect mark, in CSS this time.
+ * The Reflect mark, in CSS this time, with the wordmark and tagline beside it.
  *
  * The image has to reconstruct this inside satori's subset; a browser simply
  * has `background-clip: text` and `transform: scaleX(-1)`, so this is the same
  * mark expressed the easy way. Kept visually identical to the card's — it is
- * the first thing a visitor matches against what they clicked.
+ * the first thing a visitor matches against what they clicked. The tagline is
+ * `Trading Journal` in both places: it is a wordmark lockup, not body copy, and
+ * translating half a logo is how you end up with two logos.
  */
 function ReflectMark() {
   return (
     <span dir="ltr" className="inline-flex items-center shrink-0">
       <span
         style={{
-          fontSize: 34,
-          fontWeight: 700,
+          fontSize: 36,
+          fontWeight: 800,
           lineHeight: 1,
           backgroundImage: CARD_PALETTE.markGradient,
           backgroundClip: 'text',
@@ -109,8 +126,8 @@ function ReflectMark() {
       />
       <span
         style={{
-          fontSize: 34,
-          fontWeight: 700,
+          fontSize: 36,
+          fontWeight: 800,
           lineHeight: 1,
           color: CARD_PALETTE.markReflection,
           transform: 'scaleX(-1)',
@@ -118,51 +135,72 @@ function ReflectMark() {
       >
         R
       </span>
-      <span
-        style={{ fontSize: 13, fontWeight: 700, letterSpacing: 4, color: INK, marginInlineStart: 14 }}
-      >
-        REFLECT
+      <span className="flex flex-col" style={{ marginInlineStart: 14 }}>
+        <span style={{ fontSize: 15, fontWeight: 800, letterSpacing: 4, lineHeight: 1, color: INK }}>
+          REFLECT
+        </span>
+        <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: 1.5, lineHeight: 1, color: FAINT, marginTop: 5 }}>
+          Trading Journal
+        </span>
       </span>
     </span>
   );
 }
 
-/**
- * One label/value row inside the stats panel.
- *
- * `justify-content: space-between` under the page's own `dir="rtl"`, which
- * puts the label at the start (right) and the value at the end (left) — the
- * browser does here what the image has to do by hand with `row-reverse`.
- */
-function Row({ label, value }: { label: string; value: React.ReactNode }) {
+/** The card's one label treatment: small, spaced, and quiet. */
+function Label({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-4">
-      <span style={{ fontSize: 15, color: MUTED }}>{label}</span>
-      <Ltr style={{ fontSize: 18, fontWeight: 700, color: INK }}>{value}</Ltr>
+    <span style={{ fontSize: 12, fontWeight: 600, letterSpacing: 1.5, color: FAINT }}>{children}</span>
+  );
+}
+
+/** One of the two bordered mini-cards under the hero figure. */
+function MiniCard({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div
+      className="flex-1 min-w-0 flex flex-col gap-2 px-5 py-4 rounded-2xl"
+      style={{ background: WELL, border: `1px solid ${HAIRLINE}` }}
+    >
+      <Label>{label}</Label>
+      <Ltr style={{ fontSize: 26, fontWeight: 800, color: INK, lineHeight: 1 }}>{value}</Ltr>
     </div>
   );
 }
 
 /**
- * A discipline fraction, or the row withheld entirely.
+ * A discipline fraction with its bar — or the row withheld entirely.
  *
  * NULL RENDERS NOTHING RATHER THAN A ZERO. `behaviourDisciplineScore()` returns
  * null and never 0 when no row answered (disciplineAggregate.ts), and REF-125
  * §2.4 names the consequence of losing that distinction here: "rendering that
- * as '0/100 discipline' would be defamatory of the user's own day." The
- * builder already answers null; this is the half that does not print it.
+ * as '0/100 discipline' would be defamatory of the user's own day." The builder
+ * already answers null; this is the half that does not print it.
+ *
+ * The bar is teal and never green or red. Green and red are semantic on both
+ * surfaces and belong to the P&L alone — a discipline bar that turned red would
+ * be the page passing judgement in the figure's own colours.
  */
-function FractionRow({ label, value }: { label: string; value: ShareFraction | null }) {
+function DisciplineRow({ label, value }: { label: string; value: ShareFraction | null }) {
   if (value === null) return null;
+  // Guarded for the same reason the image guards it: a zero denominator would
+  // compute a NaN width, which lays out as a full bar — a perfect score drawn
+  // on a day nobody answered anything about.
+  const pct = value.answered > 0 ? Math.round((value.met / value.answered) * 100) : 0;
   return (
-    <Row
-      label={label}
-      value={
-        <>
+    <div className="flex flex-col gap-2.5">
+      <div className="flex items-baseline justify-between gap-4">
+        <span style={{ fontSize: 15, color: MUTED }}>{label}</span>
+        <Ltr style={{ fontSize: 16, fontWeight: 800, color: INK }}>
           {value.met}/{value.answered}
-        </>
-      }
-    />
+        </Ltr>
+      </div>
+      <div
+        aria-hidden="true"
+        style={{ height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.07)' }}
+      >
+        <div style={{ width: `${pct}%`, height: '100%', borderRadius: 3, background: TEAL }} />
+      </div>
+    </div>
   );
 }
 
@@ -171,13 +209,38 @@ function Detail({ label, amount }: { label: string; amount: number }) {
   return (
     <div
       className="flex-1 min-w-0 flex items-baseline justify-between gap-3 px-4 py-3 rounded-xl"
-      style={{ background: PANEL, border: `1px solid ${HAIRLINE}` }}
+      style={{ background: WELL, border: `1px solid ${HAIRLINE}` }}
     >
       <span style={{ fontSize: 13, color: MUTED }}>{label}</span>
       <Ltr style={{ fontSize: 15, fontWeight: 700, color: amount >= 0 ? GREEN : RED }}>
         {formatMoney(amount)}
       </Ltr>
     </div>
+  );
+}
+
+/**
+ * The teal check badge, matching the card's.
+ *
+ * ⚠️ IT MAKES NO CLAIM ABOUT IDENTITY — see the card's note at the same spot.
+ * Reflect verifies no trader's identity; the provenance line beside it carries
+ * the only claim either surface makes, and that line says "before fees" rather
+ * than "verified". `aria-hidden` because it is decorative: a screen reader
+ * announcing a check here would state exactly the thing it does not mean.
+ */
+function CheckBadge() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" className="shrink-0">
+      <circle cx="12" cy="12" r="11" fill={TEAL} fillOpacity="0.16" stroke={TEAL} strokeWidth="1.6" />
+      <path
+        d="M7.2 12.4l3.1 3.1 6.4-6.9"
+        fill="none"
+        stroke={TEAL}
+        strokeWidth="2.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 
@@ -199,49 +262,43 @@ export default function SharedDayCard({
   // Derived from the two frozen fields, exactly as the image derives it — not
   // stored, so cards minted before Stage 3 still render. Withheld rather than
   // shown as 0% when nothing was counted.
-  const winRate =
-    snapshot.trades > 0 ? `${Math.round((snapshot.wins / snapshot.trades) * 100)}%` : null;
+  const winRate = snapshot.trades > 0 ? `${Math.round((snapshot.wins / snapshot.trades) * 100)}%` : '—';
+
+  // Pooled, not averaged — the image's reasoning, restated by using the same
+  // arithmetic: averaging a 1/1 and a 2/10 gives 60%, which is not a thing that
+  // happened.
+  const met = (snapshot.followedPlan?.met ?? 0) + (snapshot.stopHeld?.met ?? 0);
+  const answered = (snapshot.followedPlan?.answered ?? 0) + (snapshot.stopHeld?.answered ?? 0);
+  const disciplineScore = answered > 0 ? Math.round((met / answered) * 100) : null;
+  const hasDiscipline = snapshot.followedPlan !== null || snapshot.stopHeld !== null;
 
   return (
     <div
       dir="rtl"
-      className="w-full max-w-[1100px] mx-auto rounded-[28px] overflow-hidden relative"
+      className="w-full max-w-[1100px] mx-auto rounded-[28px] relative"
       style={{
-        backgroundColor: CARD_PALETTE.backdropFlat,
+        backgroundColor: CARD_PALETTE.canvasFlat,
         backgroundImage: CARD_PALETTE.backdrop,
-        border: `1px solid ${HAIRLINE}`,
+        // The frame, matching the image: a 2px teal edge and a 40px outer
+        // bloom, both from the shared palette so neither can drift.
+        border: `2px solid ${CARD_PALETTE.frameBorder}`,
+        boxShadow: CARD_PALETTE.frameGlow,
       }}
     >
       {/* The dot grid. Real CSS can repeat a radial-gradient, so unlike the
           image this needs no tiled SVG. `pointer-events-none` because it is
-          texture laid over the whole artefact. */}
+          texture laid over the whole artefact, and the rounding is repeated
+          here so the texture stops where the frame does. */}
       <div
         aria-hidden="true"
-        className="absolute inset-0 pointer-events-none"
+        className="absolute inset-0 pointer-events-none rounded-[26px]"
         style={{
-          backgroundImage: 'radial-gradient(rgba(255,255,255,0.05) 1.6px, transparent 1.6px)',
-          backgroundSize: '26px 26px',
-        }}
-      />
-      {/* The single teal glow, behind the number it belongs to.
-          PHYSICAL `left`, NOT `insetInlineStart`: this container is `dir="rtl"`
-          so the logical start edge is the RIGHT one, and the logical property
-          put the glow behind the stats panel instead of behind the money. The
-          money column is pinned to the left here to match the image, so the
-          light that belongs to it is pinned to the left too. */}
-      <div
-        aria-hidden="true"
-        className="absolute pointer-events-none"
-        style={{
-          left: -200,
-          top: -240,
-          width: 760,
-          height: 760,
-          backgroundImage: CARD_PALETTE.glow,
+          backgroundImage: 'radial-gradient(rgba(255,255,255,0.06) 1.7px, transparent 1.7px)',
+          backgroundSize: '28px 28px',
         }}
       />
 
-      <div className="relative flex flex-col gap-10 md:gap-14 p-6 md:p-12">
+      <div className="relative flex flex-col gap-10 md:gap-12 p-6 md:p-12">
         {/* ── Mark, date, handle ──────────────────────────────────────────── */}
         {/* `flex-row-reverse` UNDER AN RTL CONTAINER, so the mark lands on the
             LEFT and the date on the right — matching the image rather than
@@ -250,37 +307,19 @@ export default function SharedDayCard({
             This container stays `dir="rtl"` because that is what makes every
             Hebrew string inside it lay out correctly for free, including
             `tradingDayLabel`, which mixes Hebrew with digits in one node and
-            would reorder under an LTR base. Only the three STRUCTURAL rows are
+            would reorder under an LTR base. Only the STRUCTURAL rows are
             reversed. The image reaches the same arrangement from the other
             side — satori has an LTR base and no bidi, so it reverses rows to
-            get the Hebrew right; this reverses rows to get the composition
+            get its layout right; this reverses rows to get the composition
             right. Imri's brief fixes the composition (mark left, date right,
             panel right), and a visitor who clicked a card has to arrive
             somewhere that looks like it. */}
-        <div className="flex flex-row-reverse items-start justify-between gap-4 flex-wrap">
+        <div className="flex flex-row-reverse items-center justify-between gap-4 flex-wrap">
           <ReflectMark />
-          <div className="flex flex-col items-end min-w-0">
-            <h1 style={{ fontSize: 17, fontWeight: 700, color: INK, letterSpacing: '-0.01em' }}>
-              {/* The row's column and not `snapshot.day`. They agree in every
-                  row this build writes; if they ever disagree, the column is
-                  the one the owner's dialog and the index are keyed on. */}
-              {tradingDayLabel(tradingDay)}
-            </h1>
-            {/* The opt-in handle, and the only name this page can print.
-                Absent unless the trader both set one and turned the toggle on
-                — see buildDailyShareSnapshot, which applies the visibility
-                itself. */}
-            {snapshot.nickname !== null && (
-              <span
-                style={{ fontSize: 14, color: MUTED, marginTop: 4, overflowWrap: 'anywhere' }}
-              >
-                {snapshot.nickname}
-              </span>
-            )}
-          </div>
+          <h1 style={{ fontSize: 15, fontWeight: 600, color: MUTED }}>{tradingDayLabel(tradingDay)}</h1>
         </div>
 
-        {/* ── The day's money, and the panel ──────────────────────────────── */}
+        {/* ── The day's money, and the discipline panel ───────────────────── */}
         {/* Stacked on a phone, two columns from `md` — the brief's "full width
             on desktop, stacked on mobile". `items-center` so the headline and
             the panel share a centre line whatever the panel contains, which is
@@ -290,55 +329,80 @@ export default function SharedDayCard({
           {/* `text-align: left` inside an RTL container: the money column sits
               on the left of the artefact, as it does on the image, so its
               label and figure hang off the left edge rather than the right. */}
-          <div className="flex-1 min-w-0" style={{ textAlign: 'left' }}>
-            <p style={{ fontSize: 15, color: MUTED, marginBottom: 6 }}>תוצאת היום</p>
-            <Ltr
-              style={{
-                // Fluid rather than fixed: a six-figure amount must not clip on
-                // a narrow phone, and this card has no horizontal scroll to
-                // fall back on.
-                fontSize: 'clamp(40px, 9vw, 76px)',
-                fontWeight: 700,
-                lineHeight: 1.05,
-                letterSpacing: '-0.03em',
-                display: 'inline-block',
-                // `—` when no counted trade recorded an amount. NOT `$0.00`: a
-                // day whose trades carry no money figure is not a breakeven
-                // day, and zero under a "Broker-synced" tag would be a claim we
-                // cannot support. At this size a dash still reads as a dash,
-                // which is why the page keeps it where the image — where the
-                // figure is 112px and an em dash becomes a bar — spells it out.
-                color: pnl === null ? MUTED : pnl >= 0 ? GREEN : RED,
-              }}
+          <div className="flex-1 min-w-0 flex flex-col gap-6" style={{ textAlign: 'left' }}>
+            <div className="flex flex-col gap-3">
+              <Label>תוצאת היום</Label>
+              <Ltr
+                style={{
+                  // Fluid rather than fixed: a six-figure amount must not clip
+                  // on a narrow phone, and this card has no horizontal scroll
+                  // to fall back on. The image cannot do this — it has no
+                  // viewport — which is why it measures the glyphs instead
+                  // (lib/share/cardMetrics.ts).
+                  fontSize: 'clamp(40px, 9vw, 76px)',
+                  fontWeight: 800,
+                  lineHeight: 1.05,
+                  letterSpacing: '-0.03em',
+                  display: 'inline-block',
+                  // `—` when no counted trade recorded an amount. NOT `$0.00`:
+                  // a day whose trades carry no money figure is not a breakeven
+                  // day, and zero under a "Broker-synced" tag would be a claim
+                  // we cannot support. At this size a dash still reads as a
+                  // dash, which is why the page keeps it where the image —
+                  // where the figure is ~120px and an em dash becomes a bar —
+                  // spells it out instead.
+                  color: pnl === null ? MUTED : pnl >= 0 ? GREEN : RED,
+                }}
+              >
+                {pnl === null ? '—' : formatMoney(pnl)}
+              </Ltr>
+            </div>
+
+            <div className="flex gap-4" style={{ textAlign: 'right' }}>
+              <MiniCard label="עסקאות סגורות" value={snapshot.trades} />
+              <MiniCard label="אחוז הצלחה" value={winRate} />
+            </div>
+          </div>
+
+          {/* The discipline panel — withheld whole when neither fraction was
+              answered, for the reason on DisciplineRow. An empty bordered panel
+              headed DISCIPLINE makes the same false claim more quietly. */}
+          {hasDiscipline && (
+            <div
+              className="w-full md:w-[380px] shrink-0 flex flex-col gap-5 p-5 md:p-6 rounded-2xl"
+              style={{ background: WELL, border: `1px solid ${HAIRLINE}` }}
             >
-              {pnl === null ? '—' : formatMoney(pnl)}
-            </Ltr>
-          </div>
-
-          <div
-            className="w-full md:w-[380px] shrink-0 flex flex-col gap-4 p-5 md:p-6 rounded-2xl"
-            style={{ background: PANEL, border: `1px solid ${HAIRLINE}` }}
-          >
-            <Row label="עסקאות סגורות" value={snapshot.trades} />
-            {winRate !== null && <Row label="אחוז הצלחה" value={winRate} />}
-
-            {(snapshot.followedPlan !== null || snapshot.stopHeld !== null) && (
-              <>
-                <div style={{ height: 1, background: HAIRLINE }} />
-                <FractionRow label="עמד בתוכנית" value={snapshot.followedPlan} />
-                {/* "לא הורחק" AND NOT "לא הוזז", which is the one piece of copy
-                    on this page that departs from the ticket's wording,
-                    deliberately. The counted predicate treats a TIGHTENING as
-                    held — Imri's 19.10 decision, stopHistory.ts:46-57, "a
-                    trader who moves a stop TOWARD the profit is managing risk,
-                    not breaking discipline" — and a tightened stop WAS moved.
-                    So "לא הוזז" over this number would be false on exactly the
-                    trades the product decided to reward. "הורחק" is also the
-                    vocabulary the journal already uses. */}
-                <FractionRow label="הסטופ לא הורחק" value={snapshot.stopHeld} />
-              </>
-            )}
-          </div>
+              <div className="flex items-center justify-between gap-4">
+                <Label>משמעת</Label>
+                {disciplineScore !== null && (
+                  <Ltr
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 800,
+                      color: TEAL,
+                      padding: '4px 11px',
+                      borderRadius: 999,
+                      background: 'rgba(0,210,210,0.12)',
+                      border: '1px solid rgba(0,210,210,0.35)',
+                    }}
+                  >
+                    {disciplineScore}%
+                  </Ltr>
+                )}
+              </div>
+              <DisciplineRow label="עמד בתוכנית" value={snapshot.followedPlan} />
+              {/* "לא הורחק" AND NOT "לא הוזז", which is the one piece of copy
+                  on this page that departs from the ticket's wording,
+                  deliberately. The counted predicate treats a TIGHTENING as
+                  held — Imri's 19.10 decision, stopHistory.ts:46-57, "a trader
+                  who moves a stop TOWARD the profit is managing risk, not
+                  breaking discipline" — and a tightened stop WAS moved. So
+                  "לא הוזז" over this number would be false on exactly the
+                  trades the product decided to reward. "הורחק" is also the
+                  vocabulary the journal already uses. */}
+              <DisciplineRow label="הסטופ לא הורחק" value={snapshot.stopHeld} />
+            </div>
+          )}
         </div>
 
         {/* ── Best and worst — the page's own block, kept small ───────────── */}
@@ -353,19 +417,39 @@ export default function SharedDayCard({
           </div>
         )}
 
-        {/* ── Provenance, and the link out ────────────────────────────────── */}
-        {/* Reversed for the same reason as the header: the image puts the
-            provenance bottom-left and the link bottom-right. */}
+        {/* ── Identity, provenance, and the link out ──────────────────────── */}
+        {/* Reversed for the same reason as the header: the image puts the name
+            and provenance bottom-left and the link bottom-right. */}
         <div
           className="flex flex-row-reverse items-center justify-between gap-4 flex-wrap pt-6"
           style={{ borderTop: `1px solid ${HAIRLINE}` }}
         >
-          {/* English in an RTL card, so it gets its own direction rather than
-              being reordered into the Hebrew flow around it. An empty span
-              holds the row when the day is manual and there is no claim. */}
-          <span dir="ltr" style={{ fontSize: 12, color: MUTED, letterSpacing: '0.02em' }}>
-            {note ?? ''}
-          </span>
+          <div className="flex flex-col gap-1.5 min-w-0">
+            <div className="flex items-center gap-2.5">
+              <CheckBadge />
+              {/* The opt-in handle, and the only name this page can print.
+                  "סוחר Reflect" when the toggle is off — not blank, which would
+                  leave the badge floating beside nothing. Absent-by-default is
+                  enforced upstream: buildDailyShareSnapshot applies the
+                  visibility document itself, so a nickname only arrives here if
+                  the trader both set one and turned the toggle on. */}
+              <span
+                style={{ fontSize: 16, fontWeight: 800, color: INK, overflowWrap: 'anywhere' }}
+              >
+                {snapshot.nickname ?? 'סוחר Reflect'}
+              </span>
+            </div>
+            {/* English in an RTL card, so it gets its own direction rather than
+                being reordered into the Hebrew flow around it. Rendered only
+                when there is a claim — a manual day makes none, and an empty
+                element here would leave a stray gap under the name. */}
+            {note !== null && (
+              <span dir="ltr" style={{ fontSize: 12, color: FAINT, letterSpacing: '0.02em' }}>
+                {note}
+              </span>
+            )}
+          </div>
+
           {/* The only outbound link on the page. A plain <a> and not next/link:
               this is a route out of the app to the marketing apex, so there is
               nothing to prefetch and no client router to involve on a page that
@@ -373,7 +457,7 @@ export default function SharedDayCard({
           <a
             href="https://reflecttrading.app"
             dir="ltr"
-            style={{ fontSize: 13, fontWeight: 600, color: TEAL, textDecoration: 'none' }}
+            style={{ fontSize: 13, fontWeight: 700, color: TEAL, textDecoration: 'none' }}
           >
             reflecttrading.app
           </a>
