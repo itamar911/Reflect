@@ -106,7 +106,17 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith('/terms') ||
     pathname.startsWith('/privacy') ||
     pathname.startsWith('/risk-disclosure') ||
-    pathname.startsWith('/accessibility');
+    pathname.startsWith('/accessibility') ||
+    // REF-125. A shared trading day, read by whoever holds the token and by
+    // the link previewers that unfurl it — so by definition nobody with a
+    // session. Without this line the gate below redirects every one of them to
+    // /login, the page works for the one person who IS signed in, and the
+    // translation suite tests the login page and passes green.
+    //
+    // It opens the ROUTE and not the table. The page is a server component and
+    // reads with the service role, so `anon` is still granted nothing anywhere
+    // in the database — migration 043's "WHO MAY READ ANY OF THIS".
+    pathname.startsWith('/share');
 
   const isPublicRoute = pathname === '/' || isAuthRoute || isApiRoute || isMarketingRoute;
 

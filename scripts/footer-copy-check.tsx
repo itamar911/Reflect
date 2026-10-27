@@ -48,6 +48,13 @@ const MOUNTS = [
   'src/app/privacy/page.tsx',
   'src/app/accessibility/page.tsx',
   'src/app/phone-showcase/page.tsx',
+  // REF-125. Both halves of the public share route. It sits outside `(app)`,
+  // `(auth)` and `(protected)`, so it inherits no footer from any layout and
+  // each page mounts one directly. The not-found boundary is listed too: a
+  // revoked link is a page a stranger reaches and reads, and the disclosures
+  // are required on every page rather than on every successful one.
+  'src/app/share/[token]/page.tsx',
+  'src/app/share/not-found.tsx',
 ];
 
 const failures: string[] = [];
