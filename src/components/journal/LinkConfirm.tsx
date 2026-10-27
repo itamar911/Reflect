@@ -49,6 +49,7 @@ import {
 import { brokerStopToShow, readStopHistory } from '@/lib/journal/stopHistory';
 import { planCandidates, type CandidatePlan } from '@/lib/tradovate/match';
 import { formatMoney } from '@/lib/money';
+import { timeOfDay } from '@/lib/datetime';
 
 const GOLD = '#00d2d2';
 const SURF2 = 'var(--color-tg-surface-2)';
@@ -106,8 +107,10 @@ export interface LinkablePlan extends CandidatePlan {
   quantity?: number | null;
 }
 
-const timeOf = (iso: string | null): string =>
-  iso ? new Date(iso).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }) : '—';
+// Pinned to the trader's zone (lib/datetime.ts): this sits beside a broker
+// fill time, and the two disagreeing by the server's offset is the whole
+// reason a trader would mis-match a plan to the wrong execution.
+const timeOf = (iso: string | null): string => timeOfDay(iso) || '—';
 
 const price = (value: number | null | undefined): string =>
   value != null && Number.isFinite(Number(value)) ? Number(value).toFixed(2) : '—';

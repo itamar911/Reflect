@@ -7,6 +7,7 @@ import { TrendingUp, Rocket, ArrowLeftRight, RefreshCw, Building2, Activity, Rul
 import { renderPlainAiText } from '@/lib/ai/textFormatting';
 import { tradeMoneyPnl, isWinningTrade } from '@/lib/pnl';
 import { averageOf, rrValue } from '@/lib/intent';
+import { shortDate } from '@/lib/datetime';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const GOLD   = '#00d2d2';
@@ -85,9 +86,8 @@ function rowPnl(t: TradeSummary): number | null {
   return t.status === 'closed' && t.exit_price != null ? tradeMoneyPnl(t) : null;
 }
 function fmtPnl(v: number) { return `${v >= 0 ? '+' : ''}${v.toFixed(2)}`; }
-function fmtDate(iso: string) {
-  return new Date(iso).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', year: '2-digit' });
-}
+// The journal's row date, pinned to the trader's zone — see lib/datetime.ts.
+const fmtDate = shortDate;
 
 export function computeStats(strategyName: string, trades: TradeSummary[]) {
   const linked  = trades.filter(t => t.strategy === strategyName);

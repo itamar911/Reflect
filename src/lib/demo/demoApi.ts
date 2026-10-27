@@ -6,6 +6,7 @@ import {
   DEMO_DEBRIEF_RESULT,
   DEMO_COACH_INSIGHTS,
   DEMO_PATTERNS,
+  demoShareTodayResponse,
   demoWeeklySummaryResponse,
 } from './fixtures';
 import { triggerDemoUpsell } from './demoDb';
@@ -17,11 +18,32 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-export function demoApiResponse(pathname: string): Response {
+/**
+ * `method` separates the two kinds of demo /api call.
+ *
+ * A GET is a widget reading on mount, and the visitor did not ask for it — so
+ * it gets canned content, and anything uncanned gets a quiet 403 with NO
+ * upsell. A write is the visitor pressing something, which is exactly when the
+ * upsell belongs.
+ *
+ * The distinction was added for `/api/share/today`: ShareDayButton GETs it on
+ * every dashboard mount, so the old method-blind version opened /demo/dashboard
+ * with the signup modal already over the page.
+ */
+export function demoApiResponse(pathname: string, method = 'GET'): Response {
   if (pathname.startsWith('/api/weekly-summary')) return json(demoWeeklySummaryResponse());
   if (pathname.startsWith('/api/ai-debrief'))     return json(DEMO_DEBRIEF_RESULT);
   if (pathname.startsWith('/api/ai-coach'))       return json({ insights: DEMO_COACH_INSIGHTS });
   if (pathname.startsWith('/api/ai-patterns'))    return json({ patterns: DEMO_PATTERNS });
+  // Today's card as the dialog opens onto it: a real preview, and no link yet,
+  // so the demo shows "צור קישור" rather than somebody else's live token.
+  // Minting one is a WRITE and falls through to the upsell below, which is the
+  // same answer every other demo write gives.
+  if (pathname.startsWith('/api/share/today') && method === 'GET') {
+    return json(demoShareTodayResponse());
+  }
+
+  if (method === 'GET') return json({ error: 'DEMO_MODE' }, 403);
   triggerDemoUpsell();
   return json({ error: 'DEMO_MODE' }, 403);
 }

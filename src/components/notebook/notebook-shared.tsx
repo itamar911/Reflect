@@ -1,6 +1,8 @@
 import type { CSSProperties, ReactNode } from 'react';
 import { BookOpen, Lightbulb, ClipboardList } from 'lucide-react';
 
+import { longDate, longDateTime } from '@/lib/datetime';
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export type PageType = 'journal' | 'insights' | 'plan';
@@ -70,16 +72,13 @@ export function tagChipStyle(tag: string): CSSProperties {
 
 // ── Date formatting ───────────────────────────────────────────────────────────
 
-export function formatDateTime(iso: string): string {
-  const d = new Date(iso);
-  const date = d.toLocaleDateString('he-IL', { day: 'numeric', month: 'long' });
-  const time = d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
-  return `${date}, ${time}`;
-}
+// Both pinned to the trader's zone — see lib/datetime.ts. In the runtime's
+// zone an entry written late in the Israeli evening was stamped a day earlier
+// by the Node render than by the browser's, which is the #418 the notebook
+// threw on load.
+export const formatDateTime = longDateTime;
 
-export function formatDateLong(iso: string): string {
-  return new Date(iso).toLocaleDateString('he-IL', { day: 'numeric', month: 'long', year: 'numeric' });
-}
+export const formatDateLong = longDate;
 
 // ── Shared style helpers ──────────────────────────────────────────────────────
 

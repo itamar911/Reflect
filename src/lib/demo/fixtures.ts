@@ -606,3 +606,30 @@ export function demoWeeklySummaryResponse() {
     latest_week_start: weekStartStr,
   };
 }
+
+/**
+ * What `GET /api/share/today` answers in demo mode (REF-125 Stage 2).
+ *
+ * `shares: []` — TODAY HAS NO LINK YET, so the dialog opens on its preview and
+ * its "צור קישור" button rather than on a token. The row in
+ * {@link DEMO_DAILY_SHARES} is what `/demo/share/<token>` renders and is a
+ * different question; handing it out here would open the dialog onto a live
+ * link the visitor never minted, with a revoke button under it.
+ *
+ * `nickname: null` matches the demo profile for the reason the fixture
+ * snapshot's own does — an unnamed card is the default REF-125 §2.6 chose, and
+ * a fixture that arrived pre-named would make it look like the exception.
+ *
+ * Pressing the button from here is a write, so demoApi answers it with the
+ * upsell: the dialog stays open and says so, which is the demo's story for
+ * every other write in the app.
+ */
+export function demoShareTodayResponse() {
+  return {
+    available: true as const,
+    day: currentTradingDay(new Date()),
+    nickname: null,
+    preview: DEMO_DAILY_SHARES[0].snapshot,
+    shares: [],
+  };
+}

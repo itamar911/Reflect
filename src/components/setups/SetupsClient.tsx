@@ -8,6 +8,7 @@ import { renderPlainAiText } from '@/lib/ai/textFormatting';
 import { formatMoney } from '@/lib/money';
 import { isWinningTrade, tradeMoneyPnl } from '@/lib/pnl';
 import { averageOf, rrValue } from '@/lib/intent';
+import { mediumDate } from '@/lib/datetime';
 import { SIGNED_URL_TTL_SECONDS, isOwnedPath, removeSetupImage } from '@/lib/setups/imageUrls';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -652,7 +653,7 @@ function TradeRow({ trade, isLinked, onToggle, borderTop }: {
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium truncate" style={{ color: TEXT }}>{trade.strategy}</p>
         <p className="text-[10px]" style={{ color: MUTED }}>
-          {new Date(trade.submitted_at).toLocaleDateString('he-IL', { day: 'numeric', month: 'short' })}
+          {mediumDate(trade.submitted_at)}
           {trade.symbol && ` · ${trade.symbol}`}
         </p>
       </div>

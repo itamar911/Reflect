@@ -79,11 +79,29 @@ export default function ShareDayButton() {
   const [data, setData] = useState<TodayWire | null>(null);
   const [open, setOpen] = useState(false);
 
+  /**
+   * ONLY THE FIRST ANSWER MAY HIDE THE CONTROL.
+   *
+   * `available === false` unmounts this whole component, the open dialog with
+   * it — and `onChanged` below re-runs `load()` straight after a link is
+   * minted. So a refresh that failed used to take the dialog down at the exact
+   * moment it had something to show: the link was created, and the trader was
+   * dropped back on the dashboard with no link and no error. A transient 401,
+   * a 500 or a dropped connection was enough.
+   *
+   * After the control is up, a failed refresh therefore changes nothing: the
+   * last good payload stays on screen and the dialog reports its own failures
+   * beside its own buttons, which is where a trader is looking.
+   */
+  const hide = useCallback(() => {
+    setAvailable((prev) => (prev === null ? false : prev));
+  }, []);
+
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
       const res = await fetch('/api/share/today', { signal, cache: 'no-store' });
       if (res.status === 503) {
-        setAvailable(false);
+        hide();
         return;
       }
       const body = await res.json().catch(() => null);
@@ -92,16 +110,16 @@ export default function ShareDayButton() {
         // unavailable rather than surfaced: the trader's next action will
         // redirect them to /login anyway, and an error beside the greeting
         // about a feature they have not touched is noise.
-        setAvailable(false);
+        hide();
         return;
       }
       setData(body as TodayWire);
       setAvailable(true);
     } catch {
       // Withdrawn or offline. Say nothing and render nothing.
-      if (!signal?.aborted) setAvailable(false);
+      if (!signal?.aborted) hide();
     }
-  }, []);
+  }, [hide]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -295,7 +313,18 @@ function ShareDayDialog({
             type="button"
             onClick={onClose}
             aria-label="סגור"
-            className="hit-40 shrink-0"
+            // `relative` IS LOAD-BEARING, not tidiness. `.hit-40::after` is an
+            // absolutely-positioned 40×40 touch target, so the element has to
+            // be its own positioning context — globals.css says so where the
+            // utility is defined, and the other 23 call sites all pair the two.
+            // Without it the pseudo-element resolved against the nearest
+            // positioned ancestor, which here is the `fixed inset-0` backdrop:
+            // `width: max(100%, 40px)` then measured the VIEWPORT, laying an
+            // invisible full-screen close target over the dialog. Every control
+            // underneath it closed the dialog instead of doing its own job —
+            // "צור קישור" included, which is why the button looked like it
+            // bounced back to the dashboard without minting a link.
+            className="hit-40 relative shrink-0"
             style={{ color: 'var(--color-tg-muted)' }}
           >
             <X aria-hidden="true" size={18} />

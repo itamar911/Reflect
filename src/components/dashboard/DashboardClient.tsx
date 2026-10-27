@@ -11,6 +11,7 @@ import LivePositions from '@/components/tradovate/LivePositions';
 import type { DashTrade } from '@/lib/dashboard/trades';
 import { tradeMoneyPnl, hasMoneyPnl, isWinningTrade, tradeDirection, tradePointsPnl } from '@/lib/pnl';
 import { currentTradingDay, tradingDayOfTrade, tradingDaysEndingAt } from '@/lib/tradingDay';
+import { dayMonth, shortDateTime } from '@/lib/datetime';
 import { getPlanLimits, type PlanTier } from '@/lib/plans/config';
 import { useMediaQuery, useBrowserTranslated } from '@/lib/hooks';
 import { useModalDialog } from '@/lib/a11y/useModalDialog';
@@ -92,14 +93,11 @@ function recentRowName(t: DashTrade): string {
   return `${title}, ${dir}, ${fmtDateTime(t.submitted_at)}, ${win ? 'רווח' : 'הפסד'} ${amount}`;
 }
 function fmtPnl(v: number) { return `${v >= 0 ? '+' : ''}${v.toFixed(2)}`; }
-function fmtDate(iso: string) {
-  return new Date(iso).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit' });
-}
-function fmtDateTime(iso: string) {
-  const d = new Date(iso);
-  return d.toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', year: '2-digit' })
-    + ' ' + d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
-}
+// Both pinned to the trader's zone via lib/datetime.ts. They used to format in
+// the runtime's zone, which is UTC in Node and Israel in the browser — the
+// hydration mismatch (#418) that took the dashboard down.
+const fmtDate = dayMonth;
+const fmtDateTime = shortDateTime;
 
 // ── Series builders ───────────────────────────────────────────────────────────
 type BarItem = { label: string; value: number };

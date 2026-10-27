@@ -2,6 +2,8 @@
 
 import { CalendarClock } from 'lucide-react';
 
+import { shortDate } from '@/lib/datetime';
+
 /**
  * "What happened to the plan you left open?" — asked at the top of the next
  * trade form (REF-82 §5.2).
@@ -74,12 +76,12 @@ export interface OpenPlanFromPreviousDay {
   pnl_currency: string | null;
 }
 
-/** Matches the journal's row date, so the same plan reads the same in both. */
-function fmtPlanDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('he-IL', {
-    day: '2-digit', month: '2-digit', year: '2-digit',
-  });
-}
+/**
+ * Matches the journal's row date, so the same plan reads the same in both —
+ * and now literally the same function, pinned to the trader's zone. See
+ * lib/datetime.ts for the hydration mismatch the local-zone version caused.
+ */
+const fmtPlanDate = shortDate;
 
 function directionWord(direction: 'long' | 'short'): string {
   return direction === 'long' ? 'לונג' : 'שורט';

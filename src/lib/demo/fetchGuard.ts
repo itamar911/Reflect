@@ -16,7 +16,16 @@ if (typeof window !== 'undefined' && !installed) {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
       const pathname = url.startsWith('/') ? url : new URL(url, window.location.origin).pathname;
       if (pathname.startsWith('/api/')) {
-        return import('./demoApi').then(({ demoApiResponse }) => demoApiResponse(pathname));
+        // The METHOD matters now: a demo READ that a widget fires on mount gets
+        // canned content, while a WRITE the visitor initiated gets the upsell.
+        // Without it, ShareDayButton's mount-time GET /api/share/today fell to
+        // the upsell branch and threw the signup modal in front of every
+        // /demo/dashboard load, unprompted.
+        const method = (
+          init?.method ?? (input instanceof Request ? input.method : 'GET')
+        ).toUpperCase();
+        return import('./demoApi').then(({ demoApiResponse }) =>
+          demoApiResponse(pathname, method));
       }
     }
     return realFetch(input, init);

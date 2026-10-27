@@ -33,6 +33,7 @@ import { formatMoney, TRADING_CURRENCY } from '@/lib/money';
 import { tradeMoneyPnl, hasMoneyPnl, isWinningTrade, tradeDirection, tradePointsPnl } from '@/lib/pnl';
 import { isTradeTaken, NOT_ENTERED, NOT_ENTERED_LABEL, tradeStatusLabel } from '@/lib/trades/status';
 import { useHydrated } from '@/lib/hooks';
+import { shortDate } from '@/lib/datetime';
 import { useModalDialog } from '@/lib/a11y/useModalDialog';
 import './journal.css';
 
@@ -231,11 +232,11 @@ function fmtPriceCell(v: number | null): string {
   return v != null ? v.toFixed(2) : '—';
 }
 
-function fmtDate(iso: string) {
-  return new Date(iso).toLocaleDateString('he-IL', {
-    day: '2-digit', month: '2-digit', year: '2-digit',
-  });
-}
+// Pinned to the trader's zone — see lib/datetime.ts. Formatting in the
+// runtime's zone made this cell differ between the Node render and the
+// browser's (#418), and for a trade stamped after 22:00 UTC it was off by a
+// whole DAY rather than by the offset.
+const fmtDate = shortDate;
 
 function fmtPnl(v: number) {
   return `${v >= 0 ? '+' : ''}${v.toFixed(2)}`;
