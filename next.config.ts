@@ -29,6 +29,36 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     '/share/[token]/image': ['./src/lib/share/fonts/*.ttf'],
   },
+
+  /**
+   * Keep a navigated route in the client router cache for 30 seconds
+   * (REF-129 item 5).
+   *
+   * The default for a dynamic route is `0`, which means the router cache holds
+   * nothing: every soft navigation re-fetches the route from the server, and a
+   * prefetched payload is thrown away before it can be used — the app paid for
+   * the prefetch and then fetched again on the click. Every route in the (app)
+   * group is dynamic, so that was all of them, and it is why "מעבר בין סעיפי
+   * הסיידבר מרגיש איטי" survived having prefetch on at all.
+   *
+   * 30s is chosen to match FRESH_MS in lib/rules/brokerDayContext.ts, which is
+   * this product's existing answer to the same question — how long a figure
+   * stands before it is re-read — and the reasoning carries: long enough that
+   * clicking between the dashboard and the journal and back reuses what it
+   * already has, short enough that a trade closed while the trader is reading
+   * another page is picked up on the next visit.
+   *
+   * WHAT IS NOT AFFECTED, and why this is safe for a journal whose numbers
+   * change: this is the SOFT-navigation cache only. A hard load, a reload, and
+   * `router.refresh()` all bypass it — and `router.refresh()` is what the app
+   * already calls after every write (AppShell's onSuccess for a submitted
+   * plan, the auth-state listener, DashboardClient's realtime refetch), so the
+   * screen a trader has just changed is still re-rendered from the server
+   * immediately. What this caches is the route they did NOT change.
+   */
+  experimental: {
+    staleTimes: { dynamic: 30 },
+  },
 };
 
 export default nextConfig;
