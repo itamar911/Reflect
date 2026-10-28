@@ -611,6 +611,113 @@ group('reconcile() alone, since it is the one rule that gates every import', [
   ], [true, 0]),
 ]);
 
+// ── 10b. AMBIGUOUS ORDER: the tie the walk cannot break (REF-117 Stage 8) ───
+//
+// THE LIVE CASE, 28.10: seven journal rows on one contract in one account where
+// the trader took two or three
+// (~/Desktop/reflect-reports/ref-117-live-split-investigation.md). The mechanism
+// is below, and the two fixtures differ in ONE INPUT ONLY — the instants — which
+// is the whole argument for refusing rather than sorting.
+//
+// A pair of fixtures, because the refusal is only defensible if it is narrow:
+//
+//   - W1, `sevenReal`: the trader really did seven 1-lot round trips, at
+//     distinct instants. Seven cycles, seven rows, nothing held. Merging these
+//     would delete seven real trades, which is why this module does not try to.
+//   - W2, `sevenTied`: THE SAME fourteen fills, the same ids, the same prices,
+//     the same quantities, the same arithmetic — all at ONE instant. The walk's
+//     `(timestamp, id)` sort now reads them interleaved buy/sell/buy/sell and
+//     carves out the same seven cycles, except this time they are fabricated:
+//     the fills are equally consistent with one 7-lot position scaled into and
+//     out of, and nothing in the response says which happened.
+//
+// And `sevenTied` passes every check that existed before this group. The
+// reconciliation identity is a sum over the group — order-blind — so it agrees
+// exactly; and Tradovate matches FIFO while the interleaved walk reproduces that
+// same FIFO, so the oracle agrees too. Hence a refusal keyed on the tie itself.
+const TIED = new Date(Date.UTC(2026, 9, 28, 14, 30, 0)).toISOString();
+
+/** Seven 1-lot round trips, buy then sell, as fourteen fills with ascending ids. */
+function roundTrips(at?: string): CycleFill[] {
+  tick = 0;
+  return Array.from({ length: 7 }).flatMap((_, index) => [
+    fill(8600 + index * 2, 'Buy', 1, 100 + index, at === undefined ? {} : { at }),
+    fill(8601 + index * 2, 'Sell', 1, 101 + index, at === undefined ? {} : { at }),
+  ]);
+}
+
+const sevenReal = scan(roundTrips(), []);
+const sevenTied = scan(roundTrips(TIED), []);
+
+// The ordinary same-instant case, which must stay ordinary: ONE order for three
+// contracts coming back as three partial fills, all stamped the same instant.
+// Every permutation of three buys yields the same cycle, so there is nothing to
+// be ambiguous about — and holding it would hold a routine fill at the open.
+tick = 0;
+const PARTIALS = new Date(Date.UTC(2026, 9, 28, 14, 31, 0)).toISOString();
+const LATER = new Date(Date.UTC(2026, 9, 28, 14, 35, 0)).toISOString();
+const partA = fill(8701, 'Buy', 1, 100, { at: PARTIALS });
+const partB = fill(8702, 'Buy', 1, 100, { at: PARTIALS });
+const partC = fill(8703, 'Buy', 1, 101, { at: PARTIALS });
+const partExit = fill(8704, 'Sell', 3, 110, { at: LATER });
+const partials = scan([partA, partB, partC, partExit], []);
+
+// The minimal shape: ONE instant, TWO fills, opposite sides. Whether the buy or
+// the sell executed first decides between one closed cycle and two open ones,
+// and the data does not say.
+tick = 0;
+const tiedBuy = fill(8801, 'Buy', 1, 100, { at: TIED });
+const tiedSell = fill(8802, 'Sell', 1, 101, { at: TIED });
+const minimalTie = scan([tiedBuy, tiedSell], []);
+
+group('AMBIGUOUS ORDER: same instant, opposite sides, so the walk refuses', [
+  // W1 first, because it is what the refusal must not touch.
+  c('(1) W1: seven real round trips at distinct instants are seven cycles', [
+    sevenReal.cycles.length,
+    sevenReal.held.length,
+    sevenReal.cycles.every((cycle) => cycle.cycleClosed && cycle.qty === 1),
+  ], [7, 0, true]),
+  // W2: the same fourteen fills, one instant. THE FINDING.
+  c('(2) W2: the same fills at ONE instant are HELD, not seven rows', [
+    sevenTied.cycles.length,
+    sevenTied.held.length,
+    sevenTied.held[0].reason,
+  ], [0, 1, 'ambiguous_order']),
+  c('(3) and the two fixtures differ in NOTHING but the instants', [
+    roundTrips().map((f) => [f.id, f.action, f.qty, f.price]),
+    roundTrips(TIED).map((f) => [f.id, f.action, f.qty, f.price]),
+  ], [
+    roundTrips().map((f) => [f.id, f.action, f.qty, f.price]),
+    roundTrips().map((f) => [f.id, f.action, f.qty, f.price]),
+  ]),
+  // Why neither of the checks that already existed would have caught it.
+  c('(4) the held group states its fill count and no partial cycle',
+    [sevenTied.held[0].fills, sevenTied.cycles], [14, []]),
+  // The minimal case, so the rule is readable without the seven-row scaffolding.
+  c('(5) two fills, one instant, opposite sides: held', [
+    minimalTie.cycles.length,
+    minimalTie.held[0].reason,
+  ], [0, 'ambiguous_order']),
+  // And the narrowness, which is what keeps this from holding ordinary days.
+  c('(6) same instant, SAME side is one cycle — partial fills of one order', [
+    partials.cycles.length,
+    partials.held.length,
+    partials.cycles[0].entryQty,
+    partials.cycles[0].qty,
+  ], [1, 0, 3, 3]),
+  c('(7) the three partial fills really do share an instant',
+    new Set([partA.timestamp, partB.timestamp, partC.timestamp]).size, 1),
+  // The pre-existing same-second fixture in the STAGES group below is the same
+  // claim from the other side: three ORDERS in one second still state three
+  // stages. Neither group may start holding the other's fixture.
+  c('(8) and a tie is judged per instant, not per second', [
+    scan([
+      fill(8901, 'Buy', 1, 100, { at: new Date(Date.UTC(2026, 9, 28, 14, 40, 7, 100)).toISOString() }),
+      fill(8902, 'Sell', 1, 101, { at: new Date(Date.UTC(2026, 9, 28, 14, 40, 7, 900)).toISOString() }),
+    ], []).cycles.length,
+  ], [1]),
+]);
+
 // ── 11. STAGES: one ORDER is one stage, however many fills it took ──────────
 //
 // REF-117 Stage 7, and the only group here about the PROJECTION rather than the

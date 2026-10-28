@@ -52,6 +52,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { portfolioLabel } from '../portfolios/portfolio';
 import { readPortfolios } from '../portfolios/read';
+import { brokerSymbolRoot } from '../symbols';
 import { accountIdentity } from './accounts';
 import { readActiveAccounts, syncBrokerAccounts, type AccountSyncCounts } from './account-sync';
 import { flushUserCalls } from './call-meter';
@@ -182,6 +183,36 @@ export interface SyncResult {
    * exactly that case.
    */
   heldCount: number;
+  /**
+   * The instrument ROOTS whose trades were held because the EXECUTION ORDER was
+   * not in the data (REF-117 Stage 8).
+   *
+   * SPLIT OUT OF {@link heldSymbols} RATHER THAN POOLED WITH IT, because the two
+   * absences have different causes and the existing sentence would misdescribe
+   * this one. `heldSymbols` renders "הנתונים מהברוקר לא תאמו" — a failed
+   * reconciliation, two figures from one source disagreeing. Here the figures
+   * agree perfectly: ./cycles.ts holds the group precisely BECAUSE the
+   * reconciliation cannot see the problem — it is a sum, so it is blind to
+   * order. Telling a trader the broker's numbers did not match would be a wrong
+   * explanation of a real refusal.
+   *
+   * A ROOT AND NOT A CONTRACT SYMBOL, which is the one place this field differs
+   * from {@link heldSymbols}. What a trader can act on is "the NQ trades are
+   * waiting", and `brokerSymbolRoot` is DISPLAY ONLY here — nothing is routed,
+   * fetched, cached or priced by this string, which is the bound ./fills.ts'
+   * header sets on every use of it. A name it cannot parse yields null and is
+   * dropped, with {@link ambiguousCount} carrying the absence.
+   *
+   * Deduplicated and sorted. Empty on every ordinary day.
+   */
+  ambiguousSymbols: string[];
+  /**
+   * How many groups were held for an undecidable order, INCLUDING any whose
+   * name did not parse into a root.
+   *
+   * The same expressibility {@link heldCount} exists for, for the same reason.
+   */
+  ambiguousCount: number;
   /**
    * What this run could not do for the trader, ready for the wire
    * (REF-112 §5).
@@ -345,6 +376,8 @@ async function pullAndImport(request: SyncRequest): Promise<SyncResult> {
       // in this shape is stated.
       heldSymbols: [],
       heldCount: 0,
+      ambiguousSymbols: [],
+      ambiguousCount: 0,
       notices: [],
     };
   }
@@ -486,12 +519,33 @@ async function pullAndImport(request: SyncRequest): Promise<SyncResult> {
     stopHistories,
   });
 
+  // ── The two held sentences, partitioned by CAUSE (REF-117 Stage 8) ────────
+  //
+  // An undecidable execution order is a different absence from a failed
+  // reconciliation and gets a different sentence, so the groups are split here
+  // rather than pooled and re-examined downstream. PARTITIONED AND NOT
+  // OVERLAPPING: a group has exactly one `reason`, so every held group lands in
+  // exactly one of the two counts and `heldCount + ambiguousCount` is still the
+  // number of groups this run refused.
+  const ambiguous = held.filter((group) => group.reason === 'ambiguous_order');
+  const mismatched = held.filter((group) => group.reason !== 'ambiguous_order');
+
   // Deduplicated and sorted, so that two held groups on one contract — the
   // two-account case — produce one symbol, and so that the sentence a trader
   // reads is the same on two runs that saw the same thing. A null symbol
   // contributes to the count and not to the list; see {@link SyncResult}.
   const heldSymbols = [
-    ...new Set(held.map((group) => group.symbol).filter((s): s is string => s !== null)),
+    ...new Set(mismatched.map((group) => group.symbol).filter((s): s is string => s !== null)),
+  ].sort();
+
+  // The same reduction, through the root. Two contract months of one instrument
+  // held at once therefore produce ONE word rather than two — which is right
+  // for this sentence: the finding is that the instrument's order is undecided,
+  // and the expiry is not what a trader would act on.
+  const ambiguousSymbols = [
+    ...new Set(ambiguous.map((group) => brokerSymbolRoot(group.symbol)).filter(
+      (root): root is string => root !== null
+    )),
   ].sort();
 
   return {
@@ -501,7 +555,9 @@ async function pullAndImport(request: SyncRequest): Promise<SyncResult> {
     isTradeSource,
     importEnabled: enabled,
     heldSymbols,
-    heldCount: held.length,
+    heldCount: mismatched.length,
+    ambiguousSymbols,
+    ambiguousCount: ambiguous.length,
     // AFTER the account pass, deliberately: a trader's FIRST sync is also the
     // one that creates their `accounts` rows, and asking for a nickname before
     // those rows exist would label every notice with the broker's name on the

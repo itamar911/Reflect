@@ -187,6 +187,23 @@ export type BrokerSyncResult =
       /** How many groups were held, including any with no readable symbol. */
       heldCount?: number;
       /**
+       * The instrument ROOTS held because the execution order was undecidable
+       * (REF-117 Stage 8).
+       *
+       * The bound `heldSymbols` established, one step tighter: a ROOT — `NQ` —
+       * and not even the expiry month. Same privacy class, same reason for
+       * being sent at all, and lib/tradovate/sync.ts is again where the rest of
+       * `HeldGroup` is dropped.
+       *
+       * ITS OWN FIELD BECAUSE IT IS ITS OWN SENTENCE. Pooling it into
+       * `heldSymbols` would tell the trader the broker's figures disagreed,
+       * which is the one thing that did NOT happen here — see the field's note
+       * in lib/tradovate/sync.ts. Absent when empty, like `heldSymbols`.
+       */
+      ambiguousSymbols?: string[];
+      /** How many groups were held for an undecidable order, named or not. */
+      ambiguousCount?: number;
+      /**
        * What this run could not do for the trader (REF-112 §5).
        *
        * THE SECOND TRADE-SHAPED THING THIS ROUTE SENDS, and the bound is the
@@ -324,10 +341,19 @@ export async function respondToSyncRequest(
   try {
     // Spelled out rather than passed whole: the parse also carries `ok` and
     // `clamped`, which are this function's business and not the sync's.
-    const { counts, asOf, importEnabled, heldSymbols, heldCount, notices } = await deps.runSync(
-      userId,
-      { dayStartMs: requested.dayStartMs, windowStartMs: requested.windowStartMs }
-    );
+    const {
+      counts,
+      asOf,
+      importEnabled,
+      heldSymbols,
+      heldCount,
+      ambiguousSymbols,
+      ambiguousCount,
+      notices,
+    } = await deps.runSync(userId, {
+      dayStartMs: requested.dayStartMs,
+      windowStartMs: requested.windowStartMs,
+    });
 
     return answer({
       source: 'broker_verified',
@@ -339,6 +365,8 @@ export async function respondToSyncRequest(
       // reads the absence as "nothing held", the same rule it applies to
       // `importEnabled`.
       ...(heldCount > 0 ? { heldSymbols, heldCount } : {}),
+      // Same rule, same reason (REF-117 Stage 8).
+      ...(ambiguousCount > 0 ? { ambiguousSymbols, ambiguousCount } : {}),
       // Same rule, same reason (REF-112 §5).
       ...(notices.length > 0 ? { notices } : {}),
       ...counts,

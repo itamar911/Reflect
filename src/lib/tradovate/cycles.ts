@@ -68,12 +68,21 @@
  *
  *     (prevPos ?? 0) + Σ signedQty over the fills  ===  position.netPos
  *
- * Agree, and every closed cycle the walk found is real. Disagree, and
- * `/fill/list` is incomplete — an overnight carry, a truncated response, a
- * mis-resolved account — and the whole group is HELD rather than imported. See
- * {@link reconcile}. It replaces `datePair`'s `missing_fill` refusal with one
- * that covers strictly more, and the direction is ./fills.ts' own: not importing
- * corrects itself on the next pull, importing something wrong does not.
+ * Agree, and the walk saw every fill. Disagree, and `/fill/list` is incomplete —
+ * an overnight carry, a truncated response, a mis-resolved account — and the
+ * whole group is HELD rather than imported. See {@link reconcile}. It replaces
+ * `datePair`'s `missing_fill` refusal with one that covers strictly more, and
+ * the direction is ./fills.ts' own: not importing corrects itself on the next
+ * pull, importing something wrong does not.
+ *
+ * WHAT IT DOES NOT LICENSE, AND THIS COST SEVEN JOURNAL ROWS ON 28.10: the
+ * identity is a SUM, so it is blind to ORDER. A walk that read the fills in the
+ * wrong sequence satisfies it exactly, and the cycles it carves out of that
+ * sequence can still be wrong — one per interleaved piece rather than one per
+ * position. The sum says the fills are all present; it says nothing about which
+ * came first. That is a second question, with its own refusal:
+ * {@link HeldReason} `'ambiguous_order'`, and the long note on
+ * `ambiguousOrder` is where the measurement lives.
  *
  * `prevPos` IS AN OPTIONAL FIELD AND ITS ABSENCE IS NOT GUESSED AROUND. The
  * identity above could be solved for it — `netPos − Σ` — and doing that would
@@ -206,7 +215,14 @@ export type HeldReason =
   /** A fill on this contract could not be attributed to one account. */
   | 'unattributed_fill'
   /** A fill carried an unreadable instant or quantity, so the walk has no order. */
-  | 'unreadable_fill';
+  | 'unreadable_fill'
+  /**
+   * Two fills share an instant and take OPPOSITE sides, so the execution order
+   * is not in the data (REF-117 Stage 8).
+   *
+   * See {@link ambiguousOrder} for why this is a refusal and not a sort.
+   */
+  | 'ambiguous_order';
 
 /** One group the scan refused to state cycles for. Counts and a reason, never a guess. */
 export interface HeldGroup {
@@ -360,6 +376,60 @@ export function reconcile(params: {
   // Not stated: the identity reduces to `walked === netPos`, and a failure is
   // information — the fills are incomplete — rather than a value to back out.
   return { ok: walked === netPos, seedNet: 0, impliedPrevPos };
+}
+
+/**
+ * Whether this group's fills leave the walk's ORDER undecided (REF-117 Stage 8).
+ *
+ * THE WALK SORTS BY `(timestamp, fill.id)`, AND THE SECOND KEY IS A GUESS. When
+ * two fills carry the same instant, nothing in `/fill/list` says which executed
+ * first — `fill.id` is the tiebreak only because something had to be, and the
+ * note on {@link LogicalPosition.keyFillId} already warns that this module has
+ * "been punished enough for trusting that ids and instants agree".
+ *
+ * WHY A WRONG GUESS IS NOT A COSMETIC PROBLEM. Measured on 28.10 against the
+ * production walk (~/Desktop/reflect-reports/ref-117-live-split-investigation.md,
+ * shape 2): when the walk's order is not the execution order, `netPos` returns
+ * to zero after each interleaved piece and the walk emits ONE CYCLE PER FILL
+ * PAIR instead of one cycle per position — seven journal rows where the trader
+ * took two or three. And it passes every check that exists. The reconciliation
+ * identity in {@link reconcile} is a SUM over the group, and a sum does not
+ * depend on order, so a mis-ordered walk reconciles perfectly. The pricing
+ * oracle does not catch it either: Tradovate matches FIFO and an interleaved
+ * walk reproduces that same FIFO, so the fill P&L and the pair P&L agree on
+ * every one of the fabricated rows. This is the one place in the chain where a
+ * wrong answer passes in silence.
+ *
+ * SO THE REFUSAL IS NARROW, AND THE NARROWNESS IS THE WHOLE DESIGN. Same
+ * instant plus the SAME side is the ordinary case — one order coming back as
+ * several partial fills, routine at the open — and the order WITHIN those fills
+ * cannot change a thing: they all push `netPos` the same way, so every
+ * permutation yields the same cycles, the same legs and the same P&L. Only
+ * OPPOSITE sides at one instant can move `netPos` across zero in one order and
+ * not in another, which is exactly the difference between two cycles and one.
+ * `scripts/broker-cycles-check.ts` pins both directions.
+ *
+ * AND IT HOLDS RATHER THAN SORTS BETTER, because there is nothing better to
+ * sort by. Resolving the true order needs evidence this module is not given —
+ * `/fillPair`'s matching, which is a separate stage and needs a raw measurement
+ * nobody has yet. Holding fails in the direction this module already chose:
+ * "not importing corrects itself on the next pull, importing something wrong
+ * does not."
+ */
+function ambiguousOrder(fills: readonly CycleFill[]): boolean {
+  // Keyed on the PARSED instant and not on the timestamp string, because the
+  // walk sorts on the parsed value: two spellings of one instant collide in the
+  // sort and must collide here too.
+  const sidesByInstant = new Map<number, 'Buy' | 'Sell'>();
+  for (const fill of fills) {
+    const atMs = Date.parse(fill.timestamp);
+    // Unreadable is `unreadable_fill`'s refusal, already made before this runs.
+    if (!Number.isFinite(atMs)) continue;
+    const seen = sidesByInstant.get(atMs);
+    if (seen === undefined) sidesByInstant.set(atMs, fill.action);
+    else if (seen !== fill.action) return true;
+  }
+  return false;
 }
 
 /** `fillId → accountId`, plus the two counts that say how it was decided. */
@@ -519,6 +589,22 @@ export function cyclesFromFills(input: {
         accountId: group.accountId,
         contractId: group.contractId,
         reason: 'unattributed_fill',
+        fills: group.fills.length,
+      });
+      continue;
+    }
+
+    // BEFORE THE POSITION ROWS, with the other two refusals that are about the
+    // FILLS THEMSELVES rather than about what the broker says is held. A group
+    // whose order is undecided has no walk to reconcile, so asking `netPos`
+    // about it first would report whichever of the two failed — and the
+    // reconciliation PASSES on a mis-ordered walk anyway (see `ambiguousOrder`),
+    // so it would report nothing at all.
+    if (ambiguousOrder(group.fills)) {
+      held.push({
+        accountId: group.accountId,
+        contractId: group.contractId,
+        reason: 'ambiguous_order',
         fills: group.fills.length,
       });
       continue;

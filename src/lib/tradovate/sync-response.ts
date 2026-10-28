@@ -79,6 +79,21 @@ export type BrokerSyncOutcome =
        */
       heldCount: number;
       /**
+       * The instrument roots held because the execution order was undecidable
+       * (REF-117 Stage 8).
+       *
+       * Required here although the wire fields are optional, the rule
+       * `heldSymbols` follows. Empty is the ordinary day.
+       */
+      ambiguousSymbols: string[];
+      /**
+       * How many groups were held for an undecidable order, including any whose
+       * name did not parse into a root.
+       *
+       * The same expressibility {@link heldCount} exists for.
+       */
+      ambiguousCount: number;
+      /**
        * What this run could not do for the trader (REF-112 §5).
        *
        * Required here although the wire field is optional — the parser
@@ -195,6 +210,18 @@ export function readSyncResponse(body: unknown): BrokerSyncOutcome {
     heldCount:
       typeof b.heldCount === 'number' && Number.isFinite(b.heldCount) && b.heldCount > 0
         ? b.heldCount
+        : 0,
+    // REF-117 Stage 8, under both of the rules immediately above: a deployment
+    // from before this stage sends neither field, which reads as the quiet day
+    // it always did, and an unnameable group is carried by the count alone.
+    ambiguousSymbols: Array.isArray(b.ambiguousSymbols)
+      ? b.ambiguousSymbols.filter((s): s is string => typeof s === 'string' && s !== '')
+      : [],
+    ambiguousCount:
+      typeof b.ambiguousCount === 'number' &&
+      Number.isFinite(b.ambiguousCount) &&
+      b.ambiguousCount > 0
+        ? b.ambiguousCount
         : 0,
     // REF-112 §5. `readNotices` drops what it does not recognise rather than
     // refusing the body — see its own note on why that rule is the opposite of
@@ -343,6 +370,50 @@ function heldNote(symbols: readonly string[]): string {
 }
 
 /**
+ * An instrument whose trades were held because the EXECUTION ORDER was
+ * undecidable (REF-117 Stage 8).
+ *
+ * WHY IT IS NOT {@link heldNote}'S SENTENCE. That one says "הנתונים מהברוקר לא
+ * תאמו", which is the honest description of a failed reconciliation — two
+ * figures from one source disagreeing. This refusal is the opposite case: the
+ * figures agree, and ./cycles.ts held the group BECAUSE they agree while saying
+ * nothing about sequence (the identity is a sum, so it is blind to order). Two
+ * fills carrying one instant on opposite sides can be one closed position or
+ * two, and the response does not say which. Telling the trader the broker's
+ * numbers did not match would be a wrong explanation of a correct refusal, and
+ * the cost of the wrong one is a trader who goes looking at their broker
+ * statement for a disagreement that is not there.
+ *
+ * WHAT THE WORDS DO AND DO NOT CLAIM, under {@link heldNote}'s four rules:
+ *
+ *   - "ממתינות" and not "חסרות", for that function's reason: the next sync
+ *     re-offers the same window. This cause CAN repeat — a tie is a property of
+ *     the fills and re-reading them finds the same tie — so the word is doing
+ *     more work here, and it is still the true one: the day is not lost, and
+ *     REF-117's wider stage resolves the order from `/fillPair` rather than
+ *     holding.
+ *   - "סדר הביצוע לא חד-משמעי" names the input that is missing and makes no
+ *     claim about whose fault it is. It is nobody's: two executions genuinely
+ *     landed on the same instant.
+ *   - NO COUNT OF TRADES, because there is none to give — that is precisely
+ *     the quantity the refusal exists because it cannot work out. "שתיים או
+ *     שבע" is the actual state of knowledge and is not a sentence.
+ *   - DESCRIPTIVE, NEVER AN INSTRUCTION (§8 of TodayContextPanel, a vendor
+ *     compliance requirement). "ננסה שוב" is what WE do. No emojis (CLAUDE.md).
+ *
+ * The root is named when it parsed and the sentence stands without it, the same
+ * degradation {@link heldNote} makes.
+ */
+function ambiguousNote(roots: readonly string[]): string {
+  const tail = 'סדר הביצוע לא חד-משמעי, ננסה שוב בסנכרון הבא.';
+  if (roots.length === 0) return `עסקאות ממתינות — ${tail}`;
+  // Comma-joined, for the reason heldNote gives: two identical sentences
+  // differing only in a symbol is the shape a reader skips. The roots are latin
+  // and ltr-isolated by the component.
+  return `עסקאות ב-${roots.join(', ')} ממתינות — ${tail}`;
+}
+
+/**
  * Hebrew counts one, and then everything else.
  *
  * "נוספו 1 עסקאות" is the kind of thing that makes a product look unfinished,
@@ -446,6 +517,12 @@ export function describeSyncOutcome(outcome: BrokerSyncOutcome): SyncMessage {
   const details = [
     ...noticeLines(outcome.notices),
     ...(outcome.heldCount > 0 ? [heldNote(outcome.heldSymbols)] : []),
+    // BESIDE THE OTHER HELD LINE AND NOT INSTEAD OF IT (REF-117 Stage 8). The
+    // two causes are partitioned upstream — a group has one reason — so a day
+    // that met both says both, and a day that met one says one. Ranked second
+    // because a failed reconciliation is the broader failure: it can mean a
+    // truncated response, where this one is always about a named instrument.
+    ...(outcome.ambiguousCount > 0 ? [ambiguousNote(outcome.ambiguousSymbols)] : []),
     ...(outcome.skippedOpen > 0 ? [OPEN_POSITION_NOTE] : []),
   ];
 
@@ -483,7 +560,14 @@ export function describeSyncOutcome(outcome: BrokerSyncOutcome): SyncMessage {
     // AND SO DOES A NOTICE (REF-112 §5), for the same reason and more
     // strongly: a skipped account is a whole portfolio missing from the day,
     // not one contract.
-    problem: outcome.heldCount > 0 || outcome.notices.length > 0,
+    //
+    // AND SO DOES AN UNDECIDABLE ORDER (REF-117 Stage 8). It has to be named
+    // here rather than inherited: the partition upstream moved those groups OUT
+    // of `heldCount`, so a day whose only refusal was a tie would otherwise
+    // have drawn "הכל מעודכן" above its own contradiction — the exact failure
+    // the paragraph above exists to prevent.
+    problem:
+      outcome.heldCount > 0 || outcome.ambiguousCount > 0 || outcome.notices.length > 0,
   };
 }
 

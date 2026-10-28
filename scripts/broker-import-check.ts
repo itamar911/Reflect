@@ -1681,10 +1681,12 @@ function syncDeps(over: Partial<SyncRouteDeps> = {}): SyncRouteDeps {
       asOf: '2026-10-15T13:59:00.000Z',
       isTradeSource: true,
       importEnabled: true,
-      // The ordinary day: nothing was held (REF-117 Stage 6) and nothing was
-      // skipped (REF-112 §5).
+      // The ordinary day: nothing was held (REF-117 Stage 6), no order was
+      // undecidable (Stage 8) and nothing was skipped (REF-112 §5).
       heldSymbols: [],
       heldCount: 0,
+      ambiguousSymbols: [],
+      ambiguousCount: 0,
       notices: [],
     }),
     ...over,
@@ -2741,6 +2743,8 @@ async function syncCopyGroup() {
       importEnabled?: boolean;
       heldSymbols?: string[];
       heldCount?: number;
+      ambiguousSymbols?: string[];
+      ambiguousCount?: number;
       notices?: BrokerNotice[];
     } = {}
   ) =>
@@ -2759,6 +2763,8 @@ async function syncCopyGroup() {
       failed: 0,
       heldSymbols: [],
       heldCount: 0,
+      ambiguousSymbols: [],
+      ambiguousCount: 0,
       notices: [],
       ...over,
     } as BrokerSyncOutcome);
@@ -2780,6 +2786,17 @@ async function syncCopyGroup() {
   const heldTwo = verified({ heldSymbols: ['ESZ6', 'MNQZ6'], heldCount: 2 });
   const heldUnnamed = verified({ heldSymbols: [], heldCount: 1 });
   const heldAndOpen = verified({ skippedOpen: 1, heldSymbols: ['MNQZ6'], heldCount: 1 });
+
+  // ── REF-117 Stage 8: an instrument whose execution ORDER was undecidable ──
+  const tied = verified({ ambiguousSymbols: ['NQ'], ambiguousCount: 1 });
+  const tiedUnnamed = verified({ ambiguousSymbols: [], ambiguousCount: 1 });
+  const tiedWithImport = verified({ imported: 2, ambiguousSymbols: ['NQ'], ambiguousCount: 1 });
+  const bothCauses = verified({
+    heldSymbols: ['MNQZ6'],
+    heldCount: 1,
+    ambiguousSymbols: ['NQ'],
+    ambiguousCount: 1,
+  });
 
   group('the sync copy says what happened, in Hebrew that counts', [
     c('(1) three imported', three.text, 'נוספו 3 עסקאות'),
@@ -2853,6 +2870,47 @@ async function syncCopyGroup() {
         held.details[0]!.includes(word)
       ),
       false),
+
+    // ── THE UNDECIDABLE ORDER (REF-117 Stage 8) ────────────────────────────
+    //
+    // The live case of 28.10: seven journal rows on one contract where the
+    // trader took two or three, because two fills shared an instant and the
+    // walk's tiebreak was a guess. cycles.ts now holds that group — and the
+    // sentence has to be its OWN, because the reconciliation DID pass. It is a
+    // sum, so it is blind to order; saying "הנתונים מהברוקר לא תאמו" would
+    // send a trader to their broker statement looking for a disagreement that
+    // is not there.
+    c('(21) an undecidable order names the instrument and its own cause',
+      tied.details,
+      ['עסקאות ב-NQ ממתינות — סדר הביצוע לא חד-משמעי, ננסה שוב בסנכרון הבא.']),
+    // THE DISTINCTION THAT IS THE WHOLE REASON FOR THE SECOND FIELD.
+    c('(22) and it is NOT the failed-reconciliation sentence',
+      tied.details[0] === held.details[0], false),
+    c('(23) a tie makes the run a problem even with nothing else wrong',
+      [tied.text, tied.problem], ['הכל מעודכן', true]),
+    c('(24) a run that imported AND held a tie reports both',
+      [tiedWithImport.text, tiedWithImport.problem, tiedWithImport.details.length],
+      ['נוספו 2 עסקאות', true, 1]),
+    // Same degradation heldNote makes: a root that did not parse is carried by
+    // the count, and the sentence still stands.
+    c('(25) an unparsed root still gets a sentence',
+      tiedUnnamed.details,
+      ['עסקאות ממתינות — סדר הביצוע לא חד-משמעי, ננסה שוב בסנכרון הבא.']),
+    // The two causes are partitioned upstream, so a day that met both says
+    // both. Neither may suppress the other.
+    c('(26) both causes at once are two lines, reconciliation first',
+      bothCauses.details,
+      ['עסקאות ב-MNQZ6 ממתינות — הנתונים מהברוקר לא תאמו, ננסה שוב בסנכרון הבא.',
+       'עסקאות ב-NQ ממתינות — סדר הביצוע לא חד-משמעי, ננסה שוב בסנכרון הבא.']),
+    // The same two rules the held sentence is pinned against, restated for
+    // this one rather than assumed to be inherited.
+    c('(27) it never claims a number of waiting trades',
+      /\d/.test(tied.details[0]!.replace('NQ', '')), false),
+    c('(28) and it carries no imperative either',
+      ['כדאי', 'שים לב', 'נסה שוב בעוד', 'עליך'].some((word) =>
+        tied.details[0]!.includes(word)
+      ),
+      false),
   ]);
 
   await noticeCopyGroup();
@@ -2910,6 +2968,8 @@ async function noticeCopyGroup() {
       failed: 0,
       heldSymbols: [],
       heldCount: 0,
+      ambiguousSymbols: [],
+      ambiguousCount: 0,
       notices,
     });
 
@@ -2962,17 +3022,24 @@ async function noticeCopyGroup() {
       [currency.reconnect, none.reconnect, degraded.reconnect], [false, false, false]),
 
     // ── Ordering, de-duplication, and the parser ─────────────────────────
-    c('(11) notices come before the held line and the open-position line',
+    // ALL FOUR QUALIFIERS AT ONCE, which is the only place the full precedence
+    // is stated: a notice is a whole portfolio missing, a failed
+    // reconciliation is a contract's figures missing, an undecidable order is
+    // a named instrument waiting, and an open position is the mechanism
+    // working as designed.
+    c('(11) notices come before the two held lines and the open-position line',
       describeSyncOutcome({
         source: 'broker_verified', windowStart: SYNC_DAY_START,
         asOf: '2026-10-15T13:59:00.000Z', importEnabled: true, ran: true,
         offered: 0, imported: 0, linkedAuto: 0, queued: 0, updated: 0, unchanged: 0,
         skippedHidden: 0, failed: 0,
         skippedOpen: 1, heldSymbols: ['MNQZ6'], heldCount: 1,
+        ambiguousSymbols: ['NQ'], ambiguousCount: 1,
         notices: [{ kind: 'host_degraded' }],
       }).details,
       ['חלק מהנתונים מהברוקר לא נטענו — ננסה שוב בסנכרון הבא',
        'עסקאות ב-MNQZ6 ממתינות — הנתונים מהברוקר לא תאמו, ננסה שוב בסנכרון הבא.',
+       'עסקאות ב-NQ ממתינות — סדר הביצוע לא חד-משמעי, ננסה שוב בסנכרון הבא.',
        'פוזיציה פתוחה נכנסת ליומן רק לאחר סגירתה.']),
     // TWO HOSTS CAN REPORT THE SAME ACCOUNT. Two identical sentences one above
     // the other is the shape a reader skips.
@@ -3011,6 +3078,10 @@ async function noticeCopyGroup() {
     c('(18) and so does an empty string',
       readNotices([{ kind: 'account_currency', account: '' }]),
       [{ kind: 'account_currency', account: null }]),
+    // The absent-field rule, over the WHOLE parsed shape: a body from a
+    // deployment older than any of these stages resolves to the quiet day,
+    // which is what lets an open tab keep talking to a new server and the
+    // reverse. The two Stage 8 fields are in the expectation for that reason.
     c('(19) absence of the field is no notices at all',
       readSyncResponse({
         source: 'broker_verified', windowStart: SYNC_DAY_START,
@@ -3021,7 +3092,9 @@ async function noticeCopyGroup() {
       {
         source: 'broker_verified', windowStart: SYNC_DAY_START,
         asOf: '2026-10-15T13:59:00.000Z', importEnabled: false,
-        heldSymbols: [], heldCount: 0, notices: [], ran: true,
+        heldSymbols: [], heldCount: 0,
+        ambiguousSymbols: [], ambiguousCount: 0,
+        notices: [], ran: true,
         offered: 0, imported: 0, linkedAuto: 0, queued: 0, updated: 0,
         unchanged: 0, skippedOpen: 0, skippedHidden: 0, failed: 0,
       }),
