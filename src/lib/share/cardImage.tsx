@@ -200,13 +200,27 @@ function checkBadgeUri(): string {
 }
 
 /**
- * How much of the hero column the number is allowed to occupy.
+ * How much of the hero column the number may occupy, and the size it may reach.
  *
- * Not 100%: a figure that ends exactly on the column edge reads as clipped even
- * when it is not, and the 4% keeps a descender-free gap between the longest
- * loss and the discipline panel beside it.
+ * BOTH CAME DOWN A FIFTH IN IMRI'S REVIEW (28.10). The P&L was the right thing
+ * to lead with and the wrong size to do it at: at 0.96 of the column it ran
+ * edge to edge, so the left-hand side had no air in it at all and the
+ * mini-cards under it read as a separate block rather than as the rest of the
+ * same one. Still not 100% for the original reason — a figure that ends exactly
+ * on the column edge reads as clipped even when it is not.
+ *
+ * BOTH NUMBERS HAVE TO MOVE TOGETHER, and that is the part worth stating,
+ * because the hero is `min(cap, fitted-to-width)`: the long strings are
+ * WIDTH-constrained and never reach the cap at all. `-$124,875.50` is fitted to
+ * the column on both sizes, so dropping the cap alone would have shrunk
+ * `+$1,240.50` and left the six-figure loss exactly where it was — the two
+ * fixtures would have disagreed about how big the hero is.
+ *
+ * IT IS STILL THE HERO. ~96px on the og card is three times the mini-card
+ * figures beside it, and nothing else on either card comes close.
  */
-const HERO_WIDTH_RATIO = 0.96;
+const HERO_WIDTH_RATIO = 0.77;
+const HERO_MAX_SIZE: Record<ShareCardSize, number> = { og: 96, square: 106 };
 
 // ── Pieces ──────────────────────────────────────────────────────────────────
 
@@ -508,7 +522,7 @@ export function ShareCardImage({ snapshot, tradingDay, size, token }: ShareCardP
   const moneySize = fitFontSize(
     money,
     heroColumn * HERO_WIDTH_RATIO,
-    u(square ? 132 : 120),
+    u(HERO_MAX_SIZE[size]),
     heroTracking
   );
 
