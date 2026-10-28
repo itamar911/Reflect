@@ -206,15 +206,43 @@ function AccountMark({ broker }: { broker: boolean }) {
   );
 }
 
-/** One account: mark, name, and that account's money. */
+/**
+ * One account: mark, name, and that account's money.
+ *
+ * `dir="ltr"` ON THE ROW, AND IT IS THE ONE THING ON THIS PAGE THAT OPTS OUT
+ * (Imri's review, 28.10).
+ *
+ * The page is Hebrew and RTL, and that is right for every other row on it. But
+ * a flex row inside `dir="rtl"` lays its children out RIGHT TO LEFT, so this
+ * row rendered as a MIRROR of the same row on the card image: the figure landed
+ * on the physical left, the diamond and the name on the right. The card puts
+ * the mark and the name on the left and the money at the right-hand end, and
+ * the page is meant to be the card's twin — a stranger who follows the link has
+ * to arrive somewhere that looks like the image they clicked, and an accounts
+ * panel flipped end for end is the one block where it visibly did not.
+ *
+ * NOT a page-wide change, and not `flex-row-reverse`: the first would flip the
+ * Hebrew prose this page is made of, and the second would reverse the ORDER of
+ * the children while leaving the row's text direction RTL, which is a different
+ * layout that happens to look the same until something wraps.
+ *
+ * THE NAME KEEPS ITS OWN DIRECTION via `dir="auto"` below. The row only decides
+ * where the three boxes sit; `display_name` is free text the trader typed and
+ * may be Hebrew, Latin or mixed, so it picks its base direction from its own
+ * first strong character rather than inheriting the row's.
+ */
 function AccountRow({ account }: { account: ShareAccountRow }) {
   return (
-    <div className="flex items-center gap-3 min-w-0">
+    <div dir="ltr" className="flex items-center gap-3 min-w-0">
       <AccountMark broker={account.broker} />
       {/* `min-w-0` + `truncate`: the name is bounded at 22 characters by the
           snapshot, but a narrow phone is narrower than 22 characters and the
           figure beside it must not be pushed off. */}
-      <span className="min-w-0 truncate" style={{ fontSize: 15, fontWeight: 800, color: INK }}>
+      <span
+        dir="auto"
+        className="min-w-0 truncate"
+        style={{ fontSize: 15, fontWeight: 800, color: INK }}
+      >
         {account.name}
       </span>
       <span className="flex-1" />
