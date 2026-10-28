@@ -80,7 +80,14 @@ export function SiteDisclosureFooter({ className = '' }: { className?: string })
                   hidden from assistive tech — read aloud it is just an
                   interruption between two list items. */}
               {i > 0 && <span aria-hidden="true" className="text-sm text-tg-muted">·</span>}
-              <Link href={href} className="text-sm text-tg-muted hover:text-tg-text-2 transition-colors">
+              {/* prefetch={false} (REF-129 item 1). This footer is on every
+                  route in the app, and Link prefetch is viewport-triggered —
+                  so the four legal routes were being fetched ahead for every
+                  trader who scrolled to the bottom of any page, measured at 16
+                  RSC requests. They are fine print: the trader who wants them
+                  is a rare one, and they are static pages that load fast from
+                  a cold click anyway. Nothing here is worth prefetching. */}
+              <Link href={href} prefetch={false} className="text-sm text-tg-muted hover:text-tg-text-2 transition-colors">
                 {label}
               </Link>
             </span>

@@ -141,13 +141,29 @@ function NavLink({ item, expanded, active, hardNav }: {
   hardNav?: boolean;
 }) {
   const LinkOrAnchor = hardNav ? 'a' : Link;
+
+  // NO `prefetch` PROP BELOW — Next's default, deliberately (REF-129 item 1).
+  //
+  // It used to be `prefetch={true}`, which on a DYNAMIC route does not mean
+  // "fetch it sooner", it means "fetch the WHOLE payload": the server renders
+  // the route in full and runs every Supabase query in it. The sidebar is on
+  // screen on every page in the app and prefetch is viewport-triggered, so all
+  // ten rows fired at once on every page view — ten full dynamic renders, ten
+  // 97ms auth round trips, and the queries of ten routes, including /stats,
+  // which selects every trade the user has ever made. All of it before the
+  // trader had clicked anything, and most of it for routes they never opened.
+  //
+  // The default prefetches only as far as the nearest loading boundary, and
+  // every route in the (app) group has a loading.tsx — so what is fetched
+  // ahead is now the static shell, which is the part that actually makes the
+  // click feel instant, and the dynamic work happens when the trader commits
+  // to the route.
   return (
     // aria-label, not just title: collapsed, the label span below is
     // aria-hidden and the icon is the link's only content, which leaves the
     // link with no computed name at all — title does not fill the gap here.
     <LinkOrAnchor
       href={item.href}
-      {...(hardNav ? {} : { prefetch: true })}
       aria-label={item.label}
       title={!expanded ? item.label : undefined}
       className="relative flex items-center rounded-xl select-none"
