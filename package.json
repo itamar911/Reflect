@@ -13,6 +13,7 @@
     "tradovate:refresh-check": "tsx scripts/tradovate-refresh-check.ts",
     "test:translation": "node scripts/translation-check.mjs",
     "test:trading-day": "tsx scripts/trading-day-check.ts",
+    "test:trade-gate": "tsx scripts/trade-form-gate-check.ts",
     "test:footer-copy": "tsx scripts/footer-copy-check.tsx",
     "test:money": "tsx scripts/money-format-check.ts",
     "test:null-safety": "tsx scripts/features-null-safety-check.ts",

@@ -261,6 +261,21 @@ interface TradePlanFormProps {
   onSuccess: () => void;
   /** A "warn"-action personal rule that's currently triggered — shown as a persistent banner, doesn't block submission. */
   initialWarning?: string | null;
+  /**
+   * The open-the-form rule gate has not answered yet (REF-129 item 2).
+   *
+   * THE SHEET NOW OPENS BEFORE THE GATE HAS RUN, so this prop is what stands
+   * between a blocked trader and a submitted plan in the window between the
+   * two. While it is true the submit button is disabled and reads
+   * "בודק חוקים…"; AppShell clears it when the gate answers, and closes the
+   * sheet outright if the answer was a block.
+   *
+   * It is NOT a second opinion on the rules and never decides anything — it
+   * only says whether the answer has arrived. The decision stays in
+   * lib/rules/openTradeFormGate.ts, and `attemptSubmit` below re-runs the full
+   * check regardless, which is what makes failing open on a gate error safe.
+   */
+  ruleGatePending?: boolean;
   disciplineAlertsEnabled: boolean;
   /**
    * Migration 037 has been run, so `accounts` and `trade_plans.account_id`
@@ -288,7 +303,7 @@ interface TradePlanFormProps {
   liveEnabled?: boolean;
 }
 
-export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess, initialWarning, disciplineAlertsEnabled, portfoliosEnabled = false, liveEnabled = false }: TradePlanFormProps) {
+export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess, initialWarning, ruleGatePending = false, disciplineAlertsEnabled, portfoliosEnabled = false, liveEnabled = false }: TradePlanFormProps) {
   const limits = getPlanLimits(plan);
   const titleId = useId();
   const symbolRef = useRef<HTMLInputElement>(null);
@@ -1979,9 +1994,15 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
 
                   `הגש בכל זאת` is the second click a warning costs. See
                   handleSubmit on why that one is kept. */}
+              {/* `ruleGatePending` shuts the button while the open-the-form
+                  gate is still reading the rules (REF-129 item 2). The sheet
+                  opens before that answer arrives now, and this is the thing
+                  that makes opening it early safe — see the prop's own note.
+                  It ranks below `isBlocked`, which is a decided answer, and
+                  above the warning label, which is only a nudge. */}
               <Button
                 fullWidth
-                disabled={isBlocked}
+                disabled={isBlocked || ruleGatePending}
                 loading={submitLoading}
                 onClick={attemptSubmit}
                 variant={isBlocked ? 'danger' : 'primary'}
@@ -1989,6 +2010,7 @@ export default function TradePlanForm({ userId, plan, isOpen, onClose, onSuccess
               >
                 {isBlocked
                   ? 'עסקה חסומה'
+                  : ruleGatePending ? 'בודק חוקים…'
                   : hasPendingWarning ? 'הגש בכל זאת' : 'הגש תוכנית עסקה'}
               </Button>
 

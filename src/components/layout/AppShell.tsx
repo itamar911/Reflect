@@ -10,6 +10,7 @@ import '@/lib/demo/fetchGuard';
 import TradePlanForm from '@/components/trade/TradePlanForm';
 import RuleBlockedModal from '@/components/rules/RuleBlockedModal';
 import { fetchActiveRuleViolation, type RuleViolationResult } from '@/lib/rules/fetchActiveRuleViolation';
+import { openTradeFormThroughGate } from '@/lib/rules/openTradeFormGate';
 import { loadBrokerDayPull } from '@/lib/rules/brokerDayContext';
 import { logRuleViolations } from '@/lib/rules/logRuleViolation';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
@@ -295,6 +296,15 @@ export default function AppShell({
   }, [motionReady, expanded]);
   const [ruleBlock,   setRuleBlock]   = useState<RuleViolationResult | null>(null);
   const [ruleWarning, setRuleWarning] = useState<string | null>(null);
+  /**
+   * The rule gate has not answered yet (REF-129 item 2).
+   *
+   * The sheet now opens before the gate runs, so this is what keeps a blocked
+   * trader from submitting in the window between the two: it travels to
+   * TradePlanForm, where it disables the submit button and puts "בודק חוקים…"
+   * on it. Without it, opening the sheet early would be a way around a rule.
+   */
+  const [ruleGatePending, setRuleGatePending] = useState(false);
 
   async function tryOpenTradeForm() {
     // read the path live — this also runs from the window event handler below,
@@ -307,41 +317,53 @@ export default function AppShell({
       setFormOpen(true);
       return;
     }
-    // Today as the broker reports it, before the rules are checked against it
-    // (REF-90). Fetched here rather than inside the gate so that the form,
-    // which opens a moment later and runs the second enforcement path, shares
-    // this answer — loadBrokerDayPull() holds it briefly for exactly that. It
-    // never rejects: a failure is one of the four provenance states, and all
-    // four fall back to Reflect's own figures except the verified one.
-    const broker = await loadBrokerDayPull(userId);
-    const violation = await fetchActiveRuleViolation(userId, broker, limits.realTimeBlocking);
-    if (violation && (violation.actionType === 'block_day' || violation.actionType === 'block_timer')) {
-      setRuleBlock(violation);
-      if (violation.customRule) {
-        logRuleViolations([{
-          userId,
-          ruleSource: 'custom',
-          customRuleId: violation.customRule.id,
-          ruleKey: violation.customRule.condition_type,
-          ruleName: violation.customRule.name,
-          outcome: 'blocked',
-          tradePlanId: null,
-        }]);
-      } else if (violation.presetRuleKey) {
-        logRuleViolations([{
-          userId,
-          ruleSource: 'preset',
-          customRuleId: null,
-          ruleKey: violation.presetRuleKey,
-          ruleName: violation.ruleName,
-          outcome: 'blocked',
-          tradePlanId: null,
-        }]);
+
+    // THE SHEET OPENS FIRST, THEN THE RULES ARE READ (REF-129 item 2). The
+    // order, and the reason for it, live in lib/rules/openTradeFormGate.ts —
+    // this is the wiring, and the two requests below are the same two that
+    // used to be awaited here before `setFormOpen(true)`.
+    //
+    // `loadBrokerDayPull` holds a pull for 30s and shares an in-flight promise,
+    // so this and the form's own load — which starts as soon as the sheet opens
+    // — are still served by ONE request, and still judge the same day.
+    await openTradeFormThroughGate(
+      {
+        loadBroker: () => loadBrokerDayPull(userId),
+        checkRules: (broker) => fetchActiveRuleViolation(userId, broker, limits.realTimeBlocking),
+      },
+      {
+        openSheet: () => setFormOpen(true),
+        closeSheet: () => setFormOpen(false),
+        setChecking: setRuleGatePending,
+        showWarning: setRuleWarning,
+        // The logging stays here rather than in the gate module: it is a write,
+        // and that module is the sequence and nothing else.
+        showBlock: (violation) => {
+          setRuleBlock(violation);
+          if (violation.customRule) {
+            logRuleViolations([{
+              userId,
+              ruleSource: 'custom',
+              customRuleId: violation.customRule.id,
+              ruleKey: violation.customRule.condition_type,
+              ruleName: violation.customRule.name,
+              outcome: 'blocked',
+              tradePlanId: null,
+            }]);
+          } else if (violation.presetRuleKey) {
+            logRuleViolations([{
+              userId,
+              ruleSource: 'preset',
+              customRuleId: null,
+              ruleKey: violation.presetRuleKey,
+              ruleName: violation.ruleName,
+              outcome: 'blocked',
+              tradePlanId: null,
+            }]);
+          }
+        },
       }
-    } else {
-      setRuleWarning(violation?.actionType === 'warn' ? violation.description : null);
-      setFormOpen(true);
-    }
+    );
   }
 
   // Detect mobile viewport
@@ -719,6 +741,7 @@ export default function AppShell({
         onClose={() => setFormOpen(false)}
         onSuccess={() => router.refresh()}
         initialWarning={ruleWarning}
+        ruleGatePending={ruleGatePending}
         disciplineAlertsEnabled={disciplineAlertsEnabled}
         portfoliosEnabled={portfoliosEnabled}
         liveEnabled={liveEnabled}
