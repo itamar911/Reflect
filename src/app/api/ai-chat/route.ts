@@ -361,7 +361,7 @@ export async function POST(request: Request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { limits } = await getUserPlan(supabase, user.id);
+  const { limits } = await getUserPlan(user.id);
   if (!limits.aiCoach) return NextResponse.json({ error: 'PLAN_LIMIT', feature: 'ai_coach' }, { status: 403 });
 
   const { messages } = await request.json() as { messages: { role: 'user' | 'assistant'; content: string }[] };

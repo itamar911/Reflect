@@ -17,7 +17,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       .select('onboarding_completed, display_name')
       .eq('id', user.id)
       .single(),
-    getUserPlan(supabase, user.id),
+    getUserPlan(user.id),
     supabase.from('alert_settings').select('discipline_enabled').eq('user_id', user.id).single(),
   ]);
 

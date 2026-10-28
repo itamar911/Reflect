@@ -33,7 +33,7 @@ export default async function DashboardPage({ searchParams }: {
   const accountId = resolveAccountParam((await searchParams).account, hiddenColumnExists);
   const accountLabel = await readPortfolioLabel(supabase, user.id, accountId);
 
-  const [profileRes, tradesRes, { tier: plan }] = await Promise.all([
+  const [profileRes, tradesRes, { tier: plan }, brokerState] = await Promise.all([
     supabase.from('profiles').select('display_name').eq('id', user.id).single(),
     // 'not_entered' is excluded here and in DashboardClient's own refetch,
     // which has to stay in step with this query: a plan the user never entered
@@ -51,7 +51,26 @@ export default async function DashboardPage({ searchParams }: {
     )
       .order('submitted_at', { ascending: false })
       .limit(500),
-    getUserPlan(supabase, user.id),
+    getUserPlan(user.id),
+    // REF-112 §5.4 — the one broker state this screen can report that nothing
+    // else will. A connection whose environment no longer matches the
+    // deployment's still says 'active', so neither the sync panel nor /settings
+    // calls it expired; it simply stops refreshing and dies at token lifetime,
+    // counted by the keep-alive as a routine skip the whole way down.
+    //
+    // `brokerAccounts: null` — NOT COUNTED, deliberately. The dashboard does
+    // not read the `accounts` table and must not start for this: "you have no
+    // portfolios" belongs on the screen whose subject is portfolios, and
+    // /accounts says it there.
+    //
+    // IN THE Promise.all RATHER THAN AFTER IT (REF-129 item 4). It is a
+    // service-role read over its own client, so it shares nothing with the two
+    // queries above and never depended on their results — awaiting it
+    // afterwards simply added its round trip to the page's critical path. It
+    // does not throw: readBrokerState answers with a state, including for the
+    // trader who has no connection at all, so it cannot reject the Promise.all
+    // and take the dashboard down with it.
+    readBrokerState({ userId: user.id, brokerAccounts: null }),
   ]);
 
   const displayName = profileRes.data?.display_name?.split(' ')[0] ?? 'סוחר';
@@ -74,19 +93,8 @@ export default async function DashboardPage({ searchParams }: {
   // both halves are, and the same reason the two props above are here.
   const canSync = canConnectBroker && hiddenColumnExists;
 
-  // REF-112 §5.4 — the one broker state this screen can report that nothing
-  // else will. A connection whose environment no longer matches the
-  // deployment's still says 'active', so neither the sync panel nor /settings
-  // calls it expired; it simply stops refreshing and dies at token lifetime,
-  // counted by the keep-alive as a routine skip the whole way down.
-  //
-  // `brokerAccounts: null` — NOT COUNTED, deliberately. The dashboard does not
-  // read the `accounts` table and must not start for this: "you have no
-  // portfolios" belongs on the screen whose subject is portfolios, and
-  // /accounts says it there.
-  const brokerNotices = brokerStateNotices(
-    await readBrokerState({ userId: user.id, brokerAccounts: null }),
-  );
+  // The state itself is read in the Promise.all above — see the note there.
+  const brokerNotices = brokerStateNotices(brokerState);
 
   return (
     <>

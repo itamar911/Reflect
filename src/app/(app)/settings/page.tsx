@@ -45,20 +45,32 @@ export default async function SettingsPage({ searchParams }: {
   // paths because both redirect to this page with this code — see resultUrl().
   const notAvailable = result === TradovateResult.NotAvailable;
 
-  const [profileRes, alertRes] = await Promise.all([
-    supabase.from('profiles').select('*').eq('id', user.id).single(),
-    supabase.from('alert_settings').select('*').eq('user_id', user.id).single(),
-  ]);
-
-  const profile = profileRes.data;
-  const alertSettings = alertRes.data as AlertSettingsData | null;
-
   // Tradovate is OPEN to every signed-in user unless TRADOVATE_OAUTH_ALLOWED_USER_IDS
   // names ids, in which case only those (lib/tradovate/allowlist.ts). This only
   // decides whether the button is live — the real check is in
   // /api/tradovate/connect and /api/tradovate/callback, which read the same
   // function independently. A hidden button is still a URL.
+  //
+  // Hoisted above the Promise.all (REF-129 item 4) so the connection read can
+  // join it. It reads an environment variable and makes no request, so it costs
+  // nothing to decide earlier.
   const canConnectTradovate = isUserAllowed(user.id);
+
+  const [profileRes, alertRes, tradovateRead] = await Promise.all([
+    supabase.from('profiles').select('*').eq('id', user.id).single(),
+    supabase.from('alert_settings').select('*').eq('user_id', user.id).single(),
+    // The service-role connection read, IN THE Promise.all RATHER THAN AFTER IT
+    // (REF-129 item 4). It goes over its own client and never depended on the
+    // two queries beside it, so awaiting it afterwards just added its round
+    // trip to this page's critical path. The condition is unchanged and still
+    // the one state where the read buys nothing — see the note on
+    // `tradovateStatus` below — it just decides whether to start the request
+    // instead of whether to wait for it, and `null` stands for "not asked".
+    canConnectTradovate ? readConnectionSummary(user.id) : null,
+  ]);
+
+  const profile = profileRes.data;
+  const alertSettings = alertRes.data as AlertSettingsData | null;
 
   // Read for everyone now that everyone can connect, which is what §3 of the
   // investigation asked for ("restore readConnectionSummary() unconditionally").
@@ -88,8 +100,11 @@ export default async function SettingsPage({ searchParams }: {
    */
   let tradovateExpiringSoon = false;
 
-  if (canConnectTradovate) {
-    const read = await readConnectionSummary(user.id);
+  // `null` is "not asked" — the read was never started, which is the
+  // `canConnectTradovate` false case. Both of the flags above keep their
+  // quiet defaults then, exactly as when this was an `if` around the await.
+  if (tradovateRead !== null) {
+    const read = tradovateRead;
 
     if (read.outcome === 'error') {
       tradovateReadFailed = true;

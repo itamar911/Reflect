@@ -19,7 +19,7 @@ export default async function RulesPage() {
   // RULE_EVENT_LIMIT + 1 is fetched so the card can say whether older events
   // exist without a second count query.
   const [{ tier: plan }, presetRes, customRes, eventsRes] = await Promise.all([
-    getUserPlan(supabase, user.id),
+    getUserPlan(user.id),
     supabase.from('preset_rules').select('*').eq('user_id', user.id).single(),
     supabase.from('custom_rules').select('*').eq('user_id', user.id).order('created_at'),
     // No filter on trade_plan_id. The only other reader of this table

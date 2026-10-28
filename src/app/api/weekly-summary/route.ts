@@ -115,7 +115,7 @@ export async function GET(request: Request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { limits } = await getUserPlan(supabase, user.id);
+  const { limits } = await getUserPlan(user.id);
   if (!limits.weeklySummary) return NextResponse.json({ error: 'PLAN_LIMIT', feature: 'weekly_summary' }, { status: 403 });
 
   const now = new Date();
@@ -236,7 +236,7 @@ export async function POST(request: Request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { limits } = await getUserPlan(supabase, user.id);
+  const { limits } = await getUserPlan(user.id);
   if (!limits.weeklySummary) return NextResponse.json({ error: 'PLAN_LIMIT', feature: 'weekly_summary' }, { status: 403 });
 
   const now = new Date();
