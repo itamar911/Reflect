@@ -107,7 +107,16 @@ function saveFile(file: File) {
   const anchor = document.createElement('a');
   anchor.href = url;
   anchor.download = file.name;
+  // IN THE DOCUMENT BEFORE `click()`, which is JournalExport's shape byte for
+  // byte. A detached anchor is enough in Chromium — measured, by driving this
+  // button and watching the download fire either way — so this is NOT load
+  // bearing there. It is kept because Firefox has historically ignored a
+  // synthetic click on an unattached anchor, and Firefox is precisely a
+  // browser this path exists for: `canShare({files})` is false on it
+  // everywhere, so every Firefox user who presses "שתף תמונה" lands here.
+  document.body.appendChild(anchor);
   anchor.click();
+  document.body.removeChild(anchor);
   // Deferred, not immediate: revoking synchronously after `click()` races the
   // browser's own read of the URL in Safari and lands an empty file on disk.
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
