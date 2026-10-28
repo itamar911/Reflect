@@ -74,6 +74,45 @@ const ACTION_STYLE: React.CSSProperties = {
   color: 'var(--color-tg-text-2)',
 };
 
+/**
+ * The one filled control in the dialog — Button.tsx's `primary` variant
+ * (turquoise, black text) expressed in this file's idiom.
+ *
+ * NOT `<Button variant="primary">`: every other control in here is
+ * ACTION_CLASS + a style object, and the share row needs the primary and the
+ * secondary to agree on height, radius and padding to the pixel. Mixing a
+ * shared component with the local pattern in one two-button stack is how those
+ * drift apart.
+ */
+const PRIMARY_STYLE: React.CSSProperties = {
+  background: 'var(--color-tg-primary)',
+  borderColor: 'var(--color-tg-primary)',
+  color: '#000',
+};
+
+/** The share sheet's title. Targets that ignore it (Instagram) lose nothing. */
+const SHARE_TITLE = 'יום המסחר שלי ב-Reflect';
+
+/**
+ * Save a File the browser already holds, without a round trip.
+ *
+ * The download ANCHOR elsewhere in this dialog streams straight from the URL
+ * and is the better thing when there is no Blob in hand. Here there is one —
+ * the share path already fetched it — so re-requesting the PNG only to have the
+ * browser write it to disk would be a second 150 KB fetch for bytes that are
+ * one object URL away.
+ */
+function saveFile(file: File) {
+  const url = URL.createObjectURL(file);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = file.name;
+  anchor.click();
+  // Deferred, not immediate: revoking synchronously after `click()` races the
+  // browser's own read of the URL in Safari and lands an empty file on disk.
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
 export default function ShareDayButton() {
   const [available, setAvailable] = useState<boolean | null>(null);
   const [data, setData] = useState<TodayWire | null>(null);
@@ -211,6 +250,94 @@ function ShareDayDialog({
       : { ...initial.preview, nickname: showNickname && trimmedNickname !== '' ? trimmedNickname : null };
 
   const shareUrl = live === null ? null : `${window.location.origin}/share/${live.token}`;
+
+  /**
+   * THE SQUARE, as a File, held ready before the trader asks for it.
+   *
+   * `navigator.share()` REQUIRES TRANSIENT USER ACTIVATION, and on iOS Safari —
+   * which is the entire point of this button — an `await` between the click and
+   * the call spends it: fetching the PNG inside the handler and then sharing
+   * throws `NotAllowedError` on exactly the platform the feature exists for.
+   * The Web Share API takes no promise for `files`, so the only way to call it
+   * synchronously from the gesture is to already have the bytes.
+   *
+   * So the dialog fetches the card once, when the link appears, and the handler
+   * finds it waiting. It still falls back to fetching on demand — a trader who
+   * clicks before the prefetch lands must not get nothing — and that path is
+   * the one that can hit the activation limit, which is why the handler treats
+   * a share failure as "download instead" rather than as an error.
+   *
+   * ONE EXTRA REQUEST, and it is the same URL the download button uses, so the
+   * HTTP cache serves that click from memory. The preview `<img>` above fetches
+   * the 1200×630; this is the 1080×1080 and they do not collide.
+   */
+  const imageUrl = live === null ? null : `/share/${live.token}/image?size=square`;
+  const imageName = live === null ? null : `reflect-${live.tradingDay}.png`;
+  const [cardFile, setCardFile] = useState<File | null>(null);
+
+  useEffect(() => {
+    if (imageUrl === null || imageName === null) return;
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const res = await fetch(imageUrl, { signal: controller.signal });
+        if (!res.ok) return;
+        const blob = await res.blob();
+        setCardFile(new File([blob], imageName, { type: 'image/png' }));
+      } catch {
+        // Left null on purpose. `shareImage` fetches on demand, and a prefetch
+        // that failed is not something to tell the trader about.
+      }
+    })();
+    return () => controller.abort();
+  }, [imageUrl, imageName]);
+
+  /**
+   * The phone's own share sheet — WhatsApp, Instagram, Save to Photos.
+   *
+   * THE FALLBACK IS A DOWNLOAD, not a message. `canShare({files})` is false on
+   * every desktop browser and on Firefox everywhere, and a trader there has
+   * asked for the image, not for an explanation — so they get the image. The
+   * secondary button below says the same thing in words for anyone who wants it
+   * explicitly.
+   */
+  async function shareImage() {
+    if (imageUrl === null || imageName === null) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      let file = cardFile;
+      if (file === null) {
+        const res = await fetch(imageUrl);
+        if (!res.ok) {
+          setMessage('לא הצלחנו להכין את התמונה.');
+          return;
+        }
+        file = new File([await res.blob()], imageName, { type: 'image/png' });
+        setCardFile(file);
+      }
+
+      // `canShare` is absent entirely on older browsers, so this is a typeof
+      // check and not a truthiness one — and it is asked about THIS file,
+      // because a browser can support sharing text and refuse PNGs.
+      if (typeof navigator.canShare === 'function' && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: SHARE_TITLE });
+        return;
+      }
+
+      saveFile(file);
+      setMessage('הדפדפן הזה לא תומך בשיתוף תמונה — הורדנו אותה במקום.');
+    } catch (err) {
+      // DISMISSING THE SHEET IS NOT A FAILURE. Both Safari and Chrome reject
+      // with AbortError when the trader taps outside it, and an error message
+      // for "changed my mind" is noise beside a button they just dismissed.
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+      console.error('[share] share image failed', err);
+      setMessage('לא הצלחנו לשתף את התמונה.');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function create() {
     setBusy(true);
@@ -476,13 +603,31 @@ function ShareDayDialog({
               </button>
             </div>
 
-            {/* THE SQUARE, NOT THE ONE ABOVE. The preview is 1200×630 because
-                that is what unfurls; the download is 1080×1080 because the
-                thing a trader does with a downloaded card is post it to
-                Instagram or a status, where a landscape crop loses the
-                number. Both come from the same renderer.
+            {/* THE SQUARE, NOT THE ONE ABOVE, for both of these. The preview is
+                1200×630 because that is what unfurls; what a trader does with
+                the card in their hand is post it to Instagram or a status,
+                where a landscape crop loses the number. Both come from the same
+                renderer.
 
-                A PLAIN ANCHOR WITH `download`, not JournalExport's
+                SHARING IS THE PRIMARY ACTION AND DOWNLOADING IS NOT, because
+                this dialog is opened on a phone far more often than on a
+                desktop, and on a phone "download" ends the job halfway: the
+                trader still has to leave Reflect, open Photos, open WhatsApp
+                and find the file. The sheet is the one tap that reaches the app
+                they meant. The download stays because it is the only thing that
+                works when the sheet is not there. */}
+            <button
+              type="button"
+              onClick={() => void shareImage()}
+              disabled={busy}
+              className={ACTION_CLASS}
+              style={{ ...PRIMARY_STYLE, justifyContent: 'center', padding: '10px 12px' }}
+            >
+              <Share2 aria-hidden="true" size={13} />
+              שתף תמונה
+            </button>
+
+            {/* A PLAIN ANCHOR WITH `download`, not JournalExport's
                 blob-and-synthetic-anchor: that pattern exists because the CSV
                 is built in the browser and has no URL. This has a URL, it is
                 same-origin, and letting the browser stream it straight to
