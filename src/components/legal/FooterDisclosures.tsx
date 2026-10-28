@@ -49,8 +49,14 @@ export function FooterDisclosures({ className = '' }: { className?: string }) {
       <p dir="rtl" className={DISCLOSURE_TEXT_CLASS} style={DISCLOSURE_TEXT_STYLE}>
         <strong className="font-bold">גילוי סיכון: </strong>
         {RISK_DISCLOSURE_HE}{' '}
+        {/* prefetch={false} for SiteDisclosureFooter's reason (REF-129 item 1),
+            and this is the FIFTH link in that footer — the four in the nav row
+            above it are not all of them. Found by measuring after those four
+            were turned off: this one was still prefetching /risk-disclosure on
+            every page a trader scrolled to the bottom of. */}
         <Link
           href="/risk-disclosure"
+          prefetch={false}
           className="underline underline-offset-2 transition-colors hover:text-tg-primary"
           style={{ color: 'inherit' }}
         >
