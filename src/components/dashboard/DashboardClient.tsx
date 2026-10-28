@@ -1724,108 +1724,129 @@ export default function DashboardClient({
 
       {trades.length > 0 && (
         <>
-          {/* ── Top 4 stat cards — 4-across only from lg: at md widths four
-              columns leave cards narrower than the gauge itself ───────────── */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {/* ── Top 4 stat cards ─────────────────────────────────────────────
+              Four-across is a question about THIS ROW'S width, and `lg:` was
+              asking the window's. The row is only `viewport − sidebar`, so
+              with the sidebar open at 1024–1180 the row went four-across into
+              cards narrower than their own contents, and flexbox spent the
+              shortfall painting outside the card — leftward, under dir="rtl",
+              because that is where main-end is (REF-128 item 1).
 
-            {/* Card 1: Profitable Days */}
-            <Card>
-              <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: 'center', gap: 12 }}>
-                <div style={{ flex: isMobile ? undefined : 1, minWidth: isMobile ? 0 : 88, display: "flex", flexDirection: "column", gap: 4, width: isMobile ? "100%" : undefined }}>
-                  <p style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: TEXT2 }}>ימים רווחיים</p>
-                  <p style={{ fontSize: isMobile ? 26 : 'clamp(20px, 1.9vw, 26px)', fontWeight: 800, lineHeight: 1, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', color: stats.profitDays >= stats.lossDays ? GREEN : RED }}>
-                    {stats.profitDayPct}%
-                  </p>
-                  <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                    <span style={{ fontSize: 14, fontWeight: 800, color: GREEN, fontVariantNumeric: 'tabular-nums' }}>{stats.profitDays}</span>
-                    <span style={{ fontSize: 10, color: MUTED, fontWeight: 600 }}>|</span>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: TEXT2, fontVariantNumeric: 'tabular-nums' }}>{stats.neutralDays}</span>
-                    <span style={{ fontSize: 10, color: MUTED, fontWeight: 600 }}>|</span>
-                    <span style={{ fontSize: 14, fontWeight: 800, color: RED, fontVariantNumeric: 'tabular-nums' }}>{stats.lossDays}</span>
+              A container query asks the width that actually decides, so it
+              also tracks the sidebar opening and closing instead of guessing
+              a viewport number that stands in for it.
+
+              The floor to clear is the widest card's min-content: 172px on the
+              demo's figures, ~195px once the avg win/loss labels carry
+              four-digit amounts. `@5xl` (64rem) is the narrowest container step
+              that clears it — four columns there leave a 205px content box.
+              Don't lower it: `@3xl` leaves 141px and overflows again. ────── */}
+          <div className="@container">
+            <div className="grid grid-cols-2 @5xl:grid-cols-4 gap-3">
+
+              {/* Card 1: Profitable Days */}
+              <Card className="overflow-hidden">
+                <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: 'center', gap: 12 }}>
+                  <div style={{ flex: isMobile ? undefined : 1, minWidth: isMobile ? 0 : 88, display: "flex", flexDirection: "column", gap: 4, width: isMobile ? "100%" : undefined }}>
+                    <p style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: TEXT2 }}>ימים רווחיים</p>
+                    <p style={{ fontSize: isMobile ? 26 : 'clamp(20px, 1.9vw, 26px)', fontWeight: 800, lineHeight: 1, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', color: stats.profitDays >= stats.lossDays ? GREEN : RED }}>
+                      {stats.profitDayPct}%
+                    </p>
+                    <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                      <span style={{ fontSize: 14, fontWeight: 800, color: GREEN, fontVariantNumeric: 'tabular-nums' }}>{stats.profitDays}</span>
+                      <span style={{ fontSize: 10, color: MUTED, fontWeight: 600 }}>|</span>
+                      <span style={{ fontSize: 14, fontWeight: 700, color: TEXT2, fontVariantNumeric: 'tabular-nums' }}>{stats.neutralDays}</span>
+                      <span style={{ fontSize: 10, color: MUTED, fontWeight: 600 }}>|</span>
+                      <span style={{ fontSize: 14, fontWeight: 800, color: RED, fontVariantNumeric: 'tabular-nums' }}>{stats.lossDays}</span>
+                    </div>
+                  </div>
+                  {/* No `minWidth` floor on this column (REF-128 item 1).
+                      SemiGauge is already `width:100%, maxWidth:140` and shrinks
+                      on its own; a floor here pinned the svg at 72px and spent
+                      the shortfall pushing the row past the card instead. */}
+                  <div style={{ flex: isMobile ? undefined : "0 1 140px" }}>
+                    <SemiGauge width={isMobile ? 88 : 140} strokeWidth={12} segments={[
+                      { value: stats.profitDays, color: GREEN },
+                      { value: stats.lossDays,   color: RED },
+                    ]} />
                   </div>
                 </div>
-                <div style={{ flex: isMobile ? undefined : "0 1 140px", minWidth: isMobile ? undefined : 72 }}>
-                  <SemiGauge width={isMobile ? 88 : 140} strokeWidth={12} segments={[
-                    { value: stats.profitDays, color: GREEN },
-                    { value: stats.lossDays,   color: RED },
-                  ]} />
-                </div>
-              </div>
-            </Card>
+              </Card>
 
-            {/* Card 2: Win Rate */}
-            <Card>
-              <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: 'center', gap: 12 }}>
-                <div style={{ flex: isMobile ? undefined : 1, minWidth: isMobile ? 0 : 88, display: "flex", flexDirection: "column", gap: 4, width: isMobile ? "100%" : undefined }}>
-                  <p style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: TEXT2 }}>אחוזי הצלחה</p>
-                  <p style={{ fontSize: isMobile ? 26 : 'clamp(20px, 1.9vw, 26px)', fontWeight: 800, lineHeight: 1, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', color: stats.winPct >= 50 ? GREEN : RED }}>
-                    {stats.winPct}%
-                  </p>
-                  <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                    <span style={{ fontSize: 14, fontWeight: 800, color: GREEN, fontVariantNumeric: 'tabular-nums' }}>{stats.winTrades}</span>
-                    <span style={{ fontSize: 10, color: MUTED, fontWeight: 600 }}>|</span>
-                    <span style={{ fontSize: 14, fontWeight: 800, color: RED, fontVariantNumeric: 'tabular-nums' }}>{stats.lossTrades}</span>
+              {/* Card 2: Win Rate */}
+              <Card className="overflow-hidden">
+                <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: 'center', gap: 12 }}>
+                  <div style={{ flex: isMobile ? undefined : 1, minWidth: isMobile ? 0 : 88, display: "flex", flexDirection: "column", gap: 4, width: isMobile ? "100%" : undefined }}>
+                    <p style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: TEXT2 }}>אחוזי הצלחה</p>
+                    <p style={{ fontSize: isMobile ? 26 : 'clamp(20px, 1.9vw, 26px)', fontWeight: 800, lineHeight: 1, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', color: stats.winPct >= 50 ? GREEN : RED }}>
+                      {stats.winPct}%
+                    </p>
+                    <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                      <span style={{ fontSize: 14, fontWeight: 800, color: GREEN, fontVariantNumeric: 'tabular-nums' }}>{stats.winTrades}</span>
+                      <span style={{ fontSize: 10, color: MUTED, fontWeight: 600 }}>|</span>
+                      <span style={{ fontSize: 14, fontWeight: 800, color: RED, fontVariantNumeric: 'tabular-nums' }}>{stats.lossTrades}</span>
+                    </div>
+                  </div>
+                  <div style={{ flex: isMobile ? undefined : "0 1 140px" }}>
+                    <SemiGauge width={isMobile ? 88 : 140} strokeWidth={12} segments={[
+                      { value: stats.winPct,       color: GREEN },
+                      { value: 100 - stats.winPct, color: RED },
+                    ]} />
                   </div>
                 </div>
-                <div style={{ flex: isMobile ? undefined : "0 1 140px", minWidth: isMobile ? undefined : 72 }}>
-                  <SemiGauge width={isMobile ? 88 : 140} strokeWidth={12} segments={[
-                    { value: stats.winPct,       color: GREEN },
-                    { value: 100 - stats.winPct, color: RED },
-                  ]} />
-                </div>
-              </div>
-            </Card>
+              </Card>
 
-            {/* Card 3: Avg Win/Loss ratio */}
-            <Card>
-              <p style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: TEXT2, marginBottom: 14 }}>יחס רווח/הפסד ממוצע</p>
-              <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'stretch' : 'center', gap: isMobile ? 8 : 16 }}>
-                <span style={{ fontSize: isMobile ? 15 : 18, fontWeight: 700, color: TEXT2, fontVariantNumeric: 'tabular-nums' }}>
-                  {stats.avgLoss < -0.001 ? (stats.avgWin / Math.abs(stats.avgLoss)).toFixed(2) : '—'}
-                </span>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: isMobile ? undefined : 1 }}>
-                  <SplitBar left={stats.avgWin} right={Math.abs(stats.avgLoss)} leftColor={GREEN} rightColor={RED} />
-                  <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'flex-start' : 'center', gap: isMobile ? 2 : undefined, justifyContent: isMobile ? undefined : 'space-between' }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: GREEN, fontVariantNumeric: 'tabular-nums' }}>{formatMoney(stats.avgWin)}</span>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: RED, fontVariantNumeric: 'tabular-nums' }}>{formatMoney(stats.avgLoss)}</span>
+              {/* Card 3: Avg Win/Loss ratio */}
+              <Card className="overflow-hidden">
+                <p style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: TEXT2, marginBottom: 14 }}>יחס רווח/הפסד ממוצע</p>
+                <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'stretch' : 'center', gap: isMobile ? 8 : 16 }}>
+                  <span style={{ fontSize: isMobile ? 15 : 18, fontWeight: 700, color: TEXT2, fontVariantNumeric: 'tabular-nums' }}>
+                    {stats.avgLoss < -0.001 ? (stats.avgWin / Math.abs(stats.avgLoss)).toFixed(2) : '—'}
+                  </span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: isMobile ? undefined : 1 }}>
+                    <SplitBar left={stats.avgWin} right={Math.abs(stats.avgLoss)} leftColor={GREEN} rightColor={RED} />
+                    <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'flex-start' : 'center', gap: isMobile ? 2 : undefined, justifyContent: isMobile ? undefined : 'space-between' }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: GREEN, fontVariantNumeric: 'tabular-nums' }}>{formatMoney(stats.avgWin)}</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: RED, fontVariantNumeric: 'tabular-nums' }}>{formatMoney(stats.avgLoss)}</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            </Card>
+              </Card>
 
-            {/* Card 4: P&L Balance */}
-            <Card>
-              <p style={{ fontSize: 13, fontWeight: 700, color: TEXT2, marginBottom: 8 }}>מאזן P&L</p>
-              <div style={{ display: 'flex', flexDirection: 'row', gap: 4, flexWrap: 'wrap', marginBottom: 10 }}>
-                {(['total', 'monthly', 'weekly', 'daily'] as const).map(p => (
-                  <button key={p} onClick={() => setPnlPeriod(p)}
-                    className="hit-40 relative"
-                    style={{
-                      background: pnlPeriod === p ? 'rgba(0,210,210,0.12)' : 'transparent',
-                      color: pnlPeriod === p ? ACCENT : TEXT2,
-                      border: pnlPeriod === p ? `1px solid rgba(0,210,210,0.3)` : `1px solid ${BORDER}`,
-                      borderRadius: 6,
-                      padding: '5px 10px',
-                      fontSize: 11,
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                    }}>
-                    {p === 'total' ? 'כללי' : p === 'monthly' ? 'חודשי' : p === 'weekly' ? 'שבועי' : 'יומי'}
-                  </button>
-                ))}
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-                {/* LTR isolation keeps the leading +/- glued to the amount inside
-                    the RTL card (bidi otherwise strands it on its own line), and
-                    the clamp lets long $ amounts fit narrow cards without clipping */}
-                <span style={{ fontSize: isMobile ? 'clamp(15px, 5.6vw, 20px)' : 'clamp(20px, 2.4vw, 36px)', fontWeight: 800, letterSpacing: '-0.02em', whiteSpace: 'nowrap', direction: 'ltr', unicodeBidi: 'isolate', fontVariantNumeric: 'tabular-nums', color: selPeriodPnl >= 0 ? GREEN : RED }}>
-                  {selPeriodDisplay}
-                </span>
-                <span style={{ fontSize: 12, fontWeight: 600, color: TEXT2 }}>
-                  ({selPeriodCount} עסקאות)
-                </span>
-              </div>
-            </Card>
+              {/* Card 4: P&L Balance */}
+              <Card className="overflow-hidden">
+                <p style={{ fontSize: 13, fontWeight: 700, color: TEXT2, marginBottom: 8 }}>מאזן P&L</p>
+                <div style={{ display: 'flex', flexDirection: 'row', gap: 4, flexWrap: 'wrap', marginBottom: 10 }}>
+                  {(['total', 'monthly', 'weekly', 'daily'] as const).map(p => (
+                    <button key={p} onClick={() => setPnlPeriod(p)}
+                      className="hit-40 relative"
+                      style={{
+                        background: pnlPeriod === p ? 'rgba(0,210,210,0.12)' : 'transparent',
+                        color: pnlPeriod === p ? ACCENT : TEXT2,
+                        border: pnlPeriod === p ? `1px solid rgba(0,210,210,0.3)` : `1px solid ${BORDER}`,
+                        borderRadius: 6,
+                        padding: '5px 10px',
+                        fontSize: 11,
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                      }}>
+                      {p === 'total' ? 'כללי' : p === 'monthly' ? 'חודשי' : p === 'weekly' ? 'שבועי' : 'יומי'}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+                  {/* LTR isolation keeps the leading +/- glued to the amount inside
+                      the RTL card (bidi otherwise strands it on its own line), and
+                      the clamp lets long $ amounts fit narrow cards without clipping */}
+                  <span style={{ fontSize: isMobile ? 'clamp(15px, 5.6vw, 20px)' : 'clamp(20px, 2.4vw, 36px)', fontWeight: 800, letterSpacing: '-0.02em', whiteSpace: 'nowrap', direction: 'ltr', unicodeBidi: 'isolate', fontVariantNumeric: 'tabular-nums', color: selPeriodPnl >= 0 ? GREEN : RED }}>
+                    {selPeriodDisplay}
+                  </span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: TEXT2 }}>
+                    ({selPeriodCount} עסקאות)
+                  </span>
+                </div>
+              </Card>
+            </div>
           </div>
 
           {/* ── Radar cards ───────────────────────────────────────────────── */}
