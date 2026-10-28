@@ -1099,6 +1099,21 @@ function Card({ children, className = '', style }: { children: React.ReactNode; 
   );
 }
 
+/**
+ * The four KPI cards (REF-128-b).
+ *
+ * `overflow-hidden` is a safety net only — nothing reaches it at any width.
+ *
+ * The padding eases with the row: Card's own 20px everywhere the grid is two
+ * columns (phone and tablet included, so those are untouched), then from
+ * `@4xl` — where the cards go four-across and a column is at its narrowest —
+ * 14px, climbing back to 20px by the time the container is ~1250px. Scoped to
+ * that breakpoint on purpose: in the four-column range a card is container/4,
+ * so `cqw` tracks the card's own width, which is the thing that's short. Below
+ * it a card is container/2 and has room to spare.
+ */
+const KPI_CARD_CLASS = 'overflow-hidden @4xl:p-[clamp(14px,1.6cqw,20px)]';
+
 function SectionTitle({ children, large }: { children: React.ReactNode; large?: boolean }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
@@ -1736,20 +1751,36 @@ export default function DashboardClient({
               also tracks the sidebar opening and closing instead of guessing
               a viewport number that stands in for it.
 
-              The floor to clear is the widest card's min-content: 172px on the
-              demo's figures, ~195px once the avg win/loss labels carry
-              four-digit amounts. `@5xl` (64rem) is the narrowest container step
-              that clears it — four columns there leave a 205px content box.
-              Don't lower it: `@3xl` leaves 141px and overflows again. ────── */}
+              `@5xl` (64rem) was the first answer and it was too high: it put
+              the row back to 2×2 on a 1280 window with the sidebar open, where
+              the container is 1000px — 24px short (REF-128-b).
+
+              What had made a low step unsafe was that the cards' own type
+              scale was still asking the VIEWPORT: the P&L amount was
+              `clamp(20px, 2.4vw, 36px)` and the two percentages `1.9vw`, so a
+              card got BIGGER type exactly when a wide window with an open
+              sidebar made its column narrow. The four-column floor therefore
+              tracked the window — swept at 912/1000/1036px of container for a
+              1280/1440/1920 viewport, and 1048/1092/1128 once the amounts
+              carry five figures, i.e. above `@5xl` itself. Those clamps are
+              now in `cqw`, against the same container the column count asks,
+              which makes the floor a property of the row: 744px of container,
+              flat across every viewport, five-figure amounts included.
+
+              With that, overflow is no longer what picks the step — gauge
+              legibility is. Four columns at `@4xl` (56rem) leave a 184px
+              content box and an ~84px gauge, which is the agreed floor;
+              `@3xl` would leave 153px and a 53px gauge, which is unreadable
+              long before anything spills. ─────────────────────────────────── */}
           <div className="@container">
-            <div className="grid grid-cols-2 @5xl:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 @4xl:grid-cols-4 gap-3">
 
               {/* Card 1: Profitable Days */}
-              <Card className="overflow-hidden">
+              <Card className={KPI_CARD_CLASS}>
                 <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: 'center', gap: 12 }}>
                   <div style={{ flex: isMobile ? undefined : 1, minWidth: isMobile ? 0 : 88, display: "flex", flexDirection: "column", gap: 4, width: isMobile ? "100%" : undefined }}>
                     <p style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: TEXT2 }}>ימים רווחיים</p>
-                    <p style={{ fontSize: isMobile ? 26 : 'clamp(20px, 1.9vw, 26px)', fontWeight: 800, lineHeight: 1, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', color: stats.profitDays >= stats.lossDays ? GREEN : RED }}>
+                    <p style={{ fontSize: isMobile ? 26 : 'clamp(20px, 2.0cqw, 26px)', fontWeight: 800, lineHeight: 1, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', color: stats.profitDays >= stats.lossDays ? GREEN : RED }}>
                       {stats.profitDayPct}%
                     </p>
                     <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 5 }}>
@@ -1774,11 +1805,11 @@ export default function DashboardClient({
               </Card>
 
               {/* Card 2: Win Rate */}
-              <Card className="overflow-hidden">
+              <Card className={KPI_CARD_CLASS}>
                 <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: 'center', gap: 12 }}>
                   <div style={{ flex: isMobile ? undefined : 1, minWidth: isMobile ? 0 : 88, display: "flex", flexDirection: "column", gap: 4, width: isMobile ? "100%" : undefined }}>
                     <p style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: TEXT2 }}>אחוזי הצלחה</p>
-                    <p style={{ fontSize: isMobile ? 26 : 'clamp(20px, 1.9vw, 26px)', fontWeight: 800, lineHeight: 1, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', color: stats.winPct >= 50 ? GREEN : RED }}>
+                    <p style={{ fontSize: isMobile ? 26 : 'clamp(20px, 2.0cqw, 26px)', fontWeight: 800, lineHeight: 1, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', color: stats.winPct >= 50 ? GREEN : RED }}>
                       {stats.winPct}%
                     </p>
                     <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 5 }}>
@@ -1797,7 +1828,7 @@ export default function DashboardClient({
               </Card>
 
               {/* Card 3: Avg Win/Loss ratio */}
-              <Card className="overflow-hidden">
+              <Card className={KPI_CARD_CLASS}>
                 <p style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: TEXT2, marginBottom: 14 }}>יחס רווח/הפסד ממוצע</p>
                 <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'stretch' : 'center', gap: isMobile ? 8 : 16 }}>
                   <span style={{ fontSize: isMobile ? 15 : 18, fontWeight: 700, color: TEXT2, fontVariantNumeric: 'tabular-nums' }}>
@@ -1805,7 +1836,14 @@ export default function DashboardClient({
                   </span>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: isMobile ? undefined : 1 }}>
                     <SplitBar left={stats.avgWin} right={Math.abs(stats.avgLoss)} leftColor={GREEN} rightColor={RED} />
-                    <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'flex-start' : 'center', gap: isMobile ? 2 : undefined, justifyContent: isMobile ? undefined : 'space-between' }}>
+                    {/* These two amounts are this card's floor, and a grouped
+                        "$12,345.67" is one unbreakable word — so side by side they set
+                        a min-content that no font trim gets under (REF-128-b). `wrap`
+                        lets them fall into the column the mobile branch already puts
+                        them in instead of spilling, which is what makes a step below
+                        `@5xl` safe at any amount. It engages only under ~190px of
+                        content box, i.e. the bottom of the `@4xl` range. */}
+                    <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', flexWrap: isMobile ? undefined : 'wrap', alignItems: isMobile ? 'flex-start' : 'center', gap: isMobile ? 2 : undefined, rowGap: isMobile ? undefined : 2, justifyContent: isMobile ? undefined : 'space-between' }}>
                       <span style={{ fontSize: 12, fontWeight: 700, color: GREEN, fontVariantNumeric: 'tabular-nums' }}>{formatMoney(stats.avgWin)}</span>
                       <span style={{ fontSize: 12, fontWeight: 700, color: RED, fontVariantNumeric: 'tabular-nums' }}>{formatMoney(stats.avgLoss)}</span>
                     </div>
@@ -1814,7 +1852,7 @@ export default function DashboardClient({
               </Card>
 
               {/* Card 4: P&L Balance */}
-              <Card className="overflow-hidden">
+              <Card className={KPI_CARD_CLASS}>
                 <p style={{ fontSize: 13, fontWeight: 700, color: TEXT2, marginBottom: 8 }}>מאזן P&L</p>
                 <div style={{ display: 'flex', flexDirection: 'row', gap: 4, flexWrap: 'wrap', marginBottom: 10 }}>
                   {(['total', 'monthly', 'weekly', 'daily'] as const).map(p => (
@@ -1837,8 +1875,12 @@ export default function DashboardClient({
                 <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
                   {/* LTR isolation keeps the leading +/- glued to the amount inside
                       the RTL card (bidi otherwise strands it on its own line), and
-                      the clamp lets long $ amounts fit narrow cards without clipping */}
-                  <span style={{ fontSize: isMobile ? 'clamp(15px, 5.6vw, 20px)' : 'clamp(20px, 2.4vw, 36px)', fontWeight: 800, letterSpacing: '-0.02em', whiteSpace: 'nowrap', direction: 'ltr', unicodeBidi: 'isolate', fontVariantNumeric: 'tabular-nums', color: selPeriodPnl >= 0 ? GREEN : RED }}>
+                      the clamp lets long $ amounts fit narrow cards without clipping.
+                      In `cqw`, so this is the one number on the page whose size is
+                      set by the card holding it — in `vw` it grew on a wide window
+                      precisely when an open sidebar had made its column narrow, and
+                      that is what put the four-column floor above `@5xl`. */}
+                  <span style={{ fontSize: isMobile ? 'clamp(15px, 5.6vw, 20px)' : 'clamp(20px, 2.6cqw, 36px)', fontWeight: 800, letterSpacing: '-0.02em', whiteSpace: 'nowrap', direction: 'ltr', unicodeBidi: 'isolate', fontVariantNumeric: 'tabular-nums', color: selPeriodPnl >= 0 ? GREEN : RED }}>
                     {selPeriodDisplay}
                   </span>
                   <span style={{ fontSize: 12, fontWeight: 600, color: TEXT2 }}>
