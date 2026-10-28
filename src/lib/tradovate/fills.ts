@@ -963,6 +963,13 @@ export async function scanHost(params: Parameters<typeof loadHostTrades>[0]): Pr
   trades: BrokerTrade[];
   held: HeldGroup[];
   notices: PullNotice[];
+  /**
+   * Cycles this host skipped because they have not closed yet (REF-117 Stage 8).
+   *
+   * A COUNT FOR THE LOG LINE AND NOTHING ELSE — nothing branches on it. See the
+   * `cycleClosed` note beside the filter below on why the skip happens here.
+   */
+  skippedOpen: number;
 }> {
   const { reader, host, accounts, dayStartMs } = params;
 
@@ -993,7 +1000,7 @@ export async function scanHost(params: Parameters<typeof loadHostTrades>[0]): Pr
   // case: a trader whose ONLY account was closed this morning has an empty
   // `accounts` and one carried id, and the early return is exactly what would
   // throw their last trade away.
-  if (accountIds.size === 0) return { trades: [], held: [], notices: [] };
+  if (accountIds.size === 0) return { trades: [], held: [], notices: [], skippedOpen: 0 };
 
   // Positions exist to answer one question — whose trade is this — so they are
   // filtered by account and by nothing else. In particular NOT by `tradeDate`,
@@ -1011,12 +1018,12 @@ export async function scanHost(params: Parameters<typeof loadHostTrades>[0]): Pr
   // reconciliation identity that licenses trusting any cycle at all.
   const positions = await reader.get<TradovatePosition[]>('/position/list');
   const myPositions = (positions ?? []).filter((position) => accountIds.has(position.accountId));
-  if (myPositions.length === 0) return { trades: [], held: [], notices: [] };
+  if (myPositions.length === 0) return { trades: [], held: [], notices: [], skippedOpen: 0 };
 
   const myPositionIds = new Set(myPositions.map((position) => position.id));
   const allPairs = await reader.get<TradovateFillPair[]>('/fillPair/list');
   const myPairs = (allPairs ?? []).filter((pair) => myPositionIds.has(pair.positionId));
-  if (myPairs.length === 0) return { trades: [], held: [], notices: [] };
+  if (myPairs.length === 0) return { trades: [], held: [], notices: [], skippedOpen: 0 };
 
   const fills = await reader.get<TradovateFill[]>('/fill/list');
 
@@ -1037,12 +1044,14 @@ export async function scanHost(params: Parameters<typeof loadHostTrades>[0]): Pr
   const pairById = new Map<number, TradovateFillPair>();
   for (const pair of myPairs) pairById.set(pair.id, pair);
 
-  // What can become a journal row at all. Three refusals, and each one is the
+  // What can become a journal row at all. Four refusals, and each one is the
   // honest answer to a question `BrokerTrade` has no shape for:
   //
   //   - NOTHING MATCHED YET. An open cycle the trader has not exited any of has
   //     `qty: 0` and no pair, so there is no round trip to state. This is the
   //     same silence as before: no pair, no trade.
+  //   - STILL OPEN. See the paragraph below — this is the one that is new, and
+  //     it generalises the line above it.
   //   - INTERDAY. Stage 0 measured /fill/list, /fillPair/list AND /position/list
   //     at `depthDays = 0`, so a position opened yesterday has unreachable entry
   //     fills. `entryPrice` and `openedAtMs` are non-nullable on BrokerTrade and
@@ -1052,13 +1061,56 @@ export async function scanHost(params: Parameters<typeof loadHostTrades>[0]): Pr
   //     absence rather than a fabricated entry.
   //   - NOT FULLY PRICED. A cycle whose pairs do not cover its exit quantity has
   //     no honest P&L, and a partial one would under-report a real loss.
+  //
+  // ── `cycleClosed` HAS TO BE ASKED HERE, BEFORE PRICING (REF-117 Stage 8) ──
+  //
+  // THE BUG IT FIXES COSTS THE TRADER THEIR WHOLE DAY. A cycle that is open but
+  // PARTIALLY EXITED — bought three, sold one, still holding two — passed every
+  // test above: `qty` is the exit quantity, so it is 1 and not 0, and
+  // `pairedQty` covers that single exit exactly. So it reached `describeCycle`,
+  // and `pointsPnl` is computed over ALL the legs including the two entries
+  // nobody has closed, which is not a number: measured offline against the
+  // production modules at −49990 points on a 3-lot fixture
+  // (~/Desktop/reflect-reports/ref-117-live-split-investigation.md §4.4). The
+  // oracle in `priceCycle` then does its job, finds the fill P&L and the pair
+  // P&L disagree, and throws `pnl_disagreement` — which is NOT scoped to the
+  // one cycle. It fails the entire day pull, and the trader is told
+  // "Tradovate לא זמין" about a day whose other trades are perfectly readable.
+  //
+  // The scenario is not exotic. It is a trader who scales out and syncs while
+  // still holding the rest, which is precisely what the "סנכרן עכשיו" button
+  // exists for.
+  //
+  // THE FILTER ALREADY EXISTED — rule 1 in ./import.ts, applied to
+  // `BrokerTrade.cycleClosed` — and it was simply too late in the chain: it
+  // gates the WRITE, and this cycle never got that far. So the question is
+  // asked here as well, where it costs nothing and where the answer can still
+  // prevent the throw. Both filters are kept deliberately: this one is what
+  // makes the day survive, and the one in ./import.ts is the guard on the
+  // statement that writes to a trader's journal. See the build report.
+  //
+  // AND IT IS SKIPPED SILENTLY, NOT HELD. An open position is the mechanism
+  // working as designed — the trade genuinely has not happened yet, and the
+  // next sync after the exit imports it. Routing it to `unpriceable` would put
+  // "the trades are waiting" in front of every trader who is simply still in a
+  // position, which is the one sentence that would train them to ignore the
+  // panel. The same silence the `qty: 0` line above has always kept; this is
+  // that rule, finally covering the case where some of the exit DID match.
   const usable = scan.cycles.filter(
-    (cycle) => cycle.qty > 0 && !cycle.interday && cycle.pairedQty === cycle.qty
+    (cycle) =>
+      cycle.cycleClosed && cycle.qty > 0 && !cycle.interday && cycle.pairedQty === cycle.qty
   );
 
   const unpriceable = scan.cycles.filter(
-    (cycle) => cycle.qty > 0 && (cycle.interday || cycle.pairedQty !== cycle.qty)
+    (cycle) =>
+      cycle.cycleClosed && cycle.qty > 0 && (cycle.interday || cycle.pairedQty !== cycle.qty)
   );
+
+  // Counted for the log line, so that a skip nobody is told about is still a
+  // skip somebody can measure. `qty > 0` scopes it to the cycles that WOULD
+  // have been offered a row — an untouched open position has always been
+  // silent and is not news.
+  const skippedOpen = scan.cycles.filter((cycle) => !cycle.cycleClosed && cycle.qty > 0).length;
 
   const unnamedHeld: Omit<HeldGroup, 'symbol'>[] = [
     ...scan.held,
@@ -1210,6 +1262,7 @@ export async function scanHost(params: Parameters<typeof loadHostTrades>[0]): Pr
     trades: priced.map((cycle) => describeCycle(cycle, host, units, pairById)),
     held,
     notices,
+    skippedOpen,
   };
 }
 
@@ -1621,6 +1674,14 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
   /** How many hosts were dropped by rule 1. Counted for the log line. */
   let hostsDropped = 0;
   /**
+   * Open cycles skipped before pricing, across hosts (REF-117 Stage 8).
+   *
+   * COUNTED AND NEVER ACTED ON, like `crossHostCollisions`. The skip itself is
+   * silent to the trader by design — see the note beside the filter in
+   * `scanHost` — and this is the number that makes it measurable anyway.
+   */
+  let skippedOpen = 0;
+  /**
    * How many accounts this pull carried past a host that stopped listing them
    * (REF-124). Counted for the log line, and read once below.
    *
@@ -1763,6 +1824,7 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
     pooled.push(...scanned.trades);
     held.push(...scanned.held);
     notices.push(...scanned.notices);
+    skippedOpen += scanned.skippedOpen;
   }
 
   // ── Nothing to have traded with, which is now an error (REF-112 §5.12) ───
@@ -1830,18 +1892,33 @@ export async function loadBrokerDay(request: BrokerDayRequest): Promise<BrokerDa
   //
   // A COUNT, LIKE EVERY OTHER FIELD ON THIS LINE. No account id, no host name,
   // no symbol, no figure — see the rule above.
+  // THE TWO REF-117 STAGE 8 COUNTS, AND THEY ARE THE ONLY REPORT EITHER
+  // SAFEGUARD MAKES TO AN OPERATOR. `heldAmbiguous` is how often two fills
+  // landed on one instant on opposite sides — the number nobody has ever been
+  // able to measure, and the one that says whether resolving the true order
+  // from `/fillPair` is worth a stage. `skippedOpen` is how often a cycle was
+  // still open at pricing time, which until this change was not a skip at all
+  // but a thrown `pnl_disagreement` that cost the trader the whole day.
+  //
+  // COUNTS, LIKE EVERY OTHER FIELD ON THIS LINE. No symbol, no account id, no
+  // host, no figure — `heldAmbiguous` is a length, and `HeldGroup`'s symbol and
+  // ids stay out of it.
+  const heldAmbiguous = held.filter((group) => group.reason === 'ambiguous_order').length;
   if (
     hostsDropped > 0 ||
     crossHostCollisions > 0 ||
     skippedAccounts > 0 ||
     unpricedContracts > 0 ||
-    carriedAccounts > 0
+    carriedAccounts > 0 ||
+    heldAmbiguous > 0 ||
+    skippedOpen > 0
   ) {
     console.warn(
       `[tradovate][day] hostsAsked=${order.length} hostsDropped=${hostsDropped} ` +
         `accounts=${claimed.size} crossHostIdCollisions=${crossHostCollisions} ` +
         `skippedAccounts=${skippedAccounts} unpricedContracts=${unpricedContracts} ` +
-        `includedMissing=${carriedAccounts}`
+        `includedMissing=${carriedAccounts} heldAmbiguous=${heldAmbiguous} ` +
+        `skippedOpen=${skippedOpen}`
     );
   }
 

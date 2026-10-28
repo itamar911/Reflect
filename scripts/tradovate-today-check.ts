@@ -3727,6 +3727,91 @@ async function bothPathsAgree() {
     ], [2, 2]),
   ]);
 
+  // ── An OPEN cycle with a PARTIAL exit cost the whole day (REF-117 Stage 8) ──
+  //
+  // Case (4) above covers the open cycle that has matched NOTHING: `qty: 0`, no
+  // pair, silent. The case it does not cover is the one measured offline on
+  // 28.10 (§4.4 of ref-117-live-split-investigation.md) and it is not an edge:
+  // a trader who SCALES OUT and syncs while still holding the rest, which is
+  // what the "סנכרן עכשיו" button is for.
+  //
+  // WHY IT GOT PAST EVERY FILTER. `qty` is the EXIT quantity, so a cycle that
+  // bought three and sold one has `qty: 1` and not 0; `pairedQty` covers that
+  // one exit exactly; and it is not interday. So it was priced — and
+  // `pointsPnl` is computed over ALL the legs, including the two entries nobody
+  // has closed, which is a number with no meaning (−10070 points here). The
+  // oracle in `priceCycle` then did exactly its job: fill P&L and pair P&L
+  // disagree, so it threw `pnl_disagreement`. THAT THROW IS NOT SCOPED TO THE
+  // CYCLE. It failed the whole day pull, and the trader saw "Tradovate לא
+  // זמין" over a day whose other trades were perfectly readable.
+  //
+  // So this fixture is the §5.11 shape applied to a different cause: one thing
+  // that cannot be stated must cost ITSELF and not the day.
+  const scaleOutEntry = handFill({
+    id: 991_001, at: '2026-10-14T09:00:00Z', action: 'Buy', qty: 3, price: 5040,
+  });
+  const scaleOutPartial = handFill({
+    id: 991_002, at: '2026-10-14T10:00:00Z', action: 'Sell', qty: 1, price: 5050,
+  });
+  const firstClosed = closedTrip();
+  const secondClosed = roundTrip({
+    side: 'long', openAt: '2026-10-14T07:00:00Z', closeAt: '2026-10-14T08:00:00Z',
+    entry: 5020, exit: 5030,
+  });
+
+  // One account, ONE CONTRACT, one position row: the open cycle is in the SAME
+  // netPos walk as the two closed ones, which is what makes this the strong
+  // version of the fixture rather than two independent groups. Walked is
+  // +1−1+1−1+3−1 = +2, so the reconciliation agrees with `netPos: 2` and the
+  // group is not held for an unrelated reason.
+  let threw = 'resolved';
+  const partialExit = await pullFull(
+    handScene(
+      [...firstClosed.fills, ...secondClosed.fills, scaleOutEntry, scaleOutPartial],
+      [
+        firstClosed.pair,
+        secondClosed.pair,
+        handPair({ id: 991_003, buy: scaleOutEntry, sell: scaleOutPartial, qty: 1 }),
+      ],
+      { positions: [openOwn] }
+    )
+  ).catch((error: unknown) => {
+    threw = error instanceof Error ? error.message : String(error);
+    return null;
+  });
+
+  group('REF-117 Stage 8: an open cycle with a partial exit costs itself, not the day', [
+    // (1) THE HEADLINE, and the whole regression. This threw before.
+    c('(1) the pull resolves instead of failing the day', threw, 'resolved'),
+    // ES is $50 a point and each closed trip made 10, so the day is +$1000. The
+    // figure matters as much as the count: a day that imported two rows and
+    // priced them wrongly would pass a count-only assertion.
+    c('(2) the two closed trades are imported, to the cent', [
+      partialExit?.trades.length,
+      partialExit?.day.closedCount,
+      partialExit?.day.net,
+    ], [2, 2, 1000]),
+    c('(3) and both of them are closed cycles',
+      partialExit?.trades.map((trade) => trade.cycleClosed), [true, true]),
+    // SKIPPED SILENTLY, NOT HELD. An open position is the mechanism working as
+    // designed — the next sync after the exit imports it — and "the trades are
+    // waiting" in front of every trader still in a position is the sentence
+    // that would train them to ignore the panel.
+    c('(4) the open cycle is neither a row nor an absence to explain', [
+      partialExit?.held.length,
+      partialExit?.notices.length,
+      partialExit?.trades.filter((trade) => !trade.cycleClosed).length,
+    ], [0, 0, 0]),
+    // The meaningless figure must not have reached a row under any name. −10070
+    // points at $50 is −$503,500, and the two real rows are +$500 each.
+    c('(5) and the number that caused the throw is nowhere in the day',
+      partialExit?.trades.map((trade) => trade.pnlUsd), [500, 500]),
+    // The still-held quantity never became a row of its own either, which is
+    // the other way this could have been "fixed" wrongly.
+    c('(6) nothing was invented for the two contracts still held',
+      partialExit?.trades.map((trade) => trade.qty), [1, 1]),
+  ]);
+
   // ── The route ─────────────────────────────────────────────────────────────
 
   const ROW_TODAY: BrokerTrade = {
