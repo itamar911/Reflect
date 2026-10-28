@@ -659,13 +659,41 @@ export function ShareCardImage({ snapshot, tradingDay, size, token }: ShareCardP
     u(21)
   );
 
+  /**
+   * THE SQUARE RUNS OUT OF HEIGHT, AND ONLY THE SQUARE.
+   *
+   * The landscape card puts the accounts panel BESIDE the hero, so its rows
+   * cost it no vertical room at all. The square stacks everything — header,
+   * hero, three mini-cards, the panel, then the footer — and at four rows and
+   * up the column was taller than the frame. The card did not shrink to fit:
+   * satori pushed the footer straight out of the bottom, so a trader with five
+   * accounts published a card with the nickname sliced in half, the QR hanging
+   * off the edge and `reflecttrading.app` gone entirely.
+   *
+   * THE LINE THAT WAS BEING CUT IS THE ONE THAT MATTERS MOST. "Broker-synced ·
+   * before fees" is the only claim this card makes, and it is the sentence that
+   * keeps a GROSS broker figure from reading as a net one. Losing it off the
+   * bottom of a public artefact is not a cosmetic bug.
+   *
+   * SO THE RHYTHM TIGHTENS, AND ONLY WHEN IT HAS TO. A one-to-three account
+   * card is the common one and keeps the spacing exactly as approved; the
+   * compression is spent only on the cards that would otherwise overflow. The
+   * alternative — tightening every square card — would have changed a reviewed
+   * design for every trader in order to fix the few.
+   *
+   * Not fewer rows instead: the panel is the card's answer to "where did this
+   * money come from", and dropping an account to buy whitespace answers it less
+   * honestly than setting the same five rows closer together.
+   */
+  const tight = square && shownAccounts.length >= 4;
+
   const accounts = snapshot.accounts.length > 0 ? (
     <div
       style={{
         display: 'flex',
         flexDirection: 'column',
         width: '100%',
-        padding: u(26),
+        padding: u(tight ? 19 : 26),
         borderRadius: u(20),
         background: WELL,
         border: `1px solid ${HAIRLINE}`,
@@ -675,15 +703,15 @@ export function ShareCardImage({ snapshot, tradingDay, size, token }: ShareCardP
           is what makes the right-hand column a heading for the figures rather
           than a second title. */}
       <Label u={u}>ACCOUNTS · TODAY&apos;S P&amp;L</Label>
-      <div style={{ display: 'flex', height: u(20) }} />
+      <div style={{ display: 'flex', height: u(tight ? 13 : 20) }} />
       {shownAccounts.map((account, i) => (
         <div key={account.name + i} style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
-          {i > 0 && <div style={{ display: 'flex', height: u(16) }} />}
+          {i > 0 && <div style={{ display: 'flex', height: u(tight ? 10 : 16) }} />}
           <AccountRow account={account} u={u} nameSize={accountNameSize} />
         </div>
       ))}
       {omittedAccounts > 0 && (
-        <span style={{ fontSize: u(16), fontWeight: 700, color: FAINT, marginTop: u(16) }}>
+        <span style={{ fontSize: u(16), fontWeight: 700, color: FAINT, marginTop: u(tight ? 11 : 16) }}>
           {`+${omittedAccounts} more`}
         </span>
       )}
@@ -791,13 +819,13 @@ export function ShareCardImage({ snapshot, tradingDay, size, token }: ShareCardP
         flexDirection: 'column',
         justifyContent: 'center',
         width: '100%',
-        paddingTop: u(30),
+        paddingTop: u(tight ? 20 : 30),
       }}
     >
       {hero}
-      <div style={{ display: 'flex', height: u(30) }} />
+      <div style={{ display: 'flex', height: u(tight ? 18 : 30) }} />
       {miniCards}
-      {accounts !== null && <div style={{ display: 'flex', height: u(22) }} />}
+      {accounts !== null && <div style={{ display: 'flex', height: u(tight ? 14 : 22) }} />}
       {accounts}
     </div>
   ) : (
