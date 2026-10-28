@@ -104,11 +104,17 @@ const ACCEPTED_PERMISSION_STATUSES = new Set(['Accepted', 'Approved']);
 export const MAX_ACCOUNT_IDS = 25;
 
 /** A lockout status row, as documented. Every field optional but `accountId`. */
-interface LockoutStatus {
+export interface LockoutStatus {
   accountId: number;
   locked: boolean | null;
   /** Whole seconds from now. Negative means it has already passed. */
   endsInSeconds: number | null;
+}
+
+/** One `errors[]` entry from the status envelope. */
+export interface LockoutError {
+  accountId: number | null;
+  error: string;
 }
 
 /**
@@ -122,6 +128,46 @@ export function endsInSeconds(endTime: unknown, nowMs: number): number | null {
   const parsed = Date.parse(endTime);
   if (!Number.isFinite(parsed)) return null;
   return Math.round((parsed - nowMs) / 1000);
+}
+
+/**
+ * Unpack `/user/accountlockoutstatus`'s `{ statuses, errors }` envelope.
+ *
+ * ONE DEFINITION, used by both the Stage 3 survey and the Stage 4 experiment.
+ * Stage 4 decides whether to WRITE based on what this returns, so a second copy
+ * that drifted would be a second opinion about whether an account is already
+ * locked — which is exactly the question the irreversible call hangs on.
+ *
+ * `errorText` is read defensively: it is not in this endpoint's documented
+ * schema, but it IS the shape every other Tradovate endpoint uses for a
+ * failure — and it arrives with HTTP 200 (`src/lib/tradovate/types.ts:86-87`),
+ * so `ok` alone would read a failure as a success. That is the trap REF-126
+ * Stage 2 §ג.1 item 7 names.
+ */
+export function parseLockoutEnvelope(
+  rows: Row[],
+  nowMs: number
+): { errorText: string | null; statuses: LockoutStatus[]; errors: LockoutError[] } {
+  const envelope: Row = rows[0] ?? {};
+  const rawStatuses = Array.isArray(envelope.statuses) ? envelope.statuses : [];
+  const rawErrors = Array.isArray(envelope.errors) ? envelope.errors : [];
+
+  const statuses: LockoutStatus[] = rawStatuses
+    .filter((row): row is Row => !!row && typeof row === 'object')
+    .map((row) => ({
+      accountId: numberField(row, 'accountId') ?? -1,
+      locked: typeof row.locked === 'boolean' ? row.locked : null,
+      endsInSeconds: endsInSeconds(row.endTime, nowMs),
+    }));
+
+  const errors: LockoutError[] = rawErrors
+    .filter((row): row is Row => !!row && typeof row === 'object')
+    .map((row) => ({
+      accountId: numberField(row, 'accountId'),
+      error: stringField(row, 'error') ?? '<non-string>',
+    }));
+
+  return { errorText: stringField(envelope, 'errorText'), statuses, errors };
 }
 
 /** Read a numeric field off a row without widening anything. */
@@ -178,6 +224,36 @@ export function claimAccountIds(
     claimed: union.slice(0, MAX_ACCOUNT_IDS),
     capped: union.length > MAX_ACCOUNT_IDS,
   };
+}
+
+/**
+ * The claimed account ids on ONE host, resolved by the two reads.
+ *
+ * Extracted so the Stage 4 write gate uses the SAME rule as the Stage 3 survey
+ * rather than its own opinion about which accounts are the trader's. The write
+ * is irreversible; it must not be guarded by a second implementation.
+ *
+ * Returns an empty list if either read failed — the fail-safe direction, and the
+ * one that makes a failed read a refusal rather than a permission.
+ */
+export async function claimedIdsOnHost(options: {
+  accessToken: string;
+  apiUrl: string;
+  userId: string;
+  tradovateUserId: number | null;
+}): Promise<{ claimed: number[]; accountsOk: boolean; permissionsOk: boolean }> {
+  const { accessToken, apiUrl, userId, tradovateUserId } = options;
+  const call = { accessToken, apiUrl, userId };
+
+  const accountsCall = await callEndpoint('/account/list', call);
+  const permissionsCall = await callEndpoint('/tradingPermission/list', call);
+
+  if (!accountsCall.ok) {
+    return { claimed: [], accountsOk: false, permissionsOk: permissionsCall.ok };
+  }
+
+  const claim = claimAccountIds(accountsCall.rows, permissionsCall.rows, tradovateUserId);
+  return { claimed: claim.claimed, accountsOk: true, permissionsOk: permissionsCall.ok };
 }
 
 /** What one host's measurement looks like. */
@@ -284,38 +360,14 @@ export async function probeHostTradingLock(options: {
     body: { accountIds: claim.claimed },
   });
 
-  // The documented success shape is `{ statuses: [...], errors: [...] }`, which
-  // ./call.ts normalises to a single row. `errorText` is read defensively: it is
-  // not in the status endpoint's documented schema, but it IS the shape every
-  // other Tradovate endpoint uses for a failure — and it arrives with HTTP 200
-  // (`src/lib/tradovate/types.ts:86-87`), so `ok` alone would read a failure as
-  // a success. That is the trap REF-126 Stage 2 §ג.1 item 7 names.
-  const envelope: Row = lockoutCall.rows[0] ?? {};
-  const rawStatuses = Array.isArray(envelope.statuses) ? envelope.statuses : [];
-  const rawErrors = Array.isArray(envelope.errors) ? envelope.errors : [];
-
-  const statuses: LockoutStatus[] = rawStatuses
-    .filter((row): row is Row => !!row && typeof row === 'object')
-    .map((row) => ({
-      accountId: numberField(row, 'accountId') ?? -1,
-      locked: typeof row.locked === 'boolean' ? row.locked : null,
-      endsInSeconds: endsInSeconds(row.endTime, nowMs),
-    }));
-
-  const errors = rawErrors
-    .filter((row): row is Row => !!row && typeof row === 'object')
-    .map((row) => ({
-      accountId: numberField(row, 'accountId'),
-      error: stringField(row, 'error') ?? '<non-string>',
-    }));
-
+  const { errorText, statuses, errors } = parseLockoutEnvelope(lockoutCall.rows, nowMs);
   const answeredIds = new Set(statuses.map((entry) => entry.accountId));
 
   report.step3AccountLockoutStatus = {
     asked: true,
     ...reportOf(lockoutCall),
     fields: fieldSurvey(lockoutCall.rows),
-    errorText: stringField(envelope, 'errorText'),
+    errorText,
     statuses,
     errors,
     measurement: {

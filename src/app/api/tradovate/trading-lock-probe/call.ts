@@ -26,7 +26,7 @@ import {
   TradovateRequestError,
 } from '@/lib/tradovate/errors';
 
-import { assertReadOnly } from './guard';
+import { assertReadOnly, assertTheOneWrite, THE_ONE_WRITE } from './guard';
 import type { Row } from './survey';
 
 /** What one endpoint call is allowed to say about itself. */
@@ -144,4 +144,69 @@ export function reportOf(result: CallResult): Omit<CallResult, 'rows'> {
   const { rows: _rows, ...rest } = result;
   void _rows;
   return rest;
+}
+
+/**
+ * THE ONE WRITE (REF-126 Stage 4). A separate function on purpose.
+ *
+ * {@link callEndpoint} can only reach `assertReadOnly`, so no amount of editing
+ * a path string there can produce a write. This is the only function in the
+ * repository that can reach `assertTheOneWrite`, and it accepts no `path`
+ * argument at all — the endpoint is {@link THE_ONE_WRITE} and the body is
+ * `{ accountId, durationMinutes }` with nothing else expressible.
+ *
+ * `durationMinutes` IS NOT A PARAMETER. REF-126 Stage 4 requires it hardcoded
+ * to 1, and it is — see {@link DURATION_MINUTES}. A caller cannot ask for an
+ * hour by passing a number, because there is nowhere to pass one.
+ *
+ * NO RETRY, EVER. Stage 4 item 5 says one call, and the documented failure
+ * "Account {id} already has an active lockout for user {userId}. New lockout
+ * requests are not permitted until the existing lockout expires." is the reason
+ * it matters: a retry after an apparent failure could be a retry after a
+ * SUCCESS, and the second attempt would then report a false negative about a
+ * lock that is really in place. One call, whatever happens.
+ *
+ * THE RESPONSE IS RETURNED RAW, and that is deliberate: the caller must read
+ * `errorText` rather than `ok`, because Tradovate answers a failure with HTTP
+ * 200 and an `errorText` field (`src/lib/tradovate/types.ts:86-87`). A helper
+ * that collapsed this to a boolean would be the bug.
+ */
+export const DURATION_MINUTES = 1;
+
+export interface WriteResult {
+  status: number | null;
+  /** Whether the HTTP call completed — NOT whether the lockout was created. */
+  completed: boolean;
+  /** The upstream body, verbatim. `null` when the call did not complete. */
+  response: unknown;
+  outcome: CallResult['outcome'];
+  note: string;
+}
+
+export async function callTheOneWrite(options: {
+  accessToken: string;
+  apiUrl: string;
+  userId: string;
+  accountId: number;
+}): Promise<WriteResult> {
+  assertTheOneWrite(THE_ONE_WRITE);
+
+  try {
+    const response = await tradovateRequest<unknown>(THE_ONE_WRITE, {
+      accessToken: options.accessToken,
+      apiUrl: options.apiUrl,
+      userId: options.userId,
+      body: { accountId: options.accountId, durationMinutes: DURATION_MINUTES },
+      method: 'POST',
+    });
+    return { status: 200, completed: true, response, outcome: 'ok', note: 'הקריאה הושלמה — יש לקרוא errorText' };
+  } catch (error) {
+    const { status, outcome, note } = classify(error);
+    // NOTE THE HONEST GAP: a call that threw may still have been APPLIED
+    // upstream. A 500 or a dropped connection after Tradovate committed the
+    // lockout looks identical here to one that never reached it. That is why
+    // the handler re-reads the status afterwards instead of inferring it, and
+    // why there is no retry.
+    return { status, completed: false, response: null, outcome, note };
+  }
 }
