@@ -100,6 +100,11 @@ export async function generateMetadata({
     url: `/share/${token}/image`,
     width: CARD_SIZES.og.width,
     height: CARD_SIZES.og.height,
+    // `og:image:type`, which several unfurlers use to decide whether to fetch
+    // the image at all rather than discovering the format after downloading it.
+    // Hard-coded because the route has exactly one output format: ImageResponse
+    // rasterises through resvg to PNG and takes no format option.
+    type: 'image/png',
     alt: 'כרטיס יום המסחר',
   };
 
@@ -111,6 +116,18 @@ export async function generateMetadata({
       type: 'article',
       locale: 'he_IL',
       siteName: 'Reflect',
+      // `og:url` — the canonical address of this card, and it was the one tag
+      // on the unfurl checklist genuinely absent. Next does NOT deep-merge
+      // `openGraph`: the root layout's block (layout.tsx, `url: '/'`) is
+      // replaced wholesale by this one, so an `openGraph` here without `url`
+      // emits no og:url at all rather than inheriting the apex.
+      //
+      // Relative, for the same reason the image is: `metadataBase` resolves it
+      // to the canonical origin, whereas an origin read off a request header
+      // would be forgeable and would get the scheme wrong behind the proxy.
+      // Under /demo that makes this the real /share path, which is correct —
+      // the fixture route is a test surface, not a canonical address.
+      url: `/share/${token}`,
       title,
       description,
       images: [image],

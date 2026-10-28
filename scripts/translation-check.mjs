@@ -17,29 +17,41 @@
  *   - descend into same-origin iframes: the landing page embeds the whole app
  *     in one, so it ran unverified under every earlier "all routes pass"
  *
+ * It also carries one check that is not about translation at all — the share
+ * card's Open Graph tags (`checkShareUnfurl` at the foot of this file). It
+ * lives here because this is the suite that already serves a build and already
+ * holds the /demo share route, and splitting it out would mean a second
+ * harness booting a second server to fetch two URLs.
+ *
  * Usage: node scripts/translation-check.mjs [baseUrl]
- * Exits non-zero if any page crashes or the embedded demo fails to render.
+ * Exits non-zero if any page crashes, the embedded demo fails to render, or the
+ * share page's unfurl tags regress.
  */
 import playwright from 'playwright';
 
 const { chromium } = playwright;
 
 const BASE = process.argv[2] || process.env.BASE || 'http://localhost:3000';
+
+/**
+ * REF-125. The public share card, through /demo so it renders from fixtures
+ * rather than needing a live token in a real database.
+ *
+ * THE TOKEN MUST STAY IN STEP WITH `DEMO_SHARE_TOKEN` in
+ * src/lib/demo/fixtures.ts, and it is a literal here because this script is
+ * plain node and cannot import TypeScript. scripts/share-leak-check.ts §8
+ * asserts the two match — without that, drifting them makes this route visit
+ * the not-found page, find no error boundary, and pass green while testing
+ * nothing. The same is true if '/share' ever leaves isMarketingRoute in
+ * src/proxy.ts, which that suite also checks.
+ */
+const SHARE_ROUTE = '/demo/share/demoshare0000000000000000demo';
+
 const ROUTES = [
   '/', '/terms', '/privacy', '/risk-disclosure', '/login', '/signup',
   '/demo/dashboard', '/demo/trades', '/demo/stats', '/demo/journal',
   '/demo/setups', '/demo/notebook', '/demo/coach', '/demo/rules', '/demo/strategies',
-  // REF-125. The public share card, through /demo so it renders from fixtures
-  // rather than needing a live token in a real database.
-  //
-  // THE TOKEN MUST STAY IN STEP WITH `DEMO_SHARE_TOKEN` in
-  // src/lib/demo/fixtures.ts, and it is a literal here because this script is
-  // plain node and cannot import TypeScript. scripts/share-leak-check.ts
-  // asserts the two match — without that, drifting them makes this entry visit
-  // the not-found page, find no error boundary, and pass green while testing
-  // nothing. The same is true if '/share' ever leaves isMarketingRoute in
-  // src/proxy.ts, which that suite also checks.
-  '/demo/share/demoshare0000000000000000demo',
+  SHARE_ROUTE,
 ];
 
 // The error boundary's heading (src/app/error.tsx). Its presence means a
@@ -235,6 +247,91 @@ async function checkEmbeddedDemo(browser) {
   await ctx.close();
 }
 
+/**
+ * The share card's unfurl tags (REF-125 Stage 3, REF-128).
+ *
+ * NO BROWSER, AND THAT IS THE ASSERTION. Everything else in this file drives
+ * Playwright; this one fetches raw HTML with `fetch` and regexes the markup,
+ * because the property under test is that the tags are in the SERVER's
+ * response. WhatsApp, facebookexternalhit and Telegram run no JavaScript, so a
+ * head assembled client-side is a head they never see — and a Playwright
+ * assertion would pass on exactly that broken page, since by the time it reads
+ * the DOM React has hydrated and put the tags there. Reading the bytes off the
+ * wire is the only version of this check that can fail for the right reason.
+ *
+ * WHY THESE SIX TAGS. Each is a way the preview degrades to a bare link rather
+ * than erroring visibly: no og:image is no card; a RELATIVE og:image is the
+ * classic form of that, since unfurlers do not resolve it against anything and
+ * `metadataBase` in src/app/layout.tsx is the only reason ours ships absolute;
+ * wrong dimensions get the card cropped to a thumbnail; a missing og:title
+ * leaves the URL as its own headline.
+ *
+ * THE IMAGE IS FETCHED AT THE LOCAL PATH, NOT AT og:image's URL. og:image is
+ * absolute against the hardcoded apex, so following it from a local run would
+ * test production and pass green against a broken build (and a CI run would
+ * silently depend on the internet). The absoluteness is asserted as a string;
+ * the fetch goes to this run's own BASE.
+ */
+async function checkShareUnfurl() {
+  const label = 'share unfurl tags';
+  const problems = [];
+  const bot = { 'user-agent': 'WhatsApp/2.23.20.0 A' };
+
+  // No cookie jar: `fetch` sends none, which is the anonymous crawler's case —
+  // the one src/proxy.ts has to let past the auth gate.
+  const res = await fetch(BASE + SHARE_ROUTE, { headers: bot, redirect: 'manual' });
+  const html = res.status === 200 ? await res.text() : '';
+  if (res.status !== 200) problems.push(`page answered ${res.status} (unfurlers need a 200)`);
+
+  // `<head>` only. A string that happens to appear in the page body, or in a
+  // serialised RSC payload further down, is not a meta tag.
+  const head = html.slice(0, html.indexOf('</head>') + 1);
+  const meta = (property) => {
+    const m = head.match(
+      new RegExp(`<meta[^>]+(?:property|name)="${property}"[^>]*content="([^"]*)"`, 'i')
+    ) || head.match(
+      new RegExp(`<meta[^>]+content="([^"]*)"[^>]+(?:property|name)="${property}"`, 'i')
+    );
+    return m === null ? null : m[1];
+  };
+
+  const ogImage = meta('og:image');
+  if (ogImage === null) problems.push('no og:image in the server-rendered head');
+  else if (!/^https:\/\/[^/]+\/.+/.test(ogImage)) {
+    problems.push(`og:image is not an absolute https URL: ${ogImage}`);
+  }
+
+  const ogTitle = meta('og:title');
+  if (ogTitle === null || ogTitle.trim() === '') problems.push('no og:title');
+
+  if (meta('og:description') === null) problems.push('no og:description');
+  if (meta('og:url') === null) problems.push('no og:url');
+  if (meta('og:image:type') !== 'image/png') {
+    problems.push(`og:image:type is ${meta('og:image:type')}, expected image/png`);
+  }
+  const dims = `${meta('og:image:width')}x${meta('og:image:height')}`;
+  if (dims !== '1200x630') problems.push(`og:image dimensions are ${dims}, expected 1200x630`);
+
+  // The route behind og:image, as the crawler reaches it: a bot UA, no
+  // cookies, and no redirect followed — an auth bounce must fail here rather
+  // than be quietly resolved into a 200 for the login page.
+  const img = await fetch(`${BASE}${SHARE_ROUTE}/image`, { headers: bot, redirect: 'manual' });
+  const bytes = img.status === 200 ? (await img.arrayBuffer()).byteLength : 0;
+  const type = img.headers.get('content-type');
+  if (img.status !== 200) problems.push(`image route answered ${img.status}`);
+  else if (type !== 'image/png') problems.push(`image Content-Type is ${type}, expected image/png`);
+  // WhatsApp's own ceiling, and the tightest of the platforms' limits.
+  else if (bytes > 300 * 1024) problems.push(`image is ${Math.round(bytes / 1024)}KB, over 300KB`);
+
+  if (problems.length) failures.push(label);
+  console.log(
+    `${problems.length ? 'FAIL  ' : 'ok    '} ${label.padEnd(20)} ` +
+    `og:image=${ogImage === null ? 'missing' : ogImage.replace(/^https:\/\//, '')} ` +
+    `png=${Math.round(bytes / 1024)}KB`
+  );
+  problems.forEach((p) => console.log('         ' + p));
+}
+
 const browser = await chromium.launch();
 console.log(`translated-page suite against ${BASE}\n`);
 for (const route of ROUTES) await checkRoute(browser, route);
@@ -243,8 +340,11 @@ await checkEmbeddedDemo(browser);
 await browser.close();
 
 console.log('');
+await checkShareUnfurl();
+
+console.log('');
 if (failures.length) {
   console.log(`FAILED (${failures.length}): ${failures.join(', ')}`);
   process.exit(1);
 }
-console.log(`passed: ${ROUTES.length} routes + embedded demo`);
+console.log(`passed: ${ROUTES.length} routes + embedded demo + share unfurl`);
