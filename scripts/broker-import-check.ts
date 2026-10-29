@@ -6192,6 +6192,19 @@ const MOVED_HISTORY: StopHistory = {
   preFillVersions: 0,
   anchoredAtFill: true,
   otherTargets: [],
+  // The target was placed with the bracket and left alone (REF-130 part ג).
+  // 4525 is ABOVE the 4510.25 entry, which is the only side a long's target can
+  // pay out on, so the side is `'gain'` — and `targetHistoryGroup()` is where
+  // the wrong-side shape and the four move readings are pinned.
+  tp_history: {
+    verdict: 'kept',
+    initialTp: 4525,
+    finalTp: 4525,
+    targetSide: 'gain',
+    movedCount: 0,
+    direction: null,
+    targetCount: 1,
+  },
   // One bracket, which is what the measured trade had and what every fixture
   // here is a departure from (REF-113 Stage 5). ONE TRACK since Stage 6 — the
   // stop was dragged rather than cancelled and replaced, so the count is the
@@ -6228,6 +6241,18 @@ const NONE_HISTORY: StopHistory = {
   noStopPlaced: true,
   source: 'none',
   versions: [],
+  // No stop AND no target. `'none'` here is the same kind of finding the stop's
+  // is — we read the orders and there was no target order — which is why it is a
+  // document rather than the null an unread row carries.
+  tp_history: {
+    verdict: 'none',
+    initialTp: null,
+    finalTp: null,
+    targetSide: null,
+    movedCount: 0,
+    direction: null,
+    targetCount: 0,
+  },
   // No protective order to count. Zero and one are different claims, and
   // neither is "we did not look" — that is the column being NULL.
   stopCount: 0,
@@ -6268,6 +6293,12 @@ const UNKNOWN_HISTORY: StopHistory = {
   verdict: 'unknown',
   reason: 'interday',
   noStopPlaced: false,
+  // NULL AND NOT NONE_HISTORY'S `'none'` DOCUMENT (REF-130 part ג). An
+  // `'unknown'` is `unknownHistory()`, which returns before any candidate is
+  // classified, so there is no target reading at all — where NONE_HISTORY read
+  // the orders and found no target. Spelling it out here rather than inheriting
+  // it is what keeps the fixture the shape the writer actually produces.
+  tp_history: null,
 };
 
 /** A trailing stop: it moved, and the moves were the server's. */

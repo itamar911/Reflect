@@ -439,6 +439,140 @@ export const MAX_WINDOW_CANDIDATES_PER_TRADE = 12;
  */
 const WINDOW_TOLERANCE_MS = 60_000;
 
+/**
+ * What the broker's TARGET orders say, as a sub-document of {@link StopHistory}
+ * (REF-130 part ג).
+ *
+ * A NESTED DOCUMENT AND NOT A COLUMN, AND NOT NEW KEYS AT THE TOP LEVEL EITHER.
+ * `stop_history` is JSONB with no CHECK (migration 038 says so and says why) and
+ * the import already writes the WHOLE object, so this needs no migration — every
+ * row written from here on carries it and no row before it does. Nesting keeps
+ * the two readings separable: a reader that wants the stop verdict is not handed
+ * four more fields it has to know are about something else, and
+ * `lib/journal/stopHistory.ts` can answer null for the target without answering
+ * null for the stop.
+ *
+ * THE KEY IS `tp_history`, SPELLED THE COLUMN'S WAY RATHER THAN THE DOCUMENT'S.
+ * Every other key in {@link StopHistory} is camelCase; this one is snake_case
+ * because REF-130 names it after the column it deliberately is NOT, and a stored
+ * key is the one thing a rename cannot reach — rows carrying it will outlive any
+ * tidying of this file. The reader maps it to a camelCase field.
+ *
+ *
+ * THREE THINGS IT DOES NOT DO, AND THE MIDDLE ONE IS THE REAL WORK
+ * ----------------------------------------------------------------
+ *
+ *   - **No fill anchor.** {@link StopHistory.initialStop} is the stop IN FORCE
+ *     AT THE FILL, decided by a clock against `/command/list`. There is no such
+ *     reading here: {@link initialTp} is the first price the chosen target order
+ *     ever stated, so a bracket re-priced behind an entry that moved before it
+ *     filled reports the pre-fill price and counts the re-pricing as a move.
+ *   - **No exit-drag cut.** {@link withoutExitDrag} removes the step where a
+ *     trader drags a STOP onto the market to force an exit. The same thing
+ *     happens to targets — dragging a limit down to the bid is how a long gets
+ *     out now rather than at the target — and it is not cut here, so that trade
+ *     reads as a large `'closer'`. THIS IS THE KNOWN FALSE POSITIVE of the
+ *     feature. It is why every sentence built from this is neutral in both
+ *     directions and why nothing scores it; see lib/journal/stopHistory.ts.
+ *   - **No track grouping.** {@link stopTracks} reads a cancelled stop and its
+ *     replacement as one stop. A target cancelled and replaced is two orders
+ *     here, so the replacement is a second candidate rather than a continuation,
+ *     and the chain is not followed.
+ *
+ * DISPLAY ONLY. No score reads this, no rule reads this, and nothing derived
+ * from it reaches `moved_sl` or any other self-report column.
+ */
+export interface TargetHistory {
+  /**
+   * The answer, in the four values {@link StopHistory.verdict} already uses.
+   *
+   *   `'moved'`   a target existed and its price changed at least once
+   *   `'kept'`    a target existed and never changed
+   *   `'none'`    we read the orders and there was no target — a FINDING
+   *   `'unknown'` we read them and cannot describe what we found. The ONE
+   *               reason this stage produces: the chosen target was on the
+   *               WRONG SIDE of the entry. See {@link targetSide}.
+   */
+  verdict: 'moved' | 'kept' | 'none' | 'unknown';
+  /**
+   * The first price the chosen target order stated. Null on `'none'` and on
+   * `'unknown'`.
+   *
+   * NOT WHAT `broker_take_profit` HOLDS, on a wrong-side row. That column takes
+   * {@link StopHistory.initialTarget}, which is reported even when every
+   * candidate was on the losing side of the entry — see
+   * {@link StopHistory.initialTarget}. This field is null there instead, so a
+   * reader branching on this document can never print that price.
+   */
+  initialTp: number | null;
+  /** The last price it stated. Null for {@link initialTp}'s reasons. */
+  finalTp: number | null;
+  /**
+   * Which side of the entry {@link initialTp} sat on. The target's twin of
+   * {@link StopHistory.initialStopSide}, and the field that column never had.
+   *
+   *   `'gain'`  above the entry for a long, below it for a short — the only
+   *             side a target can pay out on.
+   *   `'wrong'` the other side, which says our own attribution picked an order
+   *             that cannot have been this trade's target.
+   *   `null`    there was no target to have a side.
+   *
+   * MEASURED, NOT HYPOTHETICAL, and it is the defect REF-130 was opened over:
+   * {@link nearestTarget} partitions its candidates by side and then returns
+   * `priced[0]` unconditionally, so when EVERY candidate is wrong-side it still
+   * returns one — exactly as the stop's reduce does, and with no field saying
+   * so. `broker_take_profit` has therefore been able to hold a price on the
+   * losing side of the entry since Stage 3. This is that field.
+   */
+  targetSide: 'gain' | 'wrong' | null;
+  /**
+   * How many times the chosen target's price changed, over CONSECUTIVE
+   * VERSIONS.
+   *
+   * THE CHOSEN ORDER'S AND NOT A SUM, which is where this differs from
+   * {@link StopHistory.movedCount} and the difference is honest rather than
+   * convenient: that field sums across protective orders because "did you move
+   * your risk" is answered by any of them, and there is no equivalent question
+   * about a target. A scaled exit's second target is in
+   * {@link StopHistory.otherTargets} and its revisions are not counted here.
+   *
+   * A RESTATED PRICE IS NOT A MOVE, for {@link StopHistory.movedCount}'s
+   * reason: Tradovate mints a version for a quantity or TIF modify, and the
+   * measured entry trigger had seven versions and three distinct prices.
+   */
+  movedCount: number;
+  /**
+   * Which way it went, over CONSECUTIVE STEPS and never end-to-end.
+   *
+   *   `'closer'`  every counted step moved the target TOWARD the entry
+   *   `'farther'` every counted step moved it AWAY from the entry
+   *   `'mixed'`   both happened
+   *
+   * Null when nothing moved.
+   *
+   * SIDE-AWARE, AND THAT IS THE WHOLE OF THE DERIVATION. It is measured on the
+   * GAIN the target states — `price - entry` for a long, `entry - price` for a
+   * short — so LOWERING a long's target brings it closer and RAISING a short's
+   * does, which is the inverse of the stop's test and the reason this cannot be
+   * read off whether the number went up or down.
+   *
+   * AND NEITHER DIRECTION IS A FAILING. A trader who pulls a target in is
+   * taking what the market offered; a trader who pushes one out is letting a
+   * winner run. The stop's `'widened'` is a warning because the risk grew;
+   * nothing grows here, which is why lib/journal/stopHistory.ts words both
+   * directions neutrally and names the entry explicitly in each.
+   */
+  direction: 'closer' | 'farther' | 'mixed' | null;
+  /**
+   * How many priced target orders this row chose between.
+   *
+   * Above one is a scaled exit — or our own attribution offering more than one
+   * candidate — and it is what tells a reader that {@link movedCount} and
+   * {@link direction} describe ONE of several real targets. Zero on `'none'`.
+   */
+  targetCount: number;
+}
+
 /** What the broker says about one trade's protective orders. The JSONB body. */
 export interface StopHistory {
   /**
@@ -522,7 +656,19 @@ export interface StopHistory {
    * ninety ticks below it the trader was actually protected at.
    */
   finalStop: number | null;
-  /** The target nearest the entry. This is what `broker_take_profit` holds. */
+  /**
+   * The target nearest the entry. This is what `broker_take_profit` holds.
+   *
+   * AND IT MAY BE ON THE WRONG SIDE OF THE ENTRY (REF-130 part ג).
+   * {@link nearestTarget} partitions its candidates by side and then returns the
+   * best of whatever it has, so when EVERY candidate was wrong-side this is a
+   * price that could never have paid out — the stop defect's twin, with no
+   * `initialStopSide` beside it until now. {@link TargetHistory.targetSide} is
+   * that field. ANY READER PUTTING THIS NUMBER IN FRONT OF A TRADER MUST BRANCH
+   * ON IT, exactly as a reader of {@link initialStop} must branch on
+   * {@link initialStopSide}; `brokerTargetToShow` in lib/journal/stopHistory.ts
+   * is where that is done once.
+   */
   initialTarget: number | null;
   /**
    * How many times a stop price changed, inside the counted window — SUMMED
@@ -643,6 +789,28 @@ export interface StopHistory {
   anchoredAtFill: boolean;
   /** The targets that were not chosen, nearest first (§1.3 of decision 3). */
   otherTargets: number[];
+  /**
+   * What happened to the chosen target, or null for "we did not look"
+   * (REF-130 part ג).
+   *
+   * NULL AND NOT A `'unknown'` DOCUMENT on the branches that never classified a
+   * candidate — the inter-day case, the fan-out ceiling, a failed version read.
+   * Those are {@link unknownHistory}, and there "we never looked" is the honest
+   * answer; a `verdict: 'unknown'` inside the sub-document is reserved for the
+   * one thing we DID look at and cannot describe, which is a target on the
+   * wrong side of the entry. A reader of the stored column cannot tell those
+   * two apart from an absent key either, and does not need to: both mean say
+   * nothing.
+   *
+   * SO AN ABSENT KEY IS A THIRD STATE FOR ANYONE READING THE STORED COLUMN, for
+   * {@link anchoredAtFill}'s reason and with the same remedy. Every row written
+   * before REF-130 carries no `tp_history`, there is no backfill and there
+   * cannot be one — `./import.ts` derives only rows where `stop_history IS
+   * NULL`, and `/order/list` is `depthDays = 0`, so the orders those rows came
+   * from are gone. lib/journal/stopHistory.ts reads it as nullable for that
+   * reason, and every surface REF-130 adds shows nothing on a row that lacks it.
+   */
+  tp_history: TargetHistory | null;
   /**
    * How many CONCURRENT protective stops this row's verdict was read from —
    * TRACKS, not orders (REF-113 Stage 5, redefined in Stage 6).
@@ -1281,6 +1449,11 @@ function unknownHistory(
     preFillVersions: 0,
     anchoredAtFill: false,
     otherTargets: [],
+    // NULL BECAUSE NOTHING WAS CLASSIFIED. Every branch that reaches here
+    // returned before the candidates were split into stops and targets, so
+    // there is no target reading to report — not a `'none'`, which would claim
+    // we looked and found no target. See {@link StopHistory.tp_history}.
+    tp_history: null,
     stopCount: 0,
     // NEITHER OF THESE IS A FINDING ON AN `'unknown'` and the shape cannot say
     // so in its own types — the fields are non-optional, exactly as
@@ -1388,9 +1561,13 @@ export function deriveStopHistory(params: {
   const stops = pool.filter((order) => isStopType(order.type)).filter(
     (order) => stopPrices(order.versions).length > 0
   );
+  // `targetPrices(...).length > 0` AND NOT `targetPrice(...) !== null`, which is
+  // the same test said the way the stop filter above says it (REF-130 part ג).
+  // The list is what the move count is read from, so the filter and the
+  // derivation now share one definition of "this order stated a price".
   const targets = pool
     .filter((order) => isTargetType(order.type))
-    .filter((order) => targetPrice(order.versions) !== null);
+    .filter((order) => targetPrices(order.versions).length > 0);
 
   // The quantity test, and it applies to INFERRED candidates only. An order for
   // more contracts than the position held cannot be protecting it — but a
@@ -1434,6 +1611,12 @@ export function deriveStopHistory(params: {
       preFillVersions: 0,
       anchoredAtFill: false,
       otherTargets: chosenTarget.otherTargets,
+      // A REAL TARGET READING ON A TRADE WITH NO STOP (REF-130 part ג). The
+      // candidates WERE classified on this branch — that is what makes `'none'`
+      // a finding rather than a failure — so the targets among them were
+      // classified too, and a trader who placed a target and no stop is a shape
+      // this row can describe.
+      tp_history: targetHistory(chosenTarget, trade),
       // Zero protective orders is what `'none'` MEANS, so this restates the
       // verdict rather than adding to it — and it keeps the field non-optional,
       // which is what stops a reader having to tell "no stops" from "no key".
@@ -1606,6 +1789,7 @@ export function deriveStopHistory(params: {
     preFillVersions: stopAtEntry ? stop.preFill : 0,
     anchoredAtFill: stop.anchoredAtFill,
     otherTargets: chosenTarget.otherTargets,
+    tp_history: targetHistory(chosenTarget, trade),
     stopCount: ranked.length,
     stopAtEntry,
     lateStop,
@@ -2227,13 +2411,29 @@ function signedRisk(price: number, trade: BrokerTrade): number {
   return trade.direction === 'long' ? trade.entryPrice - price : price - trade.entryPrice;
 }
 
-/** A target's price: the limit price of its first version. */
-function targetPrice(versions: readonly TradovateOrderVersion[]): number | null {
+/**
+ * The limit prices this target order actually stated, oldest first. REF-130.
+ *
+ * EXACTLY {@link stopPrices} OVER `price` INSTEAD OF `stopPrice`, and the
+ * parallel is the point rather than a coincidence: a version with no stated
+ * price is dropped rather than read as a change, which is edge case 5 said about
+ * targets — a trader who closes by hand leaves the target `Canceled`, and a
+ * cancellation IS NOT A MOVE.
+ *
+ * THIS REPLACED A `targetPrice` THAT RETURNED THE FIRST PRICE AND STOPPED. That
+ * function was all `nearestTarget` had ever needed, and discarding the rest of
+ * the list one line after the versions had been fetched, classified and paired
+ * is the whole of what REF-130 part ג calls "already fetched and then thrown
+ * away". `[0]` is still the price every pre-REF-130 caller wanted, so nothing
+ * that reads {@link StopHistory.initialTarget} or `broker_take_profit` moves.
+ */
+function targetPrices(versions: readonly TradovateOrderVersion[]): number[] {
+  const prices: number[] = [];
   for (const version of versions) {
     const price = finite(version.price);
-    if (price !== null) return price;
+    if (price !== null) prices.push(price);
   }
-  return null;
+  return prices;
 }
 
 /**
@@ -2260,30 +2460,169 @@ function targetPrice(versions: readonly TradovateOrderVersion[]): number | null 
 function nearestTarget(
   orders: readonly ProtectiveOrder[],
   trade: BrokerTrade
-): { initialTarget: number | null; otherTargets: number[]; source: 'linked' | 'inferred' } {
+): ChosenTarget {
   const { entryPrice } = trade;
   /** What reaching this target would have paid. Negative is the wrong side. */
   const gainOf = (price: number): number =>
     trade.direction === 'long' ? price - entryPrice : entryPrice - price;
 
+  // CARRIES THE WHOLE PRICE LIST AND RANKS ON `prices[0]` (REF-130 part ג).
+  // `prices[0]` is the number the old `targetPrice` returned, so the ordering,
+  // the partition and `initialTarget` are byte-identical to what they were — the
+  // list is additional rather than instead. Ranked on the FIRST price and not
+  // the last for {@link StopHistory.initialStopSide}'s reason said about
+  // targets: a target dragged onto the market to force an exit ends up near the
+  // entry legitimately, and ranking on where it ENDED would let that drag
+  // outrank the real target.
   const priced = orders
-    .map((order) => ({ price: targetPrice(order.versions), layer: order.layer }))
-    .filter((entry): entry is { price: number; layer: Layer } => entry.price !== null)
+    .map((order) => ({ prices: targetPrices(order.versions), layer: order.layer }))
+    .filter((entry) => entry.prices.length > 0)
     .sort(
       (a, b) =>
         // The side first, as a partition and not as a weight — a wrong-side
         // target never outranks a real one however close it sits. Then the
         // nearest within the group.
-        Number(gainOf(b.price) > 0) - Number(gainOf(a.price) > 0) ||
-        Math.abs(a.price - entryPrice) - Math.abs(b.price - entryPrice)
+        Number(gainOf(b.prices[0]) > 0) - Number(gainOf(a.prices[0]) > 0) ||
+        Math.abs(a.prices[0] - entryPrice) - Math.abs(b.prices[0] - entryPrice)
     );
 
-  if (priced.length === 0) return { initialTarget: null, otherTargets: [], source: 'linked' };
+  if (priced.length === 0) {
+    return {
+      initialTarget: null,
+      otherTargets: [],
+      source: 'linked',
+      prices: [],
+      side: null,
+      count: 0,
+    };
+  }
+
+  const chosen = priced[0];
+  return {
+    initialTarget: chosen.prices[0],
+    otherTargets: priced.slice(1).map((entry) => entry.prices[0]),
+    source: chosen.layer === 'window' ? 'inferred' : 'linked',
+    prices: chosen.prices,
+    // THE FIELD `broker_take_profit` NEVER HAD. The sort above partitions by
+    // side and this reduce-free return still takes `priced[0]` whatever side it
+    // is on — which is correct, for the reason the stop's own reduce gives: an
+    // empty list would read as "the trader placed no target", and the best of a
+    // bad set reported WITH A FLAG SAYING SO is the honest answer. This is that
+    // flag. See {@link TargetHistory.targetSide}.
+    side: gainOf(chosen.prices[0]) > 0 ? 'gain' : 'wrong',
+    count: priced.length,
+  };
+}
+
+/** {@link nearestTarget}'s answer: the price, the losers, and the evidence. */
+interface ChosenTarget {
+  initialTarget: number | null;
+  otherTargets: number[];
+  source: 'linked' | 'inferred';
+  /** Every price the CHOSEN order stated, oldest first. REF-130 part ג. */
+  prices: number[];
+  /** Which side of the entry `prices[0]` sat on. REF-130 part ג. */
+  side: 'gain' | 'wrong' | null;
+  /** How many priced target orders there were to choose between. */
+  count: number;
+}
+
+/**
+ * How many times the target moved, and which way — over CONSECUTIVE STEPS.
+ *
+ * {@link countMoves} FOR TARGETS, AND DELIBERATELY MUCH SMALLER. That function
+ * takes a cut window, a trailing flag, an automation map and a bare-cancel step,
+ * because every one of those changes whether a stop MOVEMENT IS THE TRADER'S —
+ * and `moved_sl` can arm a `block_day` rule, so a move attributed wrongly locks
+ * someone out of the app. Nothing here reaches a rule or a score, so none of
+ * that machinery is bought: this is the version list, compared pairwise.
+ *
+ * CONSECUTIVE AND NEVER END-TO-END, which is {@link countMoves}'s §C and is the
+ * one piece of its reasoning that does carry over: a target pulled in and then
+ * pushed back out is `'mixed'`, not "unchanged", because both things happened.
+ *
+ * MEASURED ON THE GAIN AND NOT ON THE PRICE. `after < before` is the target
+ * moving TOWARD the entry for a long and a short alike, because `gainOf` has
+ * already read the side off the trade — the same rule `signedRisk` states for
+ * stops, inverted. Reading it off whether the number rose or fell would call
+ * every short's retreat an advance.
+ */
+function targetMoves(
+  prices: readonly number[],
+  trade: BrokerTrade
+): { movedCount: number; direction: TargetHistory['direction'] } {
+  const gainOf = (price: number): number =>
+    trade.direction === 'long' ? price - trade.entryPrice : trade.entryPrice - price;
+
+  let movedCount = 0;
+  let closer = false;
+  let farther = false;
+
+  for (let i = 1; i < prices.length; i += 1) {
+    const before = gainOf(prices[i - 1]);
+    const after = gainOf(prices[i]);
+    // A RESTATED PRICE IS NOT A MOVE — a quantity or TIF modify mints a version
+    // and states the same price. See {@link TargetHistory.movedCount}.
+    if (after === before) continue;
+    movedCount += 1;
+    if (after < before) closer = true;
+    else farther = true;
+  }
 
   return {
-    initialTarget: priced[0].price,
-    otherTargets: priced.slice(1).map((entry) => entry.price),
-    source: priced[0].layer === 'window' ? 'inferred' : 'linked',
+    movedCount,
+    direction:
+      movedCount === 0 ? null : closer && farther ? 'mixed' : closer ? 'closer' : 'farther',
+  };
+}
+
+/**
+ * The target sub-document, from the chosen candidate. PURE.
+ *
+ * THE WRONG-SIDE BRANCH CARRIES NO PRICES, and that is the whole reason this is
+ * a function rather than four fields spread through the two return literals. A
+ * target on the losing side of the entry is an order our own attribution picked
+ * wrongly, so there is nothing true to say about where it started, where it
+ * ended or which way it went — and `movedCount: 0` with `direction: null` beside
+ * a `'unknown'` verdict is the shape that cannot be mistaken for a reading.
+ * `broker_take_profit` still holds that price, because omitting it would be a
+ * behaviour change to a column eleven readers already have; what changes is that
+ * from here on there is a field that says the price is not to be believed.
+ */
+function targetHistory(chosen: ChosenTarget, trade: BrokerTrade): TargetHistory {
+  if (chosen.initialTarget === null) {
+    return {
+      verdict: 'none',
+      initialTp: null,
+      finalTp: null,
+      targetSide: null,
+      movedCount: 0,
+      direction: null,
+      targetCount: 0,
+    };
+  }
+
+  if (chosen.side === 'wrong') {
+    return {
+      verdict: 'unknown',
+      initialTp: null,
+      finalTp: null,
+      targetSide: 'wrong',
+      movedCount: 0,
+      direction: null,
+      targetCount: chosen.count,
+    };
+  }
+
+  const moves = targetMoves(chosen.prices, trade);
+  return {
+    verdict: moves.movedCount > 0 ? 'moved' : 'kept',
+    initialTp: chosen.prices[0],
+    finalTp: chosen.prices[chosen.prices.length - 1],
+    targetSide: 'gain',
+    movedCount: moves.movedCount,
+    direction: moves.direction,
+    targetCount: chosen.count,
   };
 }
 
