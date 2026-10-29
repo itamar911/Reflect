@@ -2699,6 +2699,7 @@ async function main() {
 
   await liveLoaderGroup();
   await liveOpenPnlGroup();
+  await liveGateShapeGroup();
   await liveRouteGroup();
   await liveCacheGroup();
   await liveFlatTransitionGroup();
@@ -4462,14 +4463,19 @@ async function liveLoaderGroup() {
 // count — a flat account must never be asked at all, and that is a property of
 // `loadOpenPositions`' control flow rather than a condition anyone remembers.
 
-/** `loadOpenPositions` against one scene, cold, on the `live` host alone. */
-async function openWith(data: Scene) {
+/**
+ * `loadOpenPositions` against one scene, cold, on the `live` host alone.
+ *
+ * `pnlEnabled` DEFAULTS TO TRUE HERE AND TO FALSE IN THE PRODUCT, which is the
+ * one place in this file the two disagree on purpose. Every group below this
+ * line was written about the figure, so the helper they share asks for it; the
+ * 29.10 gate's own group passes `false` and asserts what is then absent.
+ */
+async function openWith(data: Scene, pnlEnabled = true) {
   forgetContractNames();
   const readers = { live: reader(data), demo: reader(scene({ accounts: [], positions: [] })) };
   const pull = await loadOpenPositions({
-    readers, environment: 'live', tradovateUserId: ACCOUNT.userId, nowMs: NOW,
-    // The 29.10 gate, ON: these groups are about the figure itself.
-    pnlEnabled: true,
+    readers, environment: 'live', tradovateUserId: ACCOUNT.userId, nowMs: NOW, pnlEnabled,
   });
   return { pull, calls: readers.live.calls };
 }
@@ -4572,6 +4578,93 @@ async function liveOpenPnlGroup() {
     c('(16) no balance-shaped key reaches the loader\'s shape',
       [...allKeys(ok.pull.accounts)].filter((k) => /liq|cash|realiz|total|margin|withdraw/i.test(k)),
       []),
+  ]);
+
+  forgetContractNames();
+}
+
+// ── 29.10: the gate removes one request and nothing else ───────────────────
+//
+// The compliance decision is narrow and the risk is that the implementation is
+// not: "stop publishing the figure" is one line away from "stop polling", and
+// a poll that stops is a trader who is not told they are holding something —
+// which is the failure this whole feature exists to prevent.
+//
+// SO THE ASSERTION IS A SET DIFFERENCE, not a pair of expected lists. The
+// gated and ungated call sequences are both captured from the same scene and
+// the difference between them is asserted to be EXACTLY the snapshot path. A
+// change that also drops `/contract/item`, or that skips the position read when
+// there is no figure to put beside it, fails here rather than on somebody's
+// dashboard.
+
+async function liveGateShapeGroup() {
+  const held = [openPosition(2)];
+
+  const on = await openWith(scene({ positions: held }), true);
+  const off = await openWith(scene({ positions: held }), false);
+
+  // Flat, both ways: the poll that costs two reads must still cost two.
+  const flatOn = await openWith(scene({ positions: [POSITION] }), true);
+  const flatOff = await openWith(scene({ positions: [POSITION] }), false);
+
+  // What the gate took away, computed rather than written down.
+  const removed = on.calls.filter((path) => !off.calls.includes(path));
+  const added = off.calls.filter((path) => !on.calls.includes(path));
+
+  group('REF-108 29.10: the gate removes the snapshot POST and nothing else', [
+    c('(1) the only path the gate removes is the snapshot', removed, [SNAPSHOT_CALL]),
+    c('(2) and it adds nothing', added, []),
+
+    // The sequence in full, because (1) is a difference and a difference is
+    // satisfied by two empty lists.
+    c('(3) a gated poll is the three reads it was before Stage 4a',
+      off.calls, ['/account/list', '/position/list', '/contract/item']),
+    c('(4) the ungated poll is those three and the POST', on.calls,
+      ['/account/list', '/position/list', '/contract/item', SNAPSHOT_CALL]),
+
+    // The fixture rejects every POST path but the snapshot, so a count of the
+    // snapshot path IS the count of requests made with the second verb.
+    c('(5) a gated poll issues no POST at all',
+      off.calls.filter((path) => path === SNAPSHOT_CALL).length, 0),
+
+    // ── AND THE POSITION IS STILL THERE, WHICH IS THE POINT ────────────────
+    c('(6) the position survives the gate, with its account and host',
+      [off.pull.accounts.length, off.pull.accounts[0].brokerAccountId, off.pull.accounts[0].host],
+      [1, ACCOUNT.id, 'live']),
+    c('(7) the contract, the quantity and the side are all unchanged',
+      off.pull.accounts[0].positions.map((p) => [p.contractName, p.netPos]),
+      on.pull.accounts[0].positions.map((p) => [p.contractName, p.netPos])),
+    c('(8) and `/contract/item` still ran, so the name is a name',
+      off.pull.accounts[0].positions[0].contractName, 'ESZ6'),
+    c('(9) asOf is still the instant of the pull', off.pull.asOf, new Date(NOW).toISOString()),
+
+    // The figure, and only the figure.
+    c('(10) the figure is null under the gate', off.pull.accounts[0].openPnl, null),
+    c('(11) and it is the fixture\'s number without it', on.pull.accounts[0].openPnl,
+      SNAPSHOT_OPEN_PNL),
+
+    // A FLAT POLL COSTS WHAT IT ALWAYS COST, both ways. The gate must not be
+    // the thing that makes the common case cheaper, because then somebody
+    // measuring the poll would read the gate as the optimisation it is not.
+    c('(12) a flat poll is two reads, gated', flatOff.calls,
+      ['/account/list', '/position/list']),
+    c('(13) and two reads ungated', flatOn.calls, ['/account/list', '/position/list']),
+    c('(14) a flat poll reports nothing either way',
+      [flatOff.pull.accounts, flatOn.pull.accounts], [[], []]),
+
+    // ── AND THE POLL ITSELF KEEPS ITS CADENCE ──────────────────────────────
+    //
+    // `nextPollMs` reads the HOLDINGS and the figure is not one of them, so a
+    // gated answer is still the fast interval while something is open. Asserted
+    // from a gated response rather than from a hand-built pull: the number the
+    // clock sees has to come through the route's own projection, which is where
+    // a "nothing to show, so slow down" shortcut would be tempting to add.
+    c('(15) a held position still polls at the holding interval, gated',
+      nextPollMs({ source: 'broker_verified', asOf: off.pull.asOf, accounts: [
+        { accountId: LIVE_UUID, displayName: 'My Eval', positions: [{ contractName: 'ESZ6', netPos: 2 }], openPnl: null },
+      ] }), HOLDING_MS),
+    c('(16) and a gated answer is still worth polling for',
+      shouldKeepPolling({ source: 'broker_verified', asOf: off.pull.asOf, accounts: [] }), true),
   ]);
 
   forgetContractNames();
