@@ -119,6 +119,9 @@ import {
 // The 44px box itself, so (1) of the fold group is arithmetic over the two
 // constants that actually decide the clip rather than over a copy of either.
 import { SLOT_HEIGHT } from '../src/components/accounts/LivePnlSlot';
+// The compliance sentence, read from the card that renders it rather than
+// copied — the precedent is broker-import-check.ts importing SYNC_NOTE.
+import { NO_LIVE_PNL_NOTE } from '../src/components/settings/TradovateConnectionCard';
 import { moreLinesText } from '../src/lib/rules/todayLines';
 import type {
   TradovateAccount,
@@ -2700,6 +2703,7 @@ async function main() {
   await liveLoaderGroup();
   await liveOpenPnlGroup();
   await liveGateShapeGroup();
+  liveGateCopyGroup();
   await liveRouteGroup();
   await liveCacheGroup();
   await liveFlatTransitionGroup();
@@ -4668,6 +4672,69 @@ async function liveGateShapeGroup() {
   ]);
 
   forgetContractNames();
+}
+
+/**
+ * The one sentence that explains the absence, and the one place it may appear
+ * (compliance, 29.10).
+ *
+ * PINNED FOR `NO_PRICE_NOTE`'S REASON. Stage 4b deleted that constant and its
+ * two assertions together, which is what made the reword a decision rather than
+ * a diff; this sentence is the deliverable of a compliance decision, so it gets
+ * the same treatment from the start.
+ */
+function liveGateCopyGroup() {
+  group('REF-108 29.10: what the settings card says about the figure', [
+    c('(1) the sentence is pinned', NO_LIVE_PNL_NOTE,
+      'רווח/הפסד חי על פוזיציה פתוחה אינו זמין כרגע — נדרש רישיון נתוני שוק מהבורסה.'),
+
+    // "אינו זמין כרגע" and not "לא נתמך". The figure was measured working on
+    // 19.10; the only thing missing is an exchange licence, so "unsupported"
+    // would be false about our own integration.
+    c('(2) it says not-available-for-now, not unsupported',
+      [NO_LIVE_PNL_NOTE.includes('אינו זמין כרגע'), NO_LIVE_PNL_NOTE.includes('לא נתמך')],
+      [true, false]),
+
+    // It names the REASON. Without it the sentence is indistinguishable from a
+    // bug report, and a trader who reads it as one will ask support about it.
+    c('(3) and it names the reason', NO_LIVE_PNL_NOTE.includes('רישיון נתוני שוק'), true),
+
+    // NO PROMISE AND NO DATE. A CME Information License Agreement is an
+    // application with an outcome nobody here controls, and this card's
+    // RevokeNote is the precedent for stating only what has been verified.
+    c('(4) it promises nothing',
+      ['בקרוב', 'אנחנו עובדים', 'יהיה זמין', 'בעתיד'].filter((t) => NO_LIVE_PNL_NOTE.includes(t)),
+      []),
+
+    // Plain Hebrew for a trader. SYNC_NOTE's rule, same card, same reader —
+    // and "CME", "ILA" and "market data" are exactly what a draft written from
+    // the compliance thread would have carried over.
+    c('(5) no operator vocabulary reaches the card',
+      ['CME', 'ILA', 'NinjaTrader', 'API', 'market data', 'P&L', 'openPnL'].filter((t) =>
+        NO_LIVE_PNL_NOTE.toLowerCase().includes(t.toLowerCase())),
+      []),
+
+    // The NinjaTrader compliance line (TodayContextPanel §8): this card may
+    // describe app mechanics and may not advise about trading.
+    c('(6) and it is not shaped as advice',
+      ['כדאי', 'שים לב', 'אל תסחר', 'מומלץ'].filter((t) => NO_LIVE_PNL_NOTE.includes(t)), []),
+
+    // ── IT IS A SENTENCE, AND ONLY ON THAT CARD ─────────────────────────────
+    //
+    // ONE LINE, which is what the ticket asked for and what keeps it from
+    // becoming a paragraph nobody reads. A single terminating period.
+    c('(7) one sentence', NO_LIVE_PNL_NOTE.split('.').filter((s) => s.trim() !== '').length, 1),
+
+    // THE SURFACES THAT RENDER POSITIONS MUST NOT CARRY IT. Those lines poll
+    // every fifteen seconds on three surfaces, and an apology attached to a
+    // feature that is working is the thing Stage 4b deleted on purpose.
+    c('(8) no live surface explains the absence',
+      [...liveRows([solo('Solo', 2, null, 'ESZ6')], 'positions'),
+       ...liveRows([pair('Solo', null)], 'positions'),
+       ...liveRows([pair('Solo', null)], 'portfolios')]
+        .filter((row) => /רישיון|זמין|נתוני שוק/.test(row.text)),
+      []),
+  ]);
 }
 
 async function liveRouteGroup() {

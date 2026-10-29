@@ -6,6 +6,7 @@ import type { AlertSettingsData } from '@/components/settings/AlertsPanel';
 import DeleteAccountSection from '@/components/settings/DeleteAccountSection';
 import TradovateConnectionCard from '@/components/settings/TradovateConnectionCard';
 import { isUserAllowed } from '@/lib/tradovate/allowlist';
+import { isLivePnlEnabled } from '@/lib/tradovate/live-pnl';
 import { readConnectionSummary, type ConnectionStatus } from '@/lib/tradovate/connections';
 // REF-112 follow-up item 4 — the pre-expiry window, decided here so the card
 // receives a boolean rather than a deadline.
@@ -177,6 +178,12 @@ export default async function SettingsPage({ searchParams }: {
             // two above: re-derived from the stored row on every view, and
             // false whenever anything is unknown.
             expiringSoon={tradovateExpiringSoon}
+            // Compliance, 29.10. Read here rather than in the card because
+            // lib/tradovate/live-pnl.ts reads process.env and is server-only —
+            // the same reason `canConnect` is decided here. Unset is off, so
+            // the card explains the absence until a CME licence lands and the
+            // variable is set.
+            livePnlEnabled={isLivePnlEnabled()}
           />
         </Card>
       </div>

@@ -138,6 +138,41 @@ export const SYNC_NOTE =
   '01:00, ולכן עסקה שנסגרה אחרי 00:30 תגיע לכאן רק אם תפתח את Reflect לפני השעה הזאת.';
 
 /**
+ * Why there is no live P&L on an open position (compliance, 29.10).
+ *
+ * THE ONE PLACE IN THE PRODUCT THAT SAYS IT, and it is here rather than on the
+ * surfaces where the number is missing. That is the decision, and it is the
+ * opposite of the one Stage 3 made with `NO_PRICE_NOTE`:
+ *
+ * - The dashboard, the day panel and the portfolio cards render a position line
+ *   every fifteen seconds. A sentence about a licence, four times a minute, on
+ *   three surfaces, is an apology attached to a feature that is working — the
+ *   line says what the trader is holding, truthfully and completely.
+ * - This card is already where the integration explains itself: {@link
+ *   SYNC_NOTE} is the only explanation of how broker data arrives, and a reader
+ *   who wonders why there is no figure is a reader who has come looking. So the
+ *   answer is where the looking ends, once.
+ *
+ * WORDED AS A FACT ABOUT AN ENTITLEMENT, NOT AS A FAULT AND NOT AS A PROMISE.
+ * "אינו זמין כרגע" rather than "לא נתמך" — the figure was measured working on
+ * 19.10 and the only thing missing is a market-data licence from the exchange,
+ * so "unsupported" would be false. And no date, no "בקרוב", no "אנחנו עובדים
+ * על זה": a CME Information License Agreement is an application with an
+ * outcome nobody here controls, and this card's own RevokeNote sets the
+ * precedent for stating only what has been verified.
+ *
+ * No advice shape, for TodayContextPanel's NinjaTrader compliance reason — it
+ * describes what the product does, which is the same line SYNC_NOTE stays on.
+ *
+ * Exported because scripts/tradovate-today-check.ts pins it. The sentence is
+ * the deliverable of a compliance decision, so a reword has to be a decision
+ * taken again rather than a diff waved through — which is what deleting
+ * `NO_PRICE_NOTE`'s two assertions taught.
+ */
+export const NO_LIVE_PNL_NOTE =
+  'רווח/הפסד חי על פוזיציה פתוחה אינו זמין כרגע — נדרש רישיון נתוני שוק מהבורסה.';
+
+/**
  * The clock tokens inside SYNC_NOTE, as a split pattern.
  *
  * `01:00` and `00:30` are LTR tokens inside RTL sentences, and the bidi
@@ -253,6 +288,28 @@ export interface TradovateConnectionCardProps {
    * than after.
    */
   expiringSoon?: boolean;
+  /**
+   * Whether live P&L on an open position is available at all (compliance,
+   * 29.10).
+   *
+   * `TRADOVATE_LIVE_PNL_ENABLED`, decided on the server by
+   * `isLivePnlEnabled()` and arriving as a boolean — the same arrangement
+   * `canConnect` uses, and for the same reason: lib/tradovate/live-pnl.ts reads
+   * process.env.
+   *
+   * **A PROP RATHER THAN A CONSTANT SENTENCE, SO THE COPY CANNOT OUTLIVE THE
+   * RESTRICTION.** The figure is one environment variable from working (it was
+   * measured on 19.10 and only a CME licence is missing), and the day that
+   * variable is set, a card still explaining why there is no number would be
+   * the product lying about itself. One flag, one truth, both halves following
+   * it.
+   *
+   * DEFAULTS TO FALSE — unset is off, which is what the flag itself answers for
+   * an unset variable, so a caller who forgets gets the sentence rather than
+   * silence. The failure direction is to over-explain, never to show a figure
+   * we may not publish.
+   */
+  livePnlEnabled?: boolean;
 }
 
 export default function TradovateConnectionCard({
@@ -263,6 +320,7 @@ export default function TradovateConnectionCard({
   noLiveAccounts = false,
   notAvailable = false,
   expiringSoon = false,
+  livePnlEnabled = false,
 }: TradovateConnectionCardProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -319,6 +377,20 @@ export default function TradovateConnectionCard({
         </div>
 
         <SyncNote />
+
+        {/* Compliance, 29.10 — see NO_LIVE_PNL_NOTE.
+
+            HERE, UNDER SyncNote AND ABOVE EVERY STATE: the two sentences are
+            the same kind of thing — what the integration does and does not do,
+            true on every view, independent of whether this trader is connected.
+            Putting it inside one of the `canConnect` branches below would make
+            a fact about an exchange licence depend on this trader's allowlist.
+
+            Not a live region and no role: nothing announces it, because nothing
+            just changed. It is not news, it is the card describing itself. */}
+        {!livePnlEnabled && (
+          <p className="text-xs text-tg-muted mt-1.5 leading-relaxed">{NO_LIVE_PNL_NOTE}</p>
+        )}
 
         {/* REF-112-C item 2 — the refusal, said out loud.
             ABOVE the controls and outside both `canConnect` branches: it
