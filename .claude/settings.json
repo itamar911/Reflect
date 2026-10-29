@@ -6,6 +6,18 @@
       "Bash(git * --hard *)",
       "PowerShell(git reset --hard *)",
       "PowerShell(git * --hard *)",
+      "Bash(git checkout -- *)",
+      "Bash(git checkout .)",
+      "Bash(git checkout * -- *)",
+      "Bash(git checkout -f)",
+      "Bash(git checkout -f *)",
+      "Bash(git checkout *--force*)",
+      "PowerShell(git checkout -- *)",
+      "PowerShell(git checkout .)",
+      "PowerShell(git checkout * -- *)",
+      "PowerShell(git checkout -f)",
+      "PowerShell(git checkout -f *)",
+      "PowerShell(git checkout *--force*)",
       "Bash(rm *)",
       "PowerShell(rm *)",
       "PowerShell(Remove-Item *)",
@@ -47,7 +59,19 @@
     ],
     "allow": [
       "Read(.env.example)",
-      "Edit(.env.example)"
+      "Edit(.env.example)",
+      "Bash(npx tsc --noEmit)",
+      "Bash(npx tsc --noEmit *)",
+      "Bash(npm run lint)",
+      "Bash(npm run test:translation)",
+      "Bash(npm run test:share-card)",
+      "Bash(npm run test:share)",
+      "Bash(npm run test:null-safety)",
+      "Bash(npm run test:trade-gate)",
+      "mcp__claude_ai_Linear__get_issue",
+      "mcp__claude_ai_Linear__list_issues",
+      "mcp__claude_ai_Linear__list_comments",
+      "mcp__claude_ai_Linear__list_teams"
     ]
   }
 }
