@@ -4621,6 +4621,26 @@ async function liveGateShapeGroup() {
   const removed = on.calls.filter((path) => !off.calls.includes(path));
   const added = off.calls.filter((path) => !on.calls.includes(path));
 
+  // EVERY CONSOLE VERB AND NOT JUST `warn`, which is all `liveLogsOf` captures:
+  // a "the figure is gated" line is exactly the kind of thing that gets written
+  // as `console.info`, and a guard that could not see one would be worth
+  // nothing. See assertion (17).
+  const gatedLogs: string[] = [];
+  {
+    const real = { warn: console.warn, info: console.info, log: console.log };
+    const collect = (line: unknown) => void gatedLogs.push(String(line));
+    console.warn = collect;
+    console.info = collect;
+    console.log = collect;
+    try {
+      await openWith(scene({ positions: held }), false);
+    } finally {
+      console.warn = real.warn;
+      console.info = real.info;
+      console.log = real.log;
+    }
+  }
+
   group('REF-108 29.10: the gate removes the snapshot POST and nothing else', [
     c('(1) the only path the gate removes is the snapshot', removed, [SNAPSHOT_CALL]),
     c('(2) and it adds nothing', added, []),
@@ -4675,6 +4695,20 @@ async function liveGateShapeGroup() {
       ] }), HOLDING_MS),
     c('(16) and a gated answer is still worth polling for',
       shouldKeepPolling({ source: 'broker_verified', asOf: off.pull.asOf, accounts: [] }), true),
+
+    // ── THE GATE IS SILENT, AND ON THIS ROUTE THAT IS A REQUIREMENT ────────
+    //
+    // 240 polls an hour per trader. A line saying "the figure is gated" would
+    // be four lines a minute, per trader, restating a configured fact that
+    // never changes — and `readOpenPnl`'s own header already refuses to log
+    // anything here for the harder reason: the only thing a line could carry
+    // is which account is holding what, worth how much, which is the subject
+    // matter this route's privacy note exists to keep out of the logs.
+    //
+    // The absence of the figure is visible on the screen the trader is already
+    // looking at, and the flag's state is visible in Vercel. Neither needs a
+    // log line, and a count of something that is always zero is not a count.
+    c('(17) a gated poll writes nothing to the log', gatedLogs, []),
   ]);
 
   forgetContractNames();
