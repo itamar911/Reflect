@@ -19,8 +19,10 @@ import {
 } from '@/lib/journal/link';
 import {
   brokerStopToShow,
+  brokerTargetToShow,
   readStopHistory,
   stopMoveSentence,
+  targetMoveSentence,
 } from '@/lib/journal/stopHistory';
 import { realisedRr, rrRow } from '@/lib/journal/realisedRr';
 import { readTradeStages, stagePieces, stagesSentence } from '@/lib/journal/stages';
@@ -1789,6 +1791,25 @@ function TradeDetailModal({ trade, plans, onClose, onLinkResolved, onUnlink, deb
   const stops = readStopHistory(trade.stop_history);
   const brokerStop = brokerStopToShow(stops, trade.broker_stop_loss);
   const stopSentence = stopMoveSentence(stops);
+
+  // ── The broker's TARGET, in exact parallel (REF-130 part ג) ────────────────
+  //
+  // Both halves off the same sub-document for the stop pair's reason: the price
+  // is withheld for the four cases `brokerTargetToShow` names — no document, a
+  // row from before `tp_history`, no target placed, and a target on the WRONG
+  // SIDE of the entry — and the sentence appears only on a move.
+  //
+  // THE ROW IS ABSENT ENTIRELY WHERE THERE IS NOTHING TO SAY, which on this
+  // surface means absent from every manual trade and from every broker row
+  // imported before REF-130. Same reduction the `סטופ בברוקר` row above makes,
+  // and for the same reason: a `יעד בברוקר —` on a hand-logged trade is a
+  // column announcing a feature that does not apply to it.
+  const brokerTarget = brokerTargetToShow(stops, trade.broker_take_profit);
+  const targetSentence = targetMoveSentence(stops);
+  // Under the broker's target when there is one, and under the planned target
+  // when there is not — `stopSentenceAfter`'s rule, which puts the sentence
+  // wherever a trader looking for "what happened to my target" already is.
+  const targetSentenceAfter = brokerTarget !== null ? 'יעד בברוקר' : 'Take Profit';
   // Whichever of the two stop rows comes LAST, so the sentence sits under both
   // when there is a price and under the planned stop when there is not — which
   // is the `'none'` and `'unknown'` case, and exactly where a trader looking
@@ -1853,6 +1874,13 @@ function TradeDetailModal({ trade, plans, onClose, onLinkResolved, onUnlink, deb
       ? ([['סטופ בברוקר', brokerStop.toFixed(2)]] as [string, string][])
       : []),
     ['Take Profit', fmtPriceCell(trade.take_profit)],
+    // DIRECTLY UNDER THE PLANNED TARGET, in exact parallel to `סטופ בברוקר`
+    // under `Stop Loss` — "this is the target I wrote down, and this is the one
+    // the broker actually held" (REF-130 part ג). Absent entirely when the
+    // sub-document says nothing.
+    ...(brokerTarget !== null
+      ? ([['יעד בברוקר', brokerTarget.toFixed(2)]] as [string, string][])
+      : []),
     // PLANNED AND REALISED IN ONE ROW, because the comparison is the point and
     // a second row would be a second label for the same quantity (REF-123).
     // `rrRow` keeps the planned-only case byte-identical to what this row has
@@ -1926,6 +1954,22 @@ function TradeDetailModal({ trade, plans, onClose, onLinkResolved, onUnlink, deb
                     color: stopSentence.tone === 'warning' ? '#ef4444' : 'var(--color-tg-muted)',
                   }}>
                   {stopSentence.text}
+                </span>
+              </div>
+            )}
+            {/* AND WHAT IT SAW HAPPEN TO THE TARGET (REF-130 part ג). Same
+                block, one sentence, and NEVER a warning: `הורחק` on the stop
+                two rows up means the risk grew, and on the target it means a
+                winner was let run. Same word, opposite value — which is why
+                every sentence here names the entry explicitly and why there is
+                no `AlertTriangle` branch. lib/journal/stopHistory.ts holds the
+                wording and argues the tone. */}
+            {label === targetSentenceAfter && targetSentence !== null && (
+              <div className="flex items-start gap-1.5 pb-2.5 -mt-1">
+                <span
+                  className="text-[11px] leading-relaxed"
+                  style={{ color: 'var(--color-tg-muted)' }}>
+                  {targetSentence.text}
                 </span>
               </div>
             )}

@@ -1,6 +1,15 @@
 /**
- * What `trade_plans.stop_history` says, read defensively, and the one sentence
- * a trader is shown about it (REF-113 Stage 5).
+ * What `trade_plans.stop_history` says, read defensively, and the sentences a
+ * trader is shown about it (REF-113 Stage 5; the target half is REF-130 part ג).
+ *
+ * TWO DOCUMENTS IN ONE COLUMN SINCE REF-130, and they are read apart rather than
+ * together: `stop_history` now carries a nested `tp_history` describing the
+ * trade's TARGET orders, and {@link StoredStopHistory.tpHistory} is null on every
+ * row written before it. The stop's verdict and the target's are independent
+ * claims — a trade can have a readable stop and an unreadable target — so each
+ * has its own reader, its own "show nothing" list and its own sentence. See
+ * {@link StoredTargetHistory} for why the target speaks on one answer where the
+ * stop speaks on four.
  *
  * BROWSER-SAFE AND PURE. No client, no environment, no server-only import —
  * because five readers need it and three of them run in the browser: the trade
@@ -56,6 +65,64 @@
  * "הורחק" and not "הורע": this is a description. The judgement belongs to the
  * rule the trader wrote.
  */
+
+/**
+ * What the document says about the TRADE'S TARGET, as a reader may assume it
+ * (REF-130 part ג).
+ *
+ * THE SAME CLAIM-SPLIT THIS FILE'S HEADER MAKES, applied to a sub-document:
+ * `TargetHistory` in lib/tradovate/orders.ts describes what the WRITER writes,
+ * and this describes what a READER may rely on. The two are not the same, and
+ * here the gap is at its widest — every row written before REF-130 carries no
+ * `tp_history` key at all, which is most of the table and will be forever.
+ *
+ * FIVE ANSWERS AGAIN, AND FOUR OF THEM SHOW NOTHING:
+ *
+ *   null / unreadable   we never looked, or the row predates the key → NOTHING
+ *   `'none'`            we looked, no target order            → NOTHING
+ *   `'unknown'`         the target was on the wrong side      → NOTHING
+ *   `'kept'`            a target, never moved                 → the price
+ *   `'moved'`           a target, moved                       → the price and
+ *                                                               one sentence
+ *
+ * ONLY `'moved'` EARNS A SENTENCE, which is where this deliberately differs
+ * from the stop beside it. `stopMoveSentence` speaks on all four answers because
+ * each is a finding about the trader's RISK: "no stop was placed" and "we could
+ * not read the orders" are both worth saying out loud. A target is an
+ * expectation rather than a risk — a trade with no target is an ordinary trade
+ * — so the three silent answers are silent, and the price row's own presence is
+ * what says a target existed.
+ */
+export interface StoredTargetHistory {
+  verdict: 'moved' | 'kept' | 'none' | 'unknown';
+  /** The first price the chosen target order stated. */
+  initialTp: number | null;
+  /** The last price it stated. */
+  finalTp: number | null;
+  /**
+   * Which side of the entry {@link initialTp} sat on.
+   *
+   * `'wrong'` MEANS NO PRICE MAY BE SHOWN, for the reason
+   * {@link StoredStopHistory.initialStopSide} gives about stops: it says our own
+   * attribution picked an order that cannot have been this trade's target. The
+   * writer already resolves that case to `verdict: 'unknown'`, so this is the
+   * second of two locks on one door — and the one that still works if a future
+   * writer reports a side without reclassifying the verdict.
+   */
+  targetSide: 'gain' | 'wrong' | null;
+  /** How many times the price changed, over consecutive versions. */
+  movedCount: number;
+  /** Which way, over consecutive steps and never end-to-end. */
+  direction: 'closer' | 'farther' | 'mixed' | null;
+  /**
+   * How many priced target orders the row chose between, or null.
+   *
+   * NULL IS "WE DO NOT KNOW HOW MANY", NOT ONE — {@link StoredStopHistory.stopCount}'s
+   * rule, for its reason. No reader branches on it yet; it is read so that the
+   * figure is available to the next one rather than having to be added later.
+   */
+  targetCount: number | null;
+}
 
 /**
  * The fields a reader may ask for. EVERY ONE OPTIONAL, because every one is
@@ -158,6 +225,28 @@ export interface StoredStopHistory {
    * reader that it does not already know.
    */
   cancelledUnreplaced: boolean;
+  /**
+   * What the document says about the TARGET, or null (REF-130 part ג).
+   *
+   * **NULL IS "SAY NOTHING ABOUT THE TARGET", AND IT IS THE COMMON CASE.** Every
+   * row written before REF-130 carries no `tp_history` key, there is no backfill
+   * and there cannot be one (see the header), so this is null on most of the
+   * table — and on every manual trade forever, because a manual trade has no
+   * broker orders to read.
+   *
+   * THE CAMELCASE NAME READS A SNAKE_CASE KEY, which is the one place in this
+   * file where the field and the key disagree. REF-130 named the stored key
+   * `tp_history`, after the column it deliberately is not; a stored key is the
+   * one thing a later rename cannot reach, so the key keeps its spelling and
+   * this field keeps the file's.
+   *
+   * SEPARATE FROM THE STOP'S VERDICT AND NOT FOLDED INTO IT. A trade can have a
+   * readable stop and an unreadable target, or the reverse, and the two
+   * sentences are shown four rows apart — so a reader that had to infer one from
+   * the other would eventually print a claim about a target off the stop's
+   * evidence.
+   */
+  tpHistory: StoredTargetHistory | null;
 }
 
 type Raw = Record<string, unknown>;
@@ -184,6 +273,44 @@ const VERDICTS = ['moved', 'kept', 'none', 'unknown'] as const;
 const REASONS = ['interday', 'ambiguous', 'capped', 'failed'] as const;
 const SIDES = ['risk', 'wrong'] as const;
 const DIRECTIONS = ['tightened', 'widened', 'mixed'] as const;
+const TARGET_SIDES = ['gain', 'wrong'] as const;
+const TARGET_DIRECTIONS = ['closer', 'farther', 'mixed'] as const;
+
+/**
+ * The target sub-document, or null when there is nothing to rely on.
+ *
+ * NULL FOR FOUR THINGS AND ALL FOUR MEAN "SAY NOTHING", which is
+ * {@link readStopHistory}'s own list one level down: the key is absent (every
+ * row before REF-130), the value is not an object, it is an array, or it carries
+ * no recognisable verdict. The last is the defensive case and is strict for the
+ * same reason — a sub-document whose verdict we cannot read is one whose prices
+ * we have no reason to trust.
+ *
+ * EXPORTED SO THE STORED KEY IS NAMED IN ONE PLACE. The stats page reads this
+ * off a loose `select('*')` row rather than through the whole stop document, and
+ * a second `raw.tp_history` spelled out there would be a second place to get the
+ * snake_case right.
+ */
+export function readTargetHistory(value: unknown): StoredTargetHistory | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+
+  const raw = value as Raw;
+  const verdict = str(raw.verdict, VERDICTS);
+  if (verdict === null) return null;
+
+  return {
+    verdict,
+    initialTp: num(raw.initialTp),
+    finalTp: num(raw.finalTp),
+    targetSide: str(raw.targetSide, TARGET_SIDES),
+    // `?? 0` for the same reason `movedCount` has it: a count nobody wrote is a
+    // count of nothing, and every branch below treats zero as "did not move".
+    movedCount: num(raw.movedCount) ?? 0,
+    direction: str(raw.direction, TARGET_DIRECTIONS),
+    // NO `?? 1`, unlike the count above and like `stopCount`. See the field.
+    targetCount: num(raw.targetCount),
+  };
+}
 
 /**
  * The stored document, or null when there is nothing a reader may rely on.
@@ -229,6 +356,8 @@ export function readStopHistory(value: unknown): StoredStopHistory | null {
       raw.stopAtEntry === true ? true : raw.stopAtEntry === false ? false : null,
     lateStop: num(raw.lateStop),
     cancelledUnreplaced: raw.cancelledUnreplaced === true,
+    // The snake_case key, read once. See the field.
+    tpHistory: readTargetHistory(raw.tp_history),
   };
 }
 
@@ -301,6 +430,97 @@ export function brokerStopToShow(
   if (history.verdict === 'none') return null;
   if (history.initialStopSide === 'wrong') return null;
   return num(column) ?? history.initialStop;
+}
+
+/**
+ * The broker's target, to show beside the one the trader planned — or null
+ * (REF-130 part ג).
+ *
+ * TAKES THE COLUMN AND THE DOCUMENT FOR {@link brokerStopToShow}'S REASON:
+ * `broker_take_profit` is the number and `stop_history.tp_history` is what says
+ * whether the number means anything. Null for four reasons and all four render
+ * as NOTHING rather than as a dash beside a figure:
+ *
+ *   - we never looked, or the row predates `tp_history` (no sub-document)
+ *   - we looked and the trader placed no target (`'none'`)
+ *   - the target we found was on the WRONG SIDE of the entry (`'unknown'`, and
+ *     `targetSide === 'wrong'` independently) — see the field
+ *   - the column is unreadable and the document names no price either
+ *
+ * THE THIRD IS THE ONE THIS FUNCTION EXISTS FOR, and it is why no surface reads
+ * `broker_take_profit` directly. `nearestTarget` returns the best of its
+ * candidates even when every one of them was on the losing side of the entry, so
+ * that column has been able to hold such a price since Stage 3 — measured once
+ * as the ENTRY PRICE ITSELF, from a resting BUY LIMIT that produced the fill.
+ * Printing it beside the target the trader typed is the one thing this declines
+ * to do.
+ *
+ * `targetCount > 1` IS NOT IN THAT LIST, which is {@link brokerStopToShow}'s
+ * `stopCount` decision taken the same way and for a weaker reason: the nearest
+ * of two targets is still "my target" (Imri, 19.10), and nothing here prints a
+ * from→to range that two orders could falsify.
+ */
+export function brokerTargetToShow(
+  history: StoredStopHistory | null,
+  column: unknown
+): number | null {
+  const target = history?.tpHistory ?? null;
+  if (target === null) return null;
+  if (target.verdict === 'none' || target.verdict === 'unknown') return null;
+  if (target.targetSide === 'wrong') return null;
+  return num(column) ?? target.initialTp;
+}
+
+/**
+ * The one line the trade card shows about the broker's target, or null for "say
+ * nothing" (REF-130 part ג).
+ *
+ * ONLY A MOVE IS WORTH A SENTENCE. The three other answers are silent, and that
+ * asymmetry against {@link stopMoveSentence} is the product decision rather than
+ * an omission — see {@link StoredTargetHistory}. A target left alone is the
+ * ordinary case and the price row above already says there was one; "no target
+ * was placed" is not a finding about a trader the way "no stop was placed" is.
+ *
+ * **NEUTRAL IN BOTH DIRECTIONS, AND THE ENTRY IS NAMED IN EACH. THIS IS THE
+ * TRAP THE TICKET WARNS ABOUT.** `הורחק` two rows up means the stop moved away
+ * from the entry and the RISK GREW — a warning — and here it means the trader
+ * let a winner run, which costs them nothing. Same word, opposite value, two
+ * rows apart. So neither direction is toned as a failing and neither is left to
+ * stand on the verb alone: every sentence ends in `— קורב לנקודת הכניסה` or
+ * `— הורחק מנקודת הכניסה`, naming the thing the target moved relative to.
+ *
+ * AND IT IS NEUTRAL FOR A SECOND REASON, WHICH IS THAT WE CANNOT YET TELL THE
+ * INTERESTING CASE FROM THE DULL ONE. There is no exit-drag cut for targets —
+ * `TargetHistory` in lib/tradovate/orders.ts says so — so a trader who dragged a
+ * limit down to the bid to get out now reads as a large `'closer'` — the same
+ * shape as a trader who talked themselves out of their own target. Colouring
+ * either as a failing would be scoring a measurement that cannot distinguish
+ * them.
+ *
+ * NO PRICES. {@link stopMoveSentence} quotes a from→to range because the stop's
+ * two prices are the risk and the trader can check them against their own
+ * memory. A target's range adds nothing the count and the direction do not say,
+ * and `finalTp` on a dragged limit is the exit price under another name.
+ */
+export function targetMoveSentence(history: StoredStopHistory | null): StopSentence | null {
+  const target = history?.tpHistory ?? null;
+  if (target === null) return null;
+  if (target.verdict !== 'moved') return null;
+  if (target.movedCount < 1 || target.direction === null) return null;
+
+  const suffix =
+    target.direction === 'closer'
+      ? 'קורב לנקודת הכניסה'
+      : target.direction === 'farther'
+        ? 'הורחק מנקודת הכניסה'
+        : 'גם וגם';
+
+  // "פעם אחת" AND NOT "1 פעמים". Hebrew counts one differently, and a target
+  // moved once is the common case — where the stop's own count sentence is
+  // reached only by `'mixed'`, which needs two steps and can never be one.
+  const times = target.movedCount === 1 ? 'פעם אחת' : `${target.movedCount} פעמים`;
+
+  return { text: `היעד הוזז ${times} — ${suffix}`, tone: 'neutral' };
 }
 
 /** One sentence, and whether it is a fact or a warning. */
