@@ -1,4 +1,5 @@
 import { ShieldAlert, Route, ArrowUpDown, Zap, Flame, Hourglass } from 'lucide-react';
+import { TARGET_MOVE_LABEL } from '@/lib/journal/stopHistory';
 import { Section } from './shared';
 
 interface Props {
@@ -18,7 +19,7 @@ interface Props {
   patiencePct: number | null;
   /**
    * `targetMoveLine(...)` — one sentence about the broker's target orders, or
-   * null (REF-130 part ג, item 3).
+   * null when nothing has been measured yet (REF-130 part ג, item 3).
    *
    * A ROW UNDER THE CHIPS AND NOT A FIFTH CHIP, because it is not a rate. The
    * four above are "x% of the trades that answered", over denominators in the
@@ -26,6 +27,13 @@ interface Props {
    * rows imported since REF-130 shipped — which starts at zero and stays small
    * for a while. A `33%` chip built on three trades reads as a measurement of
    * the trader, and `1 מתוך 3` reads as what it is.
+   *
+   * **NULL DRAWS THE ROW ANYWAY.** It used to render nothing at all, and the
+   * first trader to go looking for the feature could not find it — correctly,
+   * because `tp_history` is written on IMPORT and has no backfill, so the
+   * denominator is zero for everyone until their next sync. An absent row and an
+   * unbuilt feature look identical; a dash and {@link TARGET_MOVE_PENDING} say
+   * which one it is. See `targetMoveLine`, where the reversal is argued.
    */
   targetMoveLine: string | null;
 }
@@ -45,6 +53,19 @@ interface Props {
  * different sentence and not one this ticket is rewriting the other four to say.
  */
 const PATIENCE_NO_DATA = 'אין מספיק נתונים';
+
+/**
+ * Why the target-move row is a dash, when it is (REF-130 part ג, follow-up).
+ *
+ * NOT `PATIENCE_NO_DATA`, and the difference is the whole reason this string
+ * exists. "אין מספיק נתונים" says the measurement failed on the rows we have,
+ * which is true of the patience chip and false here: `tp_history` is written
+ * only by an import and is not backfilled, so there is nothing wrong with the
+ * trader's journal — the figure has not STARTED yet. FUTURE TENSE, because the
+ * trader can make it arrive, and the one thing they must not conclude is that
+ * they need to go fix something.
+ */
+const TARGET_MOVE_PENDING = 'ייכתב מעסקאות חדשות';
 
 // Severity by rate: 0% calm/green · 1-14% amber · 15%+ red · null = no data
 function severity(pct: number | null) {
@@ -126,11 +147,17 @@ export default function BehaviorChips({
           lib/journal/stopHistory.ts, which argues the tone at length — so this
           sits in the muted text the rest of the page uses for a sub-figure
           rather than borrowing the chips' severity palette. */}
-      {targetMoveLine !== null && (
-        <p className="mt-3" style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-tg-text-2)' }}>
-          {targetMoveLine}
-        </p>
-      )}
+      {/* ALWAYS DRAWN, in one of two states — see the prop. The dash borrows
+          the chips' own `—`, and the reason travels as a `title` for
+          `PATIENCE_NO_DATA`'s reason: a sentence of prose under one row would
+          read as an error state rather than as a figure that has not arrived.
+          `tabIndex` so it is reachable without a pointer. */}
+      <p className="mt-3"
+        style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-tg-text-2)' }}
+        title={targetMoveLine === null ? TARGET_MOVE_PENDING : undefined}
+        tabIndex={targetMoveLine === null ? 0 : undefined}>
+        {targetMoveLine ?? `${TARGET_MOVE_LABEL}: —`}
+      </p>
     </Section>
   );
 }

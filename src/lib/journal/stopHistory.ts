@@ -589,13 +589,39 @@ export function targetMoveTally(rows: readonly TargetHistoryRow[]): TargetMoveTa
 }
 
 /**
- * The statistics page's one line about target moves, or null for "show nothing".
+ * What the target-move row is called, wherever it is drawn.
+ *
+ * EXPORTED BECAUSE {@link targetMoveLine} IS NOT THE ONLY THING THAT PRINTS IT.
+ * A zero denominator returns null here and the statistics page draws the row
+ * anyway, with a dash — so the label exists in a second place, and a second
+ * spelling of it is a row that renames itself the moment a trader's first
+ * import lands. See BehaviorChips.tsx.
+ */
+export const TARGET_MOVE_LABEL = 'הזזת יעד';
+
+/**
+ * The statistics page's one line about target moves, or null for "no figure".
  *
  * NULL ON A ZERO DENOMINATOR, which is most accounts and every account whose
  * trades are all hand-logged. `הזזת יעד: 0 מתוך 0` is a row announcing a
- * measurement that was never taken, and the stats page's own convention for a
- * figure it cannot state is to omit the row rather than draw a dash — the four
- * behaviour chips show `—` because they are a fixed grid, and this is not one.
+ * measurement that was never taken.
+ *
+ * **NULL IS NO LONGER "SHOW NOTHING", AND THAT IS A REVERSAL OF WHAT THIS
+ * COMMENT SAID.** It argued the page should omit the row entirely, on the
+ * grounds that the four behaviour chips draw `—` only because they are a fixed
+ * grid. The denominator here is the number of broker rows imported SINCE
+ * REF-130 part ג shipped — `tp_history` is written on import and has no
+ * backfill — so it is zero for every trader on the day the feature ships and
+ * stays zero until their next import. Omitting the row made a shipped feature
+ * indistinguishable from one that does not exist, which is what the first
+ * trader to look for it reported. The row is now drawn either way: this returns
+ * the figure when there is one, and the page pairs the null with a dash and a
+ * sentence saying when the figure will arrive.
+ *
+ * STILL NULL RATHER THAN A FORMATTED `0 מתוך 0`, because the two cases need
+ * different WORDS and not just a different number — "none of your trades moved
+ * their target" and "we have not measured a trade yet" are opposite claims. The
+ * copy for the second belongs beside the dash it explains.
  *
  * THE DIRECTIONS ARE A NOTE AND NOT A BREAKDOWN. They are dropped when nothing
  * moved — `(קורב 0 · הורחק 0)` is noise — and they do not have to sum to the
@@ -607,7 +633,7 @@ export function targetMoveLine(tally: TargetMoveTally): string | null {
 
   const note =
     tally.moved > 0 ? ` (קורב ${tally.closer} · הורחק ${tally.farther})` : '';
-  return `הזזת יעד: ${tally.moved} מתוך ${tally.measured} עסקאות${note}`;
+  return `${TARGET_MOVE_LABEL}: ${tally.moved} מתוך ${tally.measured} עסקאות${note}`;
 }
 
 /** One sentence, and whether it is a fact or a warning. */

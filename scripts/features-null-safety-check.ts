@@ -44,9 +44,20 @@ import { exportRow, type ExportTrade } from '../src/lib/journal/csv';
 import { tradeDirection, tradePointsPnl, tradeMoneyPnl, isWinningTrade, pnlRow } from '../src/lib/pnl';
 import { averageOf, rrValue, scaleValue, intentText, intentNumber, type RawValue } from '../src/lib/intent';
 import { readTradeFacts, tradeFactsLine, tradeFactsSummaryLine } from '../src/lib/ai/tradeFacts';
-import { readStopHistory, stopMoveSentence } from '../src/lib/journal/stopHistory';
+import {
+  readStopHistory,
+  stopMoveSentence,
+  targetMoveLine,
+  targetMoveTally,
+  TARGET_MOVE_LABEL,
+} from '../src/lib/journal/stopHistory';
+import { wasPatient } from '../src/lib/journal/patience';
+import { mapDashTrade, type RawTradeRow } from '../src/lib/dashboard/trades';
+import { disciplinePatience, measuredAxes, patienceInputOf } from '../src/lib/dashboard/radar';
 import { realisedRr, rrLabel, rrRow } from '../src/lib/journal/realisedRr';
 import { describeStages } from '../src/lib/journal/stages';
+import fs from 'node:fs';
+import path from 'node:path';
 
 // ── Harness ──────────────────────────────────────────────────────────────────
 
@@ -948,6 +959,267 @@ group('REF-123: the R:R the trade actually returned', [
       linkedLine.split(' · ').find((p) => p.startsWith('יחס בפועל')),
     ],
     [true, 1.9, null, 'יחס בפועל 1:1.9']),
+]);
+
+// ── Group 6: the dashboard radar's סבלנות axis ───────────────────────────────
+//
+// REF-130 part א fixed `סבלנות` on /stats and on the trade card and LEFT THE
+// DASHBOARD RADAR BEHIND, which is the follow-up this group pins. The axis read
+// `exited_early` alone — a self-report no broker row ever answers — so an
+// imported journal scored it from an empty denominator.
+//
+// THE ROWS GO THROUGH `mapDashTrade`, not hand-built as `DashTrade` objects.
+// That is deliberate and it is half of what broke: the wire mapping coerced a
+// NULL `take_profit` to 0 with a bare `Number()`, and `intentNumber(0)` is 0,
+// so a fabricated zero target would have WON the precedence in
+// lib/journal/patience.ts and shut the broker's real target out. A fixture that
+// skipped the mapping would have asserted a path the app does not take.
+
+/** The wire shape of one imported row: priced, with no intent recorded. */
+const dashRow = (over: Partial<RawTradeRow> = {}): RawTradeRow => ({
+  id: 'dash-1',
+  strategy: 'ORB',
+  symbol: 'MNQZ6',
+  entry_price: 30_000,
+  exit_price: 29_900,
+  // NULL, as migration 034 allows and as every imported row really is.
+  stop_loss: null,
+  take_profit: null,
+  rr_ratio: 2,
+  emotional_state: 3,
+  trade_reason: '',
+  status: 'closed',
+  direction: 'short',
+  exit_reason: null,
+  submitted_at: '2026-10-15T10:00:00.000Z',
+  closed_at: '2026-10-15T11:00:00.000Z',
+  quantity: 1,
+  pnl_amount: 200,
+  actual_pnl: 200,
+  pnl_currency: 'USD',
+  plan_score: null,
+  followed_plan: null,
+  strategy_conditions_checked: null,
+  moved_sl: null,
+  exited_early: null,
+  fomo_entry: null,
+  revenge_trade: null,
+  broker_take_profit: null,
+  broker_stop_loss: null,
+  ...over,
+});
+const dash = (over: Partial<RawTradeRow> = {}) => mapDashTrade(dashRow(over));
+
+/** A short that reached the broker's target. The ticket's own case. */
+const HIT_BROKER_TARGET = dash({
+  exit_price: 29_790,
+  broker_take_profit: 29_800,
+  broker_stop_loss: 30_100,
+});
+
+const dashboardSource = fs.readFileSync(
+  path.join(process.cwd(), 'src/components/dashboard/DashboardClient.tsx'),
+  'utf8'
+);
+
+group('REF-130 follow-up: the radar measures סבלנות instead of defaulting it', [
+  // ── (1) THE DEFECT ITSELF ───────────────────────────────────────────────
+  //
+  // An imported short that ran all the way to the broker's target. The row
+  // answers `exited_early` nowhere, so the old axis saw an empty denominator
+  // and scored it from its default — a number with no measurement under it.
+  // The prices answer it outright.
+  c('(1) a broker row that reached its target is measured, and is patience',
+    disciplinePatience([HIT_BROKER_TARGET]), 100),
+
+  // ── (2) THE ZERO THAT WOULD HAVE ACCUSED THE TRADER ─────────────────────
+  //
+  // The two halves in one case, so the assertion is the CONSEQUENCE and not
+  // two facts. `Number(null)` is 0 and `intentNumber(0)` is 0, so a coerced
+  // target wins the plan-beats-broker precedence and reports the trade above —
+  // which hit its target — as having left early. That verdict is the one thing
+  // lib/journal/patience.ts is written never to say on this evidence.
+  c('(2) the intent prices stay null through the mapping, and a 0 would flip the verdict', [
+    HIT_BROKER_TARGET.take_profit,
+    HIT_BROKER_TARGET.stop_loss,
+    patienceInputOf(HIT_BROKER_TARGET).planTarget,
+    wasPatient(patienceInputOf(HIT_BROKER_TARGET)),
+    wasPatient({ ...patienceInputOf(HIT_BROKER_TARGET), planTarget: 0 }),
+  ], [null, null, null, true, false]),
+
+  // ── (3) NOTHING MEASURED IS NULL — NOT 0, AND NOT 100 ───────────────────
+  //
+  // No target on the row at all, from either column, so there is nothing to
+  // have waited for. The four self-reported axes beside this one answer 100 to
+  // an empty denominator and are right to; this one has to say nothing, which
+  // is what lets the call site drop the axis and draw the dash.
+  c('(3) a row with no target anywhere is not measured at all',
+    disciplinePatience([dash()]), null),
+  c('(3b) and neither is an empty journal',
+    disciplinePatience([]), null),
+
+  // ── (4) THE TRADER'S OWN ANSWER STILL WINS, IN BOTH DIRECTIONS ──────────
+  //
+  // The property that keeps a manual journal scoring exactly as it did before
+  // any of this shipped. Both rows carry prices that say the OPPOSITE of the
+  // self-report, so the assertion is the precedence rather than the arithmetic:
+  // (a) is out in profit short of its target — the prices say `early` — and the
+  // trader denied it; (b) reached the target and the trader says they left
+  // early anyway.
+  c('(4) a self-report outranks the prices that contradict it', [
+    disciplinePatience([dash({ take_profit: 29_800, exited_early: false })]),
+    disciplinePatience([{ ...HIT_BROKER_TARGET, exited_early: true }]),
+  ], [100, 0]),
+
+  // ── (5) THE DENOMINATOR IS MEASURED ROWS ────────────────────────────────
+  //
+  // Four rows, two of them measurable, one of those patient: 50%. The two
+  // exclusions are one per reason — no target anywhere, and a loss that reached
+  // no stop we can name — and neither drags the rate down, which is the whole
+  // claim. Dividing by four would answer 25 and read as a trader half as
+  // patient as they are.
+  c('(5) unmeasurable rows leave the rate alone rather than voting zero',
+    disciplinePatience([
+      HIT_BROKER_TARGET,
+      dash({ broker_take_profit: 29_800, exit_price: 29_900 }),
+      dash(),
+      dash({ exit_price: 30_050 }),
+    ]), 50),
+
+  // ── (6) THE AXIS-DROPPING RULE ──────────────────────────────────────────
+  //
+  // `measuredAxes` is where this change can go wrong invisibly: the radar is
+  // five index-aligned arrays, an unmeasured axis has to leave all five, and
+  // `סבלנות` at index 3 is the first optional axis that is not the last one.
+  c('(6) every axis measured keeps every axis',
+    measuredAxes([50, 80, 100, 75, 100, 100]), [0, 1, 2, 3, 4, 5]),
+  c('(6b) an unmeasured סבלנות leaves the chart',
+    measuredAxes([50, 80, 100, null, 100, 100]), [0, 1, 2, 4, 5]),
+  // TWO AT ONCE, which is the shape the old hand-written slice could not
+  // express — `[D_LABELS[0], ...D_LABELS.slice(2)]` has the index 1 written
+  // into it and there is no second form of it for index 3.
+  c('(6c) and so do both optional axes together',
+    measuredAxes([50, null, 100, null, 100, 100]), [0, 2, 4, 5]),
+  // THE MINI-CARD'S TRANSLATION, in the other direction. Every axis keeps a
+  // card whether it was measured or not, and a card hovers a position in the
+  // SHORTENED arrays. With index 1 gone, axis 2's card must hover position 1 —
+  // asserted as the arithmetic the call site does, because a card that hovered
+  // its own position would quietly show its neighbour's label and tip.
+  c('(6d) a surviving axis hovers its new position, not its old one',
+    [0, 2, 4, 5].map((i) => measuredAxes([50, null, 100, null, 100, 100]).indexOf(i)),
+    [0, 1, 2, 3]),
+  c('(6e) and a dropped axis has no position to hover',
+    measuredAxes([50, null, 100, null, 100, 100]).indexOf(3), -1),
+
+  // ── (7) THE OLD PATH IS GONE FROM BOTH READERS ──────────────────────────
+  //
+  // Source-level, for `stopTriggerGroup`'s reason: the defect was a formula in
+  // a closure inside a `'use client'` component, and the proof it is gone is
+  // that the expression is ABSENT. Two copies existed — the axis and the 30-day
+  // trend window — and fixing one would have left the trend reporting a
+  // movement that was only the two formulas disagreeing.
+  c('(7) no reader of the radar counts exited_early by hand any more',
+    ['t.exited_early', 'withExitedEarly'].filter((n) => dashboardSource.includes(n)), []),
+  // And the hand-written label slice with index 1 written into it.
+  c('(7b) nor slices the label arrays by a hardcoded index',
+    dashboardSource.includes('D_LABELS.slice(2)'), false),
+  // The greps are only worth anything if the file is the one in hand.
+  c('(7c) and the needles are read off a file that really renders the radar',
+    [dashboardSource.includes('function RadarCard'),
+     dashboardSource.includes('disciplinePatience')], [true, true]),
+]);
+
+// ── Group 7: the target-move row is drawn before it has a figure ─────────────
+//
+// `tp_history` is written ON IMPORT and has no backfill, so the denominator of
+// REF-130 part ג's tally is zero for every trader on the day it ships and stays
+// zero until their next sync. The row was conditional on having a figure, so a
+// shipped feature and an unbuilt one looked identical — which is what the first
+// trader to go looking for it reported.
+
+const chipsSource = fs.readFileSync(
+  path.join(process.cwd(), 'src/components/stats/BehaviorChips.tsx'),
+  'utf8'
+);
+
+/**
+ * A tally with one row measured and moved, for the figure's own shape.
+ *
+ * THE OUTER `verdict` IS NOT DECORATION. `readStopHistory` returns null for a
+ * document that does not carry one, so a fixture holding `tp_history` alone
+ * measures NOTHING and would have asserted the dash it was written to rule out.
+ * `'kept'` for the stop and `'moved'` for the target is also the realistic row:
+ * the two sub-documents answer independently.
+ */
+const MOVED_ONE = targetMoveTally([
+  {
+    stop_history: {
+      verdict: 'kept',
+      movedCount: 0,
+      tp_history: {
+        verdict: 'moved',
+        initialTp: 29_790,
+        finalTp: 29_780,
+        targetSide: 'gain',
+        movedCount: 1,
+        direction: 'closer',
+        targetCount: 1,
+      },
+    },
+  },
+]);
+
+group('REF-130 follow-up: הזזת יעד exists on /stats before it has a number', [
+  // ── (1) THE STATE EVERY TRADER IS IN TODAY ──────────────────────────────
+  //
+  // A journal of hand-logged trades carries no `tp_history` on any row, so
+  // nothing is measurable and the figure is null. That is unchanged and
+  // correct: what changed is that null no longer means "render nothing".
+  c('(1) a journal with no imported rows measures nothing', [
+    targetMoveTally([{}, { stop_history: null }, { stop_history: {} }]).measured,
+    targetMoveLine(targetMoveTally([{}, { stop_history: null }])),
+  ], [0, null]),
+
+  // ── (2) ZERO MEASURED AND ZERO MOVED ARE DIFFERENT CLAIMS ───────────────
+  //
+  // The case that says why the dash is not a formatted `0 מתוך 0`. A trader
+  // with four measured rows who moved no target gets a real sentence; a trader
+  // with nothing measured gets no sentence at all, and the page pairs that with
+  // the dash and a reason. Collapsing them would tell the second trader they
+  // had been measured and found disciplined.
+  c('(2) a measured zero states its figure, where an unmeasured one states none', [
+    targetMoveLine({ measured: 4, moved: 0, closer: 0, farther: 0 }),
+    targetMoveLine({ measured: 0, moved: 0, closer: 0, farther: 0 }),
+  ], ['הזזת יעד: 0 מתוך 4 עסקאות', null]),
+
+  // ── (3) THE LABEL CANNOT DRIFT FROM THE PLACEHOLDER'S ───────────────────
+  //
+  // The row is now named in two places — here and in the component, which
+  // prints `${TARGET_MOVE_LABEL}: —` — so the label is one exported constant
+  // and this pins that the figure really is built from it. A second spelling is
+  // a row that renames itself the moment a trader's first import lands.
+  c('(3) the figure and the placeholder are named by the same constant', [
+    targetMoveLine(MOVED_ONE)?.startsWith(`${TARGET_MOVE_LABEL}: `),
+    targetMoveLine(MOVED_ONE),
+    chipsSource.includes('${TARGET_MOVE_LABEL}: —'),
+  ], [true, 'הזזת יעד: 1 מתוך 1 עסקאות (קורב 1 · הורחק 0)', true]),
+
+  // ── (4) THE ROW IS NO LONGER CONDITIONAL ON HAVING A FIGURE ─────────────
+  //
+  // Source-level, for group 6 (7)'s reason: the defect is a JSX guard and the
+  // proof is that it is absent. The old form rendered the paragraph only
+  // `{targetMoveLine !== null && (...)}`.
+  c('(4) the paragraph is not guarded on the figure existing',
+    chipsSource.includes('{targetMoveLine !== null && ('), false),
+  // And the trader is told WHEN the figure arrives, in the future tense —
+  // not that something is wrong with their journal, which is what the
+  // patience chip's `אין מספיק נתונים` would have said.
+  c('(4b) and the dash carries a reason that points forward', [
+    chipsSource.includes('ייכתב מעסקאות חדשות'),
+    chipsSource.includes("title={targetMoveLine === null ? TARGET_MOVE_PENDING : undefined}"),
+  ], [true, true]),
+  c('(4c) the needles are read off the file that really draws the chips',
+    chipsSource.includes('export default function BehaviorChips'), true),
 ]);
 
 // ── Summary ──────────────────────────────────────────────────────────────────

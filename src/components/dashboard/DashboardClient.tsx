@@ -5,8 +5,9 @@ import { Sparkles, TrendingUp, TrendingDown, RefreshCw, CheckCircle, AlertCircle
 import { formatPnlPoints } from '@/lib/utils';
 import { formatMoney } from '@/lib/money';
 import { createClient } from '@/lib/supabase/client';
-import { DASH_TRADE_SELECT, mapDashTrade, type RawTradeRow } from '@/lib/dashboard/trades';
+import { DASH_TRADE_SELECT, mapDashTrade, withBrokerPrices, type RawTradeRow } from '@/lib/dashboard/trades';
 import { visibleTrades, withAccount, withHidden } from '@/lib/trades/visible';
+import { disciplinePatience, measuredAxes } from '@/lib/dashboard/radar';
 import LivePositions from '@/components/tradovate/LivePositions';
 import type { DashTrade } from '@/lib/dashboard/trades';
 import { tradeMoneyPnl, hasMoneyPnl, isWinningTrade, tradeDirection, tradePointsPnl } from '@/lib/pnl';
@@ -190,11 +191,16 @@ function windowAvgScores(wClosed: DashTrade[]): { disc: number; perf: number } {
         return s + a.filter(x => x.checked).length / a.length * 100;
       }, 0) / withStrat.length
     : null;
+  // `סבלנות` through the SAME function the axis uses, and dropped when nothing
+  // in the window was measurable rather than defaulted. Scoring the trend by a
+  // second formula is how the axis and the trend came to disagree in the first
+  // place — see `disciplinePatience`.
+  const patS = disciplinePatience(wClosed);
   const discArr = [
     procS,
     ...(stratS !== null ? [stratS] : []),
     boolPct(t => t.moved_sl),
-    boolPct(t => t.exited_early),
+    ...(patS !== null ? [patS] : []),
     boolPct(t => t.fomo_entry),
     boolPct(t => t.revenge_trade),
   ];
@@ -336,8 +342,7 @@ function computeAll(trades: DashTrade[], now: Date) {
     : 50;
 
   const withStratCond   = closed.filter(t => Array.isArray(t.strategy_conditions_checked) && t.strategy_conditions_checked.length > 0);
-  const hasStrategyConditions = withStratCond.length > 0;
-  const strategyLoyalty = hasStrategyConditions
+  const strategyLoyalty = withStratCond.length > 0
     ? Math.round(
         withStratCond.reduce((s, t) => {
           const arr = t.strategy_conditions_checked!;
@@ -351,10 +356,12 @@ function computeAll(trades: DashTrade[], now: Date) {
     ? Math.round(withMovedSlD.filter(t => t.moved_sl === false).length / withMovedSlD.length * 100)
     : 100;
 
-  const withExitedEarly = closed.filter(t => t.exited_early != null);
-  const patience        = withExitedEarly.length > 0
-    ? Math.round(withExitedEarly.filter(t => t.exited_early === false).length / withExitedEarly.length * 100)
-    : 100;
+  // ── סבלנות, from the prices rather than from a flag ───────────────────────
+  //
+  // NULL WHERE THE FOUR BEHAVIOUR AXES AROUND IT DEFAULT TO 100, and that
+  // asymmetry is the change rather than an inconsistency in it — the reasoning
+  // is in `disciplinePatience`, with the rest of the rule.
+  const patience = disciplinePatience(closed);
 
   const withFomoEntry   = closed.filter(t => t.fomo_entry != null);
   const cleanEntries    = withFomoEntry.length > 0
@@ -366,9 +373,19 @@ function computeAll(trades: DashTrade[], now: Date) {
     ? Math.round(withRevengeTrade.filter(t => t.revenge_trade === false).length / withRevengeTrade.length * 100)
     : 100;
 
-  const disciplineScores  = [
+  /**
+   * The six discipline axes, INDEX-ALIGNED WITH `D_LABELS` and null-preserving.
+   *
+   * WAS A PRE-SLICED ARRAY OF NUMBERS, with the one optional axis — strategy
+   * loyalty, at index 1 — dropped here and the label arrays re-sliced to match
+   * by hand at the call site. `סבלנות` is now a second optional axis, at index
+   * 3, which that arrangement cannot express; so the array keeps its nulls and
+   * the one place that knows how to drop an axis is `measuredAxes`, which is
+   * where the reasoning lives.
+   */
+  const disciplineAxes: (number | null)[] = [
     processScore,
-    ...(strategyLoyalty !== null ? [strategyLoyalty] : []),
+    strategyLoyalty,
     slKeeping,
     patience,
     cleanEntries,
@@ -408,7 +425,7 @@ function computeAll(trades: DashTrade[], now: Date) {
     avgWin, avgLoss, grossProfit, grossLoss, totalPnl, totalPnlPoints,
     hasPnlAmount, periodPnl,
     dailyPnl, dailyCount, weeklyPnl, weeklyCount, monthlyPnl, monthlyCount, totalCount,
-    disciplineScores, performanceScores, hasStrategyConditions, hasDrawdownCtrl,
+    disciplineAxes, performanceScores, hasDrawdownCtrl,
     disciplineTrend, performanceTrend,
     dayMap,
     tradingDay: todayStr,
@@ -543,6 +560,16 @@ const P_TIPS = [
   'הגדר מכסת ירידה שבועית וכבד אותה',
 ];
 
+/**
+ * Why a mini-card shows a dash instead of a score.
+ *
+ * ONE SENTENCE FOR ALL OF THEM, unlike BehaviorChips' `PATIENCE_NO_DATA`, which
+ * is attached to one chip because the four beside it are null for a DIFFERENT
+ * reason — a question the trader has not answered. Every droppable axis here is
+ * null for this one: not enough rows carried what the axis is computed from.
+ */
+const RADAR_NO_DATA = 'אין מספיק נתונים';
+
 // ── Radar card (shared for both discipline and performance) ───────────────────
 function RadarCard({
   title,
@@ -562,7 +589,22 @@ function RadarCard({
   tips: string[];
   scores: number[];
   gradId: string;
-  miniCards?: { label: string; score: number | null }[];
+  /**
+   * The cards under the chart, when they are not one-per-axis.
+   *
+   * `axis` IS THE POSITION IN `labels`/`descs`/`tips`/`scores` AND NOT IN THE
+   * CALLER'S OWN LIST, because those arrays have had the unmeasured axes
+   * removed and this list has not — every axis keeps a card. A card hovers its
+   * axis, so `axis` is what the hover state is set to; null means the axis is
+   * off the chart and the card does not hover at all.
+   *
+   * Spelled out rather than inferred from the array position, which is what it
+   * used to be. That held only while the one droppable axis was the LAST one:
+   * drawdown control at index 4, so indices 0–3 happened to agree. `סבלנות` is
+   * at index 3 of six, and inferring would have silently labelled it and the two
+   * axes after it with their neighbours' names.
+   */
+  miniCards?: { label: string; score: number | null; axis: number | null }[];
   trend?: number | null;
 }) {
   // Swaps the SVG axis labels — and nothing else — once a translator is
@@ -588,8 +630,10 @@ function RadarCard({
   const avgScore = Math.round(scores.reduce((s, v) => s + v, 0) / N);
   const color    = scoreColor(avgScore);
 
-  const allMiniCards = miniCards ?? labels.map((l, i) => ({ label: l, score: scores[i] }));
-  const scoredCards  = allMiniCards.filter((mc): mc is { label: string; score: number } => mc.score !== null);
+  const allMiniCards = miniCards ?? labels.map((l, i) => ({ label: l, score: scores[i], axis: i }));
+  const scoredCards  = allMiniCards.filter(
+    (mc): mc is { label: string; score: number; axis: number | null } => mc.score !== null
+  );
   const maxS = scoredCards.length >= 2 ? Math.max(...scoredCards.map(mc => mc.score)) : null;
   const minS = scoredCards.length >= 2 ? Math.min(...scoredCards.map(mc => mc.score)) : null;
   const showInsight = maxS !== null && minS !== null && maxS !== minS;
@@ -705,12 +749,23 @@ function RadarCard({
 
       {/* Mini-cards — binary color on score number, no side bar */}
       <div className="grid grid-cols-3 gap-1 mt-1">
-        {allMiniCards.map(({ label, score }, i) => {
-          if (score === null) {
+        {allMiniCards.map(({ label, score, axis }) => {
+          if (score === null || axis === null) {
+            // A DASH IN THE NUMBER'S OWN SLOT, with the reason in the tooltip.
+            // This card used to print `אין מספיק נתונים` where the number goes,
+            // which made it the one card in the grid with no figure at all and
+            // a different height from its neighbours. The dash is the
+            // convention `—` already carries on the behaviour chips over on
+            // /stats, and it says the one thing that matters: not measured, and
+            // specifically NOT a zero. `tabIndex` so the reason is reachable
+            // without a pointer — the same pairing BehaviorChips.tsx uses.
             return (
-              <div key={label} style={{ background: SURF2, border: `1px solid ${BORDER}`, borderRadius: 8, padding: '8px 10px' }}>
+              <div key={label}
+                title={RADAR_NO_DATA}
+                tabIndex={0}
+                style={{ background: SURF2, border: `1px solid ${BORDER}`, borderRadius: 8, padding: '8px 10px' }}>
                 <p style={{ fontSize: 12, color: MUTED, fontWeight: 600, lineHeight: 1.3 }}>{label}</p>
-                <p style={{ fontSize: 10, color: MUTED, fontWeight: 600, lineHeight: 1.4, marginTop: 2 }}>אין מספיק נתונים</p>
+                <p style={{ fontSize: 19, fontWeight: 800, color: MUTED, fontVariantNumeric: 'tabular-nums', lineHeight: 1.2 }}>—</p>
               </div>
             );
           }
@@ -723,9 +778,9 @@ function RadarCard({
                 padding: '8px 10px',
                 cursor: 'pointer',
               }}
-              onMouseEnter={() => setHov(i)}
+              onMouseEnter={() => setHov(axis)}
               onMouseLeave={() => setHov(null)}
-              onClick={() => setHov(hov === i ? null : i)}>
+              onClick={() => setHov(hov === axis ? null : axis)}>
               <p style={{ fontSize: 12, color: MUTED, fontWeight: 600, lineHeight: 1.3 }}>{label}</p>
               <p style={{ fontSize: 19, fontWeight: 800, color: miniNumColor(score), fontVariantNumeric: 'tabular-nums', lineHeight: 1.2 }}>{score}</p>
             </div>
@@ -1000,9 +1055,16 @@ function TradeDetailPanel({ trade, onClose, aiReview, aiLoading, onAiReview }: {
 
           {/* Prices */}
           <div className="grid grid-cols-3 gap-2">
+            {/* A DASH AND NOT `0.00` ON A BROKER ROW. `stop_loss` and
+                `take_profit` are the trader's INTENT, migration 034 made them
+                nullable, and the import deliberately never writes them — it
+                writes `broker_stop_loss`/`broker_take_profit` instead. They
+                were typed `number` here and mapped with a bare `Number()`, so
+                every imported trade printed a planned stop of `0.00` that no
+                trader ever typed. See `mapDashTrade`. */}
             {([['כניסה', trade.entry_price.toFixed(2), TEXT],
-               ['Stop Loss', trade.stop_loss.toFixed(2), RED],
-               ['Take Profit', trade.take_profit.toFixed(2), GREEN]] as [string,string,string][]).map(([l,v,c]) => (
+               ['Stop Loss', trade.stop_loss?.toFixed(2) ?? '—', RED],
+               ['Take Profit', trade.take_profit?.toFixed(2) ?? '—', GREEN]] as [string,string,string][]).map(([l,v,c]) => (
               <div key={l} className="rounded-xl p-2.5 text-center" style={{ background: SURF2 }}>
                 <p className="text-[10px]" style={{ color: MUTED, fontWeight: 600 }}>{l}</p>
                 <p className="text-sm font-bold font-mono" style={{ color: c }}>{v}</p>
@@ -1432,17 +1494,36 @@ export default function DashboardClient({
   const now = useMemo(() => mounted ? new Date() : null, [mounted]);
 
   const stats = useMemo(() => computeAll(trades, now ?? EPOCH), [trades, now]);
-  const dLabels = stats.hasStrategyConditions ? D_LABELS : [D_LABELS[0], ...D_LABELS.slice(2)];
-  const dLabelsEn = stats.hasStrategyConditions ? D_LABELS_EN : [D_LABELS_EN[0], ...D_LABELS_EN.slice(2)];
-  const dDescs  = stats.hasStrategyConditions ? D_DESCS  : [D_DESCS[0],  ...D_DESCS.slice(2)];
-  const dTips   = stats.hasStrategyConditions ? D_TIPS   : [D_TIPS[0],   ...D_TIPS.slice(2)];
+  // Two of the six discipline axes are optional — strategy loyalty and
+  // `סבלנות` — so all five index-aligned arrays are selected through one list
+  // rather than sliced by hand per array. See `measuredAxes`.
+  const dKept     = measuredAxes(stats.disciplineAxes);
+  const dScores   = dKept.map(i => stats.disciplineAxes[i]!);
+  const dLabels   = dKept.map(i => D_LABELS[i]);
+  const dLabelsEn = dKept.map(i => D_LABELS_EN[i]);
+  const dDescs    = dKept.map(i => D_DESCS[i]);
+  const dTips     = dKept.map(i => D_TIPS[i]);
+  // Every axis keeps a mini-card, measured or not — a `סבלנות` card that
+  // vanished would leave the trader no way to know the metric exists. `axis` is
+  // the position in the SLICED arrays above, which is what the card hovers into;
+  // null means "not on the radar", and such a card does not hover at all.
+  const dMiniCards = D_LABELS.map((label, i) => ({
+    label,
+    score: stats.disciplineAxes[i],
+    axis: stats.disciplineAxes[i] === null ? null : dKept.indexOf(i),
+  }));
   const pLabels    = stats.hasDrawdownCtrl ? P_LABELS : P_LABELS.slice(0, 4);
   const pLabelsEn  = stats.hasDrawdownCtrl ? P_LABELS_EN : P_LABELS_EN.slice(0, 4);
   const pDescs     = stats.hasDrawdownCtrl ? P_DESCS  : P_DESCS.slice(0, 4);
   const pTips      = stats.hasDrawdownCtrl ? P_TIPS   : P_TIPS.slice(0, 4);
+  // Drawdown control is the LAST axis, so its index needed no translation and
+  // never had one. `axis` is spelled out anyway: it is the contract now, and an
+  // optional axis that is not last would otherwise hover the wrong label
+  // silently — which is exactly what `סבלנות` at index 3 would have done.
   const pMiniCards = P_LABELS.map((label, i) => ({
     label,
     score: i < stats.performanceScores.length ? stats.performanceScores[i] : null,
+    axis:  i < stats.performanceScores.length ? i : null,
   }));
   const effectiveCalDate = calDate ?? now;
 
@@ -1461,9 +1542,12 @@ export default function DashboardClient({
     const { data } = await withAccount(
       supabase
         .from('trade_plans')
-        // `hidden` only where the column exists. Decided on the SERVER and passed
-        // down — see the prop — because the flag that answers it is server-only.
-        .select(withHidden(DASH_TRADE_SELECT, hiddenColumnExists))
+        // `hidden` and the two migration-038 prices, only where the columns
+        // exist. Decided on the SERVER and passed down — see the prop — because
+        // the flag that answers it is server-only. MUST stay byte-identical to
+        // the server page's select: this replaces the server's rows wholesale,
+        // so a column missing here is a radar that changes on first refetch.
+        .select(withBrokerPrices(withHidden(DASH_TRADE_SELECT, hiddenColumnExists), hiddenColumnExists))
         .eq('user_id', userId)
         .neq('status', 'not_entered'),
       accountId,
@@ -1899,8 +1983,9 @@ export default function DashboardClient({
               labelsEn={dLabelsEn}
               descs={dDescs}
               tips={dTips}
-              scores={stats.disciplineScores}
+              scores={dScores}
               gradId="radarGradDisc"
+              miniCards={dMiniCards}
               trend={stats.disciplineTrend}
             />
             <RadarCard
