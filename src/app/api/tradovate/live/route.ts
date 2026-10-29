@@ -36,6 +36,30 @@
  * NOTHING RENDERS IT YET. Stage 4a ships alone, exactly as Stage 1 did.
  *
  *
+ * AND SINCE 29.10 THAT FIELD IS `null` UNLESS A FLAG SAYS OTHERWISE
+ * ----------------------------------------------------------------
+ *
+ * NinjaTrader confirmed that account-level open P&L falls under the SAME Market
+ * Data denial the paragraph above is built on, and that redistributing it needs
+ * a CME Information License Agreement Reflect does not have. So the figure is
+ * off before public launch: `TRADOVATE_LIVE_PNL_ENABLED` (lib/tradovate/live-pnl.ts,
+ * UNSET MEANS OFF) and the gate lives one layer down, inside `loadOpenPositions`.
+ *
+ * OFF MEANS THE SNAPSHOT POST IS NEVER ISSUED — zero upstream calls, not a call
+ * whose answer is discarded — and `openPnl` is `null` on every account line.
+ * The `post` verb on {@link LiveReader} is still supplied below, because the
+ * flag is read per request and a deployment that turns it on must not need a
+ * code change.
+ *
+ * **EVERYTHING ELSE ON THIS ROUTE IS UNCHANGED, AND THAT IS THE REQUIREMENT
+ * RATHER THAN A SIDE EFFECT.** `/position/list` still runs on every poll, so
+ * the contract, the quantity and the side are reported exactly as before, the
+ * flat-transition write below still fires, and the three consumers still render
+ * the position line — without a money figure, in silence, which is the state
+ * Stage 3 shipped and the UI already handles. What the trader is HOLDING is
+ * ours to say; what it is currently worth is not.
+ *
+ *
  * THE CACHE IS NOT AN OPTIMISATION
  * --------------------------------
  *
@@ -147,6 +171,7 @@ import { tradovateGet, tradovatePost } from '@/lib/tradovate/client';
 import { flushUserCalls } from '@/lib/tradovate/call-meter';
 import { getUserTradingApi, notingPenalty } from '@/lib/tradovate/connections';
 import { isImportEnabled } from '@/lib/tradovate/import';
+import { isLivePnlEnabled } from '@/lib/tradovate/live-pnl';
 import { ORDERS_LOOKBACK_MS } from '@/lib/tradovate/orders-cron';
 import {
   loadOpenPositions,
@@ -227,6 +252,11 @@ export interface LiveAccountLine {
    * **`null` IS NOT `0`.** Break-even is an answer; "we could not get one" is
    * not. Nothing in this stage renders either — Stage 4b decides what a null
    * looks like, and the floor it starts from is the line without a number.
+   *
+   * **AND SINCE 29.10 IT IS `null` FOR EVERY ACCOUNT UNLESS
+   * `TRADOVATE_LIVE_PNL_ENABLED=1`** — see the header. The field stays on the
+   * wire, with the same meaning, so the browser needs no second flag and the
+   * day a CME ILA lands is one environment change.
    */
   openPnl: number | null;
 }
@@ -628,6 +658,13 @@ export async function GET() {
           },
           environment: api.environment,
           tradovateUserId: api.tradovateUserId,
+          // PASSED EXPLICITLY THOUGH THE LOADER WOULD DEFAULT TO THE SAME
+          // ANSWER (compliance, 29.10). The default exists so that no caller
+          // can forget and publish a figure; naming it here is so that the one
+          // place in the product that polls the broker says out loud, at the
+          // call site, that the snapshot is conditional. Read per request, so
+          // turning it on is an environment change and not a deploy.
+          pnlEnabled: isLivePnlEnabled(),
         });
       } finally {
         // The call counter, for a route that does not go through

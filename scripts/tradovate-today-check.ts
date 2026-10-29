@@ -4337,24 +4337,32 @@ async function liveLoaderGroup() {
   const flat = liveReaders(scene({ positions: [POSITION] }));
   const flatPull = await loadOpenPositions({
     readers: flat.readers, environment: 'live', tradovateUserId: ACCOUNT.userId, nowMs: NOW,
+    // The 29.10 gate, ON: these groups are about the figure itself.
+    pnlEnabled: true,
   });
 
   forgetContractNames();
   const held = liveReaders(scene({ positions: [openPosition(2)] }));
   const heldPull = await loadOpenPositions({
     readers: held.readers, environment: 'live', tradovateUserId: ACCOUNT.userId, nowMs: NOW,
+    // The 29.10 gate, ON: these groups are about the figure itself.
+    pnlEnabled: true,
   });
 
   // The SECOND pull, warm. Deliberately not preceded by forgetContractNames().
   const again = liveReaders(scene({ positions: [openPosition(2)] }));
   await loadOpenPositions({
     readers: again.readers, environment: 'live', tradovateUserId: ACCOUNT.userId, nowMs: NOW,
+    // The 29.10 gate, ON: these groups are about the figure itself.
+    pnlEnabled: true,
   });
 
   forgetContractNames();
   const short = liveReaders(scene({ positions: [openPosition(-3)] }));
   const shortPull = await loadOpenPositions({
     readers: short.readers, environment: 'live', tradovateUserId: ACCOUNT.userId, nowMs: NOW,
+    // The 29.10 gate, ON: these groups are about the figure itself.
+    pnlEnabled: true,
   });
 
   // A stranger's account holding a position, on a host they share.
@@ -4367,6 +4375,8 @@ async function liveLoaderGroup() {
   );
   const strangerPull = await loadOpenPositions({
     readers: stranger.readers, environment: 'live', tradovateUserId: ACCOUNT.userId, nowMs: NOW,
+    // The 29.10 gate, ON: these groups are about the figure itself.
+    pnlEnabled: true,
   });
 
   // Failure rule 1: the non-mint host is forgiven, the mint host is not.
@@ -4381,12 +4391,16 @@ async function liveLoaderGroup() {
   const demoDown = await loadOpenPositions({
     readers: { live: reader(scene({ positions: [openPosition(1)] })), demo: broken },
     environment: 'live', tradovateUserId: ACCOUNT.userId, nowMs: NOW,
+    // The 29.10 gate, ON: these groups are about the figure itself.
+    pnlEnabled: true,
   });
   forgetContractNames();
   const mintDown = await thrown(() =>
     loadOpenPositions({
       readers: { live: broken, demo: reader(scene({ positions: [openPosition(1)] })) },
       environment: 'live', tradovateUserId: ACCOUNT.userId, nowMs: NOW,
+    // The 29.10 gate, ON: these groups are about the figure itself.
+    pnlEnabled: true,
     })
   );
 
@@ -4454,6 +4468,8 @@ async function openWith(data: Scene) {
   const readers = { live: reader(data), demo: reader(scene({ accounts: [], positions: [] })) };
   const pull = await loadOpenPositions({
     readers, environment: 'live', tradovateUserId: ACCOUNT.userId, nowMs: NOW,
+    // The 29.10 gate, ON: these groups are about the figure itself.
+    pnlEnabled: true,
   });
   return { pull, calls: readers.live.calls };
 }

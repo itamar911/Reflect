@@ -36,10 +36,27 @@
  * each position would be read as two.
  *
  *
+ * AND AS OF 29.10 IT IS OFF BY DEFAULT — THE FIGURE IS GATED
+ * ----------------------------------------------------------
+ *
+ * NinjaTrader confirmed on 29.10 that account-level open P&L falls under the
+ * same Market Data denial described above and needs a CME ILA we do not have,
+ * so Reflect must stop showing it before public launch.
+ * {@link OpenPositionsRequest.pnlEnabled} — `TRADOVATE_LIVE_PNL_ENABLED`, read
+ * through ./live-pnl.ts and UNSET MEANS OFF — is where that is decided, and off
+ * means the snapshot POST is never issued and every `openPnl` below is `null`.
+ *
+ * Everything else in this file is untouched by it: `/account/list`,
+ * `/position/list` and `/contract/item` still run, so what the trader is
+ * HOLDING is reported exactly as before. See ./live-pnl.ts for why the figure
+ * is gated rather than deleted.
+ *
+ *
  * WHAT IT COSTS, AND WHY THAT IS THE CONSTRAINT
  * ---------------------------------------------
  *
- * Per poll: `/account/list` + `/position/list` PER HOST — four requests — plus
+ * With the figure enabled, per poll: `/account/list` + `/position/list` PER
+ * HOST — four requests — plus
  * one `/contract/item` per open contract, warm-cached by host-qualified id,
  * plus **one snapshot per account that is actually holding something**. The
  * pricing chain is still NOT walked: `loadContractUnits` would add
@@ -50,6 +67,8 @@
  * THE RATE LIMIT.** A flat account is never asked, so a flat poll costs exactly
  * what it cost before Stage 4a — zero extra requests, which is most of the day
  * for most traders. One account in a position is four requests becoming five.
+ * With the 29.10 gate off no account is asked at all, so EVERY poll costs what
+ * a flat poll costs.
  * Issuing the snapshot concurrently with `/position/list` to save a round trip
  * would ask for every account the trader has, which is the one shape that turns
  * a prop trader with forty accounts into forty requests every poll.
@@ -85,6 +104,7 @@
 import { loadContractNames } from './contract-names';
 import { discoverHostAccounts, type TradovateReader } from './fills';
 import type { TradovateEnvironment } from './hosts';
+import { isLivePnlEnabled } from './live-pnl';
 import type { TradovateCashBalanceSnapshot, TradovatePosition } from './types';
 
 /**
@@ -164,6 +184,12 @@ export interface HostAccountPositions {
    * ON THE ACCOUNT BECAUSE THAT IS WHERE THE BROKER PUTS IT — see the header.
    * One figure covers every contract the account holds.
    *
+   * **ALWAYS `null` WHILE `TRADOVATE_LIVE_PNL_ENABLED` IS UNSET, WHICH IS THE
+   * LAUNCH STATE (29.10).** Not a new fifth way to null and not a special case
+   * below: the gate skips {@link readOpenPnl} entirely, so the field keeps the
+   * exact meaning it already had — "we have no figure for this account" — and
+   * every reader that already handles null handles the gate for free.
+   *
    * **`null` IS NOT `0`, AND CONFLATING THEM IS THE BUG THIS FIELD IS MOST
    * LIKELY TO GROW.** A position can genuinely sit at break-even, so zero is an
    * answer a trader can act on; null means we could not get one. Four
@@ -232,6 +258,11 @@ const SNAPSHOT_PATH = '/cashBalance/getcashbalancesnapshot';
  * A finite zero is returned AS zero. A position sitting at break-even is a
  * fact, and `null` would hide it behind "we could not say".
  *
+ * NOT REACHED AT ALL WHILE THE 29.10 GATE IS OFF. `pnlEnabled` is checked at
+ * the call site in {@link loadOpenPositions} rather than here, so that the one
+ * place the request is made shows that it is not made. Everything below is the
+ * behaviour the day a CME ILA lands.
+ *
  * NOTHING IS LOGGED HERE, not even a count. This runs up to 240 times an hour
  * per trader, the common outcome is success, and the one thing a line could
  * carry — which account, holding what, worth how much — is the subject matter
@@ -265,6 +296,21 @@ export interface OpenPositionsRequest {
   tradovateUserId: number | null;
   /** Now, ms. Injected so a suite can assert `asOf` at a fixed point. */
   nowMs?: number;
+  /**
+   * Whether the broker's open P&L may be read at all (compliance, 29.10).
+   *
+   * FALSE MEANS THE SNAPSHOT POST IS NOT ISSUED — zero upstream calls, and
+   * `openPnl` is `null` on every account. See ./live-pnl.ts for why the figure
+   * is gated rather than deleted, and the launch checklist in
+   * docs/tradovate-launch.md for the deploy order.
+   *
+   * DEFAULTED FROM THE ENVIRONMENT RATHER THAN REQUIRED, so that production is
+   * correct without the route having to remember — and the default is
+   * {@link isLivePnlEnabled}, which answers false for an unset variable. A
+   * caller that passes nothing therefore gets the compliant behaviour; the
+   * suite passes `true` explicitly for the groups that are about the figure.
+   */
+  pnlEnabled?: boolean;
 }
 
 /**
@@ -283,7 +329,13 @@ export interface OpenPositionsRequest {
 export async function loadOpenPositions(
   request: OpenPositionsRequest
 ): Promise<OpenPositionsPull> {
-  const { readers, environment, tradovateUserId, nowMs = Date.now() } = request;
+  const {
+    readers,
+    environment,
+    tradovateUserId,
+    nowMs = Date.now(),
+    pnlEnabled = isLivePnlEnabled(),
+  } = request;
   const accounts: HostAccountPositions[] = [];
 
   for (const host of Object.keys(readers) as TradovateEnvironment[]) {
@@ -359,7 +411,19 @@ export async function loadOpenPositions(
     const names = await loadContractNames(reader, host, contractIds);
 
     for (const [accountId, list] of byAccount) {
-      // ONE SNAPSHOT PER HOLDING ACCOUNT, AND ONLY HERE (REF-108 Stage 4a).
+      // ONE SNAPSHOT PER HOLDING ACCOUNT, AND ONLY HERE (REF-108 Stage 4a) —
+      // OR NONE AT ALL, WHICH IS THE LAUNCH STATE (compliance, 29.10).
+      //
+      // `pnlEnabled` false SHORT-CIRCUITS BEFORE THE CALL, not after it. The
+      // difference is the whole point of the gate: NinjaTrader's 29.10 answer
+      // is that we are not entitled to this figure, so asking for it and
+      // throwing the answer away would still be a request for data we may not
+      // receive. Zero calls, and `null` — which is the value `openPnl` already
+      // carries for "no figure", so nothing downstream needs a second branch.
+      //
+      // ONE `&&` AND NOT A WRAPPER INSIDE `readOpenPnl`, deliberately: the
+      // reader must be able to see, at the one place the request is made, that
+      // the request is not made.
       //
       // `byAccount` is already the accounts with a non-zero `netPos` on this
       // host, so reaching the snapshot from inside this loop is what makes "a
@@ -371,7 +435,7 @@ export async function loadOpenPositions(
       // three accounts at once is three requests either way; firing them
       // together only makes the burst sharper against a limit the FAQ measures
       // per SECOND as well as per hour.
-      const openPnl = await readOpenPnl(reader, accountId);
+      const openPnl = pnlEnabled ? await readOpenPnl(reader, accountId) : null;
 
       accounts.push({
         brokerAccountId: accountId,

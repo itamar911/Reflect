@@ -67,6 +67,26 @@
  * a diff waved through.
  *
  *
+ * AND THAT SILENCE IS NOW THE SHIPPING STATE, NOT THE FALLBACK (29.10)
+ * --------------------------------------------------------------------
+ *
+ * NinjaTrader confirmed that account-level open P&L falls under our Market Data
+ * denial and needs a CME ILA, so `TRADOVATE_LIVE_PNL_ENABLED` is unset at
+ * launch and `openPnl` arrives `null` for every account
+ * (lib/tradovate/live-pnl.ts). **THE GATE IS SERVER-SIDE AND THIS FILE HAS NO
+ * FLAG OF ITS OWN** — it needs none, because `null` already renders as the
+ * position and nothing else: the line keeps its contract and its quantity, the
+ * figure is absent, and {@link PORTFOLIO_TOTAL} is not emitted at all, since
+ * `hasTotal` is false and a row carrying only a qualifier would explain an
+ * absence.
+ *
+ * SO THE THREE REASONS ABOVE ARE NOW LOAD-BEARING RATHER THAN TIDY. Do not
+ * "improve" the null path into a "—", a "לא זמין", a tooltip or a sentence
+ * about a licence: on this surface the absence must read as a feature that
+ * reports positions, not as one that is broken or waiting. `scripts/tradovate-today-check.ts`
+ * asserts the gated rows carry no money, no qualifier and no new copy.
+ *
+ *
  * DIRECTION IS KNOWN AND DELIBERATELY NOT RENDERED
  * -------------------------------------------------
  *
