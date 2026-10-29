@@ -37,15 +37,34 @@
  * deliberately greppable fixture for each of them and fails if one appears.
  * `src/lib/tradovate/notices.ts` states its own boundary the same way.
  *
- * AND NO BROKER STOP OR TARGET PRICE. `broker_stop_loss` and
- * `broker_take_profit` are not secret — they are in eleven `select('*')`
- * readers already — and they are still left out, for the reason
+ * AND NO BROKER STOP PRICE. `broker_stop_loss` is not secret — it is in eleven
+ * `select('*')` readers already — and it is still left out, for the reason
  * `src/app/api/ai-debrief/route.ts` records for its own prompt: the stop prices
  * that belong in front of a model are the ones the TRADER COMMITTED TO, and
- * adding the broker's two invites the model to compute a risk figure and present
- * it as fact. The behaviour is what a coach needs, and the behaviour is
+ * adding the broker's invites the model to compute a risk figure and present it
+ * as fact. The behaviour is what a coach needs, and the behaviour is
  * {@link StopSentence} — a verdict, never a price. One policy in one module
  * rather than one per call site.
+ *
+ * `broker_take_profit` WAS IN THAT SENTENCE UNTIL REF-130 AND IS NOT ANY MORE,
+ * which is a narrowing of a stated rule and so is argued rather than assumed.
+ * The hazard the rule names is specific: a model handed a stop can subtract it
+ * from the entry, call the difference the risk, and divide by it. A TARGET
+ * cannot be turned into a risk figure — the arithmetic needs the other leg — and
+ * the one ratio it could support is `realisedRr`, which is already here and
+ * already computed for the model rather than by it. What the target buys a coach
+ * is the sentence `exited_early` was always supposed to support and never could
+ * on an imported row: "your target was at X and you took Y". That sentence is
+ * the whole of REF-130 part א, and withholding the number would leave the model
+ * to infer it from the exit price — which is exactly the guessing the deny list
+ * exists to prevent.
+ *
+ * IT GOES THROUGH `brokerTargetToShow` AND NEVER OFF THE COLUMN, for the reason
+ * `realisedRr` goes through `brokerStopToShow`: that function is the single
+ * definition of "a broker target a trader may be shown", and it withholds the
+ * number on a wrong-side target — a price `nearestTarget` can report when every
+ * candidate was on the losing side of the entry. So the model cannot be told a
+ * target the trade card declines to print, and the two cannot drift.
  *
  * `realisedRr` IS NOT AN EXCEPTION TO THAT, AND THE DISTINCTION IS THE POINT
  * (REF-123). A RATIO IS NOT A PRICE. The rule above exists because a model
@@ -109,7 +128,7 @@
  */
 
 import { linkState, LINK_STATE_COPY } from '@/lib/journal/link';
-import { readStopHistory, stopMoveSentence } from '@/lib/journal/stopHistory';
+import { brokerTargetToShow, readStopHistory, stopMoveSentence } from '@/lib/journal/stopHistory';
 import { realisedRr, rrLabel } from '@/lib/journal/realisedRr';
 import { readTradeStages, stagesSentence } from '@/lib/journal/stages';
 import { intentNumber, intentText, rrValue, scaleValue, type RawValue } from '@/lib/intent';
@@ -142,6 +161,27 @@ export interface TradeFacts {
   plannedStop: number | null;
   /** The target the TRADER PLANNED. */
   plannedTarget: number | null;
+  /**
+   * The target THE BROKER HELD, through `brokerTargetToShow` (REF-130 part ג,
+   * item 4).
+   *
+   * Null whenever that function declines to state one: no stop document, a row
+   * from before `tp_history` (most of the table), no target order placed, or a
+   * target on the wrong side of the entry. See the header for why this is the
+   * one broker price here and `broker_stop_loss` still is not.
+   */
+  brokerTarget: number | null;
+  /**
+   * Whether the broker's target was MOVED. Null when the document does not say.
+   *
+   * THREE STATES, AND THE THIRD IS NOT `false`. A row with no `tp_history` has
+   * not told us the target stayed put — it has told us nothing — and collapsing
+   * that to a `false` is the exact defect REF-130 was opened over, committed
+   * against a model this time: `ai-debrief/route.ts` collapses three NULL flags
+   * to `'לא'` and the model then writes praise on that footing. A null here
+   * drops the piece from the line entirely.
+   */
+  targetMoved: boolean | null;
   rr: number | null;
   /**
    * What the trade RETURNED against the stop the broker held, as a ratio
@@ -241,6 +281,15 @@ export function readTradeFacts(row: unknown): TradeFacts | null {
     exitPrice: intentNumber(raw.exit_price as RawValue),
     plannedStop: intentNumber(raw.stop_loss as RawValue),
     plannedTarget: intentNumber(raw.take_profit as RawValue),
+    brokerTarget: brokerTargetToShow(stops, raw.broker_take_profit),
+    // `?? null` AND NOT A FALSINESS TEST. An absent sub-document gives
+    // `undefined` here, and `undefined` is "we did not look" — see the field.
+    targetMoved:
+      stops?.tpHistory?.verdict === 'moved'
+        ? true
+        : stops?.tpHistory?.verdict === 'kept'
+          ? false
+          : null,
     rr: rrValue(raw.rr_ratio as RawValue),
     // The same four arguments the trade card passes, so the figure in the
     // prompt is the figure on the card.
@@ -326,6 +375,20 @@ export function tradeFactsLine(f: TradeFacts): string {
     f.exitPrice !== null ? `יציאה ${f.exitPrice}` : null,
     f.plannedStop !== null ? `סטופ מתוכנן ${f.plannedStop}` : null,
     f.plannedTarget !== null ? `יעד מתוכנן ${f.plannedTarget}` : null,
+    // DIRECTLY AFTER THE PLANNED TARGET, so the two sit side by side for the
+    // reason the R:R pair below does: "you planned a target at X and the broker
+    // held one at Y" is the comparison, and on an imported row the planned
+    // figure is absent and this is the only target there is.
+    //
+    // ONE PIECE AND NOT TWO, which is what keeps `הוזז` unambiguous. The line's
+    // separator is ` · `, so two pieces would render the same string — and a
+    // bare `הוזז` in a list that also talks about the stop reads as a stray
+    // verb attached to whichever noun is nearest. The price carries it.
+    f.brokerTarget !== null
+      ? f.targetMoved === null
+        ? `יעד בברוקר ${f.brokerTarget}`
+        : `יעד בברוקר ${f.brokerTarget} · ${f.targetMoved ? 'הוזז' : 'לא הוזז'}`
+      : null,
     f.rr !== null ? `R:R ${f.rr}` : null,
     // DIRECTLY AFTER THE PLANNED R:R, so the two sit side by side in the one
     // line the model reads — the comparison is the whole value of the fact.
