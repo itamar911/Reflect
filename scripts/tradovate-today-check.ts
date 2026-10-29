@@ -122,6 +122,9 @@ import { SLOT_HEIGHT } from '../src/components/accounts/LivePnlSlot';
 // The compliance sentence, read from the card that renders it rather than
 // copied — the precedent is broker-import-check.ts importing SYNC_NOTE.
 import { NO_LIVE_PNL_NOTE } from '../src/components/settings/TradovateConnectionCard';
+// The 29.10 gate itself, asserted over env objects rather than by mutating the
+// process this suite runs in — `parseAllowlist`'s arrangement.
+import { LIVE_PNL_FLAG, isLivePnlEnabled } from '../src/lib/tradovate/live-pnl';
 import { moreLinesText } from '../src/lib/rules/todayLines';
 import type {
   TradovateAccount,
@@ -2708,6 +2711,9 @@ async function main() {
   await liveCacheGroup();
   await liveFlatTransitionGroup();
   await liveClockGroup();
+  liveGateFlagGroup();
+  liveGatedRowsGroup();
+  await liveGatedRouteGroup();
   await closedMidDayGroup();
   liveNeverReachesRulesGroup();
 
@@ -6174,6 +6180,187 @@ function sourceUnder(dir: string): string {
   };
   walk(root);
   return out.join('\n');
+}
+
+// ── 29.10: the flag, and what the trader sees on the other side of it ──────
+
+/**
+ * The variable itself, parsed.
+ *
+ * `'1'` AND NOTHING ELSE, and the two cases that earn this group are `'0'` and
+ * `'false'` — the two things somebody types when they mean OFF, both truthy.
+ * On this flag the truthy-string reading of `=0` would not be a bug in a
+ * feature, it would be a compliance breach, so the parse is pinned rather than
+ * trusted to `isImportEnabled`'s precedent.
+ */
+function liveGateFlagGroup() {
+  // broker-import-check.ts' cast, for its reason: `NodeJS.ProcessEnv` requires
+  // NODE_ENV, and the point of the parameter is that the parse is asserted
+  // without mutating the process this suite runs in.
+  const env = (value?: string): NodeJS.ProcessEnv =>
+    (value === undefined ? {} : { [LIVE_PNL_FLAG]: value }) as unknown as NodeJS.ProcessEnv;
+
+  group('REF-108 29.10: TRADOVATE_LIVE_PNL_ENABLED, and unset means off', [
+    c('(1) the variable is named once', LIVE_PNL_FLAG, 'TRADOVATE_LIVE_PNL_ENABLED'),
+    c('(2) unset is off', isLivePnlEnabled(env()), false),
+    c('(3) "1" is on', isLivePnlEnabled(env('1')), true),
+    c('(4) "0" is off, not truthy', isLivePnlEnabled(env('0')), false),
+    c('(5) "false" is off, not truthy', isLivePnlEnabled(env('false')), false),
+    c('(6) "true" is off — the flag is not a boolean parser',
+      isLivePnlEnabled(env('true')), false),
+    c('(7) empty is off', isLivePnlEnabled(env('')), false),
+    c('(8) and "1 " is off — no trimming, so no near-miss reads as on',
+      isLivePnlEnabled(env('1 ')), false),
+  ]);
+}
+
+/**
+ * What the three surfaces render while the figure is gated.
+ *
+ * THE CLAIM IS "THE POSITION, UNCHANGED, WITH NO NUMBER" — not "a tidy empty
+ * state". So the assertions compare the gated rows against the ungated ones
+ * rather than against hand-written strings: the text a trader reads must be
+ * the SAME text, and the only difference anywhere must be the figure and the
+ * row that existed to qualify it.
+ *
+ * All three layouts, because they take different branches: one contract (the
+ * figure sat on the line), two or more (the figure had its own row), the
+ * dashboard's per-portfolio shape, and the card's 44px fold.
+ */
+function liveGatedRowsGroup() {
+  const FIGURE = 120;
+
+  const gatedSolo = liveRows([solo('Solo', 2, null, 'ESZ6')], 'positions');
+  const openSolo = liveRows([solo('Solo', 2, FIGURE, 'ESZ6')], 'positions');
+
+  const gatedPair = liveRows([pair('Solo', null)], 'positions');
+  const openPair = liveRows([pair('Solo', FIGURE)], 'positions');
+
+  const gatedDash = liveRows([pair('Solo', null)], 'portfolios');
+  const openDash = liveRows([pair('Solo', FIGURE)], 'portfolios');
+
+  const gatedCard = liveRows([holding(4, null)], 'positions', CARD);
+  const openCard = liveRows([holding(4, FIGURE)], 'positions', CARD);
+
+  const everyGatedRow = [...gatedSolo, ...gatedPair, ...gatedDash, ...gatedCard];
+
+  group('REF-108 29.10: the gated row is the position and no number', [
+    // ── NO FIGURE, ANYWHERE, ON ANY SURFACE ────────────────────────────────
+    c('(1) every gated row carries a null figure',
+      everyGatedRow.map((row) => row.money), everyGatedRow.map(() => null)),
+    c('(2) and none of them draws one',
+      everyGatedRow.filter((row) => rendersMoney(row.money)), []),
+    // `rendersMoney` is the only thing between a null and a glyph, and `0` is
+    // the value that broke it once. Restated here because the gate makes null
+    // the common case rather than the rare one.
+    c('(3) the rule that decides it has not drifted',
+      [rendersMoney(null), rendersMoney(0), rendersMoney(FIGURE)], [false, true, true]),
+    // A GLYPH AND NOT A DIGIT: the quantity ("4 חוזים"), the contract month
+    // ("ESZ6") and the fold's count ("ועוד 2") are all digits that belong on a
+    // gated line. What must never appear is money, and `formatMoney` cannot
+    // produce an amount without one of these.
+    c('(4) no currency glyph reaches any gated text',
+      everyGatedRow.filter((row) => /[$₪€]/.test(row.text)), []),
+
+    // ── AND NO QUALIFIER, BECAUSE THERE IS NOTHING TO QUALIFY ──────────────
+    c('(5) the per-portfolio qualifier is not emitted',
+      everyGatedRow.filter((row) => row.text.includes(PORTFOLIO_TOTAL)), []),
+
+    // ── THE POSITION IS WORD-FOR-WORD WHAT IT WAS ──────────────────────────
+    c('(6) one contract: the same sentence, without the number',
+      texts(gatedSolo), texts(openSolo)),
+    c('(7) and it is still the sentence Stage 3 shipped',
+      texts(gatedSolo), ['פוזיציה פתוחה · שני חוזים ESZ6']),
+    c('(8) two contracts: the position lines are unchanged',
+      texts(gatedPair), texts(openPair).filter((text) => !text.includes(PORTFOLIO_TOTAL))),
+    c('(9) and the gate costs exactly the one qualifier row',
+      [gatedPair.length, openPair.length], [2, 3]),
+    c('(10) the dashboard still names the portfolio',
+      texts(gatedDash), texts(openDash)),
+    c('(11) and still says what it is',
+      texts(gatedDash), ['Solo · פוזיציה פתוחה']),
+
+    // ── THE CARD'S FOLD STILL TELLS THE TRADER THERE IS MORE ───────────────
+    //
+    // The 44px box clips in silence, so "ועוד N" is the only thing standing
+    // between a three-instrument portfolio and a card that looks complete. The
+    // fold reserves `cap - 1` in BOTH branches for exactly this case — the one
+    // where there is no figure — and the gate has just made that branch the
+    // only one that runs.
+    c('(12) the gated card still folds rather than clipping',
+      gatedCard.length, COMPACT_MAX_ROWS),
+    c('(13) and the fold row says how many are not on screen',
+      gatedCard.some((row) => row.text === moreLinesText(2)), true),
+    c('(14) the ungated card folds to the same height',
+      [gatedCard.length, openCard.length], [COMPACT_MAX_ROWS, COMPACT_MAX_ROWS]),
+
+    // ── AND NOTHING EXPLAINS ITSELF ────────────────────────────────────────
+    //
+    // The floor Stage 4b chose on purpose: no dash, no "לא זמין", no sentence
+    // about a licence. That lives on the settings card, once — see
+    // liveGateCopyGroup.
+    c('(15) no gated row is a dash or a non-answer',
+      everyGatedRow.filter((row) => /^[-—–]$|לא זמין|אין נתון/.test(row.text.trim())), []),
+    c('(16) a flat portfolio still renders nothing at all',
+      liveRows([{ accountId: 'x', displayName: 'Solo', positions: [], openPnl: null }], 'positions'),
+      []),
+  ]);
+}
+
+/** The route's own answer under the gate: null on every line, same key set. */
+async function liveGatedRouteGroup() {
+  const gated = await liveBody(
+    liveDeps({
+      loadPositions: async () => ({
+        accounts: [
+          {
+            brokerAccountId: ACCOUNT.id,
+            host: 'live',
+            positions: [{ contractId: LIVE_CONTRACT, contractName: 'ESZ6', netPos: 2 }],
+            openPnl: null,
+          },
+          {
+            brokerAccountId: 7002,
+            host: 'demo',
+            positions: [{ contractId: 2, contractName: 'MNQZ6', netPos: -2 }],
+            openPnl: null,
+          },
+        ],
+        asOf: new Date(NOW).toISOString(),
+      }),
+      resolveAccounts: async () =>
+        new Map([
+          [`live:${ACCOUNT.id}`, { accountId: LIVE_UUID, displayName: 'My Eval' }],
+          ['demo:7002', { accountId: 'uuid-b', displayName: 'Eval Two' }],
+        ]),
+    })
+  );
+  // `liveBody` answers an untyped body on purpose — it is the JSON the browser
+  // receives, not the union — so the account lines are named here.
+  const accounts = (gated.accounts ?? []) as LiveAccountLine[];
+
+  group('REF-108 29.10: the gated response', [
+    c('(1) both portfolios are still answered for', accounts.length, 2),
+    c('(2) openPnl is null on every line', accounts.map((a) => a.openPnl), [null, null]),
+    c('(3) and the positions are all there',
+      accounts.map((a) => a.positions.map((p) => [p.contractName, p.netPos])),
+      [[['ESZ6', 2]], [['MNQZ6', -2]]]),
+    c('(4) the portfolio names are still resolved',
+      accounts.map((a) => a.displayName), ['My Eval', 'Eval Two']),
+
+    // THE KEY SET DOES NOT SHRINK. `openPnl` stays on the wire, carrying null,
+    // so the browser needs no second flag and turning the figure on is one
+    // environment change rather than a deploy. A gate implemented by deleting
+    // the key would fail here — and would be a shape the client has never seen.
+    c('(5) the wire shape is the one it always was',
+      [...allKeys([gated])].sort(),
+      ['accountId', 'accounts', 'asOf', 'contractName', 'displayName', 'netPos',
+       'openPnl', 'positions', 'source']),
+
+    // The provenance is untouched: the gate is about one field, not about
+    // whether the broker answered.
+    c('(6) and it is still a verified pull', gated.source, 'broker_verified'),
+  ]);
 }
 
 async function closedMidDayGroup() {
