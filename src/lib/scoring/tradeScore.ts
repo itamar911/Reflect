@@ -108,7 +108,23 @@ export interface TradeScoreResult {
 
 const TOLERANCE_PCT = 0.001; // 0.1%
 
-function withinTolerance(a: number, b: number): boolean {
+/**
+ * Whether two prices are the same price, to a tenth of a percent.
+ *
+ * EXPORTED FOR lib/journal/patience.ts AND OTHERWISE UNCHANGED (REF-130 part א).
+ * It is the product's only existing answer to "did this trade close AT that
+ * number", and the contradiction correction below is its one caller: an exit
+ * within tolerance of the target un-sets `exited_early`. The patience
+ * derivation needs the same question asked about the ENTRY — an exit at the
+ * entry price is a stop that had been moved to breakeven — and a second
+ * tolerance with a second constant would let the two drift, so there is one.
+ *
+ * RELATIVE AND THEREFORE WIDE ON AN INDEX FUTURE, which the caller has to know:
+ * 0.1% of a 29,834 NQ print is roughly 30 points, or 119 ticks. See
+ * lib/journal/patience.ts, which states what that costs it and why it accepts
+ * the cost in the direction it does.
+ */
+export function withinTolerance(a: number, b: number): boolean {
   const ref = Math.max(Math.abs(a), Math.abs(b), 1e-9);
   return Math.abs(a - b) / ref <= TOLERANCE_PCT;
 }
