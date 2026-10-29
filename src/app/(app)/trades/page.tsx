@@ -112,6 +112,20 @@ export default async function TradesPage({ searchParams }: {
     pnl_amount:       t.pnl_amount != null ? Number(t.pnl_amount) : null,
     actual_pnl:       t.actual_pnl != null ? Number(t.actual_pnl) : null,
     pnl_currency:     (t.pnl_currency as string | null) ?? null,
+    // ── The trader's own early-exit answer (REF-130 part א) ───────────────
+    //
+    // THREE STATES, AND THE STRICT TEST IS THE WHOLE POINT. The column is
+    // nullable with no default and NULL already means "not asked" — every
+    // broker row, because `CloseTrade.tsx` is its only writer and is never
+    // shown on one. A `?? false` or an `=== true` here would collapse that
+    // before `lib/journal/patience.ts` could read it, which is the defect
+    // REF-130 was opened over, committed one map earlier.
+    //
+    // AND NAMED HERE BECAUSE THIS OBJECT IS BUILT FIELD BY FIELD, for the
+    // reason the broker-column block below states at length: the `select('*')`
+    // above returns the column, and a column nobody names never reaches the
+    // component.
+    exited_early:     t.exited_early === true ? true : t.exited_early === false ? false : null,
     has_rule_violation: violatedIds.has(t.id as string),
     // ── Provenance, from migration 034 (REF-107 Stage 2) ──────────────────
     //

@@ -16,7 +16,8 @@ import { resolveAccountParam, tradesInAccount, type RawSearchParams } from '@/li
 import { readPortfolioLabel } from '@/lib/portfolios/read';
 import { tradePointsPnl, tradeMoneyPnl, hasMoneyPnl, isWinningTrade } from '@/lib/pnl';
 import { tradingDayOfTrade } from '@/lib/tradingDay';
-import { averageOf, rrValue, intentText } from '@/lib/intent';
+import { averageOf, rrValue, intentText, type RawValue } from '@/lib/intent';
+import { patienceRate, patienceTally } from '@/lib/journal/patience';
 import { behaviourDisciplineScore } from '@/lib/scoring/disciplineAggregate';
 import {
   targetMoveLine,
@@ -212,6 +213,40 @@ export default async function StatsPage({ searchParams }: {
   const withRevenge = closed.filter(t => t.revenge_trade !== null);
   const revengePct = withRevenge.length
     ? Math.round((withRevenge.filter(t => t.revenge_trade === true).length / withRevenge.length) * 100) : null;
+
+  // ── סבלנות, from the prices rather than from a flag (REF-130 part א) ──────
+  //
+  // `closed` AND NOT `trades`, like the four rates above: an open position has
+  // not finished being exited.
+  //
+  // THE DENOMINATOR IS MEASURED TRADES AND ZERO RENDERS AS A DASH. A trader
+  // whose every row is unanswerable has not been measured at 0% patience; see
+  // `patienceTally`, which is also where "the trader's own `exited_early`
+  // answer wins when there is one" lives — so a manual trade counts exactly as
+  // it would have before this existed, and the derivation is reached only by
+  // the rows that answered nothing.
+  //
+  // THE TWO BROKER COLUMNS ARE NOT ON `TradePlan`, which is why this reads
+  // through a loose record: `select('*')` returns them and the type does not
+  // declare them, exactly as it does not declare `stop_history`. `intentNumber`
+  // inside the module validates every one of them.
+  const patience = patienceRate(
+    patienceTally(
+      closed.map((t) => {
+        const raw = t as unknown as Record<string, unknown>;
+        return {
+          direction: t.direction,
+          entryPrice: t.entry_price,
+          exitPrice: t.exit_price,
+          planTarget: t.take_profit,
+          brokerTarget: raw.broker_take_profit as RawValue,
+          planStop: t.stop_loss,
+          brokerStop: raw.broker_stop_loss as RawValue,
+          exitedEarly: t.exited_early,
+        };
+      })
+    )
+  );
 
   // ── What the broker saw happen to the TARGET (REF-130 part ג, item 3) ─────
   //
@@ -421,6 +456,7 @@ export default async function StatsPage({ searchParams }: {
         movedSlPct={movedSlPct}
         fomoPct={fomoPct}
         revengePct={revengePct}
+        patiencePct={patience}
         targetMoveLine={targetMoves}
       />
 

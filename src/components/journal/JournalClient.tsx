@@ -25,6 +25,7 @@ import {
   targetMoveSentence,
 } from '@/lib/journal/stopHistory';
 import { realisedRr, rrRow } from '@/lib/journal/realisedRr';
+import { patienceOf, patienceSentence } from '@/lib/journal/patience';
 import { readTradeStages, stagePieces, stagesSentence } from '@/lib/journal/stages';
 import { startOfTradingDayIso } from '@/lib/rules/tradeRuleContext';
 import { DAY_START_PARAM, MAX_SINCE_AGE_MS, SINCE_PARAM } from '@/lib/tradovate/trading-day';
@@ -94,6 +95,17 @@ interface Trade {
   pnl_amount: number | null;
   actual_pnl: number | null;
   pnl_currency: string | null;
+  /**
+   * The trader's own "I left early" answer, in THREE states (REF-130 part א).
+   *
+   * `| null` AND NOT A BOOLEAN. The column is nullable with no default
+   * (migration 011) and NULL already means "not asked" — which is every broker
+   * row, because `CloseTrade.tsx` is the only writer and is never shown on one.
+   * `lib/journal/patience.ts` branches on the boolean and derives only in its
+   * absence, so collapsing the third state here would delete the distinction
+   * before the module could read it.
+   */
+  exited_early: boolean | null;
   has_rule_violation?: boolean;
 
   // ── Provenance (REF-107 Stage 2) ──────────────────────────────────────────
@@ -1810,6 +1822,34 @@ function TradeDetailModal({ trade, plans, onClose, onLinkResolved, onUnlink, deb
   // when there is not — `stopSentenceAfter`'s rule, which puts the sentence
   // wherever a trader looking for "what happened to my target" already is.
   const targetSentenceAfter = brokerTarget !== null ? 'יעד בברוקר' : 'Take Profit';
+
+  // ── Did the trader wait for their own target (REF-130 part א) ─────────────
+  //
+  // A ROW AND NOT A SENTENCE, unlike the two stop/target verdicts above it,
+  // because the three answers ARE comparable: "יצאת ביעד", "יצאת לפני היעד" and
+  // "הסטופ סגר" are three ways one trade ended, in the same register as `כיוון`
+  // and `סטטוס`. The stop's four answers include findings about our own reading,
+  // which is why that one is prose.
+  //
+  // `broker_take_profit` RATHER THAN `brokerTarget` ABOVE, and that is
+  // deliberate rather than an oversight: the price row needs the sub-document to
+  // print a number, and the VERDICT does not — so `סבלנות` is answerable on
+  // every broker row imported since Stage 3 while `יעד בברוקר` appears only on
+  // rows imported since REF-130. lib/journal/patience.ts argues it; the short
+  // version is that a verdict has no arithmetic a trader could check by hand.
+  //
+  // ABSENT ENTIRELY WHEN NOTHING IS KNOWN, which is every manual trade closed
+  // without answering and every imported loss that reached no stop.
+  const patience = patienceOf({
+    direction: dir,
+    entryPrice: trade.entry_price,
+    exitPrice: trade.exit_price,
+    planTarget: trade.take_profit,
+    brokerTarget: trade.broker_take_profit,
+    planStop: trade.stop_loss,
+    brokerStop: trade.broker_stop_loss,
+    exitedEarly: trade.exited_early,
+  });
   // Whichever of the two stop rows comes LAST, so the sentence sits under both
   // when there is a price and under the planned stop when there is not — which
   // is the `'none'` and `'unknown'` case, and exactly where a trader looking
@@ -1880,6 +1920,11 @@ function TradeDetailModal({ trade, plans, onClose, onLinkResolved, onUnlink, deb
     // sub-document says nothing.
     ...(brokerTarget !== null
       ? ([['יעד בברוקר', brokerTarget.toFixed(2)]] as [string, string][])
+      : []),
+    // UNDER BOTH TARGETS, because it is the verdict ON them: "this is where I
+    // was going, and this is how the trade actually ended" (REF-130 part א).
+    ...(patience !== null
+      ? ([['סבלנות', patienceSentence(patience)]] as [string, string][])
       : []),
     // PLANNED AND REALISED IN ONE ROW, because the comparison is the point and
     // a second row would be a second label for the same quantity (REF-123).
