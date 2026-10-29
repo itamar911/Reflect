@@ -102,11 +102,24 @@ import { GET as cronOrders } from '../src/app/api/cron/tradovate-orders/route';
 import { ORDERS_LOOKBACK_MS, runStopCapture } from '../src/lib/tradovate/orders-cron';
 import {
   brokerStopToShow,
+  brokerTargetToShow,
   readStopHistory,
   stopDirectionOf,
   stopMoveSentence,
   stopWasWidened,
+  targetMoveLine,
+  targetMoveSentence,
+  targetMoveTally,
 } from '../src/lib/journal/stopHistory';
+// REF-130 part א — the verdict `exited_early` could never give an imported row.
+import {
+  patienceOf,
+  patienceRate,
+  patienceSentence,
+  patienceTally,
+  wasPatient,
+  type PatienceInput,
+} from '../src/lib/journal/patience';
 import {
   describeStages,
   readTradeStages,
@@ -7495,6 +7508,392 @@ function stopFlagProposalGroup() {
   ]);
 }
 
+// ── REF-130: the target's sentence, and סבלנות from the prices ──────────────
+//
+// Two groups over the two halves of one ticket. Both are pure function calls
+// for `stopSentenceGroup`'s reason: the modules are browser-safe and have no
+// client, so the trade card, the statistics page and the coach are all driven
+// here without any of them.
+//
+// THE PROPERTY THEY EXIST FOR, in one sentence each:
+//
+//   part ג  `הורחק` must not read as a warning about a TARGET, where two rows
+//           up it is a warning about a stop. Same word, opposite value.
+//   part א  A row we cannot measure must not read as a row that failed. `0%
+//           סבלנות` on every imported trade is what the ticket was opened over,
+//           and it came from exactly that collapse.
+
+/** The target sub-document, over the stop document `stopDoc` already builds. */
+const tpDoc = (over: Record<string, unknown> = {}): Record<string, unknown> =>
+  stopDoc({
+    tp_history: {
+      verdict: 'moved',
+      initialTp: 29_790,
+      finalTp: 29_780,
+      targetSide: 'gain',
+      movedCount: 1,
+      direction: 'closer',
+      targetCount: 1,
+      ...over,
+    },
+  });
+
+const tpSentenceOf = (value: unknown): string | null =>
+  targetMoveSentence(readStopHistory(value))?.text ?? null;
+const tpToneOf = (value: unknown): string | null =>
+  targetMoveSentence(readStopHistory(value))?.tone ?? null;
+const tpPriceOf = (value: unknown, column: unknown): number | null =>
+  brokerTargetToShow(readStopHistory(value), column);
+
+function targetSentenceGroup() {
+  const tally = targetMoveTally([
+    { stop_history: tpDoc() },
+    { stop_history: tpDoc({ movedCount: 2, direction: 'farther' }) },
+    { stop_history: tpDoc({ movedCount: 2, direction: 'mixed' }) },
+    { stop_history: tpDoc({ verdict: 'kept', movedCount: 0, direction: null }) },
+    // Each of these four is EXCLUDED from the denominator, and each for its own
+    // reason. See `targetMoveTally`.
+    { stop_history: tpDoc({ verdict: 'none', movedCount: 0, direction: null }) },
+    { stop_history: tpDoc({ verdict: 'unknown', targetSide: 'wrong' }) },
+    { stop_history: stopDoc() },
+    { stop_history: null },
+    {},
+  ]);
+
+  group('REF-130: the target\'s move is a neutral fact, in both directions', [
+    // ── THE WORDING TRAP. `הורחק` is a warning two rows up and is not one
+    //    here, so the entry is named in every sentence and the tone never
+    //    leaves `neutral` ───────────────────────────────────────────────────
+    c('(1) a target pulled in names the entry, and is not a failing',
+      [tpSentenceOf(tpDoc()), tpToneOf(tpDoc())],
+      ['היעד הוזז פעם אחת — קורב לנקודת הכניסה', 'neutral']),
+    c('(2) and a target pushed out is not one either — same word as the stop',
+      [tpSentenceOf(tpDoc({ movedCount: 2, direction: 'farther', finalTp: 29_820 })),
+       tpToneOf(tpDoc({ movedCount: 2, direction: 'farther' }))],
+      ['היעד הוזז 2 פעמים — הורחק מנקודת הכניסה', 'neutral']),
+    // The stop's own widening sentence, for contrast, read through the shared
+    // function rather than quoted — so the pair cannot drift apart.
+    c('(2b) where the STOP\'s identical verb is a warning that says why',
+      [sentenceOf(stopDoc({ direction: 'widened', movedCount: 1, finalStop: 29_651.25 })),
+       toneOf(stopDoc({ direction: 'widened', movedCount: 1 }))],
+      ['הסטופ הורחק מנקודת הכניסה — הסיכון גדל (מ-29671.25 ל-29651.25)', 'warning']),
+    c('(3) both ways says so', tpSentenceOf(tpDoc({ movedCount: 3, direction: 'mixed' })),
+      'היעד הוזז 3 פעמים — גם וגם'),
+    // Hebrew counts one differently. The stop's count sentence is reached only
+    // by `'mixed'`, which needs two steps, so it never had to answer this.
+    c('(4) one move is "פעם אחת" and not "1 פעמים"',
+      tpSentenceOf(tpDoc())?.includes('1 פעמים') ?? null, false),
+
+    // ── THE FOUR SILENT ANSWERS ───────────────────────────────────────────
+    //
+    // Only a MOVE earns a sentence, where the stop speaks on all four of its
+    // verdicts. A target is an expectation rather than a risk.
+    c('(5) kept, none, wrong-side, no sub-document and no document: nothing', [
+      tpSentenceOf(tpDoc({ verdict: 'kept', movedCount: 0, direction: null })),
+      tpSentenceOf(tpDoc({ verdict: 'none', initialTp: null, movedCount: 0, direction: null })),
+      tpSentenceOf(tpDoc({
+        verdict: 'unknown', targetSide: 'wrong', initialTp: null, movedCount: 0, direction: null,
+      })),
+      // THE ROW EVERY TRADE IN THE TABLE IS TODAY: a stop document with no
+      // `tp_history` key at all. There is no backfill and there cannot be one.
+      tpSentenceOf(stopDoc()),
+      tpSentenceOf(null),
+    ], [null, null, null, null, null]),
+
+    // ── THE PRICE, AND THE WRONG-SIDE LOCK ────────────────────────────────
+    c('(6) a readable target is offered, from the column',
+      [tpPriceOf(tpDoc({ verdict: 'kept', movedCount: 0, direction: null }), 29_790),
+       // PostgREST returns NUMERIC as a STRING.
+       tpPriceOf(tpDoc(), '29790'),
+       // And the document answers when the column cannot.
+       tpPriceOf(tpDoc(), null)],
+      [29_790, 29_790, 29_790]),
+    // THE DEFECT THE TICKET WAS OPENED OVER, AS A RENDERING RULE. This is the
+    // panel where a price on the losing side of the entry would have been
+    // printed beside the target the trader typed.
+    c('(7) no price for a wrong-side target, a `none`, a row with no key, or no document', [
+      tpPriceOf(tpDoc({ verdict: 'unknown', targetSide: 'wrong', initialTp: null }), 29_790),
+      tpPriceOf(tpDoc({ verdict: 'none', initialTp: null }), 29_790),
+      tpPriceOf(stopDoc(), 29_790),
+      tpPriceOf(null, 29_790),
+    ], [null, null, null, null]),
+    // The column is named in all four, so (7) cannot pass by there being no
+    // number to offer.
+    c('(7b) and the column really does carry one in every one of those cases',
+      readStopHistory(stopDoc())?.initialStop, 29_671.25),
+
+    // ── THE READER IS DEFENSIVE, for `readStopHistory`'s reasons ───────────
+    c('(8) a count that arrives as a string still reads as a number',
+      [readStopHistory(tpDoc({ movedCount: '2' }))?.tpHistory?.movedCount,
+       readStopHistory(tpDoc({ targetCount: '3' }))?.tpHistory?.targetCount],
+      [2, 3]),
+    c('(9) an unrecognised verdict is no sub-document at all', [
+      readStopHistory(tpDoc({ verdict: 'probably' }))?.tpHistory,
+      readStopHistory(stopDoc({ tp_history: 'not a document' }))?.tpHistory,
+      readStopHistory(stopDoc({ tp_history: [] }))?.tpHistory,
+      readStopHistory(stopDoc({ tp_history: null }))?.tpHistory,
+    ], [null, null, null, null]),
+    // `targetCount` IS NOT DEFAULTED TO ONE and `movedCount` IS defaulted to
+    // zero — `stopCount`'s asymmetry, for its reason: a count nobody wrote is a
+    // count of nothing, but "how many targets" nobody wrote is not one target.
+    c('(10) an absent `targetCount` is unknown, and an absent `movedCount` is zero',
+      [readStopHistory(stopDoc({ tp_history: { verdict: 'kept' } }))?.tpHistory?.targetCount,
+       readStopHistory(stopDoc({ tp_history: { verdict: 'kept' } }))?.tpHistory?.movedCount],
+      [null, 0]),
+
+    // ── THE /stats TALLY ──────────────────────────────────────────────────
+    //
+    // Four of the nine rows above are measurable. The other five are excluded
+    // one per reason: `'none'` (a target that never existed cannot have moved),
+    // wrong-side, a stop document with no `tp_history`, a null column, and a
+    // row with no key at all.
+    c('(11) the denominator is rows we can describe, and it is four of nine',
+      tally, { measured: 4, moved: 3, closer: 1, farther: 1 }),
+    // `closer + farther` IS LESS THAN `moved`, because the `'mixed'` row went
+    // both ways. The line prints the two as a note and not as a breakdown.
+    c('(12) the line reads as a tally, and the directions need not sum to it',
+      targetMoveLine(tally), 'הזזת יעד: 3 מתוך 4 עסקאות (קורב 1 · הורחק 1)'),
+    c('(13) nothing moved drops the parenthetical rather than printing zeroes',
+      targetMoveLine({ measured: 4, moved: 0, closer: 0, farther: 0 }),
+      'הזזת יעד: 0 מתוך 4 עסקאות'),
+    // NOTHING MEASURED IS NO ROW, and not `0 מתוך 0` — which is a row
+    // announcing a measurement that was never taken. Every account is here
+    // until a broker row is imported after this ticket ships.
+    c('(14) and nothing measured shows no row at all', [
+      targetMoveLine({ measured: 0, moved: 0, closer: 0, farther: 0 }),
+      targetMoveLine(targetMoveTally([])),
+      targetMoveLine(targetMoveTally([{ stop_history: stopDoc() }, {}])),
+    ], [null, null, null]),
+  ]);
+}
+
+/**
+ * סבלנות, derived — the five cases from the ticket and the ones around them.
+ *
+ * THE BEARING FIXTURE IS (5), AND IT IS WHY THE REST ARE SAFE. A manual trade
+ * whose trader answered must read EXACTLY as it read before this module
+ * existed, in both directions, with the derivation not consulted at all. That
+ * is what confines the change to the absence it was opened about.
+ */
+function patienceGroup() {
+  /** A long out in profit, short of wherever its target is. No self-report. */
+  const LONG: PatienceInput = {
+    direction: 'long',
+    entryPrice: 5000,
+    exitPrice: 5010,
+    planTarget: null,
+    brokerTarget: null,
+    planStop: 4990,
+    brokerStop: null,
+    exitedEarly: null,
+  };
+  /** The 15.10 trade's own numbers: a short on MNQZ6. The mirror. */
+  const SHORT: PatienceInput = {
+    ...LONG,
+    direction: 'short',
+    entryPrice: ENTRY,
+    exitPrice: EXIT,
+    planStop: 29_870,
+  };
+  const verdict = (over: Partial<PatienceInput> = {}) => patienceOf({ ...LONG, ...over });
+
+  const EARLY = { ...LONG, planTarget: 5020 };
+  const HIT = { ...EARLY, exitPrice: 5020 };
+
+  // A manual trade's score, so (14) is a number and not an adjective.
+  const SCORED: TradeScoreInput = {
+    stop_loss: 4990,
+    take_profit: 5020,
+    rr_ratio: 3,
+    required_min_rr: null,
+    strategy_conditions_checked: null,
+    moved_sl: false,
+    exited_early: false,
+    fomo_entry: false,
+    revenge_trade: false,
+    exit_price: 5010,
+    entry_price: 5000,
+    direction: 'long',
+  };
+
+  const source = fs.readFileSync(
+    path.join(process.cwd(), 'src/lib/journal/patience.ts'),
+    'utf8'
+  );
+
+  group('REF-130: סבלנות is measured, and an unmeasured row is not a failure', [
+    // ── (1) THE PLAN'S TARGET BEATS THE BROKER'S ─────────────────────────
+    //
+    // The opposite precedence to `realisedRr`'s, and right for the opposite
+    // reason: that measures the risk the trader WAS CARRYING, this measures
+    // whether they honoured THEIR OWN INTENTION. Both halves in one case, so
+    // the assertion is the precedence rather than two facts: 5010 is past the
+    // broker's 5005 and short of the plan's 5020, so the two targets give
+    // OPPOSITE verdicts and only one of them can be reported.
+    c('(1) with both targets, the plan\'s wins — and the broker\'s alone would not have', [
+      patienceOf({ ...LONG, planTarget: 5020, brokerTarget: 5005 }),
+      patienceOf({ ...LONG, brokerTarget: 5005 }),
+    ], ['early', 'target']),
+
+    // ── (2) EXIT BEFORE THE BROKER'S TARGET, WITH THE SHORT MIRROR ───────
+    //
+    // THE CASE THE WHOLE TICKET IS FOR: an imported row has no `take_profit`,
+    // so before this it had no answer at all and `exited_early` read NULL →
+    // `false` → 0% סבלנות.
+    c('(2) an exit short of the BROKER\'s target is impatient, long and short alike', [
+      patienceOf({ ...LONG, brokerTarget: 5030 }),
+      patienceOf({ ...SHORT, brokerTarget: 29_700 }),
+    ], ['early', 'early']),
+    c('(2b) and the trade card says it in words',
+      patienceSentence('early'), 'יצאת לפני היעד'),
+
+    // ── (3) NO TARGET ANYWHERE: UNKNOWN, AND NO LINE ─────────────────────
+    c('(3) no target in either column is unknown — no verdict and no row',
+      [verdict(), wasPatient(LONG)], [null, null]),
+
+    // ── (4) A WRONG-SIDE TARGET IS UNKNOWN, NEVER IMPATIENT ──────────────
+    //
+    // `nearestTarget` returns the best of its candidates whatever side they are
+    // on, so `broker_take_profit` can hold a price BELOW a long's entry —
+    // measured once as the entry price itself. An exit is at or beyond such a
+    // "target" immediately, so without the side test this reads `'target'` on a
+    // trade that had none; with the sign the other way it reads `'early'`,
+    // which is an accusation built out of our own mis-attribution.
+    c('(4) a target on the wrong side of the entry is unknown, in both columns', [
+      verdict({ brokerTarget: 4980 }),
+      // At the entry: gain must be POSITIVE, not merely non-negative.
+      verdict({ brokerTarget: 5000 }),
+      // And the plan's own target gets the same test — a trader can type one
+      // on the wrong side of their entry, and no sub-document would flag it.
+      verdict({ planTarget: 4980 }),
+      wasPatient({ ...LONG, brokerTarget: 4980 }),
+    ], [null, null, null, null]),
+
+    // ── (5) A MANUAL TRADE READS EXACTLY AS IT DID. THE BEARING FIXTURE ──
+    //
+    // The trader's own answer wins in BOTH directions and the derivation is
+    // not consulted: HIT reached its target and still reports `'early'`
+    // because the trader said so.
+    c('(5) the trader\'s "I left early" outranks prices that say otherwise', [
+      patienceOf({ ...HIT, exitedEarly: true }),
+      wasPatient({ ...HIT, exitedEarly: true }),
+    ], ['early', false]),
+    // THE CONTRADICTION, AND THE TWO READERS DISAGREEING ON PURPOSE. The card
+    // shows no line rather than a sentence the trader has already denied; the
+    // aggregate still counts them as patient, because they answered.
+    c('(5b) and their "I did not" censors the sentence without losing the answer', [
+      patienceOf({ ...EARLY, exitedEarly: false }),
+      wasPatient({ ...EARLY, exitedEarly: false }),
+    ], [null, true]),
+    c('(5c) where the prices AGREE, they say which patient exit it was', [
+      patienceOf({ ...HIT, exitedEarly: false }),
+      wasPatient({ ...LONG, exitedEarly: false }),
+    ], ['target', true]),
+    // ONLY A REAL BOOLEAN IS AN ANSWER — disciplineAggregate.ts' one correction
+    // to the formula it inherited. A row where the KEY IS ABSENT reads as
+    // `undefined`, and `undefined !== null` holds, so a `!== null` test here
+    // would count an absence as a violation.
+    c('(5d) a NULL and an absent key are both "not asked", so the prices decide', [
+      wasPatient({ ...EARLY, exitedEarly: null }),
+      wasPatient({ ...EARLY, exitedEarly: undefined }),
+    ], [false, false]),
+
+    // ── The stop closed it, which is PATIENCE ────────────────────────────
+    c('(6) the plan\'s stop, then the broker\'s, and a loss with neither', [
+      verdict({ exitPrice: 4990, planTarget: 5020 }),
+      verdict({ exitPrice: 4989, planStop: null, brokerStop: 4990, planTarget: 5020 }),
+      // No stop anywhere and a loss: unknown. NOT impatience — the trade may
+      // have been closed by hand at a level nobody recorded.
+      verdict({ exitPrice: 4980, planStop: null, planTarget: 5020 }),
+    ], ['stop', 'stop', null]),
+    c('(6b) and it is said as the stop doing its job',
+      patienceSentence('stop'), 'הסטופ סגר'),
+    // THE BREAKEVEN STOP. Neither stop this module can resolve is at the entry
+    // — both are "the stop the position opened under" — so without this test a
+    // scratch exit falls through to the accusation and the trader is told they
+    // were impatient about a trade that went nowhere.
+    c('(7) a stop that had been moved to breakeven still reads as a stop', [
+      verdict({ exitPrice: 5000, planTarget: 5020 }),
+      verdict({ exitPrice: 5002, planTarget: 5020 }),
+    ], ['stop', 'stop']),
+    // AND THE BAND IS 0.1% OF THE PRICE, WHICH IS WIDE ON AN INDEX FUTURE —
+    // about 5 points at 5000 and 30 at 29,834. Pinned so the cost is a number
+    // rather than a caveat in a comment, and note the DIRECTION of the error:
+    // inside the band a genuinely early exit is credited, never accused.
+    c('(7b) wide enough that an exit 5 points up is credited, 30 is not', [
+      verdict({ exitPrice: 5005, planTarget: 5020 }),
+      verdict({ exitPrice: 5030, planTarget: 5100 }),
+    ], ['stop', 'early']),
+    c('(8) a loss that reached no stop says nothing, and one that reached it does', [
+      verdict({ exitPrice: 4970, planStop: 4950, planTarget: 5020 }),
+      verdict({ exitPrice: 4950, planStop: 4950, planTarget: 5020 }),
+    ], [null, 'stop']),
+
+    // ── At or beyond, with no tick tolerance ─────────────────────────────
+    //
+    // `tickSize` is declared in lib/tradovate/types.ts and read in ZERO places.
+    // `>=`/`<=` IS the tolerance: an exit is a quantity-weighted mean of real
+    // fills and will essentially never equal a typed price, so equality would
+    // read every target hit as an early exit.
+    c('(9) "at or beyond" the target, not "equal to" it', [
+      verdict({ exitPrice: 5020, planTarget: 5020 }),
+      verdict({ exitPrice: 5025, planTarget: 5020 }),
+    ], ['target', 'target']),
+    c('(9b) and the sentence for it', patienceSentence('target'), 'יצאת ביעד'),
+
+    // ── Null safety ──────────────────────────────────────────────────────
+    c('(10) an open trade, a row with no direction and one with no entry', [
+      verdict({ exitPrice: null, planTarget: 5020 }),
+      // From the COLUMN and never guessed from target-vs-entry (REF-107 §0ד).
+      verdict({ direction: null, planTarget: 5020 }),
+      verdict({ entryPrice: null, planTarget: 5020 }),
+    ], [null, null, null]),
+    // PostgREST returns NUMERIC as a STRING, and all four of these prices come
+    // back through the same client. A `typeof === 'number'` guard would answer
+    // unknown on every row in the table.
+    c('(11) every price still reads when it arrives as a string', [
+      patienceOf({ ...LONG, entryPrice: '5000', exitPrice: '5010', planTarget: '5030' }),
+      patienceOf({ ...LONG, entryPrice: '5000', exitPrice: '5030', brokerTarget: '5030' }),
+    ], ['early', 'target']),
+
+    // ── The /stats figure ────────────────────────────────────────────────
+    c('(12) the denominator is measured trades, and an unknown is not in it',
+      patienceTally([HIT, EARLY, LONG, { ...LONG, exitedEarly: false }]),
+      { measured: 3, patient: 2 }),
+    c('(12b) which is a rate', patienceRate(patienceTally([HIT, EARLY, LONG])), 50),
+    // NOTHING MEASURED IS A DASH AND NOT A ZERO. A trader whose every row is
+    // unanswerable has not been measured at 0% patience.
+    c('(13) nothing measured is null, which the chip draws as "—"',
+      [patienceTally([LONG]), patienceRate(patienceTally([LONG])), patienceRate(patienceTally([]))],
+      [{ measured: 0, patient: 0 }, null, null]),
+
+    // ── ITEM 7: THE SCORE DOES NOT MOVE ──────────────────────────────────
+    //
+    // `exited_early` costs its twelve in `computeTradeScore` exactly as it did,
+    // and this module is not an input to it. Pinned as the numbers and the
+    // sentence, so "no change" is checkable rather than asserted in a commit
+    // message.
+    c('(14) exited_early still costs twelve points and nothing else changed', [
+      computeTradeScore(SCORED).total,
+      computeTradeScore({ ...SCORED, exited_early: true }).total,
+      computeTradeScore({ ...SCORED, exited_early: true }).breakdown.discipline.details[1],
+    ], [100, 88, 'העסקה נסגרה מוקדם מהמתוכנן (0/12)']),
+    // AND THE MODULE CANNOT WRITE THE COLUMN. A derived verdict in
+    // `exited_early` would overwrite what the trader said AND arm
+    // `exited_early_last_trade`, which can be `block_day` — locking somebody
+    // out of the app over a derivation whose breakeven band is 30 NQ points
+    // wide. A source-level assertion, for `stopTriggerGroup`'s reason: the
+    // proof is that the call is absent.
+    c('(15) and it writes nothing — no client, no statement, no column',
+      ['supabase', '.update(', '.insert(', 'exited_early:'].filter((needle) =>
+        source.includes(needle)
+      ), []),
+    // The grep is only worth anything if the file is really the one in hand.
+    c('(15b) and the needle is read off a file that exists',
+      source.includes('export function patienceOf'), true),
+  ]);
+}
+
 async function ordersCronGroup() {
   const SECRET = 'cron-secret-for-the-test';
   const previous = process.env.CRON_SECRET;
@@ -7872,6 +8271,10 @@ async function main() {
   stopScoreGroup();
   stopRuleGroup();
   stopFlagProposalGroup();
+
+  // REF-130 — the target's sentence and tally (part ג), and סבלנות (part א).
+  targetSentenceGroup();
+  patienceGroup();
 
   // J1 — the unplanned row's score (REF-107 Stage 3b follow-up).
   scoringGroup();

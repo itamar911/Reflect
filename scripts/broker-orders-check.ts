@@ -2187,6 +2187,180 @@ function unknownGroup() {
     c('(6) an unknown still carries every field',
       [interday.source, interday.versions, interday.otherTargets, interday.movedAtMs],
       ['none', [], [], null]),
+    // REF-130 part ג. `tp_history` IS THE ONE FIELD WHOSE "EVERY FIELD" VALUE IS
+    // NULL RATHER THAN EMPTY, and the asymmetry is the point: every branch that
+    // reaches `unknownHistory` returned BEFORE the candidates were split into
+    // stops and targets, so there is no target reading at all. A `'none'`
+    // sub-document here would claim we looked and found no target order, which
+    // is the `'unknown'`/`'none'` collapse this whole file exists to prevent,
+    // committed one level down.
+    c('(6b) and `tp_history` is null — not a `none` document',
+      [interday.tp_history, 'tp_history' in interday], [null, true]),
+  ]);
+}
+
+// ── REF-130 part ג: what the TARGET orders say ──────────────────────────────
+//
+// The versions were already fetched, already classified and already paired;
+// `nearestTarget` reduced each order to one scalar and dropped the list. These
+// assertions are about what is kept.
+//
+// THE SIDE-AWARE DIRECTION IS THE WHOLE DERIVATION, which is why the long and
+// the short are mirrored rather than sampled: LOWERING a long's target and
+// RAISING a short's both bring it closer to the entry, so a reading taken off
+// whether the number rose or fell is right exactly half the time. The old test
+// suite missed the stop's twin of this defect for the same reason — its
+// two-stop case had both stops below the entry, where an absolute distance
+// gives the right answer for the wrong reason.
+function targetHistoryGroup() {
+  /** The measured bracket with the target's version list replaced. */
+  const withTargets = (...prices: number[]) =>
+    derive({
+      ...BRACKET,
+      versions: [
+        ...BRACKET.versions.filter((row) => row.orderId !== TARGET_ORDER),
+        ...prices.map((price, i) =>
+          version(90_100 + i, TARGET_ORDER, { orderType: 'Limit', price, orderQty: 1 })
+        ),
+      ],
+    }).tp_history;
+
+  // ── The short mirror ─────────────────────────────────────────────────────
+  //
+  // A SHORT'S PROTECTIVE ORDERS ARE BUYS AND ITS ENTRY IS A SELL, which is not
+  // decoration: `candidateOrders` drops any order on the SAME SIDE as the
+  // entry, so a Sell target on a short never reaches the classifier at all and
+  // the fixture would answer `'none'` while looking correct.
+  const SHORT_ENTRY = 4510.25;
+  const SHORT: BrokerTrade = {
+    ...TRADE,
+    direction: 'short',
+    entryPrice: SHORT_ENTRY,
+    exitPrice: 4502,
+    stages: {
+      entries: [{ qty: 1, price: SHORT_ENTRY }],
+      exits: [{ qty: 1, price: 4502 }],
+    },
+  };
+  const shortTargets = (...prices: number[]) =>
+    derive({
+      trade: SHORT,
+      links: BRACKET.links,
+      orders: [
+        order(ENTRY_ORDER, { action: 'Sell', ordStatus: 'Filled' }),
+        order(STOP_ORDER, { action: 'Buy' }),
+        order(TARGET_ORDER, { action: 'Buy' }),
+      ],
+      versions: [
+        version(90_201, ENTRY_ORDER, { orderType: 'Market', orderQty: 1 }),
+        // Above the entry — the only side a short's stop is submitted on.
+        version(90_202, STOP_ORDER, { orderType: 'Stop', stopPrice: 4516, orderQty: 1 }),
+        ...prices.map((price, i) =>
+          version(90_210 + i, TARGET_ORDER, { orderType: 'Limit', price, orderQty: 1 })
+        ),
+      ],
+    }).tp_history;
+
+  const kept = withTargets(TARGET);
+  const closer = withTargets(TARGET, 4520);
+  const farther = withTargets(TARGET, 4530);
+  const mixed = withTargets(TARGET, 4520, 4530);
+  const shortKept = shortTargets(4495);
+  const shortCloser = shortTargets(4495, 4505);
+  const shortFarther = shortTargets(4495, 4485);
+
+  group('REF-130: what the broker\'s target orders say', [
+    // ── Not moved ──────────────────────────────────────────────────────────
+    c('(1) one target, never re-priced, is `kept` with both ends the same',
+      [kept?.verdict, kept?.initialTp, kept?.finalTp, kept?.movedCount, kept?.direction],
+      ['kept', TARGET, TARGET, 0, null]),
+    c('(2) and the side is stated, which `broker_take_profit` never carried',
+      [kept?.targetSide, kept?.targetCount], ['gain', 1]),
+
+    // ── The side-aware direction, both ways round ──────────────────────────
+    //
+    // THE MIRROR IS THE ASSERTION. 4520 is BELOW a long's 4525 target and ABOVE
+    // a short's 4495 one, and both are `'closer'`.
+    c('(3) LOWERING a long\'s target brings it closer to the entry',
+      [closer?.verdict, closer?.direction, closer?.movedCount, closer?.finalTp],
+      ['moved', 'closer', 1, 4520]),
+    c('(4) RAISING a short\'s target brings it closer too — the mirror',
+      [shortCloser?.verdict, shortCloser?.direction, shortCloser?.movedCount, shortCloser?.finalTp],
+      ['moved', 'closer', 1, 4505]),
+    c('(5) raising a long\'s target moves it away',
+      [farther?.direction, farther?.finalTp], ['farther', 4530]),
+    c('(6) and lowering a short\'s does', [shortFarther?.direction], ['farther']),
+    c('(7) a short left alone is `kept` on the gain side',
+      [shortKept?.verdict, shortKept?.initialTp, shortKept?.targetSide],
+      ['kept', 4495, 'gain']),
+    // Consecutive steps, never end-to-end: 4525 → 4520 → 4530 ends FURTHER out
+    // than it began, and both things happened.
+    c('(8) both ways is `mixed`, counted over consecutive steps',
+      [mixed?.verdict, mixed?.direction, mixed?.movedCount], ['moved', 'mixed', 2]),
+    // A quantity or TIF modify mints a version that restates the price. The
+    // measured entry trigger had seven versions and three distinct prices.
+    c('(9) a restated price is not a move',
+      [withTargets(TARGET, TARGET)?.verdict, withTargets(TARGET, TARGET)?.movedCount],
+      ['kept', 0]),
+
+    // ── The wrong side: UNKNOWN, with no prices in it ──────────────────────
+    //
+    // THE DEFECT THE TICKET WAS OPENED OVER. `nearestTarget` partitions by side
+    // and then returns the best of what it has, so a long whose only target
+    // candidate sits BELOW its entry still reports one — and `broker_take_profit`
+    // has been able to hold that price since Stage 3.
+    c('(10) a long\'s target below its entry is `unknown`, not a target',
+      (() => {
+        const wrong = withTargets(4500);
+        return [wrong?.verdict, wrong?.targetSide, wrong?.initialTp, wrong?.finalTp,
+                wrong?.direction];
+      })(),
+      ['unknown', 'wrong', null, null, null]),
+    // The measured case, and the narrowest one: a resting BUY LIMIT entry order
+    // is `isTargetType` and sits at distance ZERO from the fill it produced.
+    c('(11) a "target" AT the entry is wrong-side too — gain must be positive',
+      [withTargets(ENTRY_PRICE)?.verdict, withTargets(ENTRY_PRICE)?.targetSide],
+      ['unknown', 'wrong']),
+    c('(12) a short\'s target above its entry is `unknown` as well',
+      [shortTargets(4520)?.verdict, shortTargets(4520)?.targetSide], ['unknown', 'wrong']),
+    // THE COLUMN STILL CARRIES IT, and that is deliberate rather than missed:
+    // omitting `initialTarget` would be a behaviour change to a column eleven
+    // `select('*')` readers already have. What changes is that a field now says
+    // the number is not to be believed, and `brokerTargetToShow` reads it.
+    c('(13) `initialTarget` still reports the wrong-side price — the flag is the fix',
+      derive({
+        ...BRACKET,
+        versions: [
+          ...BRACKET.versions.filter((row) => row.orderId !== TARGET_ORDER),
+          version(90_100, TARGET_ORDER, { orderType: 'Limit', price: 4500, orderQty: 1 }),
+        ],
+      }).initialTarget,
+      4500),
+
+    // ── No target at all ───────────────────────────────────────────────────
+    c('(14) no target order is a `none` document, with a zero count',
+      (() => {
+        const none = derive({
+          ...BRACKET,
+          orders: BRACKET.orders.filter((row) => row.id !== TARGET_ORDER),
+          versions: BRACKET.versions.filter((row) => row.orderId !== TARGET_ORDER),
+          links: [ENTRY_ORDER, STOP_ORDER],
+        }).tp_history;
+        return [none?.verdict, none?.initialTp, none?.targetSide, none?.targetCount];
+      })(),
+      ['none', null, null, 0]),
+
+    // ── Nothing about the stop moved ───────────────────────────────────────
+    //
+    // The sub-document is additional and not instead. If any of these four
+    // changed, every REF-113 reader would be reading a different document.
+    c('(15) the stop half of the measured trade is untouched',
+      (() => {
+        const full = derive(BRACKET);
+        return [full.verdict, full.initialStop, full.finalStop, full.movedCount,
+                full.direction, full.initialTarget, full.otherTargets];
+      })(),
+      ['moved', STOP_1, STOP_3, 2, 'tightened', TARGET, []]),
   ]);
 }
 
@@ -2567,6 +2741,8 @@ async function main() {
   tracksGroup();
   neverNoneGroup();
   unknownGroup();
+  // REF-130 part ג — what the target orders say, and the side-aware mirror.
+  targetHistoryGroup();
   await readerGroup();
   await readerFailureGroup();
   await leakGroup();
