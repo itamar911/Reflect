@@ -313,6 +313,116 @@ group('1b. account names are published, account ids are not');
   check('nickname on with a blank handle: still anonymous', blank.nickname === null);
 }
 
+// ── 1c. The live figure is never read, let alone published ──────────────────
+//
+// REF-108's broker open P&L is gated off at launch because NinjaTrader
+// confirmed on 29.10 that an account-level unrealised figure falls under our
+// Market Data denial and needs a CME licence. The share card is UNAFFECTED by
+// that decision — it reports closed trades only — and this group is what makes
+// "unaffected" a fact somebody checked rather than a sentence in a commit.
+//
+// IT ASSERTS THE READ, NOT JUST THE OUTPUT, and that is the whole reason it is
+// worth adding on top of group 1. An absence assertion over the serialised
+// document would also pass on a builder that read the figure and then dropped
+// it — and a figure that has been read has been copied into a process that
+// serialises things for a living. So the fixture supplies the field as an
+// ACCESSOR that records every access: the only way `touched` stays empty is if
+// no code path named the property at all.
+//
+// A spread of the row would therefore fail this group twice over: the getter
+// fires AND the value lands in the JSON. That is the same hazard group 1 is
+// built around, pointed at the one field whose publication is now a compliance
+// matter rather than a privacy one.
+
+group('1c. the live open figure is never read by the snapshot builder');
+
+{
+  /** Distinctive, so a leak cannot be a coincidence. See SECRETS' note. */
+  const LIVE_FIGURE = 918_273.64;
+
+  /**
+   * Every spelling the figure has had, plus the ones a later stage might pick.
+   *
+   * `openPnl` is ours (lib/tradovate/positions.ts), `openPnL` is the broker's
+   * on the snapshot body, and the three snake-cased ones are what a column
+   * would be called if anybody ever persisted it. Naming all five costs
+   * nothing and means the guard does not depend on the next person choosing
+   * the same spelling we did.
+   */
+  const LIVE_KEYS = ['openPnl', 'openPnL', 'open_pnl', 'unrealized_pnl', 'live_pnl'];
+
+  /** Which of those keys the builder touched. Must stay empty. */
+  const touched: string[] = [];
+
+  function withLiveFigure(overrides: Record<string, unknown> = {}): ShareTradeRow {
+    const row = dirtyRow(overrides);
+    for (const key of LIVE_KEYS) {
+      // `enumerable` so a spread or an Object.entries() walk WOULD reach it —
+      // a non-enumerable property would make this fixture pass by hiding.
+      Object.defineProperty(row, key, {
+        enumerable: true,
+        configurable: true,
+        get() {
+          touched.push(key);
+          return LIVE_FIGURE;
+        },
+      });
+    }
+    return row;
+  }
+
+  /** Every key in a document, at any depth. */
+  function keysOf(value: unknown, into: Set<string> = new Set()): Set<string> {
+    if (Array.isArray(value)) {
+      for (const item of value) keysOf(item, into);
+    } else if (value !== null && typeof value === 'object') {
+      for (const [key, inner] of Object.entries(value)) {
+        into.add(key);
+        keysOf(inner, into);
+      }
+    }
+    return into;
+  }
+
+  const snapshot = buildDailyShareSnapshot({
+    // A closed row carrying the figure, and an OPEN one carrying it too. The
+    // open row is the realistic shape — a live figure only exists while a
+    // position is open — and `countedShareTrades` drops it on `status` and
+    // `exit_price`, so it is also the assertion that an open position cannot
+    // reach this card by any route.
+    rows: [
+      withLiveFigure(),
+      withLiveFigure({ status: 'open', exit_price: null, actual_pnl: null, pnl_amount: null }),
+    ],
+    day: DAY,
+    visibility: NICKNAME_ON,
+    publicNickname: 'ES Trader',
+  });
+  const json = JSON.stringify(snapshot);
+  const lines = shareSnapshotLines(snapshot).join(' | ');
+
+  check(
+    'the builder never reads a live-figure field',
+    touched.length === 0,
+    `read ${[...new Set(touched)].join(', ')}`
+  );
+  check(
+    'no live-figure key reaches the document',
+    [...keysOf(snapshot)].filter((key) => /open.?pnl|unreal|live.?pnl/i.test(key)).length === 0,
+    [...keysOf(snapshot)].join(', ')
+  );
+  check('the figure is not in the JSON', !json.includes('918273') && !json.includes('918,273'));
+  check('the figure is not in the preview text',
+    !lines.includes('918273') && !lines.includes('918,273'));
+
+  // THE POSITIVE HALF, group 1's rule: an absence suite passes perfectly on a
+  // builder that emits nothing. The closed row's REALISED money is published,
+  // the open row is not counted, and that pair is the whole claim — "closed
+  // trades only" rather than "no money at all".
+  check('the closed row is still counted', snapshot.trades === 1);
+  check('and its realised money is still published', snapshot.pnl === 125);
+}
+
 // ── 2. The provenance tag, per case ─────────────────────────────────────────
 
 group('2. provenance');
