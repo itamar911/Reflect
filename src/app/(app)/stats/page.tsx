@@ -18,6 +18,11 @@ import { tradePointsPnl, tradeMoneyPnl, hasMoneyPnl, isWinningTrade } from '@/li
 import { tradingDayOfTrade } from '@/lib/tradingDay';
 import { averageOf, rrValue, intentText } from '@/lib/intent';
 import { behaviourDisciplineScore } from '@/lib/scoring/disciplineAggregate';
+import {
+  targetMoveLine,
+  targetMoveTally,
+  type TargetHistoryRow,
+} from '@/lib/journal/stopHistory';
 import { TrendingUp, BarChart2, Target, CandlestickChart } from 'lucide-react';
 import '@/components/stats/stats.css';
 
@@ -207,6 +212,22 @@ export default async function StatsPage({ searchParams }: {
   const withRevenge = closed.filter(t => t.revenge_trade !== null);
   const revengePct = withRevenge.length
     ? Math.round((withRevenge.filter(t => t.revenge_trade === true).length / withRevenge.length) * 100) : null;
+
+  // ── What the broker saw happen to the TARGET (REF-130 part ג, item 3) ─────
+  //
+  // `closed` AND NOT `trades`, like the four rates above it: an open position's
+  // target has not finished being moved.
+  //
+  // THE COUNTING RULE IS IN THE MODULE AND NOT HERE. Which verdicts are an
+  // answer — `'moved'` and `'kept'`, never a missing sub-document, a `'none'` or
+  // an `'unknown'` — is a reading of the column, and lib/journal/stopHistory.ts
+  // is where it can be driven by a regression script. The cast is the same one
+  // `select('*')` forces everywhere on this page: `stop_history` is a column
+  // `TradePlan` does not declare, and `readStopHistory` validates every field it
+  // reads off it.
+  const targetMoves = targetMoveLine(
+    targetMoveTally(closed as unknown as TargetHistoryRow[])
+  );
 
   // The formula is unchanged and now lives in lib/scoring/disciplineAggregate.ts.
   // The AI chat coach quoted a DIFFERENT number under the same name (REF-120
@@ -400,6 +421,7 @@ export default async function StatsPage({ searchParams }: {
         movedSlPct={movedSlPct}
         fomoPct={fomoPct}
         revengePct={revengePct}
+        targetMoveLine={targetMoves}
       />
 
       {/* ── Section 6: Day/hour distribution + records ─────────── */}

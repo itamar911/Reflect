@@ -6,6 +6,18 @@ interface Props {
   movedSlPct: number | null;
   fomoPct: number | null;
   revengePct: number | null;
+  /**
+   * `targetMoveLine(...)` — one sentence about the broker's target orders, or
+   * null (REF-130 part ג, item 3).
+   *
+   * A ROW UNDER THE CHIPS AND NOT A FIFTH CHIP, because it is not a rate. The
+   * four above are "x% of the trades that answered", over denominators in the
+   * dozens; this is "N of M", over a denominator that is the number of broker
+   * rows imported since REF-130 shipped — which starts at zero and stays small
+   * for a while. A `33%` chip built on three trades reads as a measurement of
+   * the trader, and `1 מתוך 3` reads as what it is.
+   */
+  targetMoveLine: string | null;
 }
 
 // Severity by rate: 0% calm/green · 1-14% amber · 15%+ red · null = no data
@@ -32,7 +44,13 @@ function severity(pct: number | null) {
   };
 }
 
-export default function BehaviorChips({ deviatedPct, movedSlPct, fomoPct, revengePct }: Props) {
+export default function BehaviorChips({
+  deviatedPct,
+  movedSlPct,
+  fomoPct,
+  revengePct,
+  targetMoveLine,
+}: Props) {
   const metrics = [
     { label: 'סטייה מהתוכנית', pct: deviatedPct, icon: <Route aria-hidden="true" size={15} /> },
     { label: 'הזזת Stop Loss',  pct: movedSlPct,  icon: <ArrowUpDown aria-hidden="true" size={15} /> },
@@ -58,6 +76,17 @@ export default function BehaviorChips({ deviatedPct, movedSlPct, fomoPct, reveng
           );
         })}
       </div>
+      {/* The broker's target orders, in one neutral line (REF-130 part ג).
+          UNCOLOURED AND UNICONED on purpose: moving a target is not a failing
+          in either direction — see `targetMoveSentence` in
+          lib/journal/stopHistory.ts, which argues the tone at length — so this
+          sits in the muted text the rest of the page uses for a sub-figure
+          rather than borrowing the chips' severity palette. */}
+      {targetMoveLine !== null && (
+        <p className="mt-3" style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-tg-text-2)' }}>
+          {targetMoveLine}
+        </p>
+      )}
     </Section>
   );
 }

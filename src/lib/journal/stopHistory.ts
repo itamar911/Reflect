@@ -523,6 +523,93 @@ export function targetMoveSentence(history: StoredStopHistory | null): StopSente
   return { text: `היעד הוזז ${times} — ${suffix}`, tone: 'neutral' };
 }
 
+/** How many of a set of trades had their target moved, and which way. */
+export interface TargetMoveTally {
+  /** Rows whose target we can describe at all — the DENOMINATOR. */
+  measured: number;
+  /** Of those, how many moved it. */
+  moved: number;
+  /** Of those that moved it, how many only ever pulled it IN. */
+  closer: number;
+  /** Of those that moved it, how many only ever pushed it OUT. */
+  farther: number;
+}
+
+/** A row as this tally needs it: the column, however the caller holds it. */
+export interface TargetHistoryRow {
+  stop_history?: unknown;
+}
+
+/**
+ * The target-move tally over a set of trades (REF-130 part ג, item 3).
+ *
+ * **THE DENOMINATOR IS ROWS WE CAN DESCRIBE, NOT ROWS.** Only `'moved'` and
+ * `'kept'` count — a row with no `tp_history` (most of the table, and every
+ * manual trade), a `'none'` and an `'unknown'` are each excluded, and for the
+ * reason lib/scoring/disciplineAggregate.ts states about its own four rates: a
+ * trade we have no evidence about is not evidence either way, and dividing by
+ * the row count would read a journal full of hand-logged trades as a trader who
+ * never moves a target. `'none'` is excluded too and that is deliberate rather
+ * than lumped in: it is a real finding — we read the orders and there was no
+ * target — but a trade with no target cannot have had one moved, so counting it
+ * as a row that "did not move the target" would be crediting discipline to the
+ * absence of the thing being measured.
+ *
+ * A TALLY AND NOT A PERCENTAGE. "1 of 4" and "25%" are the same arithmetic and
+ * very different claims at these sample sizes, and the four behaviour chips
+ * beside this one already carry the percentage form; see {@link targetMoveLine}.
+ *
+ * `closer + farther` CAN BE LESS THAN `moved`, and nothing here hides that: a
+ * `'mixed'` row moved its target both ways, so it is counted in `moved` and in
+ * neither direction. {@link targetMoveLine} therefore prints the two directions
+ * as a note beside the count rather than as a breakdown of it.
+ *
+ * AN AGGREGATE IN A PER-DOCUMENT MODULE, which is a deliberate altitude choice:
+ * the counting rule above IS the reading of the column — which verdicts are an
+ * answer — and leaving it in the page would put it somewhere no regression
+ * script can reach. The page keeps the filtering (closed, visible, in-account)
+ * that is its own business.
+ */
+export function targetMoveTally(rows: readonly TargetHistoryRow[]): TargetMoveTally {
+  const known = rows
+    .map((row) => readStopHistory(row.stop_history)?.tpHistory ?? null)
+    .filter(
+      (target): target is StoredTargetHistory =>
+        target !== null && (target.verdict === 'moved' || target.verdict === 'kept')
+    );
+
+  const moved = known.filter((target) => target.verdict === 'moved');
+
+  return {
+    measured: known.length,
+    moved: moved.length,
+    closer: moved.filter((target) => target.direction === 'closer').length,
+    farther: moved.filter((target) => target.direction === 'farther').length,
+  };
+}
+
+/**
+ * The statistics page's one line about target moves, or null for "show nothing".
+ *
+ * NULL ON A ZERO DENOMINATOR, which is most accounts and every account whose
+ * trades are all hand-logged. `הזזת יעד: 0 מתוך 0` is a row announcing a
+ * measurement that was never taken, and the stats page's own convention for a
+ * figure it cannot state is to omit the row rather than draw a dash — the four
+ * behaviour chips show `—` because they are a fixed grid, and this is not one.
+ *
+ * THE DIRECTIONS ARE A NOTE AND NOT A BREAKDOWN. They are dropped when nothing
+ * moved — `(קורב 0 · הורחק 0)` is noise — and they do not have to sum to the
+ * count, because a `'mixed'` row belongs to neither. ` · ` is the separator the
+ * trade card and the facts line already use.
+ */
+export function targetMoveLine(tally: TargetMoveTally): string | null {
+  if (tally.measured === 0) return null;
+
+  const note =
+    tally.moved > 0 ? ` (קורב ${tally.closer} · הורחק ${tally.farther})` : '';
+  return `הזזת יעד: ${tally.moved} מתוך ${tally.measured} עסקאות${note}`;
+}
+
 /** One sentence, and whether it is a fact or a warning. */
 export interface StopSentence {
   text: string;
