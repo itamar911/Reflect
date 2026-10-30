@@ -135,7 +135,35 @@ export async function readPortfolios(
   enabled: boolean,
 ): Promise<Portfolio[]> {
   if (!enabled) return [];
+  return (await readPortfoliosOrError(client, userId)).portfolios;
+}
 
+/**
+ * The same read, with its error left for the caller to classify — and NO GATE.
+ *
+ * FOR THE CALLER THAT MUST NOT ASK THE BROKER FLAG (REF-125 follow-up item 3).
+ * The share card's accounts panel went through `readPortfolios` with
+ * `isImportEnabled()`, and for a MANUAL-ONLY trader that is the wrong question
+ * asked in their name: they have portfolios, they are in this table, none of
+ * them came from a broker, and the flag that decides whether their card shows
+ * them is the one the owner sets after wiring up Tradovate. Their panel was
+ * empty for a reason that had nothing to do with them.
+ *
+ * The gate exists because a deployment without migration 037 answers this
+ * statement with `42P01`/`42703` — see the header. That is a question the
+ * DATABASE can answer directly, which is what lib/supabase/missing.ts is for
+ * and what this signature makes possible: the error travels, and the caller
+ * decides whether it is "not deployed" or a failure worth a log line.
+ *
+ * THE OTHER THREE CALLERS KEEP THE FLAG. They are page loads that would 500
+ * on a missing table rather than degrade, and the flag keeps the statement from
+ * being issued at all; `readPortfolios` above is unchanged for them, down to
+ * issuing no statement when it is shut.
+ */
+export async function readPortfoliosOrError(
+  client: SupabaseClient,
+  userId: string,
+): Promise<{ portfolios: Portfolio[]; error: { code?: string | null } | null }> {
   const { data, error } = await client
     .from('accounts')
     .select(PORTFOLIO_SELECT)
@@ -145,8 +173,8 @@ export async function readPortfolios(
   // take down the trade form or the journal: the worst honest outcome is a
   // trader who sees no portfolios for one render, and the worst alternative is
   // a page that will not open.
-  if (error || !data) return [];
-  return (data as unknown as RawPortfolioRow[]).map(mapPortfolio);
+  if (error || !data) return { portfolios: [], error: error ?? { code: null } };
+  return { portfolios: (data as unknown as RawPortfolioRow[]).map(mapPortfolio), error: null };
 }
 
 /**

@@ -165,8 +165,22 @@ export const MAX_SHARE_ACCOUNT_NAME = 22;
  */
 export const MAX_SHARE_ACCOUNTS = 8;
 
-/** Our word for "no account", never a trader's. See `figures.ts:140`. */
-export const SHARE_UNASSIGNED_NAME = 'Unassigned';
+/**
+ * What the card calls the trades that are not filed under any portfolio.
+ *
+ * "Reflect account", AND NOT "Unassigned" (REF-125 follow-up item 3). The
+ * bucket is the app's word either way — `figures.ts:140` makes that point about
+ * the accounts SCREEN, where "Unassigned" is addressed to the trader who owns
+ * the trades and is being invited to file them. A public card is a different
+ * reader entirely: there, "Unassigned" is our internal state leaking onto a
+ * stranger's screen, in English, as a judgement about a trader who simply never
+ * connected a broker — which is most manual traders, most of the time.
+ *
+ * "Reflect account" says the true thing instead: these trades were logged here.
+ * It is still our word and not a name the trader chose, which is why it is a
+ * CONSTANT and why nothing resolves it from the `accounts` table.
+ */
+export const SHARE_NO_ACCOUNT_NAME = 'Reflect account';
 
 export interface DailyShareSnapshot {
   /** {@link SHARE_SNAPSHOT_VERSION} at mint time. */
@@ -393,16 +407,18 @@ function accountRowsOf(
       .filter(hasMoneyPnl)
       .map(tradeMoneyPnl);
 
-    // The unassigned bucket is only worth a row when it carries MONEY. With no
-    // amount it adds a nameless line that explains nothing, and the card's
-    // total is unaffected by it either way — so it stays off.
-    if (key === UNASSIGNED && amounts.length === 0) continue;
-
+    // THE ROW IS KEPT WHETHER OR NOT IT CARRIES MONEY, which is the other half
+    // of item 3. The drop rule was written when this row was called
+    // "Unassigned": a nameless line with no figure explained nothing, so it
+    // stayed off. "Reflect account" is a real statement about where the trades
+    // were logged, and a manual trader whose day recorded no amounts would
+    // otherwise get a card with no accounts panel at all — the empty state that
+    // means "migration 037 has not run", shown to somebody for whom it has.
     rows.push({
       name:
         key === UNASSIGNED
-          ? SHARE_UNASSIGNED_NAME
-          : (labels.get(key) ?? SHARE_UNASSIGNED_NAME).slice(0, MAX_SHARE_ACCOUNT_NAME).trim(),
+          ? SHARE_NO_ACCOUNT_NAME
+          : (labels.get(key) ?? SHARE_NO_ACCOUNT_NAME).slice(0, MAX_SHARE_ACCOUNT_NAME).trim(),
       pnl: amounts.length === 0 ? null : amounts.reduce((sum, value) => sum + value, 0),
       broker: bucketRows.every(isBrokerRow),
       unassigned: key === UNASSIGNED,
@@ -410,7 +426,7 @@ function accountRowsOf(
   }
 
   // Biggest money first so the card leads with the account that moved the day,
-  // `Unassigned` always last because it is our word and not an account, and
+  // the no-account row always last because it is our word and not an account, and
   // the name as the final tie-break so a re-mint of the same day cannot
   // reorder the rows. A frozen document has to be deterministic.
   rows.sort((a, b) => {

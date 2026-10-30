@@ -30,7 +30,11 @@ import { ImageResponse } from 'next/og.js';
 import { pooledDisciplineScore } from '../src/lib/scoring/dayDiscipline';
 import { shareCardFonts } from '../src/lib/share/cardFonts';
 import { CARD_SIZES, ShareCardImage, type ShareCardSize } from '../src/lib/share/cardImage';
-import { SHARE_SNAPSHOT_VERSION, type DailyShareSnapshot } from '../src/lib/share/snapshot';
+import {
+  SHARE_NO_ACCOUNT_NAME,
+  SHARE_SNAPSHOT_VERSION,
+  type DailyShareSnapshot,
+} from '../src/lib/share/snapshot';
 
 /**
  * The score, from the fractions, by the product's own function.
@@ -137,15 +141,69 @@ const BIG_LOSS_DAY: DailyShareSnapshot = {
     { name: 'Eval 50K', pnl: -8400, broker: true },
     { name: 'Apex 100K', pnl: -22650.75, broker: true },
     { name: 'Swing Account', pnl: -44320, broker: false },
-    { name: 'Unassigned', pnl: -64765, broker: false },
+    { name: SHARE_NO_ACCOUNT_NAME, pnl: -64765, broker: false },
   ],
 };
+
+/**
+ * A MANUAL TRADER'S DAY — hand-logged, no broker anywhere on it.
+ *
+ * THE SHAPE THAT HAD NO FIXTURE (REF-125 follow-up item 3). `QUIET_DAY` is the
+ * only other `provenance: 'manual'` case and it is empty in every other sense:
+ * no trades, no accounts, both fractions null. So the combination a real manual
+ * trader actually produces — money, trades, an answered fraction, and a list of
+ * portfolios that are all `broker: false` — was never rendered by anything, and
+ * three things about it were therefore never looked at:
+ *
+ *   1. the provenance line is ABSENT, not an empty string. The two renderers
+ *      disagree about how they express that (`cardImage` emits an empty span,
+ *      `SharedDayCard` emits nothing), and nobody had seen either.
+ *   2. every row mark is HOLLOW. `LOSS_DAY` has one manual account among
+ *      broker ones, so the mixed case was covered and the uniform one was not —
+ *      and a panel of hollow diamonds is the thing most likely to read as
+ *      "unloaded" rather than as "not broker-synced".
+ *   3. the discipline subline is POPULATED on a day with no broker evidence,
+ *      which is the whole claim of REF-125's follow-up item 2: a manual trader
+ *      who answers their own debrief gets a measured number.
+ *
+ * THE NO-ACCOUNT ROW IS IN THE LIST ON PURPOSE, carrying no money. That row is
+ * now kept rather than dropped (item 3), and `—` beside a name is exactly the
+ * render that decision produces.
+ *
+ * scripts/share-leak-check.ts asserts the BUILDER produces this shape from
+ * rows, and asserts that this file still holds a manual case — the literal
+ * below is for the eye, and a fixture nothing renders is a fixture nobody sees.
+ */
+const MANUAL_DAY: DailyShareSnapshot = withDiscipline({
+  v: SHARE_SNAPSHOT_VERSION,
+  day: '2026-10-29',
+  pnl: 318.4,
+  trades: 4,
+  wins: 3,
+  losses: 1,
+  // One fraction answered and one not, which is the ordinary manual day: the
+  // trader filled in their debrief, and nothing on a hand-logged row can answer
+  // the stop question unless they said so themselves.
+  followedPlan: { met: 3, answered: 4 },
+  stopHeld: null,
+  best: 240,
+  worst: -96.6,
+  provenance: 'manual',
+  nickname: null,
+  accounts: [
+    { name: 'Interactive', pnl: 402.4, broker: false },
+    { name: 'Swing Account', pnl: -84, broker: false },
+    // No money, and kept anyway — see the docblock.
+    { name: SHARE_NO_ACCOUNT_NAME, pnl: null, broker: false },
+  ],
+});
 
 const CASES: ReadonlyArray<{ name: string; snapshot: DailyShareSnapshot }> = [
   { name: 'win-day', snapshot: WIN_DAY },
   { name: 'loss-day', snapshot: LOSS_DAY },
   { name: 'quiet-day', snapshot: QUIET_DAY },
   { name: 'big-loss', snapshot: BIG_LOSS_DAY },
+  { name: 'manual-day', snapshot: MANUAL_DAY },
 ];
 
 const SIZES: readonly ShareCardSize[] = ['og', 'square'];

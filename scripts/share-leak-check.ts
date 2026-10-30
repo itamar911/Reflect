@@ -37,6 +37,7 @@ import { readFileSync } from 'node:fs';
 
 import {
   MAX_SHARE_ACCOUNT_NAME,
+  SHARE_NO_ACCOUNT_NAME,
   buildDailyShareSnapshot,
   readDailyShareSnapshot,
   readPublicNickname,
@@ -261,7 +262,7 @@ group('1b. account names are published, account ids are not');
     accounts: OWN_ACCOUNTS,
   });
   check('an unowned account id is not resolved to a name',
-    snapshot.accounts.every((a) => a.name === 'Unassigned'));
+    snapshot.accounts.every((a) => a.name === SHARE_NO_ACCOUNT_NAME));
   check('an unowned account id does not reach the JSON',
     !JSON.stringify(snapshot).includes('SOMEBODY-ELSE'));
 }
@@ -269,8 +270,8 @@ group('1b. account names are published, account ids are not');
 {
   // NO ACCOUNTS HANDED IN — migration 037 absent, or the import gate shut.
   const snapshot = buildDailyShareSnapshot({ rows: [dirtyRow()], day: DAY, visibility: ALL_OFF });
-  check('no account sources: the panel is empty, not invented',
-    snapshot.accounts.length === 1 && snapshot.accounts[0]?.name === 'Unassigned');
+  check('no account sources: nothing is invented, and the row is ours',
+    snapshot.accounts.length === 1 && snapshot.accounts[0]?.name === SHARE_NO_ACCOUNT_NAME);
   check('no account sources: the trade row display_name is still not published',
     !JSON.stringify(snapshot).includes(SECRETS['broker account display_name on a trade row']));
 }
@@ -710,6 +711,159 @@ group('4. money and counts');
   check('a position opened months earlier is dated by its close', carried.trades === 1);
 }
 
+// ── 4b. A MANUAL-ONLY TRADER'S DAY ─────────────────────────────────────────
+//
+// REF-125 follow-up item 3. Nothing in the builder ever required a broker row —
+// `countedShareTrades` does not filter on `source` — but the shape a manual
+// trader actually produces was unrendered and unasserted: the only
+// `provenance: 'manual'` fixture was the EMPTY day, so "manual" had never been
+// seen beside money, trades, an answered fraction and a list of portfolios.
+//
+// Two things were genuinely broken for that trader and are fixed here:
+//
+//   א. the accounts panel was behind `isImportEnabled()`, a flag about OUR
+//      Tradovate rollout, so a manual trader's own portfolios were withheld
+//      from their own card. The store now classifies a missing table instead —
+//      asserted in group 4c, since the gate it replaced lived in the store.
+//   ב. trades filed under no portfolio were dropped when they carried no money
+//      and printed the word "Unassigned" when they did. They are now one kept
+//      row called "Reflect account".
+
+group('4b. a manual trader gets a card, with their accounts on it');
+
+{
+  /** A hand-logged row: no `source` key at all, which is what the form writes. */
+  const manualRow = (over: Record<string, unknown> = {}) => {
+    const row = dirtyRow({ account_id: SECRETS['account id'], ...over });
+    delete (row as Record<string, unknown>).source;
+    return row;
+  };
+
+  const day = buildDailyShareSnapshot({
+    rows: [
+      manualRow({ followed_plan: true, moved_sl: false }),
+      manualRow({ followed_plan: true, moved_sl: false }),
+      manualRow({ followed_plan: false, actual_pnl: -60, pnl_amount: -60 }),
+      manualRow({ account_id: 'leakcheck-account-second', followed_plan: true, moved_sl: false }),
+    ],
+    day: DAY,
+    visibility: ALL_OFF,
+    accounts: OWN_ACCOUNTS,
+  });
+
+  // THE THREE PROPERTIES THE FIXTURE EXISTS TO RENDER.
+  check('a manual day makes no provenance claim at all',
+    day.provenance === 'manual' && shareProvenanceNote(day.provenance) === null);
+  check('…and no provenance string reaches the preview text',
+    !shareSnapshotLines(day).some((l) => /synced/i.test(l)),
+    shareSnapshotLines(day).join(' | '));
+  check('every account row is marked hollow, not broker',
+    day.accounts.length > 0 && day.accounts.every((a) => a.broker === false),
+    JSON.stringify(day.accounts));
+  check('the discipline subline is populated on a hand-logged day',
+    disciplineEvidenceLine(day) !== '', disciplineEvidenceLine(day));
+  check('…and so is the score', day.discipline !== null, `${day.discipline}`);
+
+  // AND THE DAY IS A REAL DAY, which is the half an absence suite would pass
+  // without: the manual trader's money, trades and account split are all there.
+  check('the manual day carries its money', day.pnl === 315, `${day.pnl}`);
+  check('the manual day counts its trades', day.trades === 4);
+  check('both of the trader\'s own accounts are itemised', day.accounts.length === 2);
+}
+
+{
+  // THE NO-ACCOUNT ROW. Every trade filed under no portfolio, which is every
+  // row a trader wrote before REF-110 and every row a trader who never picked
+  // one writes today.
+  const unfiled = buildDailyShareSnapshot({
+    rows: [dirtyRow({ account_id: null }), dirtyRow({ account_id: null })],
+    day: DAY,
+    visibility: ALL_OFF,
+    accounts: OWN_ACCOUNTS,
+  });
+  check('unfiled trades become ONE row', unfiled.accounts.length === 1);
+  check('…called "Reflect account"', unfiled.accounts[0]?.name === SHARE_NO_ACCOUNT_NAME,
+    unfiled.accounts[0]?.name);
+  check('…and NEVER "Unassigned", which is our word for our own screen',
+    !JSON.stringify(unfiled).includes('Unassigned'));
+
+  // KEPT WITHOUT MONEY, which the old drop rule did not do: a manual trader
+  // whose day recorded no amounts used to get no panel at all — the empty state
+  // that means "migration 037 has not run".
+  const unpriced = buildDailyShareSnapshot({
+    rows: [dirtyRow({ account_id: null, actual_pnl: null, pnl_amount: null })],
+    day: DAY,
+    visibility: ALL_OFF,
+    accounts: OWN_ACCOUNTS,
+  });
+  check('the row is kept when the day recorded no amount',
+    unpriced.accounts.length === 1 && unpriced.accounts[0]?.name === SHARE_NO_ACCOUNT_NAME);
+  check('…carrying no money rather than a zero', unpriced.accounts[0]?.pnl === null);
+
+  // LAST, BEHIND THE NAMED ACCOUNTS. It is our word and not an account.
+  const mixed = buildDailyShareSnapshot({
+    rows: [dirtyRow(), dirtyRow({ account_id: null, actual_pnl: 9000, pnl_amount: 9000 })],
+    day: DAY,
+    visibility: ALL_OFF,
+    accounts: OWN_ACCOUNTS,
+  });
+  check('the no-account row sorts last even when it is the biggest',
+    mixed.accounts[mixed.accounts.length - 1]?.name === SHARE_NO_ACCOUNT_NAME,
+    JSON.stringify(mixed.accounts.map((a) => a.name)));
+}
+
+// ── 4c. The accounts panel asks the database, not the broker flag ──────────
+//
+// The gate lives in the STORE and is a one-line decision, so it is asserted at
+// the source level — the same way group 8 asserts translation-check.mjs' route
+// and scripts/features-null-safety-check.ts asserts the dashboard's call site.
+// Driving it would need a Supabase client, which this suite deliberately has
+// none of.
+
+group('4c. the share card no longer gates its accounts on the import flag');
+
+{
+  const store = readFileSync(new URL('../src/lib/share/store.ts', import.meta.url), 'utf8');
+  const accountsRead = store.slice(store.indexOf('async function readOwnAccountLabels'));
+  const body = accountsRead.slice(0, accountsRead.indexOf('\n}'));
+
+  check(
+    'readOwnAccountLabels does not consult isImportEnabled',
+    !body.includes('isImportEnabled'),
+    'a manual-only trader\'s portfolios would be withheld by a broker flag'
+  );
+  check(
+    'it classifies the error instead',
+    body.includes('isMissingTable') && body.includes('isMissingColumn'),
+    'a database without migration 037 must answer [] rather than fail the mint'
+  );
+  // The TRADES select still uses the flag, and must: naming a column before its
+  // migration has run is a 42703 and a failed mint, which no classification
+  // after the fact can undo.
+  check(
+    'the trades select still rides the flag',
+    store.includes('shareTradeSelect(isImportEnabled())'),
+    'a column list cannot be classified after the statement has failed'
+  );
+}
+
+// ── 4d. The approval renders still cover the manual day ────────────────────
+
+group('4d. the render script holds a manual-day fixture');
+
+{
+  // SAME ARGUMENT AS GROUP 8: a fixture nothing renders is a fixture nobody
+  // looks at, and the three properties asserted in 4b are VISUAL — a hollow
+  // marker, an absent line, a populated subline. The assertions above prove the
+  // document; only a PNG proves the card.
+  const render = readFileSync(new URL('./share-card-render.tsx', import.meta.url), 'utf8');
+  check('share-card-render.tsx defines MANUAL_DAY', render.includes('const MANUAL_DAY'));
+  check('…and renders it', /name: 'manual-day'/.test(render));
+  check('the manual fixture is all-hollow',
+    !/const MANUAL_DAY[\s\S]*?\n\}\);/.exec(render)?.[0]?.includes('broker: true'),
+    'a broker row in the manual fixture would make it the mixed case again');
+}
+
 // ── 5. The defensive readers ───────────────────────────────────────────────
 
 group('5. readers');
@@ -933,6 +1087,8 @@ console.log('  account NAMES published on purpose; account IDs still never, and 
 console.log('  provenance per case, including the empty day that must not read as broker');
 console.log("  stop discipline excludes 'none' and 'unknown'; a tightening counts as held");
 console.log('  one discipline score, carried as a field, derived for cards minted before it');
+console.log('  a manual trader gets their accounts, hollow marks, no provenance claim');
+console.log('  unfiled trades are one kept "Reflect account" row, never "Unassigned"');
 console.log('  readers fail closed; tokens match migration 043\'s CHECK');
 console.log('  a revoked token is not found, and the public read names three columns');
 console.log('  the translation suite exercises the share route rather than a redirect');

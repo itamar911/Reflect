@@ -43,14 +43,17 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { headers } from 'next/headers';
 
 import { portfolioLabel } from '@/lib/portfolios/portfolio';
-import { readPortfolios } from '@/lib/portfolios/read';
+import { readPortfoliosOrError } from '@/lib/portfolios/read';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { isMissingColumn, isMissingTable } from '@/lib/supabase/missing';
 // SERVER-ONLY, and this file is the right place for it: `import.ts` reads
 // `process.env`, so it must not reach a browser bundle. `store.ts` is imported
 // only by route handlers and server components (never by ShareDayButton, which
-// takes `MAX_PUBLIC_NICKNAME` from `snapshot.ts` instead) — and `readPortfolios`
-// takes the flag as an argument precisely so it stays client-safe itself.
+// takes `MAX_PUBLIC_NICKNAME` from `snapshot.ts` instead).
+//
+// ONE READER LEFT AS OF REF-125's FOLLOW-UP: the trades SELECT, where the flag
+// is standing in for "has this column's migration run" and a wrong answer is a
+// 42703. The ACCOUNTS read no longer consults it — see `readOwnAccountLabels`.
 import { isImportEnabled } from '@/lib/tradovate/import';
 import { tradingDayBounds, type TradingDay } from '@/lib/tradingDay';
 import { withHidden } from '@/lib/trades/visible';
@@ -430,17 +433,37 @@ export async function readShareToday({
  * returns their accounts and nobody else's — which is what makes the `known`
  * set in `accountRowsOf` meaningful rather than decorative.
  *
- * `readPortfolios` swallows its own errors into `[]` and issues no statement at
- * all when `isImportEnabled()` is false, so a deployment without migration 037
- * reaches this line, gets nothing, and mints a card with no accounts panel.
- * That is the designed empty state and not a failure — see
- * `DailyShareSnapshot.accounts`.
+ *
+ * IT ASKS THE DATABASE, NOT THE BROKER FLAG (REF-125 follow-up item 3)
+ * -------------------------------------------------------------------
+ *
+ * This used to pass `isImportEnabled()` to `readPortfolios`, which issues no
+ * statement at all when the flag is shut — so a MANUAL-ONLY trader's card had
+ * no accounts panel, for a reason that was about our Tradovate rollout and not
+ * about them. They have portfolios, they are in the `accounts` table, and none
+ * of them came from a broker.
+ *
+ * The flag was standing in for a real hazard: a deployment without migration
+ * 037 answers this statement with `42P01` or `42703`. That is the question
+ * `isMissingTable`/`isMissingColumn` answer directly, from the database rather
+ * than from a switch somebody has to remember to set — missing.ts' header draws
+ * exactly this line ("the other tool, for when the missing thing is the WHOLE
+ * FEATURE"). An absent table therefore yields `[]`, which is the designed empty
+ * state (see `DailyShareSnapshot.accounts`), and a REAL failure yields `[]`
+ * with a log line, because a card is better minted without its panel than not
+ * minted at all.
  */
 async function readOwnAccountLabels(
   supabase: SupabaseClient,
   userId: string
 ): Promise<ShareAccountSource[]> {
-  const portfolios = await readPortfolios(supabase, userId, isImportEnabled());
+  const { portfolios, error } = await readPortfoliosOrError(supabase, userId);
+  if (error !== null && !isMissingTable(error) && !isMissingColumn(error)) {
+    // The code and nothing else: this table's `display_name` is a prop firm's
+    // name and `nickname` is the trader's own writing, so a PostgREST message
+    // interpolated into a log line is the one thing read.ts' header forbids.
+    console.warn(`[share] accounts read failed (${error.code ?? 'no code'})`);
+  }
   return portfolios.map((p) => ({ id: p.id, label: portfolioLabel(p) }));
 }
 
