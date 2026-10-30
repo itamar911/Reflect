@@ -1207,10 +1207,20 @@ function TradeDetailPanel({ trade, onClose, aiReview, aiLoading, onAiReview }: {
 function DayDisciplineCard({
   discipline,
   day,
+  trades,
 }: {
   discipline: DayDiscipline;
   /** The trading day the score is about, for the line under it. */
   day: string;
+  /**
+   * Closed trades in that day — ONLY to tell the two empty states apart.
+   *
+   * "nothing was answered" and "nothing was traded" both score null, and
+   * saying "אף עסקה לא דיווחה" about a day with no trades in it would imply
+   * trades the trader did not take. The number itself is never shown here; the
+   * KPI row above already carries it.
+   */
+  trades: number;
 }) {
   const evidence = disciplineEvidenceLine(discipline);
   const score = discipline.score;
@@ -1250,7 +1260,11 @@ function DayDisciplineCard({
               defect REF-125 Stage 1 existed to end. */}
           <p style={{ fontSize: 11, fontWeight: 600, color: MUTED, marginTop: 1 }}>
             <TradingDayLabel day={day} color={MUTED} />
-            {score === null ? ' · לא נמדד — אף עסקה לא דיווחה' : ' · מהעסקאות שענו בלבד'}
+            {score !== null
+              ? ' · מהעסקאות שענו בלבד'
+              : trades === 0
+                ? ' · אין עסקאות סגורות'
+                : ' · לא נמדד — אף עסקה לא דיווחה'}
           </p>
           {/* LTR-isolated: "4/5" in an RTL run is reordered to "5/4" by the
               browser's own bidi algorithm, which inverts a discipline claim
@@ -2127,7 +2141,11 @@ export default function DashboardClient({
               miniCards={dMiniCards}
               trend={stats.disciplineTrend}
             />
-            <DayDisciplineCard discipline={stats.todayDiscipline} day={stats.tradingDay} />
+            <DayDisciplineCard
+              discipline={stats.todayDiscipline}
+              day={stats.tradingDay}
+              trades={stats.dailyCount}
+            />
             </div>
             <RadarCard
               title="ניקוד ביצועים"
