@@ -22,7 +22,13 @@ export const landingImages = {
       videoUrl: '/video/guy-testimonial.mp4',
       poster: '/video/guy-testimonial-poster.jpg',
     },
-    { id: 'video-3', name: 'סוחר קריפטו', quote: 'החוקים שלי, לא עוד עצה גנרית' },
+    {
+      id: 'video-3',
+      name: 'נהוראי, סוחר יומי',
+      quote: 'אנחנו פועלים הרבה מהרגש לעומת המוח',
+      videoUrl: '/video/nehorai-testimonial.mp4',
+      poster: '/video/nehorai-testimonial-poster.jpg',
+    },
     { id: 'video-4', name: 'סוחר פורקס', quote: 'משמעת שאני יכול למדוד' },
   ] as PlaceholderVideo[],
 };
