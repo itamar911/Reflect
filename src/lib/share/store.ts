@@ -53,6 +53,7 @@ import { isMissingColumn, isMissingTable } from '@/lib/supabase/missing';
 // takes the flag as an argument precisely so it stays client-safe itself.
 import { isImportEnabled } from '@/lib/tradovate/import';
 import { tradingDayBounds, type TradingDay } from '@/lib/tradingDay';
+import { withHidden } from '@/lib/trades/visible';
 
 import {
   buildDailyShareSnapshot,
@@ -93,6 +94,50 @@ const TRADE_LOOKBACK_DAYS = 120;
 
 /** Columns the OWNER's own reads may name. `snapshot` is included: it is theirs. */
 const OWN_SHARE_COLUMNS = 'token,trading_day,visibility,snapshot,revoked_at,created_at';
+
+/**
+ * The columns the snapshot builder actually reads, and no others.
+ *
+ * WAS `select('*')`, AND THE REASON IT CHANGED IS WIDTH RATHER THAN ROW COUNT
+ * (REF-125 follow-up item 1.4). The lookback is 120 days of a trader's trades
+ * — up to 1,000 rows — and a wildcard brings back every JSONB document and
+ * every free-text column on each of them (`trade_reason`, `post_trade_notes`,
+ * the debrief answers, `strategy_conditions_checked`) to compute a day's money
+ * and two fractions. The index was never the problem; the bytes were.
+ *
+ * It is a SECOND benefit that the list is now a thing a reviewer can read
+ * against `ShareTradeRow`: the builder is an allow-list, and this is the query
+ * that feeds it being one too. But the query is not where the privacy
+ * guarantee lives and must not be mistaken for it — `buildDailyShareSnapshot`
+ * names every field it emits, and it would still do so under a wildcard.
+ */
+const SHARE_TRADE_SELECT =
+  'status,exit_price,entry_price,take_profit,direction,pnl_amount,actual_pnl,closed_at,submitted_at,followed_plan,moved_sl';
+
+/**
+ * The same list plus the columns their migrations have to have run for.
+ *
+ * THE HAZARD A COLUMN LIST REINTRODUCES, and the one thing the wildcard was
+ * genuinely protecting against: naming `source`, `stop_history` or
+ * `account_id` on a database that has not run 034, 038 or 037 is a PostgREST
+ * `42703` and a failed mint, where `select('*')` simply returned no key and the
+ * builder read it as absent. So the narrowing has to carry the gate the rest of
+ * the codebase already uses for exactly this — `withHidden` for 034's `hidden`,
+ * and the same flag for the other three, which is `withBrokerPrices`'
+ * argument restated (lib/dashboard/trades.ts:78-85): one switch the owner sets
+ * after running that feature's migrations, not a flag per migration.
+ *
+ * WITH THE FLAG OFF the mint reads exactly what it needs and nothing it cannot
+ * have: no `source`, so `provenanceOf` sees no broker row and the card prints
+ * no provenance tag; no `stop_history`, so the stop fraction falls back to the
+ * trader's own `moved_sl`; no `account_id`, so every counted trade lands in the
+ * no-account bucket. All three are the SAME answers the builder already gives
+ * for an absent key, which is what makes this safe rather than merely narrow.
+ */
+function shareTradeSelect(importEnabled: boolean): string {
+  const columns = withHidden(SHARE_TRADE_SELECT, importEnabled);
+  return importEnabled ? `${columns},source,stop_history,account_id` : columns;
+}
 
 /**
  * Columns the PUBLIC read may name. Three, and the list is the point.
@@ -220,10 +265,25 @@ export async function writeOwnPublicNickname(
  * months.
  *
  * Costs the same two reads as the mint and writes nothing. The dialog calls it
- * on open, so pressing "צור קישור" immediately afterwards does repeat them;
- * that is accepted rather than cached, because a snapshot is a claim about a
- * moment and the moment that matters is the one the trader published in, not
- * the one they opened a dialog in.
+ * ON OPEN AND NOT ON MOUNT — {@link shareExistsForDay} is what the dashboard
+ * asks — so pressing "צור קישור" immediately afterwards does repeat them; that
+ * is accepted rather than cached, because a snapshot is a claim about a moment
+ * and the moment that matters is the one the trader published in, not the one
+ * they opened a dialog in.
+ *
+ * ITS READS ARE INDEPENDENT AND NOW RUN TOGETHER (REF-125 follow-up item 1.2).
+ * The trades, the handle and the account labels are three different tables and
+ * none of them is an argument to another, so awaiting them in sequence — two of
+ * them inside an object literal, which is the least visible way to serialise
+ * two requests — simply added their round trips up. `Promise.all` is the same
+ * correction REF-129 item 4 made to the dashboard's own page
+ * (app/(app)/dashboard/page.tsx:67-73), for the same reason.
+ *
+ * NONE OF THE THREE CAN REJECT, which is what makes this safe to bundle:
+ * `readTradesForDay` returns a discriminated union, and the other two swallow
+ * their own failures into "no handle" / "no accounts". A `Promise.all` whose
+ * members can throw would take the whole mint down on the least important of
+ * them.
  */
 export async function previewDailyShare({
   supabase,
@@ -236,7 +296,14 @@ export async function previewDailyShare({
   day: TradingDay;
   visibility: ShareVisibility;
 }): Promise<ShareResult<DailyShareSnapshot>> {
-  const rows = await readTradesForDay(supabase, userId, day);
+  const [rows, publicNickname, accounts] = await Promise.all([
+    readTradesForDay(supabase, userId, day),
+    // Still only read when the trader asked to publish it. The toggle decides
+    // whether the column is read at all, not merely whether the builder uses
+    // what was read.
+    visibility.nickname ? readOwnPublicNickname(supabase, userId) : Promise.resolve(null),
+    readOwnAccountLabels(supabase, userId),
+  ]);
   if (!rows.ok) return rows;
 
   return {
@@ -245,9 +312,108 @@ export async function previewDailyShare({
       rows: rows.value,
       day,
       visibility,
-      publicNickname: visibility.nickname ? await readOwnPublicNickname(supabase, userId) : null,
-      accounts: await readOwnAccountLabels(supabase, userId),
+      publicNickname,
+      accounts,
     }),
+  };
+}
+
+/**
+ * Does a live link for this day exist? — and nothing else.
+ *
+ * THE DASHBOARD'S MOUNT PROBE (REF-125 follow-up item 1.1), and the whole point
+ * is what it does NOT do. `ShareDayButton` renders nothing until it knows the
+ * feature is deployed, so every dashboard load asks this question — and it used
+ * to ask it by requesting the dialog's entire payload, which BUILT THE SNAPSHOT:
+ * a 120-day scan of `trade_plans` and a read of the `accounts` table, on every
+ * visit to the dashboard, to decide whether to draw a button. It is also why the
+ * button itself faded in late.
+ *
+ * ONE INDEXED ROW, `token` ONLY. Not a `count`, which PostgREST serves with a
+ * planner-level `COUNT(*)` over the matching set, and not `OWN_SHARE_COLUMNS`,
+ * which would drag the `snapshot` JSONB back for a boolean. `limit(1)` +
+ * `maybeSingle()` because "is there at least one" is the question.
+ *
+ * `revoked_at IS NULL` IS IN THE QUERY, so a day whose only link was revoked
+ * answers false and the dialog opens on "צור קישור" rather than on a dead
+ * token. The same filter as the public read, for the same reason.
+ */
+export async function shareExistsForDay({
+  supabase,
+  userId,
+  day,
+}: {
+  supabase: SupabaseClient;
+  userId: string;
+  day: TradingDay;
+}): Promise<ShareResult<boolean>> {
+  const { data, error } = await supabase
+    .from('daily_shares')
+    .select('token')
+    .eq('user_id', userId)
+    .eq('trading_day', day)
+    .is('revoked_at', null)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    if (isMissingTable(error)) return unavailable;
+    return failed(error.code);
+  }
+  return { ok: true, value: data !== null };
+}
+
+/**
+ * Everything the dialog opens onto, in two round trips rather than four.
+ *
+ * HERE AND NOT IN THE ROUTE, which is the change that makes the GET's cost
+ * measurable (REF-125 follow-up item 1.2). The three reads below are
+ * independent — today's links, the card as it would be published, and the
+ * trader's handle — and the route awaited them one after another, so its
+ * latency was their sum. Moving the arrangement into the store means the thing
+ * a benchmark drives is the thing the route runs, instead of a restatement of
+ * it that can drift; the route is left with auth, the status code and the JSON.
+ *
+ * THE PREVIEW IS BUILT WITH `nickname: false` BY THE CALLER and the handle
+ * travels as its own field, so the dialog can preview the name as a local patch
+ * of a local copy. See the GET route: the alternative puts the handle on the
+ * wire for every dialog open, including the ones that publish nothing.
+ *
+ * AN UNAVAILABLE TABLE IS REPORTED FROM THE SHARES READ ALONE. The preview does
+ * not touch `daily_shares` at all, so it cannot answer that question — and a
+ * preview that failed for its own reasons (a `trade_plans` failure) is a
+ * `preview: null` the dialog renders as "לא הצלחנו לבנות תצוגה מקדימה", not a
+ * reason to hide a working feature.
+ */
+export async function readShareToday({
+  supabase,
+  userId,
+  day,
+  all = false,
+}: {
+  supabase: SupabaseClient;
+  userId: string;
+  day: TradingDay;
+  /** Every day's links rather than today's. See the GET route's `?all=1`. */
+  all?: boolean;
+}): Promise<
+  ShareResult<{ shares: OwnShare[]; preview: DailyShareSnapshot | null; nickname: string | null }>
+> {
+  const [shares, preview, nickname] = await Promise.all([
+    listOwnShares({ supabase, userId, day: all ? undefined : day }),
+    previewDailyShare({
+      supabase,
+      userId,
+      day,
+      visibility: { nickname: false, balance: false },
+    }),
+    readOwnPublicNickname(supabase, userId),
+  ]);
+
+  if (!shares.ok) return shares;
+  return {
+    ok: true,
+    value: { shares: shares.value, preview: preview.ok ? preview.value : null, nickname },
   };
 }
 
@@ -515,17 +681,10 @@ async function publicReadClient(): Promise<SupabaseClient> {
 /**
  * The rows a day's snapshot is built from.
  *
- * `select('*')` AND NOT A COLUMN LIST, which is the decision that makes this
- * safe on a database missing 034, 037, 038 or 041. A wildcard returns whatever
- * the database has and simply omits the keys it does not, so `source`,
- * `stop_history` and `hidden` arrive when they exist and are `undefined` when
- * they do not — and `ShareTradeRow` declares all three optional for exactly
- * that reason. A named column list would be a 42703 and a failed mint.
- * app/(app)/trades/page.tsx:144-157 is the precedent and states the rule.
- *
- * The wildcard is safe HERE in a way it would not be on the public path: this
- * is the owner's own RLS-scoped session reading their own trades, and the rows
- * go straight into the allow-list builder, which names every field it emits.
+ * A COLUMN LIST, GATED — see {@link shareTradeSelect} for both halves of why.
+ * The read is the owner's own RLS-scoped session over their own trades, and the
+ * rows go straight into the allow-list builder, which names every field it
+ * emits.
  */
 async function readTradesForDay(
   supabase: SupabaseClient,
@@ -537,7 +696,7 @@ async function readTradesForDay(
 
   const { data, error } = await supabase
     .from('trade_plans')
-    .select('*')
+    .select(shareTradeSelect(isImportEnabled()))
     .eq('user_id', userId)
     .neq('status', 'not_entered')
     .gte('submitted_at', from)
@@ -550,6 +709,12 @@ async function readTradesForDay(
     // still classified rather than thrown: the caller's 503 is a better answer
     // than a stack trace either way.
     if (isMissingTable(error)) return unavailable;
+    // A `42703` is now reachable in exactly one state: the flag is set and the
+    // migration it stands for has not been run. Left as a FAILURE rather than
+    // folded into 'unavailable', because that state is a misconfiguration the
+    // owner wants to see in the log — lib/tradovate/import.ts' header asks for
+    // it to break loudly rather than silently, and a 503 here would read as
+    // "the share feature is not deployed yet".
     return failed(error.code);
   }
   return { ok: true, value: (data ?? []) as ShareTradeRow[] };

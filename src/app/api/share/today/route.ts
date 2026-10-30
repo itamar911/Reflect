@@ -19,9 +19,8 @@ import { NextResponse } from 'next/server';
 
 import {
   createDailyShare,
-  listOwnShares,
-  previewDailyShare,
-  readOwnPublicNickname,
+  readShareToday,
+  shareExistsForDay,
   writeOwnPublicNickname,
 } from '@/lib/share/store';
 import { readShareVisibility } from '@/lib/share/snapshot';
@@ -35,7 +34,21 @@ export const dynamic = 'force-dynamic';
 const NO_STORE = { 'Cache-Control': 'no-store, private' };
 
 /**
- * What the dialog opens onto.
+ * "The table is not there yet" — the one body four call sites answer with.
+ *
+ * A FUNCTION AND NOT A CONSTANT. A `NextResponse` carries a body stream that is
+ * consumed once, so a shared instance would serve the first request and fail
+ * the second. See the GET docblock for what this status means.
+ */
+const unavailable = () =>
+  NextResponse.json(
+    { error: 'share_unavailable', available: false },
+    { status: 503, headers: NO_STORE }
+  );
+
+/**
+ * What the dialog opens onto — or, with `?probe=1`, merely whether to draw the
+ * button.
  *
  * `available: false` IS A 503 AND NOT AN EMPTY LIST, because the two mean
  * opposite things to the button: an empty list means "you have not shared
@@ -43,6 +56,29 @@ const NO_STORE = { 'Cache-Control': 'no-store, private' };
  * dashboard hides the control entirely on the second and offers it on the
  * first, so collapsing them would put a button in front of a trader that
  * cannot work.
+ *
+ *
+ * TWO SHAPES, AND THE CHEAP ONE IS WHAT THE DASHBOARD CALLS
+ * --------------------------------------------------------
+ *
+ * REF-125 follow-up item 1.1. This route had one response, and `ShareDayButton`
+ * fetched it ON MOUNT to decide whether the feature exists — so every single
+ * dashboard load built the full snapshot: a 120-day scan of `trade_plans`, a
+ * read of `accounts`, and a read of `profiles`, to answer a boolean. The dialog
+ * was then opened by perhaps one load in fifty.
+ *
+ * So the question the dashboard asks is now its own request:
+ *
+ *     ?probe=1   → { available, day, exists }      one indexed row
+ *     (no param) → { available, day, nickname, preview, shares }
+ *
+ * The dialog asks the second one when it opens, which is also when the trader
+ * has asked to see a preview — and `previewDailyShare`'s docblock has always
+ * said "the dialog calls it on open". That is now true.
+ *
+ * ONE ROUTE AND NOT TWO, because the two answers are the same question about
+ * the same day at two depths, and a `/api/share/today/probe` would need its own
+ * auth, its own cache headers and its own 503 for the sake of one query.
  */
 export async function GET(request: Request) {
   const supabase = await createClient();
@@ -52,49 +88,38 @@ export async function GET(request: Request) {
   }
 
   const day = currentTradingDay(new Date());
+  const params = new URL(request.url).searchParams;
   // `?all=1` lists every day's links rather than today's. The dialog asks for
   // today; the parameter exists because "which of my links are live" is the
   // question a revoke UI will eventually be built around, and answering it
   // needed no second route.
-  const all = new URL(request.url).searchParams.get('all') === '1';
+  const all = params.get('all') === '1';
 
-  const shares = await listOwnShares({ supabase, userId: user.id, day: all ? undefined : day });
-  if (!shares.ok) {
-    if (shares.reason === 'unavailable') {
-      return NextResponse.json(
-        { error: 'share_unavailable', available: false },
-        { status: 503, headers: NO_STORE }
-      );
+  if (params.get('probe') === '1') {
+    const exists = await shareExistsForDay({ supabase, userId: user.id, day });
+    if (!exists.ok) {
+      if (exists.reason === 'unavailable') return unavailable();
+      console.error(`[share] probe failed (${exists.reason})`);
+      return NextResponse.json({ error: 'share_list_failed' }, { status: 500, headers: NO_STORE });
     }
-    console.error(`[share] list failed (${shares.reason})`);
+    // `exists` IS NOT READ BY THE BUTTON TODAY and is in the response anyway:
+    // it is the only thing the probe learns beyond "deployed", it costs no
+    // extra query, and "you already have a link for today" is the state a
+    // future label on the control would be written from.
+    return NextResponse.json({ available: true, day, exists: exists.value }, { headers: NO_STORE });
+  }
+
+  // The links, the handle, and the card as it WOULD be published right now —
+  // built and not stored, in parallel. The arrangement lives in the store; see
+  // `readShareToday`.
+  const today = await readShareToday({ supabase, userId: user.id, day, all });
+  if (!today.ok) {
+    if (today.reason === 'unavailable') return unavailable();
+    console.error(`[share] list failed (${today.reason})`);
     return NextResponse.json({ error: 'share_list_failed' }, { status: 500, headers: NO_STORE });
   }
 
-  // The card as it WOULD be published right now, built and not stored.
-  //
-  // ALWAYS WITH `nickname: false`, so the handle is not in this response
-  // unless the trader asks for it — the toggle is client state, and the
-  // dialog patches the name into its own copy to preview it (see
-  // ShareDayDialog). The alternative, building the preview with the name in
-  // and letting the client hide it, would put the handle on the wire for
-  // every dialog open including the ones that publish nothing.
-  const preview = await previewDailyShare({
-    supabase,
-    userId: user.id,
-    day,
-    visibility: { nickname: false, balance: false },
-  });
-
-  return NextResponse.json(
-    {
-      available: true,
-      day,
-      nickname: await readOwnPublicNickname(supabase, user.id),
-      preview: preview.ok ? preview.value : null,
-      shares: shares.value,
-    },
-    { headers: NO_STORE }
-  );
+  return NextResponse.json({ available: true, day, ...today.value }, { headers: NO_STORE });
 }
 
 /**
@@ -137,12 +162,7 @@ export async function POST(request: Request) {
       user.id,
       body.nickname === null ? null : String(body.nickname)
     );
-    if (!written.ok && written.reason === 'unavailable') {
-      return NextResponse.json(
-        { error: 'share_unavailable', available: false },
-        { status: 503, headers: NO_STORE }
-      );
-    }
+    if (!written.ok && written.reason === 'unavailable') return unavailable();
     if (!written.ok) {
       console.error(`[share] nickname write failed (${written.reason})`);
       return NextResponse.json(
@@ -156,12 +176,7 @@ export async function POST(request: Request) {
   const created = await createDailyShare({ supabase, userId: user.id, day, visibility });
 
   if (!created.ok) {
-    if (created.reason === 'unavailable') {
-      return NextResponse.json(
-        { error: 'share_unavailable', available: false },
-        { status: 503, headers: NO_STORE }
-      );
-    }
+    if (created.reason === 'unavailable') return unavailable();
     // The code and nothing else. This route's subject matter is a trader's own
     // day, and a PostgREST message interpolated into a response can carry
     // column names and values — tradovate/trades/route.ts:249-252 makes the

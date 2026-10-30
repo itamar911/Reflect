@@ -40,7 +40,16 @@ export function demoApiResponse(pathname: string, method = 'GET'): Response {
   // Minting one is a WRITE and falls through to the upsell below, which is the
   // same answer every other demo write gives.
   if (pathname.startsWith('/api/share/today') && method === 'GET') {
-    return json(demoShareTodayResponse());
+    const today = demoShareTodayResponse();
+    // THE PROBE IS A DIFFERENT SHAPE and the demo answers it as the real route
+    // does (REF-125 follow-up item 1.1): the dashboard asks `?probe=1` on
+    // mount and gets "deployed, and no link minted yet", and only the dialog
+    // asks for the payload with the preview in it. `pathname` here is the raw
+    // request string, query included — see fetchGuard.
+    if (pathname.includes('probe=1')) {
+      return json({ available: today.available, day: today.day, exists: today.shares.length > 0 });
+    }
+    return json(today);
   }
 
   if (method === 'GET') return json({ error: 'DEMO_MODE' }, 403);

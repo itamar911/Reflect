@@ -20,12 +20,18 @@
  * feature is not broken, it is not built yet, and the trader has no action to
  * take either way.
  *
- * THE COST IS ONE REQUEST PER DASHBOARD LOAD, and it is not wasted: the same
- * response carries the dialog's entire payload — today's existing links, the
- * trader's handle, and the preview. The alternative, a `shareAvailable` prop
- * computed in the RSC page, would move the same query server-side but make the
- * dashboard's own render wait on it, and the dashboard is the screen a trader
- * opens first.
+ * THE COST IS ONE CHEAP REQUEST PER DASHBOARD LOAD — `?probe=1`, which is one
+ * indexed row and no snapshot (REF-125 follow-up item 1.1). It used to be the
+ * dialog's ENTIRE payload, on the argument that the same response would be
+ * needed anyway; that argument was wrong twice. It made every dashboard load
+ * scan 120 days of `trade_plans` to decide whether to draw a button, and it
+ * made the preview a claim about the moment the DASHBOARD loaded rather than
+ * the moment the dialog opened. The payload is now fetched on open, by the
+ * handler that opens the dialog.
+ *
+ * The alternative, a `shareAvailable` prop computed in the RSC page, would move
+ * the probe server-side but make the dashboard's own render wait on it, and the
+ * dashboard is the screen a trader opens first.
  *
  * `available === null` RENDERS NOTHING TOO, which is the pre-answer state.
  * That means the button fades in rather than appearing instantly, and that is
@@ -57,12 +63,28 @@ interface OwnShareWire {
   createdAt: string;
 }
 
+/** `GET /api/share/today` — what the dialog opens onto. */
 interface TodayWire {
   available: true;
   day: string;
   nickname: string | null;
   preview: DailyShareSnapshot | null;
   shares: OwnShareWire[];
+}
+
+/**
+ * `GET /api/share/today?probe=1` — what the dashboard asks on mount.
+ *
+ * `exists` is deliberately NOT read here. The control's label does not depend on
+ * it today, and reading it would mean the button's text could disagree with the
+ * dialog's own state after a revoke in another tab. It is in the type because
+ * it is in the response, and because the next label written from it should find
+ * it already named.
+ */
+interface ProbeWire {
+  available: true;
+  day: string;
+  exists?: boolean;
 }
 
 /** The house header-action button — JournalExport's string, byte for byte. */
@@ -125,34 +147,42 @@ function saveFile(file: File) {
 export default function ShareDayButton() {
   const [available, setAvailable] = useState<boolean | null>(null);
   const [data, setData] = useState<TodayWire | null>(null);
-  const [open, setOpen] = useState(false);
+  const [opening, setOpening] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   /**
    * ONLY THE FIRST ANSWER MAY HIDE THE CONTROL.
    *
-   * `available === false` unmounts this whole component, the open dialog with
-   * it — and `onChanged` below re-runs `load()` straight after a link is
-   * minted. So a refresh that failed used to take the dialog down at the exact
-   * moment it had something to show: the link was created, and the trader was
-   * dropped back on the dashboard with no link and no error. A transient 401,
-   * a 500 or a dropped connection was enough.
+   * `available === false` unmounts this whole component and the open dialog
+   * with it. The dialog used to re-run this fetch after every mint and revoke,
+   * so a refresh that failed took the dialog down at the exact moment it had
+   * something to show: the link was created, and the trader was dropped back on
+   * the dashboard with no link and no error. A transient 401, a 500 or a
+   * dropped connection was enough.
    *
-   * After the control is up, a failed refresh therefore changes nothing: the
-   * last good payload stays on screen and the dialog reports its own failures
-   * beside its own buttons, which is where a trader is looking.
+   * THERE IS NO SUCH REFETCH LEFT (items 1.1 and 1.3) — the probe runs once, on
+   * mount — so this rule now guards one thing: `openDialog` below, which calls
+   * `hide()` only on a 503. A failure after the control is up changes nothing,
+   * and the dialog reports its own failures beside its own buttons, which is
+   * where a trader is looking.
    */
   const hide = useCallback(() => {
     setAvailable((prev) => (prev === null ? false : prev));
   }, []);
 
-  const load = useCallback(async (signal?: AbortSignal) => {
+  /**
+   * Is the feature deployed? — the only question a dashboard load asks.
+   *
+   * One indexed row. See this file's header and the GET route's.
+   */
+  const probe = useCallback(async (signal?: AbortSignal) => {
     try {
-      const res = await fetch('/api/share/today', { signal, cache: 'no-store' });
+      const res = await fetch('/api/share/today?probe=1', { signal, cache: 'no-store' });
       if (res.status === 503) {
         hide();
         return;
       }
-      const body = await res.json().catch(() => null);
+      const body = (await res.json().catch(() => null)) as ProbeWire | null;
       if (!res.ok || !body) {
         // A 401 is a session that expired under an open tab. Treated as
         // unavailable rather than surfaced: the trader's next action will
@@ -161,7 +191,6 @@ export default function ShareDayButton() {
         hide();
         return;
       }
-      setData(body as TodayWire);
       setAvailable(true);
     } catch {
       // Withdrawn or offline. Say nothing and render nothing.
@@ -177,31 +206,69 @@ export default function ShareDayButton() {
     // teardown is what keeps a withdrawn request from writing into an
     // unmounted tree.
     // eslint-disable-next-line react-hooks/set-state-in-effect -- marks the result of the fetch started here
-    void load(controller.signal);
+    void probe(controller.signal);
     return () => controller.abort();
-  }, [load]);
+  }, [probe]);
 
-  if (available !== true || data === null) return null;
+  /**
+   * THE PAYLOAD IS FETCHED BY THE CLICK, which is the other half of item 1.1.
+   *
+   * The dialog is mounted only once the preview is in hand rather than opened
+   * empty and filled in, because its first screen IS the preview: an empty
+   * dialog that acquires its numbers a moment later is a consent screen whose
+   * content arrives after the trader has started reading it. The button says
+   * "מכין…" for that moment instead, which is the one place in this component
+   * where a wait is the honest thing to show.
+   *
+   * A FAILURE IS REPORTED BESIDE THE BUTTON and does not hide it — the trader
+   * has just pressed something, so this is exactly the case the `hide()` rule
+   * above exists to exclude.
+   */
+  const openDialog = useCallback(async () => {
+    setOpening(true);
+    setFailed(false);
+    try {
+      const res = await fetch('/api/share/today', { cache: 'no-store' });
+      if (res.status === 503) {
+        hide();
+        return;
+      }
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body) {
+        console.error('[share] today failed', res.status, body);
+        setFailed(true);
+        return;
+      }
+      setData(body as TodayWire);
+    } catch (err) {
+      console.error('[share] today request failed', err);
+      setFailed(true);
+    } finally {
+      setOpening(false);
+    }
+  }, [hide]);
+
+  if (available !== true) return null;
 
   return (
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => void openDialog()}
+        disabled={opening}
         className={ACTION_CLASS}
         style={ACTION_STYLE}
         title="שתף את יום המסחר הזה בקישור ציבורי"
       >
         <Share2 aria-hidden="true" size={13} />
-        שתף את היום
+        {opening ? 'מכין…' : 'שתף את היום'}
       </button>
-      {open && (
-        <ShareDayDialog
-          initial={data}
-          onClose={() => setOpen(false)}
-          onChanged={() => void load()}
-        />
+      {failed && (
+        <span aria-live="polite" className="text-[11px]" style={{ color: 'var(--color-tg-muted)' }}>
+          לא הצלחנו לפתוח את השיתוף.
+        </span>
       )}
+      {data !== null && <ShareDayDialog initial={data} onClose={() => setData(null)} />}
     </>
   );
 }
@@ -221,11 +288,9 @@ export default function ShareDayButton() {
 function ShareDayDialog({
   initial,
   onClose,
-  onChanged,
 }: {
   initial: TodayWire;
   onClose: () => void;
-  onChanged: () => void;
 }) {
   const titleId = useId();
   const { dialogProps } = useModalDialog({
@@ -370,9 +435,14 @@ function ShareDayDialog({
           : `לא הצלחנו ליצור קישור (קוד ${res.status})`);
         return;
       }
+      // THE RESPONSE IS THE ANSWER, and there is no refetch behind it
+      // (REF-125 follow-up item 1.3). `POST` returns the row it inserted,
+      // through the same `OwnShare` reader the list uses, so a `GET` here
+      // asked the server to rebuild the snapshot it had just stored — a second
+      // 120-day scan and four more round trips, to learn what the body in hand
+      // already said. The dialog's whole state after a mint is this one share.
       setShares([body.share as OwnShareWire]);
       setMessage(null);
-      onChanged();
     } catch (err) {
       console.error('[share] create request failed', err);
       setMessage('לא הצלחנו ליצור קישור.');
@@ -397,10 +467,13 @@ function ShareDayDialog({
         setMessage(`לא הצלחנו לבטל את הקישור (קוד ${res.status})`);
         return;
       }
+      // NO `onChanged` AND NO REFETCH, for the reason `create` gives: the
+      // parent's only state is "is this feature deployed", which a revoke
+      // cannot change. The list this dialog shows is today's live links, and
+      // after a successful revoke there are none.
       setShares([]);
       setCopied(false);
       setMessage('הקישור בוטל.');
-      onChanged();
     } catch (err) {
       console.error('[share] revoke request failed', err);
       setMessage('לא הצלחנו לבטל את הקישור.');
