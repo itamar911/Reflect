@@ -60,6 +60,7 @@
  */
 
 import { formatMoney } from '@/lib/money';
+import { disciplineEvidenceLine } from '@/lib/scoring/dayDiscipline';
 import { toVisualOrder } from '@/lib/share/cardBidi';
 import { cardDateLabel } from '@/lib/share/cardFonts';
 import { fitFontSize } from '@/lib/share/cardMetrics';
@@ -68,7 +69,6 @@ import {
   shareProvenanceNote,
   type DailyShareSnapshot,
   type ShareAccountRow,
-  type ShareFraction,
 } from '@/lib/share/snapshot';
 import type { TradingDay } from '@/lib/tradingDay';
 
@@ -548,15 +548,18 @@ export function ShareCardImage({ snapshot, tradingDay, size, token }: ShareCardP
   const displayName = toVisualOrder(snapshot.nickname ?? 'Reflect trader');
 
   /**
-   * The discipline score: both fractions pooled, not averaged.
+   * The discipline score — READ, NOT COMPUTED (REF-125 follow-up item 2).
    *
-   * Pooling counts every answered question once; averaging two percentages
-   * would let a 1/1 and a 2/10 average to 60%, which is not a thing that
-   * happened. Withheld entirely when nothing was answered — see the panel.
+   * This file and `SharedDayCard.tsx` each held the pooling formula, which is
+   * the one number that must be identical on the PNG and on the page. It is now
+   * a field of the snapshot, written by `lib/scoring/dayDiscipline.ts` at mint
+   * time and derived from the two fractions by `readDailyShareSnapshot` for
+   * cards minted before the field existed — so there is nothing left here to
+   * disagree with.
+   *
+   * Still withheld entirely when nothing was answered: `null`, never 0.
    */
-  const met = (snapshot.followedPlan?.met ?? 0) + (snapshot.stopHeld?.met ?? 0);
-  const answered = (snapshot.followedPlan?.answered ?? 0) + (snapshot.stopHeld?.answered ?? 0);
-  const disciplineScore = answered > 0 ? Math.round((met / answered) * 100) : null;
+  const disciplineScore = snapshot.discipline;
 
   // ── Blocks, composed differently by the two sizes ────────────────────────
 
@@ -607,10 +610,7 @@ export function ShareCardImage({ snapshot, tradingDay, size, token }: ShareCardP
    * REF-125 §2.4 names the cost of losing that distinction: a zero on a public
    * page would be defamatory of the trader's own day.
    */
-  const disciplineSub = [snapshot.followedPlan, snapshot.stopHeld]
-    .filter((f): f is ShareFraction => f !== null)
-    .map((f) => `${f.met}/${f.answered}`)
-    .join(' · ');
+  const disciplineSub = disciplineEvidenceLine(snapshot);
 
   const miniCards = (
     <div style={{ display: 'flex', width: '100%' }}>

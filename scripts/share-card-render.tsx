@@ -27,12 +27,29 @@ import { join } from 'node:path';
 
 import { ImageResponse } from 'next/og.js';
 
+import { pooledDisciplineScore } from '../src/lib/scoring/dayDiscipline';
 import { shareCardFonts } from '../src/lib/share/cardFonts';
 import { CARD_SIZES, ShareCardImage, type ShareCardSize } from '../src/lib/share/cardImage';
 import { SHARE_SNAPSHOT_VERSION, type DailyShareSnapshot } from '../src/lib/share/snapshot';
 
+/**
+ * The score, from the fractions, by the product's own function.
+ *
+ * NOT A NUMBER TYPED INTO EACH FIXTURE. `discipline` is derived from the two
+ * fractions (lib/scoring/dayDiscipline.ts), so a literal here would be a second
+ * opinion about the formula — and a fixture that disagreed with the builder
+ * would render a card no mint could produce, which is the one thing an approval
+ * render must not do.
+ */
+const withDiscipline = (
+  snapshot: Omit<DailyShareSnapshot, 'discipline'>
+): DailyShareSnapshot => ({
+  ...snapshot,
+  discipline: pooledDisciplineScore(snapshot.followedPlan, snapshot.stopHeld),
+});
+
 /** A green day, broker-synced, with a handle shown and both fractions answered. */
-const WIN_DAY: DailyShareSnapshot = {
+const WIN_DAY: DailyShareSnapshot = withDiscipline({
   v: SHARE_SNAPSHOT_VERSION,
   day: '2026-10-27',
   pnl: 1240.5,
@@ -53,10 +70,10 @@ const WIN_DAY: DailyShareSnapshot = {
     { name: 'Topstep Combine', pnl: 95, broker: true },
     { name: 'Eval 50K', pnl: -335, broker: true },
   ],
-};
+});
 
 /** A red day, mixed provenance, anonymous, one fraction unanswered. */
-const LOSS_DAY: DailyShareSnapshot = {
+const LOSS_DAY: DailyShareSnapshot = withDiscipline({
   v: SHARE_SNAPSHOT_VERSION,
   day: '2026-10-26',
   pnl: -1875.25,
@@ -75,14 +92,14 @@ const LOSS_DAY: DailyShareSnapshot = {
     { name: 'Main Futures', pnl: -640.25, broker: true },
     { name: 'Swing Account', pnl: -1235, broker: false },
   ],
-};
+});
 
 /**
  * The shapes that are easy to forget: nothing happened, and nothing was
  * recorded. Rendered because every withheld field on this card is a branch,
  * and a branch nobody has looked at is where "—" becomes "$0.00".
  */
-const QUIET_DAY: DailyShareSnapshot = {
+const QUIET_DAY: DailyShareSnapshot = withDiscipline({
   v: SHARE_SNAPSHOT_VERSION,
   day: '2026-10-25',
   pnl: null,
@@ -98,7 +115,7 @@ const QUIET_DAY: DailyShareSnapshot = {
   // Nothing happened, so there is nothing to attribute. The panel is withheld
   // whole rather than rendered empty.
   accounts: [],
-};
+});
 
 /** A six-figure loss — the longest string the money slot ever holds. */
 const BIG_LOSS_DAY: DailyShareSnapshot = {

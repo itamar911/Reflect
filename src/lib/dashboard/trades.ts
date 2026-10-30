@@ -60,13 +60,31 @@ export interface DashTrade {
    */
   broker_take_profit: number | null;
   broker_stop_loss: number | null;
+  /**
+   * 038's stop-move document, as stored — `unknown`, deliberately.
+   *
+   * The only reader is `stopHeldOutcome` in lib/scoring/dayDiscipline.ts, which
+   * goes through `readStopHistory`; typing it here would be a second claim
+   * about a JSONB column's shape, and the narrower claim would be the wrong one
+   * (the document is versioned and this type is not).
+   */
+  stop_history: unknown;
 }
 
 export const DASH_TRADE_SELECT =
   'id,strategy,symbol,entry_price,exit_price,stop_loss,take_profit,rr_ratio,emotional_state,trade_reason,status,direction,exit_reason,submitted_at,closed_at,quantity,pnl_amount,actual_pnl,pnl_currency,plan_score,followed_plan,strategy_conditions_checked,moved_sl,exited_early,fomo_entry,revenge_trade';
 
 /**
- * Add the two migration-038 price columns, but only where they exist.
+ * Add migration 038's three columns, but only where they exist.
+ *
+ * WAS `withBrokerPrices` AND TWO COLUMNS. `stop_history` joined them for
+ * REF-125 follow-up item 2: the dashboard's new "משמעת היום" reads the same
+ * `dayDiscipline()` the share card does, and that function prefers the stop-move
+ * DOCUMENT over the `moved_sl` self-report — so a dashboard that did not select
+ * it would compute the day's number from a different denominator than the card
+ * minted from the same trades, which is the exact two-numbers-one-day complaint
+ * item 2 exists to close. All three columns are 038's and share one gate, so
+ * this is one helper rather than a second nesting level.
  *
  * `withHidden`'S ARGUMENT, FOR A SECOND MIGRATION. The dashboard NAMES its
  * columns, so asking for a column before its migration has run is a PostgREST
@@ -87,8 +105,10 @@ export const DASH_TRADE_SELECT =
  * When false the caller gets back its own constant, unchanged — the property
  * {@link withHidden} is written for.
  */
-export function withBrokerPrices(columns: string, brokerPricesExist: boolean): string {
-  return brokerPricesExist ? `${columns},broker_take_profit,broker_stop_loss` : columns;
+export function withBrokerColumns(columns: string, brokerColumnsExist: boolean): string {
+  return brokerColumnsExist
+    ? `${columns},broker_take_profit,broker_stop_loss,stop_history`
+    : columns;
 }
 
 /**
@@ -127,13 +147,15 @@ export interface RawTradeRow {
   fomo_entry: boolean | null;
   revenge_trade: boolean | null;
   /**
-   * OPTIONAL, unlike every field above it, because {@link withBrokerPrices} can
+   * OPTIONAL, unlike every field above it, because {@link withBrokerColumns} can
    * leave them out of the statement — and `NUMERIC` arrives as a STRING over
    * PostgREST, which is the hazard lib/journal/patience.ts names for its own
    * inputs. `mapDashTrade` runs both through `Number()` like the other prices.
    */
   broker_take_profit?: number | string | null;
   broker_stop_loss?: number | string | null;
+  /** 038's stop-move document. Optional for the same reason; never parsed here. */
+  stop_history?: unknown;
 }
 
 export function mapDashTrade(t: RawTradeRow): DashTrade {
@@ -170,5 +192,12 @@ export function mapDashTrade(t: RawTradeRow): DashTrade {
     revenge_trade:    t.revenge_trade ?? null,
     broker_take_profit: t.broker_take_profit != null ? Number(t.broker_take_profit) : null,
     broker_stop_loss:   t.broker_stop_loss   != null ? Number(t.broker_stop_loss)   : null,
+    // PASSED THROUGH UNPARSED, which is the one field here that is not
+    // normalised: `readStopHistory` in lib/journal/stopHistory.ts validates the
+    // whole document and refuses the ones whose verdict cannot be trusted, and
+    // a second opinion about its shape here is how the two would drift. An
+    // absent column and a NULL both arrive as `null`, which that reader answers
+    // identically.
+    stop_history:     t.stop_history ?? null,
   };
 }

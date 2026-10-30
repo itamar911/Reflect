@@ -52,8 +52,14 @@ import {
   TARGET_MOVE_LABEL,
 } from '../src/lib/journal/stopHistory';
 import { wasPatient } from '../src/lib/journal/patience';
-import { mapDashTrade, type RawTradeRow } from '../src/lib/dashboard/trades';
+import {
+  DASH_TRADE_SELECT,
+  mapDashTrade,
+  withBrokerColumns,
+  type RawTradeRow,
+} from '../src/lib/dashboard/trades';
 import { disciplinePatience, measuredAxes, patienceInputOf } from '../src/lib/dashboard/radar';
+import { dayDiscipline, disciplineEvidenceLine } from '../src/lib/scoring/dayDiscipline';
 import { realisedRr, rrLabel, rrRow } from '../src/lib/journal/realisedRr';
 import { describeStages } from '../src/lib/journal/stages';
 import fs from 'node:fs';
@@ -1220,6 +1226,131 @@ group('REF-130 follow-up: הזזת יעד exists on /stats before it has a numbe
   ], [true, true]),
   c('(4c) the needles are read off the file that really draws the chips',
     chipsSource.includes('export default function BehaviorChips'), true),
+]);
+
+// ── Group 8: the day's discipline number ─────────────────────────────────────
+//
+// REF-125's follow-up (item 2) gave the product ONE day-discipline function and
+// put its result in the share snapshot as a field, so that the public card, the
+// public page and the dashboard all print the same number for the same day.
+// This group pins the three rules that number lives by — all three of them
+// "null is not zero" rules, which is this suite's subject.
+//
+// IT ALSO PINS THE DASHBOARD'S WIRE, which is where the fix could regress
+// silently: `stopHeldOutcome` prefers the `stop_history` DOCUMENT over the
+// `moved_sl` self-report, so a dashboard that did not SELECT that column would
+// compute the day's score from a different denominator than the card minted
+// from the same trades — two numbers for one day, which is the complaint item 2
+// answers. A React render cannot be driven here, so the select string and the
+// call site are asserted at the source level, the same way group 7 asserts
+// BehaviorChips'.
+
+const dayDisciplineSource = fs.readFileSync(
+  path.join(process.cwd(), 'src/lib/scoring/dayDiscipline.ts'),
+  'utf8'
+);
+
+/** A closed row that answered BOTH questions, as the share builder reads one. */
+const answered = (over: Record<string, unknown> = {}) => ({
+  followed_plan: true,
+  moved_sl: false,
+  ...over,
+});
+
+group('REF-125 follow-up: one discipline number, and null is not zero', [
+  // ── (1) NOTHING ANSWERED IS NULL, NEVER ZERO ────────────────────────────
+  //
+  // The rule the share card was built on and the reason the dashboard card
+  // prints `—`: a day whose trades recorded no self-report and carry no broker
+  // document has no discipline score. A zero would read as a measured collapse
+  // on a day the trader has simply not debriefed, in public.
+  c('(1) five unanswered trades score null, not 0',
+    dayDiscipline([{}, {}, {}, {}, {}]).score, null),
+  c('(1) an empty day scores null too', dayDiscipline([]).score, null),
+  c('(1) and the evidence line is empty rather than "0/0"',
+    disciplineEvidenceLine(dayDiscipline([{}, {}])), ''),
+
+  // ── (2) `answered` IS NEVER `rows.length` ───────────────────────────────
+  //
+  // tradeScore.ts:218-237's hazard: the discipline booleans default to
+  // not-violated, so a trade with no evidence against it collects the whole
+  // block. Here three of five trades answered nothing and are in NEITHER half
+  // — the score is over the two that did.
+  c('(2) three silent trades beside two answered ones are not counted',
+    dayDiscipline([answered(), answered({ followed_plan: false }), {}, {}, {}]).followedPlan,
+    { met: 1, answered: 2 }),
+  c('(2) …and the score is 75%, not 45% and not 90%',
+    // 1 of 2 plans + 2 of 2 stops = 3 of 4 answered questions.
+    dayDiscipline([answered(), answered({ followed_plan: false }), {}, {}, {}]).score, 75),
+
+  // ── (3) POOLED, NOT AVERAGED ────────────────────────────────────────────
+  //
+  // Averaging a 1/1 and a 2/10 gives 60%, which is not a thing that happened to
+  // anybody. Pooling counts every answered question once: 3 of 11.
+  c('(3) 1/1 beside 2/10 is 27%, not 60%',
+    dayDiscipline([
+      { followed_plan: true },
+      ...Array.from({ length: 2 }, () => ({ moved_sl: false })),
+      ...Array.from({ length: 8 }, () => ({ moved_sl: true })),
+    ]).score,
+    27),
+
+  // ── (4) A TRADE TAKEN WITH NO STOP IS NOT PERFECT STOP DISCIPLINE ───────
+  //
+  // `verdict: 'none'` is the broker telling us there was no stop at all, and
+  // `'unknown'` is our own read failing. Crediting either would be the most
+  // flattering thing this number could say.
+  c('(4) no stop at all is not counted, in either half',
+    dayDiscipline([{ stop_history: { verdict: 'none' } }]).stopHeld, null),
+  c('(4) an unreadable verdict is not counted either',
+    dayDiscipline([{ stop_history: { verdict: 'unknown' } }]).stopHeld, null),
+  c('(4) a tightening IS held — Imri, 19.10',
+    dayDiscipline([{ stop_history: { verdict: 'moved', direction: 'tightened' } }]).stopHeld,
+    { met: 1, answered: 1 }),
+
+  // ── (5) THE DASHBOARD READS THE SAME ROWS THE CARD DOES ─────────────────
+  //
+  // A broker row answers `moved_sl` nowhere and carries the document instead.
+  // Through `mapDashTrade` — the real wire — the document survives, so the
+  // dashboard's number is the card's number. Before item 2 the column was not
+  // selected at all and this fixture would have scored null.
+  c('(5) a mapped broker row answers the stop question from its document',
+    dayDiscipline([dash({ stop_history: { verdict: 'kept' } })]).stopHeld,
+    { met: 1, answered: 1 }),
+  c('(5) a widened stop on a mapped broker row counts against',
+    dayDiscipline([dash({ stop_history: { verdict: 'moved', direction: 'widened' } })]).score, 0),
+  c('(5) and the same rows give the same score through either shape',
+    dayDiscipline([dash({ stop_history: { verdict: 'kept' }, followed_plan: true })]).score,
+    dayDiscipline([{ stop_history: { verdict: 'kept' }, followed_plan: true }]).score),
+
+  // ── (6) THE SELECT AND THE CALL SITE ────────────────────────────────────
+  //
+  // `withBrokerColumns` is the gate: with the flag on the document is in the
+  // statement, with it off the dashboard issues the query it issued before any
+  // of this, because naming a column before its migration is a 42703 and a
+  // page that will not open.
+  c('(6) the gated select asks for stop_history',
+    withBrokerColumns(DASH_TRADE_SELECT, true).includes('stop_history'), true),
+  c('(6) …and does not ask for it with the gate shut',
+    withBrokerColumns(DASH_TRADE_SELECT, false).includes('stop_history'), false),
+  c('(6) the dashboard computes the day from the shared function',
+    dashboardSource.includes('dayDiscipline(todayTrades)'), true),
+  c('(6) the dashboard renders it as משמעת היום',
+    dashboardSource.includes('משמעת היום'), true),
+  c('(6) the radar is labelled as the all-time score, not the day\'s',
+    dashboardSource.includes('title="ניקוד כולל"'), true),
+  c('(6) …and carries a period note',
+    /periodNote="[^"]*500/.test(dashboardSource), true),
+
+  // ── (7) THE MODULE STAYS PURE AND BROWSER-SAFE ──────────────────────────
+  //
+  // One caller is a `'use client'` component and another is a route handler, so
+  // an import of `process.env`, a Supabase client or a clock here would break
+  // one of them — and would make this group undrivable, which is how the defect
+  // it pins survived inside a 200-line closure in the first place.
+  c('(7) no environment access', /process\.env/.test(dayDisciplineSource), false),
+  c('(7) no clock of its own', /new Date\(|Date\.now/.test(dayDisciplineSource), false),
+  c('(7) no supabase import', /supabase/i.test(dayDisciplineSource), false),
 ]);
 
 // ── Summary ──────────────────────────────────────────────────────────────────

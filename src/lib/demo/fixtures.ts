@@ -6,6 +6,7 @@
 // and stats always look current without reseeding.
 
 import { isWinningTrade, tradeMoneyPnl } from '@/lib/pnl';
+import { pooledDisciplineScore } from '@/lib/scoring/dayDiscipline';
 import { TRADING_CURRENCY } from '@/lib/money';
 import { currentTradingDay } from '@/lib/tradingDay';
 
@@ -404,6 +405,12 @@ export const DEMO_SHARE_TOKEN = 'demoshare0000000000000000demo';
  * key at all — so this row prints no provenance tag, which is the same thing a
  * manual trader's real card does.
  */
+/** The demo day's two discipline fractions, named so the score can derive from them. */
+const DEMO_SHARE_FRACTIONS = {
+  followedPlan: { met: 3, answered: 3 },
+  stopHeld: { met: 2, answered: 3 },
+} as const;
+
 const DEMO_DAILY_SHARES = [
   {
     id: 'demo-share-01',
@@ -417,8 +424,17 @@ const DEMO_DAILY_SHARES = [
       trades: 3,
       wins: 2,
       losses: 1,
-      followedPlan: { met: 3, answered: 3 },
-      stopHeld: { met: 2, answered: 3 },
+      followedPlan: DEMO_SHARE_FRACTIONS.followedPlan,
+      stopHeld: DEMO_SHARE_FRACTIONS.stopHeld,
+      // DERIVED, NOT TYPED IN. The field is new (REF-125 follow-up item 2) and
+      // the one thing a fixture must not do with it is state a score its own
+      // fractions do not imply — this snapshot is handed to the dialog's
+      // preview DIRECTLY, without passing through `readDailyShareSnapshot`, so
+      // nothing downstream would correct a wrong literal.
+      discipline: pooledDisciplineScore(
+        DEMO_SHARE_FRACTIONS.followedPlan,
+        DEMO_SHARE_FRACTIONS.stopHeld
+      ),
       best: 310,
       worst: -98,
       provenance: 'manual',

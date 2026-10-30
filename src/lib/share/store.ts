@@ -123,8 +123,8 @@ const SHARE_TRADE_SELECT =
  * `42703` and a failed mint, where `select('*')` simply returned no key and the
  * builder read it as absent. So the narrowing has to carry the gate the rest of
  * the codebase already uses for exactly this — `withHidden` for 034's `hidden`,
- * and the same flag for the other three, which is `withBrokerPrices`'
- * argument restated (lib/dashboard/trades.ts:78-85): one switch the owner sets
+ * and the same flag for the other three, which is `withBrokerColumns`'
+ * argument restated (lib/dashboard/trades.ts): one switch the owner sets
  * after running that feature's migrations, not a flag per migration.
  *
  * WITH THE FLAG OFF the mint reads exactly what it needs and nothing it cannot

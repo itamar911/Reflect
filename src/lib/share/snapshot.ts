@@ -40,35 +40,34 @@
  * normaliser beside it, and the leak suite grows a case.
  *
  *
- * THE TWO DISCIPLINE NUMBERS ARE FRACTIONS, AND THAT IS THE DECISION
- * -----------------------------------------------------------------
+ * THE DISCIPLINE NUMBER IS NOT DECIDED HERE ANY MORE
+ * -------------------------------------------------
  *
- * Not a 0-100 score. REF-125 §2.4 found five rival discipline definitions in
- * the product and two hazards that a single score inherits and a fraction does
- * not:
+ * `src/lib/scoring/dayDiscipline.ts` owns it as of REF-125's follow-up item 2,
+ * and that module's header carries the whole argument: the unified fractions,
+ * the denominator that is never `rows.length`, the `null` that is never a zero,
+ * and why this card KEEPS the conservative measured number rather than adopting
+ * the dashboard radar's more forgiving one (Imri, 30.10).
  *
- *   1. `behaviourDisciplineScore()` returns NULL and never 0 when no row
- *      answers any flag (disciplineAggregate.ts:64-80). Rendering that absence
- *      as "0/100" on a public page would be defamatory of the trader's own
- *      day. A fraction has an explicit denominator, so "nothing was answered"
- *      is `null` and renders as nothing rather than as a zero.
+ * WHAT CHANGED HERE is that the snapshot now CARRIES THE SCORE AS A FIELD
+ * instead of leaving each renderer to pool the two fractions itself.
+ * `cardImage.tsx` and `SharedDayCard.tsx` held line-for-line copies of that
+ * formula — the two surfaces that must never disagree, kept in step by hand —
+ * and both now read {@link DailyShareSnapshot.discipline}.
  *
- *   2. tradeScore.ts:218-237 — the discipline booleans default to
- *      not-violated on a broker row with no self-report, so "a trade entered
- *      on impulse and managed badly can collect the whole discipline block for
- *      having no evidence against it". A fraction with an HONEST DENOMINATOR
- *      is the answer: an unanswered trade is counted in neither half, so the
- *      card says "followed the plan on 4 of the 5 trades that recorded it"
- *      rather than silently crediting the sixth.
- *
- * Every denominator here is therefore "rows that answered", never
- * `rows.length` — which is REF-107 Stage 4's rule, and the thing
- * scripts/features-null-safety-check.ts exists to pin.
+ * The fractions stay in the document because they are the EVIDENCE the card
+ * prints under the score, and because a card minted before this change has to
+ * keep rendering: `readDailyShareSnapshot` derives the score from them when the
+ * field is absent, with the same function that computed it.
  */
 
 import { formatMoney } from '@/lib/money';
 import { hasMoneyPnl, isWinningTrade, pnlRow, tradeMoneyPnl } from '@/lib/pnl';
-import { readStopHistory, stopWasWidened } from '@/lib/journal/stopHistory';
+import {
+  dayDiscipline,
+  pooledDisciplineScore,
+  type DisciplineFraction,
+} from '@/lib/scoring/dayDiscipline';
 import { tradingDayLabel, tradingDayOfTrade, type TradingDay } from '@/lib/tradingDay';
 
 /** The snapshot format. Bumped when a field changes meaning, never for an addition. */
@@ -84,17 +83,13 @@ export const MAX_PUBLIC_NICKNAME = 24;
 /**
  * A discipline count and the number of trades that answered the question.
  *
- * `answered` IS NEVER `rows.length` AND IS NEVER ZERO. A fraction with a zero
- * denominator is not a fraction, so the builder returns `null` for the whole
- * thing instead — see the header's hazard 1. A reader therefore never has to
- * guard against a division by zero, and `met <= answered` always holds.
+ * AN ALIAS AND NOT A SECOND DECLARATION. The shape and the rules behind it are
+ * `DisciplineFraction`'s in lib/scoring/dayDiscipline.ts; the name is kept
+ * because the two card renderers, the demo fixtures and the leak suite all
+ * speak of a *share* fraction, and because the stored JSONB's shape is this
+ * module's contract to describe.
  */
-export interface ShareFraction {
-  /** Trades on which the trader did the thing. */
-  met: number;
-  /** Trades that recorded an answer either way. */
-  answered: number;
-}
+export type ShareFraction = DisciplineFraction;
 
 /**
  * Where the day's figures came from, over the trades actually counted.
@@ -194,8 +189,22 @@ export interface DailyShareSnapshot {
   losses: number;
   /** "עמד בתוכנית 4/5", or null when no trade answered. */
   followedPlan: ShareFraction | null;
-  /** "הסטופ לא הורחק 3/4", or null. See {@link stopHeldOutcome} for the predicate. */
+  /** "הסטופ לא הורחק 3/4", or null. See `stopHeldOutcome` for the predicate. */
   stopHeld: ShareFraction | null;
+  /**
+   * The day's discipline score, 0-100 — or null when nothing was answered.
+   *
+   * NULL AND NEVER 0, like {@link pnl}: a day on which no trade recorded
+   * either answer has no discipline score, and a zero on a public page would
+   * be defamatory of the trader's own day. Both renderers print `—`.
+   *
+   * ADDITIVE, SO `SHARE_SNAPSHOT_VERSION` DID NOT MOVE. A card minted before
+   * REF-125's follow-up has no `discipline` key, and
+   * {@link readDailyShareSnapshot} derives it from the two fractions with the
+   * same function that computed it here — so an old card renders the number it
+   * always rendered rather than a dash.
+   */
+  discipline: number | null;
   /** Money only. Null when no counted trade carries a money figure. */
   best: number | null;
   worst: number | null;
@@ -306,84 +315,6 @@ export function countedShareTrades(
       row.exit_price != null &&
       tradingDayOfTrade(row) === day
   );
-}
-
-// ── The two discipline predicates ───────────────────────────────────────────
-
-/**
- * Whether this trade's stop was held, or `null` for "nothing answered".
- *
- * THE THREE-WAY ANSWER IS THE POINT, and the `null` is doing the work the
- * header's hazard 2 describes. Read in order:
- *
- *   1. A READABLE `stop_history` DOCUMENT WINS, because it is the broker's
- *      evidence rather than a self-report, and `readStopHistory` has already
- *      refused the documents whose verdict cannot be trusted.
- *
- *        'kept'    → true.  We looked and it never moved.
- *        'moved'   → NOT WIDENED. `stopWasWidened` is the predicate the
- *                    widened-only rule and the score already share, so
- *                    "a widening happened" has one definition in the product.
- *                    A TIGHTENING IS THEREFORE HELD, which is Imri's 19.10
- *                    decision (stopHistory.ts:46-57): "a trader who moves a
- *                    stop TOWARD the profit is managing risk, not breaking
- *                    discipline."
- *        'none'    → NULL, AND THIS IS THE IMPORTANT ONE. We looked and there
- *                    was no stop at all. There is nothing to widen, so a
- *                    `true` here would credit a trade taken with NO STOP as
- *                    perfect stop discipline — the single most flattering
- *                    thing this card could say, and exactly §2.4's "no
- *                    evidence reads as clean" hazard. Not counted either way.
- *        'unknown' → NULL. "We looked and could not tell" must not read as
- *                    'kept'; stopHistory.ts:34-37 says so in as many words —
- *                    "a trader would be told their stop stayed put on the
- *                    strength of a read that failed".
- *
- *   2. NO DOCUMENT → the trader's own `moved_sl`. Coarser on purpose: a
- *      self-report cannot distinguish a tighten from a widen, so a `true`
- *      counts against. That is the conservative direction and it is the
- *      trader's own answer about their own trade, not an inference of ours.
- *
- *   3. NEITHER → null. Not counted, in either half.
- */
-export function stopHeldOutcome(row: ShareTradeRow): boolean | null {
-  const history = readStopHistory(row.stop_history);
-  if (history !== null) {
-    if (history.verdict === 'kept') return true;
-    if (history.verdict === 'moved') return !stopWasWidened(row.stop_history);
-    // 'none' and 'unknown' — see the docblock. Fall through to no answer
-    // rather than to the self-report: the document is the better evidence and
-    // what it says is that this question does not apply to this trade.
-    return null;
-  }
-  if (row.moved_sl == null) return null;
-  return row.moved_sl !== true;
-}
-
-/** `followed_plan`, which is a plain self-report and has no second source. */
-function followedPlanOutcome(row: ShareTradeRow): boolean | null {
-  return row.followed_plan == null ? null : row.followed_plan === true;
-}
-
-/**
- * Count a three-way predicate into a fraction, or into nothing.
- *
- * Returns null — never `{ met: 0, answered: 0 }` — when no row answered. See
- * {@link ShareFraction}.
- */
-function fractionOf(
-  rows: readonly ShareTradeRow[],
-  outcome: (row: ShareTradeRow) => boolean | null
-): ShareFraction | null {
-  let met = 0;
-  let answered = 0;
-  for (const row of rows) {
-    const value = outcome(row);
-    if (value === null) continue;
-    answered++;
-    if (value) met++;
-  }
-  return answered === 0 ? null : { met, answered };
 }
 
 // ── The builder ─────────────────────────────────────────────────────────────
@@ -554,6 +485,11 @@ export function buildDailyShareSnapshot({
 
   const nickname = visibility.nickname ? readPublicNickname(publicNickname) : null;
 
+  // ONE FUNCTION FOR ALL THREE FIELDS, which is item 2's whole point: the score
+  // the card prints and the two fractions it prints underneath cannot disagree,
+  // because they are not computed separately any more.
+  const discipline = dayDiscipline(counted);
+
   return {
     v: SHARE_SNAPSHOT_VERSION,
     day,
@@ -561,8 +497,9 @@ export function buildDailyShareSnapshot({
     trades: counted.length,
     wins,
     losses,
-    followedPlan: fractionOf(counted, followedPlanOutcome),
-    stopHeld: fractionOf(counted, stopHeldOutcome),
+    followedPlan: discipline.followedPlan,
+    stopHeld: discipline.stopHeld,
+    discipline: discipline.score,
     best: amounts.length === 0 ? null : Math.max(...amounts),
     worst: amounts.length === 0 ? null : Math.min(...amounts),
     provenance: provenanceOf(counted),
@@ -603,6 +540,11 @@ export function shareSnapshotLines(snapshot: DailyShareSnapshot): string[] {
       `הטובה ${formatMoney(snapshot.best)} · החלשה ${formatMoney(snapshot.worst)}`
     );
   }
+  // THE SCORE IS IN THE PREVIEW BECAUSE IT IS THE CARD'S HEADLINE FIGURE. The
+  // lines used to list the two fractions and leave the trader to pool them,
+  // which meant the one number a stranger reads first was the one number the
+  // consent screen did not show.
+  if (snapshot.discipline !== null) lines.push(`משמעת: ${snapshot.discipline}%`);
   if (snapshot.followedPlan !== null) {
     lines.push(`עמד בתוכנית ${snapshot.followedPlan.met}/${snapshot.followedPlan.answered}`);
   }
@@ -746,6 +688,9 @@ export function readDailyShareSnapshot(value: unknown): DailyShareSnapshot | nul
 
   const provenance = PROVENANCES.find((p) => p === raw.provenance) ?? 'manual';
 
+  const followedPlan = readFraction(raw.followedPlan);
+  const stopHeld = readFraction(raw.stopHeld);
+
   return {
     v: count(raw.v),
     day,
@@ -753,8 +698,17 @@ export function readDailyShareSnapshot(value: unknown): DailyShareSnapshot | nul
     trades: count(raw.trades),
     wins: count(raw.wins),
     losses: count(raw.losses),
-    followedPlan: readFraction(raw.followedPlan),
-    stopHeld: readFraction(raw.stopHeld),
+    followedPlan,
+    stopHeld,
+    // DERIVED WHEN THE FIELD IS ABSENT, which is what makes the addition
+    // additive: every card minted before REF-125's follow-up carries the two
+    // fractions and no score, and `pooledDisciplineScore` is the same function
+    // the builder used — so such a card renders the number it always rendered
+    // rather than a dash. A STORED score is clamped to 0-100 and otherwise
+    // trusted; this reader does not recompute it, because the stored value is
+    // what the trader consented to publish and a re-derivation could disagree
+    // with it if the fractions were ever edited by hand.
+    discipline: readDisciplineScore(raw.discipline, followedPlan, stopHeld),
     best: num(raw.best),
     worst: num(raw.worst),
     // An unreadable provenance resolves to the state that prints NO TAG. The
@@ -764,6 +718,25 @@ export function readDailyShareSnapshot(value: unknown): DailyShareSnapshot | nul
     nickname: readPublicNickname(raw.nickname),
     accounts: readAccountRows(raw.accounts),
   };
+}
+
+/**
+ * The stored discipline score, or the one its fractions imply.
+ *
+ * Three states and they are all different: a NUMBER is a score the mint wrote,
+ * `null` with fractions present is a card from before the field existed (derive
+ * it), and `null` with no fractions is a day that answered nothing (stays
+ * null). Clamped rather than rejected, for `readFraction`'s reason: a near-miss
+ * should still render something true.
+ */
+function readDisciplineScore(
+  value: unknown,
+  followedPlan: ShareFraction | null,
+  stopHeld: ShareFraction | null
+): number | null {
+  const stored = num(value);
+  if (stored === null) return pooledDisciplineScore(followedPlan, stopHeld);
+  return Math.max(0, Math.min(100, Math.round(stored)));
 }
 
 /**

@@ -5,9 +5,14 @@ import { Sparkles, TrendingUp, TrendingDown, RefreshCw, CheckCircle, AlertCircle
 import { formatPnlPoints } from '@/lib/utils';
 import { formatMoney } from '@/lib/money';
 import { createClient } from '@/lib/supabase/client';
-import { DASH_TRADE_SELECT, mapDashTrade, withBrokerPrices, type RawTradeRow } from '@/lib/dashboard/trades';
+import { DASH_TRADE_SELECT, mapDashTrade, withBrokerColumns, type RawTradeRow } from '@/lib/dashboard/trades';
 import { visibleTrades, withAccount, withHidden } from '@/lib/trades/visible';
 import { disciplinePatience, measuredAxes } from '@/lib/dashboard/radar';
+import {
+  dayDiscipline,
+  disciplineEvidenceLine,
+  type DayDiscipline,
+} from '@/lib/scoring/dayDiscipline';
 import LivePositions from '@/components/tradovate/LivePositions';
 import type { DashTrade } from '@/lib/dashboard/trades';
 import { tradeMoneyPnl, hasMoneyPnl, isWinningTrade, tradeDirection, tradePointsPnl } from '@/lib/pnl';
@@ -298,6 +303,22 @@ function computeAll(trades: DashTrade[], now: Date) {
     const d = new Date(t.closed_at ?? t.submitted_at);
     return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
   });
+  /**
+   * THE DAY'S DISCIPLINE, FROM THE SAME FUNCTION THE SHARE CARD USES
+   * (REF-125 follow-up item 2).
+   *
+   * `todayTrades` is already the dashboard's own answer to "which trades are
+   * today", by `tradingDayOfTrade` — the Stage 1 definition — so this adds no
+   * third opinion about the day and no second opinion about the score. What it
+   * adds is the MEASURED number beside the radar's all-time one, which is the
+   * actual gap behind "the card says 33 and the dashboard says 82": those were
+   * never the same claim, and neither screen said which it was making.
+   *
+   * NOT THE RADAR'S FORMULA, and the radar is untouched. See
+   * lib/scoring/dayDiscipline.ts.
+   */
+  const todayDiscipline = dayDiscipline(todayTrades);
+
   const dailyPnl    = todayTrades.reduce((s, t) => s + tradeMoneyPnl(t), 0);
   const dailyCount  = todayTrades.length;
   const weeklyPnl   = weekTrades.reduce((s, t) => s + tradeMoneyPnl(t), 0);
@@ -426,6 +447,7 @@ function computeAll(trades: DashTrade[], now: Date) {
     hasPnlAmount, periodPnl,
     dailyPnl, dailyCount, weeklyPnl, weeklyCount, monthlyPnl, monthlyCount, totalCount,
     disciplineAxes, performanceScores, hasDrawdownCtrl,
+    todayDiscipline,
     disciplineTrend, performanceTrend,
     dayMap,
     tradingDay: todayStr,
@@ -573,6 +595,7 @@ const RADAR_NO_DATA = 'אין מספיק נתונים';
 // ── Radar card (shared for both discipline and performance) ───────────────────
 function RadarCard({
   title,
+  periodNote,
   labels,
   labelsEn,
   descs,
@@ -583,6 +606,16 @@ function RadarCard({
   trend,
 }: {
   title: string;
+  /**
+   * WHICH TRADES THIS SCORE IS ABOUT, in words, under the title.
+   *
+   * REF-125 follow-up item 2. Both radars are scored over the last 500 closed
+   * trades with NO DATE BOUND, and neither said so — so a trader reading
+   * "ניקוד משמעת" next to a day's P&L had every reason to read it as the day's,
+   * and then to find the share card disagreeing with it by fifty points. The
+   * label and this line are the fix; the formula is untouched.
+   */
+  periodNote?: string;
   labels: string[];
   labelsEn: string[];
   descs: string[];
@@ -649,7 +682,12 @@ function RadarCard({
           post-launch pass. Do not convert piecemeal. */}
       {/* Header — title + score circle + trend indicator */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-        <p style={{ fontSize: 15, fontWeight: 700, color: TEXT }}>{title}</p>
+        <div style={{ minWidth: 0 }}>
+          <p style={{ fontSize: 15, fontWeight: 700, color: TEXT }}>{title}</p>
+          {periodNote && (
+            <p style={{ fontSize: 11, fontWeight: 600, color: MUTED, marginTop: 1 }}>{periodNote}</p>
+          )}
+        </div>
         <div style={{
           width: 48, height: 48, borderRadius: '50%',
           background: `${color}22`,
@@ -1146,6 +1184,99 @@ function TradeDetailPanel({ trade, onClose, aiReview, aiLoading, onAiReview }: {
   );
 }
 
+/**
+ * "משמעת היום" — the measured number, beside the radar's all-time one
+ * (REF-125 follow-up item 2).
+ *
+ * THE SAME FUNCTION THE PUBLIC CARD USES, which is the entire point of the
+ * card: `lib/scoring/dayDiscipline.ts` over `todayTrades`. A trader who shares
+ * their day now sees the figure the card will print BEFORE they open the share
+ * dialog, on the screen they opened it from.
+ *
+ * IT SHOWS ITS DENOMINATOR. `4/5 · 3/4` under the score is what the number was
+ * computed from, and it is there because the score's honesty is exactly the
+ * thing that makes it look low: a day of five trades where two recorded an
+ * answer is scored over those two. The radar above resolves the same absence to
+ * 100 and says so in its own period line.
+ *
+ * `—` AND NOT `0%` when nothing was answered, with the reason in words rather
+ * than in a tooltip — a zero here would read as a measured collapse on a day
+ * the trader simply has not debriefed yet. Same rule as the radar's mini-cards
+ * and as the card's.
+ */
+function DayDisciplineCard({
+  discipline,
+  day,
+}: {
+  discipline: DayDiscipline;
+  /** The trading day the score is about, for the line under it. */
+  day: string;
+}) {
+  const evidence = disciplineEvidenceLine(discipline);
+  const score = discipline.score;
+
+  return (
+    <Card>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div
+          style={{
+            width: 48,
+            height: 48,
+            borderRadius: '50%',
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: score === null ? SURF2 : `${scoreColor(score)}22`,
+            border: `2px solid ${score === null ? BORDER : scoreColor(score)}`,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 16,
+              fontWeight: 800,
+              fontVariantNumeric: 'tabular-nums',
+              color: score === null ? MUTED : scoreColor(score),
+            }}
+          >
+            {score === null ? '—' : score}
+          </span>
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <p style={{ fontSize: 15, fontWeight: 700, color: TEXT }}>משמעת היום</p>
+          {/* THE SHARED LABEL AND NOT A STRING, so the day this card names is
+              the day the header names, with the same window tooltip behind it.
+              Two surfaces naming different days from the same trades is the
+              defect REF-125 Stage 1 existed to end. */}
+          <p style={{ fontSize: 11, fontWeight: 600, color: MUTED, marginTop: 1 }}>
+            <TradingDayLabel day={day} color={MUTED} />
+            {score === null ? ' · לא נמדד — אף עסקה לא דיווחה' : ' · מהעסקאות שענו בלבד'}
+          </p>
+          {/* LTR-isolated: "4/5" in an RTL run is reordered to "5/4" by the
+              browser's own bidi algorithm, which inverts a discipline claim
+              silently. The share card isolates the same string for the same
+              reason. */}
+          {evidence !== '' && (
+            <p
+              style={{
+                fontSize: 12,
+                fontWeight: 700,
+                color: TEXT2,
+                marginTop: 3,
+                direction: 'ltr',
+                unicodeBidi: 'isolate',
+                fontVariantNumeric: 'tabular-nums',
+              }}
+            >
+              {evidence}
+            </p>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 // ── Card wrapper ──────────────────────────────────────────────────────────────
 function Card({ children, className = '', style }: { children: React.ReactNode; className?: string; style?: React.CSSProperties }) {
   return (
@@ -1547,7 +1678,7 @@ export default function DashboardClient({
         // the flag that answers it is server-only. MUST stay byte-identical to
         // the server page's select: this replaces the server's rows wholesale,
         // so a column missing here is a radar that changes on first refetch.
-        .select(withBrokerPrices(withHidden(DASH_TRADE_SELECT, hiddenColumnExists), hiddenColumnExists))
+        .select(withBrokerColumns(withHidden(DASH_TRADE_SELECT, hiddenColumnExists), hiddenColumnExists))
         .eq('user_id', userId)
         .neq('status', 'not_entered'),
       accountId,
@@ -1976,9 +2107,17 @@ export default function DashboardClient({
           </div>
 
           {/* ── Radar cards ───────────────────────────────────────────────── */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {/* THE DAY'S NUMBER SITS WITH THE ALL-TIME ONE (REF-125 follow-up
+              item 2), in the first column, under the radar it is most likely to
+              be confused with. The grid still holds TWO children so the two
+              radars stay side by side at `md`; the day card is stacked inside
+              the first one rather than made a third cell, which at two columns
+              would have put it under the performance radar instead. */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-start">
+            <div className="flex flex-col gap-3">
             <RadarCard
-              title="ניקוד משמעת"
+              title="ניקוד כולל"
+              periodNote="משמעת לאורך כל התקופה · עד 500 העסקאות הסגורות האחרונות"
               labels={dLabels}
               labelsEn={dLabelsEn}
               descs={dDescs}
@@ -1988,8 +2127,11 @@ export default function DashboardClient({
               miniCards={dMiniCards}
               trend={stats.disciplineTrend}
             />
+            <DayDisciplineCard discipline={stats.todayDiscipline} day={stats.tradingDay} />
+            </div>
             <RadarCard
               title="ניקוד ביצועים"
+              periodNote="תוצאות לאורך כל התקופה · עד 500 העסקאות הסגורות האחרונות"
               labels={pLabels}
               labelsEn={pLabelsEn}
               descs={pDescs}

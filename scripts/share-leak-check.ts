@@ -43,11 +43,19 @@ import {
   readShareVisibility,
   shareProvenanceNote,
   shareSnapshotLines,
-  stopHeldOutcome,
   type ShareTradeRow,
   type ShareVisibility,
 } from '../src/lib/share/snapshot';
 import { isWellFormedShareToken, mintShareToken, readSharedCard } from '../src/lib/share/store';
+// THE PREDICATES MOVED (REF-125 follow-up item 2). `stopHeldOutcome` is now
+// lib/scoring/dayDiscipline.ts', because the dashboard reads it too; group 3
+// drives it from its new home so the suite tests the one definition rather than
+// a share-shaped copy of it.
+import {
+  dayDiscipline,
+  disciplineEvidenceLine,
+  stopHeldOutcome,
+} from '../src/lib/scoring/dayDiscipline';
 import { DEMO_SHARE_TOKEN } from '../src/lib/demo/fixtures';
 
 const failures: string[] = [];
@@ -548,6 +556,109 @@ group('3. discipline fractions');
   );
 }
 
+// ── 3b. ONE discipline number, carried by the document ─────────────────────
+//
+// REF-125 follow-up item 2. The score used to be derived by `cardImage.tsx` and
+// by `SharedDayCard.tsx` from the two fractions, separately — one number, two
+// implementations, on the PNG a trader posts and the page it links to. It is now
+// a FIELD, and these are the four claims that makes:
+//
+//   1. the builder writes it, pooled rather than averaged;
+//   2. it is null and never 0 when nothing was answered;
+//   3. a card minted BEFORE the field existed still renders its old number,
+//      because the reader derives it from the fractions it does have;
+//   4. a stored score is what renders — the renderers no longer compute one, so
+//      a document whose score and fractions disagree must publish the score the
+//      trader consented to rather than a re-derivation.
+
+group('3b. the discipline score is one number, and it is in the document');
+
+{
+  const build = (rows: ShareTradeRow[]) =>
+    buildDailyShareSnapshot({ rows, day: DAY, visibility: ALL_OFF });
+
+  // 4 of 5 followed, 5 of 5 held → 9 of 10 answered questions → 90%.
+  const day = build([
+    dirtyRow({ followed_plan: true, moved_sl: false }),
+    dirtyRow({ followed_plan: true, moved_sl: false }),
+    dirtyRow({ followed_plan: true, moved_sl: false }),
+    dirtyRow({ followed_plan: true, moved_sl: false }),
+    dirtyRow({ followed_plan: false, moved_sl: false }),
+  ]);
+  check('the score is pooled over both fractions', day.discipline === 90, `${day.discipline}`);
+  check(
+    'and it is the same number the shared function gives',
+    day.discipline === dayDiscipline([
+      dirtyRow({ followed_plan: true, moved_sl: false }),
+      dirtyRow({ followed_plan: true, moved_sl: false }),
+      dirtyRow({ followed_plan: true, moved_sl: false }),
+      dirtyRow({ followed_plan: true, moved_sl: false }),
+      dirtyRow({ followed_plan: false, moved_sl: false }),
+    ]).score
+  );
+
+  // POOLED AND NOT AVERAGED. A 1/1 and a 2/10 average to 60%; pooled they are
+  // 3 of 11, which is 27% — and 60% is not a thing that happened to anybody.
+  const lopsided = buildDailyShareSnapshot({
+    rows: [
+      // One row answers the plan question only…
+      dirtyRow({ followed_plan: true, moved_sl: null, stop_history: null }),
+      // …and ten answer the stop question only, two of them held.
+      ...Array.from({ length: 2 }, () =>
+        dirtyRow({ followed_plan: null, moved_sl: false })),
+      ...Array.from({ length: 8 }, () =>
+        dirtyRow({ followed_plan: null, moved_sl: true })),
+    ],
+    day: DAY,
+    visibility: ALL_OFF,
+  });
+  check('1/1 beside 2/10 pools to 27%, not 60%', lopsided.discipline === 27,
+    `${lopsided.discipline} from ${JSON.stringify(lopsided.followedPlan)} ${JSON.stringify(lopsided.stopHeld)}`);
+
+  // NULL, NEVER ZERO. The whole reason the card does not print 0%.
+  const silent = build([
+    dirtyRow({ followed_plan: null, moved_sl: null, stop_history: null }),
+    dirtyRow({ followed_plan: null, moved_sl: null, stop_history: null }),
+  ]);
+  check('nothing answered → null, not a zero', silent.discipline === null);
+  check('…on a day that still counted its trades', silent.trades === 2);
+  check('an empty day has no score either', build([]).discipline === null);
+
+  // The evidence line both surfaces print under the score.
+  check('the evidence line is the two fractions',
+    disciplineEvidenceLine(day) === '4/5 · 5/5', disciplineEvidenceLine(day));
+  check('a withheld score has no evidence line', disciplineEvidenceLine(silent) === '');
+
+  // THE SCORE IS IN THE PREVIEW TEXT, which is what the trader consents from.
+  check('the preview states the score', shareSnapshotLines(day).some((l) => l.includes('90%')),
+    shareSnapshotLines(day).join(' | '));
+  check('a withheld score is not previewed as 0%',
+    !shareSnapshotLines(silent).some((l) => l.includes('0%')));
+
+  // A CARD MINTED BEFORE THE FIELD EXISTED. Its document has the fractions and
+  // no `discipline` key, and it must render the number it always rendered.
+  const legacy = JSON.parse(JSON.stringify(day)) as Record<string, unknown>;
+  delete legacy.discipline;
+  check('a pre-field card derives its score from its fractions',
+    readDailyShareSnapshot(legacy)?.discipline === 90);
+  const legacySilent = JSON.parse(JSON.stringify(silent)) as Record<string, unknown>;
+  delete legacySilent.discipline;
+  check('…and a pre-field card with no fractions stays null',
+    readDailyShareSnapshot(legacySilent)?.discipline === null);
+
+  // A STORED SCORE IS NOT RECOMPUTED, but it is bounded: the renderers print
+  // this value, so a document carrying 900 must not put 900% on a public page.
+  check('a stored score survives the reader',
+    readDailyShareSnapshot({ day: DAY, discipline: 61 })?.discipline === 61);
+  check('an absurd stored score is clamped to 100',
+    readDailyShareSnapshot({ day: DAY, discipline: 900 })?.discipline === 100);
+  check('a negative stored score is clamped to 0',
+    readDailyShareSnapshot({ day: DAY, discipline: -5 })?.discipline === 0);
+  check('a non-numeric stored score falls back to the fractions',
+    readDailyShareSnapshot({ day: DAY, discipline: 'high', followedPlan: { met: 1, answered: 2 } })
+      ?.discipline === 50);
+}
+
 // ── 4. Money, counts and the empty day ─────────────────────────────────────
 
 group('4. money and counts');
@@ -821,6 +932,7 @@ console.log(`  ${Object.keys(SECRETS).length} denied values absent from the JSON
 console.log('  account NAMES published on purpose; account IDs still never, and an unowned id resolves to none');
 console.log('  provenance per case, including the empty day that must not read as broker');
 console.log("  stop discipline excludes 'none' and 'unknown'; a tightening counts as held");
+console.log('  one discipline score, carried as a field, derived for cards minted before it');
 console.log('  readers fail closed; tokens match migration 043\'s CHECK');
 console.log('  a revoked token is not found, and the public read names three columns');
 console.log('  the translation suite exercises the share route rather than a redirect');

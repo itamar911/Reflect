@@ -1,7 +1,7 @@
 import { createClient, getCachedUser } from '@/lib/supabase/server';
 import { getUserPlan } from '@/lib/plans/getUserPlan';
 import DashboardClient from '@/components/dashboard/DashboardClient';
-import { DASH_TRADE_SELECT, mapDashTrade, withBrokerPrices } from '@/lib/dashboard/trades';
+import { DASH_TRADE_SELECT, mapDashTrade, withBrokerColumns } from '@/lib/dashboard/trades';
 import type { DashTrade, RawTradeRow } from '@/lib/dashboard/trades';
 import AccountFilterChip from '@/components/accounts/AccountFilterChip';
 import { isUserAllowed } from '@/lib/tradovate/allowlist';
@@ -45,7 +45,7 @@ export default async function DashboardPage({ searchParams }: {
         // two migration-038 prices on the same flag (lib/dashboard/trades.ts).
         // The same decision is passed to DashboardClient, whose realtime refetch
         // has to issue the same query — see `hiddenColumnExists` there.
-        .select(withBrokerPrices(withHidden(DASH_TRADE_SELECT, hiddenColumnExists), hiddenColumnExists))
+        .select(withBrokerColumns(withHidden(DASH_TRADE_SELECT, hiddenColumnExists), hiddenColumnExists))
         .eq('user_id', user.id)
         .neq('status', 'not_entered'),
       accountId,

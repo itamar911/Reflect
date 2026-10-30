@@ -62,7 +62,8 @@
 import { formatMoney } from '@/lib/money';
 import { CARD_PALETTE } from '@/lib/share/cardImage';
 import { shareProvenanceNote } from '@/lib/share/snapshot';
-import type { DailyShareSnapshot, ShareAccountRow, ShareFraction } from '@/lib/share/snapshot';
+import { disciplineEvidenceLine } from '@/lib/scoring/dayDiscipline';
+import type { DailyShareSnapshot, ShareAccountRow } from '@/lib/share/snapshot';
 import { tradingDayLabel, type TradingDay } from '@/lib/tradingDay';
 
 const {
@@ -319,18 +320,14 @@ export default function SharedDayCard({
   // shown as 0% when nothing was counted.
   const winRate = snapshot.trades > 0 ? `${Math.round((snapshot.wins / snapshot.trades) * 100)}%` : '—';
 
-  // Pooled, not averaged — the image's reasoning, restated by using the same
-  // arithmetic: averaging a 1/1 and a 2/10 gives 60%, which is not a thing that
-  // happened.
-  const met = (snapshot.followedPlan?.met ?? 0) + (snapshot.stopHeld?.met ?? 0);
-  const answered = (snapshot.followedPlan?.answered ?? 0) + (snapshot.stopHeld?.answered ?? 0);
-  const disciplineScore = answered > 0 ? Math.round((met / answered) * 100) : null;
-  // The two fractions as the discipline card's evidence line, in the same
-  // order and the same `met/answered` shape the image prints.
-  const disciplineSub = [snapshot.followedPlan, snapshot.stopHeld]
-    .filter((f): f is ShareFraction => f !== null)
-    .map((f) => `${f.met}/${f.answered}`)
-    .join(' · ');
+  // THE FIELD, NOT A SECOND COPY OF THE FORMULA (REF-125 follow-up item 2).
+  // This page and the PNG each pooled the two fractions themselves, which made
+  // one number two implementations on the two surfaces a visitor can compare
+  // side by side. The snapshot now carries it — see `DailyShareSnapshot.discipline`
+  // — and the evidence line comes from the same module, in the same order and
+  // the same `met/answered` shape the image prints.
+  const disciplineScore = snapshot.discipline;
+  const disciplineSub = disciplineEvidenceLine(snapshot);
 
   return (
     <div
